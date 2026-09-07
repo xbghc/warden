@@ -1,0 +1,93 @@
+import path from 'node:path';
+import { realpath } from 'node:fs/promises';
+import type { RepoInfo, WorktreeInfo } from '@warden/shared';
+import { runGit } from './git.js';
+import { HttpError } from './errors.js';
+
+export interface RepoContext {
+  /** Root of the worktree the server was started in. */
+  root: string;
+  /** Root of the main worktree (where .git lives). */
+  commonRoot: string;
+}
+
+async function safeRealpath(p: string): Promise<string> {
+  try {
+    return await realpath(p);
+  } catch {
+    return path.resolve(p);
+  }
+}
+
+export async function resolveRepo(dir: string): Promise<RepoContext> {
+  let top: string;
+  try {
+    const r = await runGit(['rev-parse', '--show-toplevel'], { cwd: dir });
+    top = r.stdout.trim();
+  } catch (e) {
+    throw new HttpError(400, `${dir} is not inside a git repository`, 'not_a_repo');
+  }
+  if (!top) throw new HttpError(400, `${dir} is not inside a git worktree (bare repository?)`, 'not_a_repo');
+  const root = await safeRealpath(top);
+  const common = await runGit(['rev-parse', '--git-common-dir'], { cwd: root });
+  const commonDir = await safeRealpath(path.resolve(root, common.stdout.trim()));
+  const commonRoot = path.basename(commonDir) === '.git' ? path.dirname(commonDir) : root;
+  return { root, commonRoot };
+}
+
+export async function listWorktrees(ctx: RepoContext): Promise<WorktreeInfo[]> {
+  const r = await runGit(['worktree', 'list', '--porcelain'], { cwd: ctx.root });
+  const out: WorktreeInfo[] = [];
+  let cur: Partial<WorktreeInfo> | null = null;
+  const flush = () => {
+    if (cur && cur.path) {
+      out.push({
+        path: cur.path,
+        head: cur.head ?? '',
+        branch: cur.branch,
+        isMain: false,
+        detached: cur.detached ?? false,
+        bare: cur.bare ?? false,
+      });
+    }
+    cur = null;
+  };
+  for (const line of r.stdout.split('\n')) {
+    if (!line.trim()) {
+      flush();
+      continue;
+    }
+    if (line.startsWith('worktree ')) {
+      flush();
+      cur = { path: line.slice('worktree '.length) };
+    } else if (!cur) {
+      continue;
+    } else if (line.startsWith('HEAD ')) cur.head = line.slice(5);
+    else if (line.startsWith('branch ')) cur.branch = line.slice(7).replace(/^refs\/heads\//, '');
+    else if (line === 'detached') cur.detached = true;
+    else if (line === 'bare') cur.bare = true;
+  }
+  flush();
+  // Normalise paths through realpath so they match ctx.root/commonRoot comparisons.
+  for (const wt of out) {
+    wt.path = await safeRealpath(wt.path);
+    wt.isMain = wt.path === ctx.commonRoot;
+  }
+  return out;
+}
+
+export async function getRepoInfo(ctx: RepoContext, defaultTarget: string): Promise<RepoInfo> {
+  const [branchRes, headRes, worktrees] = await Promise.all([
+    runGit(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: ctx.root }).catch(() => ({ stdout: 'HEAD' })),
+    runGit(['rev-parse', 'HEAD'], { cwd: ctx.root }).catch(() => ({ stdout: '' })),
+    listWorktrees(ctx),
+  ]);
+  return {
+    root: ctx.root,
+    commonRoot: ctx.commonRoot,
+    branch: branchRes.stdout.trim(),
+    head: headRes.stdout.trim(),
+    worktrees,
+    defaultTarget,
+  };
+}

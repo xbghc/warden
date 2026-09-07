@@ -1,0 +1,59 @@
+{
+  "name": "@xbghc/warden",
+  "version": "0.1.0",
+  "description": "Local web UI to review git diffs (working tree, staged, commits, ranges, worktrees) with line comments exported as agent-ready prompts.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xbghc/warden.git"
+  },
+  "keywords": [
+    "git",
+    "diff",
+    "review",
+    "code-review",
+    "agent",
+    "nvim",
+    "wsl"
+  ],
+  "bin": {
+    "warden": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "dev": "concurrently -n server,web -c blue,green \"pnpm dev:server\" \"pnpm dev:web\"",
+    "dev:server": "tsx watch bin/cli.ts --port 4100 --no-open",
+    "dev:web": "pnpm --filter @warden/web dev",
+    "build": "rimraf dist && pnpm build:web && pnpm build:server",
+    "build:web": "pnpm --filter @warden/web build",
+    "build:server": "tsup",
+    "typecheck": "tsc --noEmit -p tsconfig.json && pnpm --filter @warden/web typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "pnpm build && pnpm test"
+  },
+  "devDependencies": {
+    "@hono/node-server": "^1.19.17",
+    "@types/node": "^22.20.1",
+    "@warden/server": "workspace:*",
+    "@warden/shared": "workspace:*",
+    "concurrently": "^9.2.4",
+    "hono": "^4.13.7",
+    "rimraf": "^6.1.3",
+    "tsup": "^8.5.1",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.11"
+  }
+}
