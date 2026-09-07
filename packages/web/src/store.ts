@@ -1,0 +1,409 @@
+import { create } from 'zustand';
+import type {
+  Comment,
+  CommentSide,
+  CreateCommentRequest,
+  CreateIssueRequest,
+  FileDiff,
+  FileEntry,
+  Issue,
+  NvimInstancesResponse,
+  Prefs,
+  RepoInfo,
+  TargetKey,
+  UpdateCommentRequest,
+  UpdateIssueRequest,
+  ViewMode,
+} from '@warden/shared';
+import { api, ApiError } from './api';
+import { copyText } from './lib/clipboard';
+
+export type DiffState = { status: 'loading' } | { status: 'ok'; diff: FileDiff } | { status: 'error'; message: string };
+export type Panel = 'diff' | 'commits' | 'issues';
+
+export interface Toast {
+  id: number;
+  message: string;
+  kind: 'info' | 'error';
+}
+
+export interface JumpTarget {
+  file: string;
+  side: CommentSide;
+  line: number;
+  nonce: number;
+}
+
+export interface AppStore {
+  repo: RepoInfo | null;
+  initError: string | null;
+  prefs: Prefs;
+  targetKey: TargetKey;
+  root: string;
+  files: FileEntry[];
+  filesLoading: boolean;
+  filesError: string | null;
+  activeFile: string | null;
+  diffs: Record<string, DiffState>;
+  comments: Comment[];
+  issues: Issue[];
+  /** All comments across targets (loaded with the issues panel). */
+  allComments: Comment[];
+  nvim: NvimInstancesResponse | null;
+  nvimScanning: boolean;
+  panel: Panel;
+  includeExported: boolean;
+  selectedCommentIds: string[];
+  jumpTo: JumpTarget | null;
+  toast: Toast | null;
+  reattaching: string | null;
+  refreshNonce: number;
+
+  init(): Promise<void>;
+  setTarget(key: TargetKey): Promise<void>;
+  loadFiles(): Promise<void>;
+  refresh(): Promise<void>;
+  openFile(path: string, force?: boolean): Promise<void>;
+  setActiveFile(path: string | null): void;
+  setViewMode(mode: ViewMode): void;
+  toggleViewed(path: string): Promise<void>;
+  createComment(body: CreateCommentRequest): Promise<Comment | undefined>;
+  updateComment(id: string, body: UpdateCommentRequest): Promise<Comment | undefined>;
+  deleteComment(id: string): Promise<void>;
+  exportComments(ids: string[]): Promise<void>;
+  copyAllComments(): Promise<void>;
+  loadIssues(): Promise<void>;
+  createIssue(body: CreateIssueRequest): Promise<Issue | undefined>;
+  updateIssue(id: string, body: UpdateIssueRequest): Promise<void>;
+  deleteIssue(id: string): Promise<void>;
+  exportIssue(id: string): Promise<void>;
+  scanNvim(force?: boolean): Promise<void>;
+  selectNvim(socket: string): Promise<void>;
+  openInNvim(filePath: string, line: number): Promise<void>;
+  setPanel(panel: Panel): void;
+  setIncludeExported(v: boolean): void;
+  toggleSelectComment(id: string): void;
+  clearSelectedComments(): void;
+  jumpToComment(comment: Comment): Promise<void>;
+  setReattaching(id: string | null): void;
+  showToast(message: string, kind?: Toast['kind']): void;
+}
+
+let toastSeq = 0;
+let toastTimer: ReturnType<typeof setTimeout> | null = null;
+
+function errMsg(e: unknown): string {
+  if (e instanceof ApiError) return e.message;
+  if (e instanceof Error) return e.message;
+  return String(e);
+}
+
+export const useStore = create<AppStore>((set, get) => {
+  const fail = (e: unknown) => get().showToast(errMsg(e), 'error');
+
+  const loadDiff = async (path: string): Promise<FileDiff | undefined> => {
+    const { targetKey, files } = get();
+    const entry = files.find((f) => f.path === path);
+    set((s) => ({ diffs: { ...s.diffs, [path]: { status: 'loading' } } }));
+    try {
+      const diff = await api.file(targetKey, path, { oldPath: entry?.oldPath, untracked: entry?.untracked });
+      if (get().targetKey !== targetKey) return undefined;
+      set((s) => ({ diffs: { ...s.diffs, [path]: { status: 'ok', diff } } }));
+      return diff;
+    } catch (e) {
+      if (get().targetKey !== targetKey) return undefined;
+      set((s) => ({ diffs: { ...s.diffs, [path]: { status: 'error', message: errMsg(e) } } }));
+      return undefined;
+    }
+  };
+
+  return {
+    repo: null,
+    initError: null,
+    prefs: { viewMode: 'unified', nvimSocketByRoot: {} },
+    targetKey: 'working',
+    root: '',
+    files: [],
+    filesLoading: false,
+    filesError: null,
+    activeFile: null,
+    diffs: {},
+    comments: [],
+    issues: [],
+    allComments: [],
+    nvim: null,
+    nvimScanning: false,
+    panel: 'diff',
+    includeExported: false,
+    selectedCommentIds: [],
+    jumpTo: null,
+    toast: null,
+    reattaching: null,
+    refreshNonce: 0,
+
+    async init() {
+      try {
+        const [repo, state] = await Promise.all([api.repo(), api.state()]);
+        set({ repo, prefs: state.prefs, issues: state.issues, root: repo.root });
+        await get().setTarget(repo.defaultTarget || 'working');
+      } catch (e) {
+        set({ initError: errMsg(e) });
+      }
+    },
+
+    async setTarget(key) {
+      set({ targetKey: key, files: [], diffs: {}, activeFile: null, comments: [], filesError: null, selectedCommentIds: [], reattaching: null, panel: 'diff' });
+      api.patchPrefs({ lastTarget: key }).catch(() => undefined);
+      await get().loadFiles();
+    },
+
+    async loadFiles() {
+      const key = get().targetKey;
+      set({ filesLoading: true, filesError: null });
+      try {
+        // Re-attach comments first so the listing carries fresh comment state.
+        await api.reanchor(key).catch(() => undefined);
+        const res = await api.files(key);
+        if (get().targetKey !== key) return;
+        const stillActive = get().activeFile && res.files.some((f) => f.path === get().activeFile) ? get().activeFile : null;
+        set({ files: res.files, root: res.root, comments: res.comments, filesLoading: false, activeFile: stillActive });
+        if (res.root !== get().nvim?.root) void get().scanNvim();
+      } catch (e) {
+        if (get().targetKey !== key) return;
+        set({ filesLoading: false, filesError: errMsg(e), files: [] });
+      }
+    },
+
+    async refresh() {
+      const { activeFile } = get();
+      set({ diffs: {}, refreshNonce: get().refreshNonce + 1 });
+      await get().loadFiles();
+      if (activeFile && get().files.some((f) => f.path === activeFile)) await loadDiff(activeFile);
+    },
+
+    async openFile(path, force = false) {
+      set({ activeFile: path, panel: 'diff' });
+      const cur = get().diffs[path];
+      if (!force && cur && cur.status !== 'error') return;
+      await loadDiff(path);
+    },
+
+    setActiveFile(path) {
+      set({ activeFile: path });
+      if (path) void get().openFile(path);
+    },
+
+    setViewMode(mode) {
+      set((s) => ({ prefs: { ...s.prefs, viewMode: mode } }));
+      api.patchPrefs({ viewMode: mode }).catch(fail);
+    },
+
+    async toggleViewed(path) {
+      const { targetKey, files } = get();
+      const entry = files.find((f) => f.path === path);
+      if (!entry) return;
+      const next = !entry.viewed;
+      set({ files: files.map((f) => (f.path === path ? { ...f, viewed: next, changed: false } : f)) });
+      try {
+        await api.setViewed(targetKey, path, next, entry.contentHash);
+      } catch (e) {
+        fail(e);
+        set((s) => ({ files: s.files.map((f) => (f.path === path ? { ...f, viewed: !next } : f)) }));
+      }
+    },
+
+    async createComment(body) {
+      try {
+        const c = await api.createComment(get().targetKey, body);
+        set((s) => ({ comments: [...s.comments, c] }));
+        return c;
+      } catch (e) {
+        fail(e);
+        return undefined;
+      }
+    },
+
+    async updateComment(id, body) {
+      try {
+        const c = await api.updateComment(get().targetKey, id, body);
+        set((s) => ({ comments: s.comments.map((x) => (x.id === id ? c : x)), reattaching: s.reattaching === id ? null : s.reattaching }));
+        return c;
+      } catch (e) {
+        fail(e);
+        return undefined;
+      }
+    },
+
+    async deleteComment(id) {
+      try {
+        await api.deleteComment(get().targetKey, id);
+        set((s) => ({
+          comments: s.comments.filter((x) => x.id !== id),
+          selectedCommentIds: s.selectedCommentIds.filter((x) => x !== id),
+          issues: s.issues.map((i) => (i.commentIds.includes(id) ? { ...i, commentIds: i.commentIds.filter((x) => x !== id) } : i)),
+        }));
+      } catch (e) {
+        fail(e);
+      }
+    },
+
+    async exportComments(ids) {
+      if (ids.length === 0) {
+        get().showToast('没有可复制的评论');
+        return;
+      }
+      try {
+        const res = await api.exportComments(ids);
+        await copyText(res.text);
+        const now = new Date().toISOString();
+        set((s) => ({
+          comments: s.comments.map((c) => (res.commentIds.includes(c.id) ? { ...c, status: c.status === 'active' ? 'exported' : c.status, exportedAt: now } : c)),
+        }));
+        get().showToast(`已复制 ${res.count} 条评论到剪贴板`);
+      } catch (e) {
+        fail(e);
+      }
+    },
+
+    async copyAllComments() {
+      const { comments, includeExported } = get();
+      const ids = comments.filter((c) => c.status === 'active' || (includeExported && c.status === 'exported')).map((c) => c.id);
+      await get().exportComments(ids);
+    },
+
+    async loadIssues() {
+      try {
+        const state = await api.state();
+        const allComments = Object.values(state.targets).flatMap((t) => t.comments);
+        set({ issues: state.issues, allComments });
+      } catch (e) {
+        fail(e);
+      }
+    },
+
+    async createIssue(body) {
+      try {
+        const issue = await api.createIssue(body);
+        set((s) => ({ issues: [...s.issues, issue], selectedCommentIds: [] }));
+        get().showToast(`已创建 Issue「${issue.title}」`);
+        return issue;
+      } catch (e) {
+        fail(e);
+        return undefined;
+      }
+    },
+
+    async updateIssue(id, body) {
+      try {
+        const issue = await api.updateIssue(id, body);
+        set((s) => ({ issues: s.issues.map((i) => (i.id === id ? issue : i)) }));
+      } catch (e) {
+        fail(e);
+      }
+    },
+
+    async deleteIssue(id) {
+      try {
+        await api.deleteIssue(id);
+        set((s) => ({ issues: s.issues.filter((i) => i.id !== id) }));
+      } catch (e) {
+        fail(e);
+      }
+    },
+
+    async exportIssue(id) {
+      try {
+        const res = await api.exportIssue(id);
+        await copyText(res.text);
+        const now = new Date().toISOString();
+        set((s) => ({
+          comments: s.comments.map((c) => (res.commentIds.includes(c.id) ? { ...c, status: c.status === 'active' ? 'exported' : c.status, exportedAt: now } : c)),
+        }));
+        get().showToast(`已复制 Issue（含 ${res.count} 条评论）到剪贴板`);
+      } catch (e) {
+        fail(e);
+      }
+    },
+
+    async scanNvim(force = false) {
+      const root = get().root || get().repo?.root;
+      if (!root) return;
+      set({ nvimScanning: true });
+      try {
+        const res = await api.nvimInstances(root, force);
+        set({ nvim: res, nvimScanning: false });
+      } catch (e) {
+        set({ nvimScanning: false });
+        fail(e);
+      }
+    },
+
+    async selectNvim(socket) {
+      const root = get().root;
+      set((s) => (s.nvim ? { nvim: { ...s.nvim, selected: socket } } : {}));
+      try {
+        await api.nvimSelect(root, socket);
+      } catch (e) {
+        fail(e);
+      }
+    },
+
+    async openInNvim(filePath, line) {
+      const { nvim, root } = get();
+      const socket = nvim?.selected;
+      if (!socket) {
+        get().showToast(nvim && nvim.instances.length > 1 ? '请先在顶部选择一个 nvim 实例' : '未发现在此仓库打开的 nvim', 'error');
+        return;
+      }
+      const absPath = `${root.replace(/\/+$/, '')}/${filePath}`;
+      try {
+        await api.nvimOpen(socket, absPath, line);
+      } catch (e) {
+        fail(e);
+        if (e instanceof ApiError && e.code === 'nvim_gone') void get().scanNvim(true);
+      }
+    },
+
+    setPanel(panel) {
+      set({ panel });
+      if (panel === 'issues') void get().loadIssues();
+    },
+
+    setIncludeExported(v) {
+      set({ includeExported: v });
+    },
+
+    toggleSelectComment(id) {
+      set((s) => ({
+        selectedCommentIds: s.selectedCommentIds.includes(id) ? s.selectedCommentIds.filter((x) => x !== id) : [...s.selectedCommentIds, id],
+      }));
+    },
+
+    clearSelectedComments() {
+      set({ selectedCommentIds: [] });
+    },
+
+    async jumpToComment(comment) {
+      if (comment.targetKey !== get().targetKey) {
+        await get().setTarget(comment.targetKey);
+      }
+      set({ panel: 'diff' });
+      await get().openFile(comment.filePath);
+      set({ jumpTo: { file: comment.filePath, side: comment.side, line: comment.endLine, nonce: Date.now() } });
+    },
+
+    setReattaching(id) {
+      set({ reattaching: id });
+      if (id) get().showToast('在 diff 中点击或拖选行，将评论重新附着到该位置');
+    },
+
+    showToast(message, kind = 'info') {
+      const id = ++toastSeq;
+      set({ toast: { id, message, kind } });
+      if (toastTimer) clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => {
+        if (get().toast?.id === id) set({ toast: null });
+      }, kind === 'error' ? 6000 : 3000);
+    },
+  };
+});

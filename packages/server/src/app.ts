@@ -547,7 +547,10 @@ export function createApp(opts: AppOptions): Hono {
 
   if (opts.webDir) {
     const webDir = opts.webDir;
-    app.get('*', (c) => serveStaticFile(c, webDir));
+    app.get('*', (c) => {
+      if (c.req.path === '/api' || c.req.path.startsWith('/api/')) return c.notFound();
+      return serveStaticFile(c, webDir);
+    });
   }
   return app;
 }

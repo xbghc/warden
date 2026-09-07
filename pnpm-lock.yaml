@@ -52,6 +52,18 @@ importers:
 
   packages/web:
     dependencies:
+      '@shikijs/core':
+        specifier: ^3.23.0
+        version: 3.23.0
+      '@shikijs/engine-javascript':
+        specifier: ^3.23.0
+        version: 3.23.0
+      '@shikijs/langs':
+        specifier: ^3.23.0
+        version: 3.23.0
+      '@shikijs/themes':
+        specifier: ^3.23.0
+        version: 3.23.0
       '@tanstack/react-virtual':
         specifier: ^3.14.11
         version: 3.14.11(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -70,9 +82,6 @@ importers:
       remark-gfm:
         specifier: ^4.0.1
         version: 4.0.1
-      shiki:
-        specifier: ^3.23.0
-        version: 3.23.0
       zustand:
         specifier: ^5.0.15
         version: 5.0.15(@types/react@18.3.31)(react@18.3.1)
@@ -764,9 +773,6 @@ packages:
 
   '@shikijs/engine-javascript@3.23.0':
     resolution: {integrity: sha512-aHt9eiGFobmWR5uqJUViySI1bHMqrAgamWE1TYSUoftkAeCCAiGawPMwM+VCadylQtF4V3VNOZ5LmfItH5f3yA==}
-
-  '@shikijs/engine-oniguruma@3.23.0':
-    resolution: {integrity: sha512-1nWINwKXxKKLqPibT5f4pAFLej9oZzQTsby8942OTlsJzOBZ0MWKiwzMsd+jhzu8YPCHAswGnnN1YtQfirL35g==}
 
   '@shikijs/langs@3.23.0':
     resolution: {integrity: sha512-2Ep4W3Re5aB1/62RSYQInK9mM3HsLeB91cHqznAJMuylqjzNVAVCMnNWRHFtcNHXsoNRayP9z1qj4Sq3nMqYXg==}
@@ -1565,9 +1571,6 @@ packages:
     resolution: {integrity: sha512-Iov+JwFv/2HcTpcwNMKd8+IWNb8tboQJNQTkAY/LLVK7gGH9jy+LGkVqPxfekHl+yMmiqXszdGWXgkfml7hjqA==}
     engines: {node: '>= 0.4'}
 
-  shiki@3.23.0:
-    resolution: {integrity: sha512-55Dj73uq9ZXL5zyeRPzHQsK7Nbyt6Y10k5s7OjuFZGMhpp4r/rsLBH0o/0fstIzX1Lep9VxefWljK/SKCzygIA==}
-
   siginfo@2.0.0:
     resolution: {integrity: sha512-ybx0WO1/8bSBLEWXZvEd7gMW3Sn3JFlW3TvX1nREbDLRNQNaeNN8WK0meBwPdAaOI7TtRRRJn/Es1zhrrCHu7g==}
 
@@ -2327,11 +2330,6 @@ snapshots:
       '@shikijs/types': 3.23.0
       '@shikijs/vscode-textmate': 10.0.2
       oniguruma-to-es: 4.3.6
-
-  '@shikijs/engine-oniguruma@3.23.0':
-    dependencies:
-      '@shikijs/types': 3.23.0
-      '@shikijs/vscode-textmate': 10.0.2
 
   '@shikijs/langs@3.23.0':
     dependencies:
@@ -3410,17 +3408,6 @@ snapshots:
   semver@6.3.1: {}
 
   shell-quote@1.9.0: {}
-
-  shiki@3.23.0:
-    dependencies:
-      '@shikijs/core': 3.23.0
-      '@shikijs/engine-javascript': 3.23.0
-      '@shikijs/engine-oniguruma': 3.23.0
-      '@shikijs/langs': 3.23.0
-      '@shikijs/themes': 3.23.0
-      '@shikijs/types': 3.23.0
-      '@shikijs/vscode-textmate': 10.0.2
-      '@types/hast': 3.0.5
 
   siginfo@2.0.0: {}
 

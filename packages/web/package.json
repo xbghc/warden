@@ -9,13 +9,16 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@shikijs/core": "^3.23.0",
+    "@shikijs/engine-javascript": "^3.23.0",
+    "@shikijs/langs": "^3.23.0",
+    "@shikijs/themes": "^3.23.0",
     "@tanstack/react-virtual": "^3.14.11",
     "@warden/shared": "workspace:*",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
-    "shiki": "^3.23.0",
     "zustand": "^5.0.15"
   },
   "devDependencies": {
