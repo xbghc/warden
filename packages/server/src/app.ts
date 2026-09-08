@@ -54,6 +54,8 @@ export interface AppOptions {
   webDir?: string;
   /** Poll interval of the repository watchers; tests use a short one. */
   watchIntervalMs?: number;
+  /** Echoed by GET /api/ping, so a caller can tell this process apart from whatever else answers. */
+  instanceToken?: string;
 }
 
 const SSE_HEARTBEAT_MS = 15_000;
@@ -140,6 +142,9 @@ export function createApp(opts: AppOptions): Hono {
   });
 
   const api = new Hono();
+
+  // Cheap identity check: no git, no state file. See wsl.ts for who asks and why.
+  api.get('/ping', (c) => c.text(opts.instanceToken ?? ''));
 
   api.get('/repo', async (c) => {
     const state = await store.load();

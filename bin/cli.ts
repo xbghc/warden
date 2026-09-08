@@ -43,7 +43,8 @@ function usage(): string {
 Usage: warden [repoPath] [options]
 
 Options:
-  --port <n>, -p <n>   Listen on a fixed port (default: first free port from 4100)
+  --port <n>, -p <n>   Listen on a fixed port (default: first free port from 4100, and under WSL
+                       the first one the Windows side can reach)
   --no-open            Do not try to open the browser
   -h, --help           Show this help
   -v, --version        Print version
@@ -125,6 +126,14 @@ async function main(): Promise<void> {
   console.log(`  repo:  ${server.repo.root}`);
   console.log(`  state: ${server.stateFile}`);
   console.log(`  url:   ${server.url}`);
+  if (server.skippedPorts.length > 0) {
+    const ports = server.skippedPorts.join(', ');
+    const plural = server.skippedPorts.length > 1 ? 's' : '';
+    console.log(`  note:  skipped port${plural} ${ports} — the WSL2 localhost relay does not publish ${plural ? 'them' : 'it'} to Windows`);
+  }
+  if (server.windowsReachable === false) {
+    console.error(`warning: Windows cannot reach ${server.url} either. Run with --port <n> to pick a port it can publish.`);
+  }
   if (args.open) {
     const opened = await openBrowser(server.url);
     if (!opened) console.log('  (could not open a browser automatically; open the URL manually)');
