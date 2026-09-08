@@ -14,7 +14,7 @@ with line comments you can copy back to the agent as a prompt.
 - Comments follow the code: they move with a hunk that gets staged, re-attach after the agent edits the file, and are cleaned up once the change is committed.
 - Auto-refresh — warden watches the repository and reloads itself when you edit, stage, commit or switch branches.
 - Local issues (title, Markdown body, open/closed) that link comments.
-- Branch-scoped todos, exportable as a numbered checklist.
+- Branch-scoped todos, each copied to the clipboard on its own — one task at a time for the agent.
 - Commit history browser: grouped by day, branch / tag labels, search by message, sha, author or
   path (each a `git log` on the server, not a filter over the rows already loaded), and a
   first-parent view that folds merged branches into their merge commits.
@@ -161,19 +161,16 @@ Notes attached to a branch rather than to a line of code, for the things you not
 that do not belong in a comment. They are not deleted when you commit. They sit in the right-hand
 rail next to the comments, under the *Todo* tab: type a title and press Enter to add one, expand a
 card to read or edit its Markdown body, filter by status, and switch between the current branch
-and all branches; *复制 Todo* copies the open ones
-(optionally including the done ones, marked ` (done)`) as:
+and all branches.
+
+Each card has its own *复制* button, and there is deliberately no "copy all": a todo is one task to
+hand to an agent, and the agent it goes to is already working in that branch. So the clipboard gets
+the title and the body — no branch, repo, count or numbering:
 
 ```markdown
-# TODO
-Branch: feature/x
-Repo: /home/user/project
-Count: 2
+补充 OrderList 的空状态
 
-## 1. 补充 OrderList 的空状态
 描述正文（Markdown）…
-
-## 2. useOrder 的依赖数组缺少 id
 ```
 
 ## nvim integration

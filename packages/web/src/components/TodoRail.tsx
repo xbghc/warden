@@ -15,6 +15,7 @@ function shortTime(iso: string): string {
 function TodoCard({ todo, showBranch }: { todo: Todo; showBranch: boolean }) {
   const updateTodo = useStore((s) => s.updateTodo);
   const deleteTodo = useStore((s) => s.deleteTodo);
+  const copyTodo = useStore((s) => s.copyTodo);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(todo.title);
@@ -44,6 +45,17 @@ function TodoCard({ todo, showBranch }: { todo: Todo; showBranch: boolean }) {
           {shortTime(todo.updatedAt)}
         </span>
         <span className="card-actions">
+          {/* One todo is one task for the agent: it goes over on its own, title and body only. */}
+          <button
+            className="link"
+            onClick={(e) => {
+              e.stopPropagation();
+              void copyTodo(todo.id);
+            }}
+            title="只复制这条 Todo 的标题和描述"
+          >
+            复制
+          </button>
           <button
             className="link"
             onClick={(e) => {
@@ -95,14 +107,12 @@ export function TodoRail() {
   const todos = useStore((s) => s.todos);
   const loadTodos = useStore((s) => s.loadTodos);
   const createTodo = useStore((s) => s.createTodo);
-  const exportTodos = useStore((s) => s.exportTodos);
   const repo = useStore((s) => s.repo);
   const root = useStore((s) => s.root);
   const branch = branchOf(repo, root);
 
   const [filter, setFilter] = useState<Filter>('open');
   const [allBranches, setAllBranches] = useState(false);
-  const [includeDone, setIncludeDone] = useState(false);
   const [draft, setDraft] = useState('');
 
   useEffect(() => {
@@ -123,8 +133,6 @@ export function TodoRail() {
     ['done', 'done', pool.filter((t) => t.status === 'done').length],
     ['all', 'all', pool.length],
   ];
-  // Export is always the current branch, whatever the list is showing.
-  const exportable = todos.filter((t) => t.branch === branch && (includeDone || t.status === 'open')).length;
   const emptyText = filter === 'done' ? '没有已完成的 Todo' : filter === 'open' && pool.length > 0 ? '全部完成了' : '还没有 Todo，在上面写第一条。';
 
   const submit = async () => {
@@ -165,18 +173,6 @@ export function TodoRail() {
         {shown.map((t) => (
           <TodoCard key={t.id} todo={t} showBranch={allBranches} />
         ))}
-      </div>
-      <div className="rail-foot">
-        <div className="rail-foot-row">
-          <button className="send" onClick={() => void exportTodos(includeDone)} disabled={exportable === 0} title={`把 ${branch} 的 Todo 复制为编号清单`}>
-            复制 Todo
-            {exportable > 0 && <span className="send-n">{exportable}</span>}
-          </button>
-          <label className="check">
-            <input type="checkbox" checked={includeDone} onChange={(e) => setIncludeDone(e.target.checked)} />
-            含已完成
-          </label>
-        </div>
       </div>
     </>
   );

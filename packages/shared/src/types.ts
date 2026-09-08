@@ -302,16 +302,6 @@ export interface TodosResponse {
   branch?: string;
 }
 
-export interface ExportTodosRequest {
-  branch: string;
-  includeDone?: boolean;
-}
-
-export interface TodoExportResponse {
-  text: string;
-  count: number;
-}
-
 /** Payload of the `changed` SSE event emitted by the repository watcher. */
 export interface ChangeEvent {
   type: 'changed';

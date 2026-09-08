@@ -11,7 +11,6 @@ import type {
   CreateTodoRequest,
   ExportRequest,
   ExportResponse,
-  ExportTodosRequest,
   FileDiff,
   FileEntry,
   FilesResponse,
@@ -25,7 +24,6 @@ import type {
   RepoInfo,
   ReviewState,
   Todo,
-  TodoExportResponse,
   TodosResponse,
   UpdateCommentRequest,
   UpdateIssueRequest,
@@ -40,7 +38,7 @@ import { currentBranch, getRepoInfo, listWorktrees, type RepoContext } from './r
 import { getFileDiff, getFullFile, listTargetDiffs, resolveTargetContext, toSummary, type TargetContext } from './targets.js';
 import { buildAnchor, reanchorComment } from './anchor.js';
 import { ensureTarget, StateStore } from './state.js';
-import { formatCommentsExport, formatIssueExport, formatTodosExport } from './export.js';
+import { formatCommentsExport, formatIssueExport } from './export.js';
 import { NvimService } from './nvim.js';
 import { RepoWatcher } from './watcher.js';
 import { serveStaticFile } from './static.js';
@@ -601,16 +599,6 @@ export function createApp(opts: AppOptions): Hono {
       s.todos.push(todo);
     });
     return c.json(todo, 201);
-  });
-
-  api.post('/todos/export', async (c) => {
-    const body = (await c.req.json()) as ExportTodosRequest;
-    const branch = typeof body.branch === 'string' ? body.branch.trim() : '';
-    if (!branch) throw badRequest('branch is required');
-    const s = await store.load();
-    const todos = s.todos.filter((t) => t.branch === branch && (body.includeDone === true || t.status === 'open'));
-    const res: TodoExportResponse = { text: formatTodosExport({ repoRoot: repo.root, branch, todos }), count: todos.length };
-    return c.json(res);
   });
 
   api.patch('/todos/:id', async (c) => {

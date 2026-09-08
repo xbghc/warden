@@ -3,7 +3,7 @@ import path from 'node:path';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Hono } from 'hono';
-import type { Todo, TodoExportResponse, TodosResponse } from '@warden/shared';
+import type { Todo, TodosResponse } from '@warden/shared';
 import { createApp, resolveRepo, StateStore, NvimService } from '@warden/server';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
@@ -76,23 +76,6 @@ describe('todos', () => {
     expect(patched).toMatchObject({ status: 'done', body: 'fixed in a follow-up', title: 'useOrder 的依赖数组缺少 id' });
     expect(patched.updatedAt >= patched.createdAt).toBe(true);
     expect((await send('PATCH', '/api/todos/nope', { status: 'done' })).status).toBe(404);
-  });
-
-  it('exports open todos, and done ones only when asked', async () => {
-    const open = await json<TodoExportResponse>(await send('POST', '/api/todos/export', { branch: 'main' }));
-    expect(open.count).toBe(1);
-    expect(open.text).toBe(
-      ['# TODO', 'Branch: main', `Repo: ${fx.root}`, 'Count: 1', '', '## 1. 补充 OrderList 的空状态', '描述正文（Markdown）…', ''].join('\n'),
-    );
-
-    const withDone = await json<TodoExportResponse>(await send('POST', '/api/todos/export', { branch: 'main', includeDone: true }));
-    expect(withDone.count).toBe(2);
-    expect(withDone.text).toContain('## 2. useOrder 的依赖数组缺少 id (done)');
-
-    const empty = await json<TodoExportResponse>(await send('POST', '/api/todos/export', { branch: 'nothing-here' }));
-    expect(empty.count).toBe(0);
-    expect(empty.text).toBe(['# TODO', 'Branch: nothing-here', `Repo: ${fx.root}`, 'Count: 0', ''].join('\n'));
-    expect((await send('POST', '/api/todos/export', {})).status).toBe(400);
   });
 
   it('deletes', async () => {

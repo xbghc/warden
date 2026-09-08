@@ -6,7 +6,6 @@ import type {
   CreateIssueRequest,
   CreateTodoRequest,
   ExportResponse,
-  ExportTodosRequest,
   FileDiff,
   FilesResponse,
   FullFileResponse,
@@ -18,7 +17,6 @@ import type {
   ReviewState,
   TargetKey,
   Todo,
-  TodoExportResponse,
   TodosResponse,
   UpdateCommentRequest,
   UpdateIssueRequest,
@@ -98,7 +96,6 @@ export const api = {
   createTodo: (body: CreateTodoRequest) => req<Todo>('POST', '/api/todos', body),
   updateTodo: (id: string, body: UpdateTodoRequest) => req<Todo>('PATCH', `/api/todos/${enc(id)}`, body),
   deleteTodo: (id: string) => req<{ ok: true }>('DELETE', `/api/todos/${enc(id)}`),
-  exportTodos: (body: ExportTodosRequest) => req<TodoExportResponse>('POST', '/api/todos/export', body),
 
   /** Server-sent stream of repository changes for one worktree root. Caller owns `close()`. */
   events: (root: string) => new EventSource(`/api/events${q({ root })}`),

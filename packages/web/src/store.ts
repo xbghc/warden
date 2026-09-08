@@ -22,6 +22,7 @@ import type {
 import { isLocalTarget, localViewKeys, tryParseTargetKey } from '@warden/shared';
 import { api, ApiError } from './api';
 import { copyText } from './lib/clipboard';
+import { todoText } from './lib/todos';
 
 /** Branch the todo list is scoped to: the worktree currently in view, else the repository's. */
 export function branchOf(repo: RepoInfo | null, root: string): string {
@@ -142,7 +143,8 @@ export interface AppStore {
   createTodo(body: CreateTodoRequest): Promise<Todo | undefined>;
   updateTodo(id: string, body: UpdateTodoRequest): Promise<void>;
   deleteTodo(id: string): Promise<void>;
-  exportTodos(includeDone: boolean): Promise<void>;
+  /** Copy one todo to the clipboard — its title and body, nothing about where it lives. */
+  copyTodo(id: string): Promise<void>;
   showToast(message: string, kind?: Toast['kind']): void;
 }
 
@@ -655,16 +657,12 @@ export const useStore = create<AppStore>((set, get) => {
       }
     },
 
-    async exportTodos(includeDone) {
-      const branch = branchOf(get().repo, get().root);
+    async copyTodo(id) {
+      const todo = get().todos.find((t) => t.id === id);
+      if (!todo) return;
       try {
-        const res = await api.exportTodos({ branch, includeDone });
-        if (res.count === 0) {
-          get().showToast(`分支 ${branch} 没有可导出的 Todo`);
-          return;
-        }
-        await copyText(res.text);
-        get().showToast(`已复制 ${res.count} 条 Todo 到剪贴板`);
+        await copyText(todoText(todo));
+        get().showToast('已复制 Todo 到剪贴板');
       } catch (e) {
         fail(e);
       }
