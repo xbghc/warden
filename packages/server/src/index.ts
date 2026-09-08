@@ -78,6 +78,11 @@ export async function startServer(opts: StartOptions): Promise<RunningServer> {
   const stop = (s: ServerType): Promise<void> =>
     new Promise((resolve, reject) => {
       s.close((err) => (err ? reject(err) : resolve()));
+      // close() only stops accepting and then waits for every connection to drain. The
+      // /api/events SSE streams never drain while a page is open, so shutdown would hang
+      // until the last tab was closed. Destroying them fires their abort handlers, which
+      // release the watcher subscriptions.
+      if ('closeAllConnections' in s) s.closeAllConnections();
     });
 
   let port: number;

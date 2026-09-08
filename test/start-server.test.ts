@@ -93,3 +93,22 @@ describe('startServer port selection', () => {
     expect(server.skippedPorts).toEqual([]);
   });
 });
+
+describe('startServer().close()', () => {
+  it('resolves while an /api/events stream is still open', async () => {
+    const server = await startServer({ repoPath: fx.root, stateFile });
+
+    // A browser tab keeps this stream open indefinitely; the server must not wait for it.
+    const res = await fetch(`${server.url}api/events`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/event-stream');
+    const drained = res.body!.getReader().read().catch(() => undefined);
+
+    const closed = server.close().then(() => 'closed' as const);
+    const timeout = new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), 2_000));
+    expect(await Promise.race([closed, timeout])).toBe('closed');
+
+    // The client sees the connection go away rather than hanging on a half-open socket.
+    await drained;
+  });
+});
