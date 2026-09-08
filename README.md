@@ -58,18 +58,25 @@ Several instances on the same repository can run at the same time.
 Refs accept anything git can resolve (`main`, `v1.2`, `HEAD~3`, a sha). `@` is `HEAD`.
 Worktrees are discovered with `git worktree list` and share the review state of the main repository.
 
+There is no target switcher in the UI: the sidebar's two blocks *are* the working tree, a commit is
+picked from the *Commits* panel, and the *Branch vs* and *Range* fields at the top of that panel open
+the other two. The sidebar names whatever is under review in its block header and puts a
+*返回工作区* link above it.
+
 `working`, `staged` and `all` are the three **local views** of one worktree. While any of them is
 selected the sidebar shows two blocks — Unstaged (`working`) and Staged (`staged`) — instead of a
 single tree, and clicking a file switches to the view it belongs to. A file that is only partly
 staged appears in both. Switching between the three keeps your comments, the draft you are typing
-and the current selection; only the diff is reloaded. Commit, range and `base` targets keep the single tree.
+and the current selection; only the diff is reloaded. `all` has no control of its own (a saved
+`lastTarget` can still restore it; *Branch vs* `@` shows the same diff). Commit, range and `base`
+targets keep the single tree.
 
 `base:<ref>` is for a branch a coding agent has been working on, committing as it goes: one tree with
 everything since the branch forked off `<ref>` — the commits plus whatever is still uncommitted or
 untracked. The diff runs against the merge base, so commits that landed on `<ref>` after the fork are
-not listed as reverted (which is what a plain `git diff <ref>` would do). The *Branch* button picks the
-base for you — the main worktree's branch when a sibling worktree is under review, otherwise `main` or
-`master` — and the field next to it takes any ref. Unlike the three local views, `base` keeps its own
+not listed as reverted (which is what a plain `git diff <ref>` would do). The *Branch vs* field in the
+Commits panel suggests the base for you — the main worktree's branch when a sibling worktree is under
+review, otherwise `main` or `master` — and takes any ref. Unlike the three local views, `base` keeps its own
 pool of comments and a commit never deletes them: the round under review is not over when the agent
 commits, so a comment whose lines changed stays *orphaned*, snippet and all, until you have checked
 the fix and delete or re-attach it.

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { FileEntry, TargetKey } from '@warden/shared';
-import { commentScopeKey, formatTargetKey, isLocalTarget, tryParseTargetKey } from '@warden/shared';
+import { commentScopeKey, formatTargetKey, isLocalTarget, targetLabel, tryParseTargetKey } from '@warden/shared';
 import { useStore } from '../store';
 import { allDirPaths, buildTree, type DirNode, type TreeNode } from '../lib/tree';
 
@@ -157,6 +157,7 @@ export function FileTree() {
   const loading = useStore((s) => s.filesLoading);
   const error = useStore((s) => s.filesError);
   const targetKey = useStore((s) => s.targetKey);
+  const setTarget = useStore((s) => s.setTarget);
 
   const target = useMemo(() => tryParseTargetKey(targetKey), [targetKey]);
   const local = !!target && isLocalTarget(target);
@@ -165,9 +166,25 @@ export function FileTree() {
   // directories across a plain view switch — which is not supposed to reset anything.
   const scope = commentScopeKey(targetKey);
 
+  // A commit, a range or a branch view is entered from the Commits panel, so the sidebar says which
+  // one is up and holds the only way back to the working tree — even when the listing failed (a
+  // bad ref, say). The worktree is already named in the top bar's selector, so the label leaves it out.
+  const back = !local && (
+    <div className="sidebar-target">
+      <span className="sidebar-target-name" title={targetKey}>
+        {target ? targetLabel({ ...target, worktree: undefined }) : targetKey}
+      </span>
+      <span className="spacer" />
+      <button className="link" onClick={() => void setTarget(formatTargetKey({ kind: 'working', ...worktree }))} title="回到工作区的 Unstaged / Staged 视图">
+        ← 返回工作区
+      </button>
+    </div>
+  );
+
   if (error) {
     return (
       <aside className="sidebar">
+        {back}
         <div className="error-box">{error}</div>
       </aside>
     );
@@ -196,6 +213,7 @@ export function FileTree() {
 
   return (
     <aside className="sidebar">
+      {back}
       <TreeBlock key={scope} title="改动" view={targetKey} files={files} empty={loading ? '加载中…' : '没有改动'} />
     </aside>
   );

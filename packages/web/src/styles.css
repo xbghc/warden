@@ -420,20 +420,6 @@ kbd {
   border-radius: var(--r-ctl);
   padding: 1px 6px;
 }
-.target {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.target-label {
-  font-family: var(--mono);
-  font-size: 12px;
-  color: var(--muted);
-  max-width: 260px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .inline-form {
   display: inline-flex;
   align-items: center;
@@ -498,6 +484,27 @@ kbd {
 }
 .tree-block + .tree-block {
   border-top: 1px solid var(--line);
+}
+/* Above a commit, range or branch tree only: the local views are home and need no way back. */
+.sidebar-target {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+.sidebar-target-name {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-2);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sidebar-target .link {
+  font-size: 12px;
 }
 .block-head {
   display: flex;
@@ -1091,6 +1098,21 @@ kbd {
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+/* Under the filters: the two history targets a click on a row cannot express. */
+.commits-compare {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--ground);
+  flex-wrap: wrap;
+}
+.compare-label {
+  font-size: 12px;
+  color: var(--ink-2);
+  margin-right: 2px;
 }
 .commits-list {
   flex: 1;

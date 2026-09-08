@@ -65,6 +65,7 @@ type Row = { kind: 'day'; key: string; label: string } | { kind: 'commit'; c: Co
 
 export function CommitsPanel({ active }: { active: boolean }) {
   const root = useStore((s) => s.root);
+  const repo = useStore((s) => s.repo);
   const targetKey = useStore((s) => s.targetKey);
   const setTarget = useStore((s) => s.setTarget);
   const showToast = useStore((s) => s.showToast);
@@ -80,11 +81,23 @@ export function CommitsPanel({ active }: { active: boolean }) {
   const scrollTop = useRef(0);
   const seq = useRef(0);
 
-  const worktree = useMemo(() => parseTargetKey(targetKey).worktree, [targetKey]);
-  const currentSha = useMemo(() => {
-    const t = parseTargetKey(targetKey);
-    return t.kind === 'commit' ? t.sha : null;
-  }, [targetKey]);
+  const target = useMemo(() => parseTargetKey(targetKey), [targetKey]);
+  const wt = target.worktree ? { worktree: target.worktree } : {};
+  const currentSha = target.kind === 'commit' ? target.sha : null;
+
+  // The two history targets a click on a row cannot express. Where the branch under review most
+  // likely forked off: the main worktree's branch when a sibling worktree is in view, otherwise
+  // main / master if the repository has one.
+  const mainWorktree = repo?.worktrees.find((w) => w.isMain);
+  const suggestedBase = (root !== mainWorktree?.path && mainWorktree?.branch) || repo?.defaultBase || 'main';
+  const [baseRef, setBaseRef] = useState(target.kind === 'base' ? target.ref : '');
+  const [rangeBase, setRangeBase] = useState(target.kind === 'range' ? target.base : '@');
+  const [rangeHead, setRangeHead] = useState(target.kind === 'range' ? target.head : '');
+  const compareBranch = () => void setTarget(formatTargetKey({ kind: 'base', ref: baseRef.trim() || suggestedBase, ...wt }));
+  const compareRange = () => {
+    const h = rangeHead.trim();
+    if (h) void setTarget(formatTargetKey({ kind: 'range', base: rangeBase.trim() || '@', head: h, ...wt }));
+  };
 
   // Typing settles for a moment before it reaches git; Enter applies at once.
   const apply = useCallback((next: Filters) => setFilters((prev) => (sameFilters(prev, next) ? prev : next)), []);
@@ -232,6 +245,36 @@ export function CommitsPanel({ active }: { active: boolean }) {
         </button>
         <span className="muted commits-count">{status}</span>
       </div>
+      <div className="commits-compare">
+        <form
+          className="inline-form"
+          title="分支自 base 分叉以来的全部改动，已提交和未提交都算（含未跟踪文件）"
+          onSubmit={(e) => {
+            e.preventDefault();
+            compareBranch();
+          }}
+        >
+          <span className="compare-label">Branch vs</span>
+          <input value={baseRef} onChange={(e) => setBaseRef(e.target.value)} placeholder={suggestedBase} spellCheck={false} aria-label="base 分支" />
+          <button type="submit">对比</button>
+        </form>
+        <form
+          className="inline-form"
+          title="对比两个 ref"
+          onSubmit={(e) => {
+            e.preventDefault();
+            compareRange();
+          }}
+        >
+          <span className="compare-label">Range</span>
+          <input value={rangeBase} onChange={(e) => setRangeBase(e.target.value)} placeholder="base (@ = HEAD)" spellCheck={false} aria-label="range 的 base" />
+          <span className="muted">..</span>
+          <input value={rangeHead} onChange={(e) => setRangeHead(e.target.value)} placeholder="head" spellCheck={false} aria-label="range 的 head" />
+          <button type="submit" disabled={!rangeHead.trim()}>
+            对比
+          </button>
+        </form>
+      </div>
       <div className="commits-list" ref={listRef} onScroll={onScroll}>
         {rows.map((row) => {
           if (row.kind === 'day') {
@@ -250,7 +293,7 @@ export function CommitsPanel({ active }: { active: boolean }) {
             <div
               key={c.sha}
               className={`commit-row ${isCurrent ? 'active' : ''}`}
-              onClick={() => void setTarget(formatTargetKey({ kind: 'commit', sha: c.sha, ...(worktree ? { worktree } : {}) }))}
+              onClick={() => void setTarget(formatTargetKey({ kind: 'commit', sha: c.sha, ...wt }))}
               title={`${c.sha}\n${c.author} <${c.email}>\n${d.toLocaleString()}`}
             >
               <span className="mono sha">{c.shortSha}</span>
