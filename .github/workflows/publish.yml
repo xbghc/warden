@@ -1,13 +1,30 @@
 name: Publish to npm
 
 # Push a tag like v0.1.0 (matching package.json "version") to publish @xbghc/warden.
-# Requires an npm automation token stored as the NPM_TOKEN repository secret.
+#
+# Auth is npm trusted publishing (OIDC) — no NPM_TOKEN secret, no token to rotate.
+# The registry hands out a short-lived credential only to this repo's publish.yml,
+# and provenance is attested automatically.
+#
+# This requires a Trusted Publisher configured on the package's npmjs.com settings
+# page (user `xbghc`, repo `warden`, workflow `publish.yml`). That page only exists
+# once the package does, so 0.1.0 was published from a laptop with `npm login`;
+# npm cannot bootstrap a brand-new package over OIDC (npm/cli#8544).
+#
+# Note there is deliberately no `registry-url:` on setup-node. It writes
+# `_authToken=${NODE_AUTH_TOKEN}` into .npmrc, which expands to empty with no token
+# set and can convince npm that auth is already configured, so it never starts the
+# OIDC exchange and fails with ENEEDAUTH or E404 (actions/setup-node#1551).
+# registry.npmjs.org is the default registry anyway.
 on:
   push:
     tags: ['v*']
 
 permissions:
   contents: read
+  # Lets the runner mint the OIDC token that the registry exchanges for a
+  # short-lived publish credential. Trusted publishing does not work without it.
+  id-token: write
 
 jobs:
   publish:
@@ -19,7 +36,10 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-          registry-url: https://registry.npmjs.org
+      # Node 22 bundles npm 10.x, but trusted publishing needs npm >= 11.5.1, and
+      # `pnpm publish` shells out to the npm CLI — so this is what OIDC keys off.
+      # An older npm silently falls back to token auth and then fails to authenticate.
+      - run: npm install -g npm@latest && npm --version
       - run: pnpm install --frozen-lockfile
       - name: Check tag matches package.json version
         run: |
@@ -31,5 +51,3 @@ jobs:
           fi
       # prepublishOnly runs `pnpm build && pnpm test` before anything is uploaded.
       - run: pnpm publish --access public --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
