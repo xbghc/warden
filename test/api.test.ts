@@ -123,7 +123,8 @@ describe('repo & targets', () => {
 
   it('worktree targets', async () => {
     const wtPath = path.join(os.tmpdir(), `warden-wt-${process.pid}-${Date.now()}`);
-    fx.git('worktree', 'add', '-q', '-b', 'feature', wtPath, 'HEAD');
+    // Forked one commit back, so main is already ahead of the branch: what a `base` target has to ignore.
+    fx.git('worktree', 'add', '-q', '-b', 'feature', wtPath, 'HEAD~1');
     try {
       const info = await json<RepoInfo>(await get('/api/repo'));
       const wt = info.worktrees.find((w) => !w.isMain)!;
@@ -137,6 +138,30 @@ describe('repo & targets', () => {
       const rangeKey = `worktree:${wt.path}:range:main..feature`;
       const range = await json<FilesResponse>(await get(`/api/targets/${k(rangeKey)}/files`));
       expect(range.files).toEqual([]);
+
+      // `base`: everything since the branch forked off main, committed or not. c2 landed on main
+      // after the fork, so its files stay out — a plain `git diff main` would list them as reverted.
+      fx.git('-C', wt.path, 'commit', '-q', '-a', '-m', 'feature: change a');
+      await writeFile(path.join(wt.path, 'src/b.ts'), 'changed, not committed\n');
+      await writeFile(path.join(wt.path, 'src/fresh.ts'), 'untracked\n');
+      const baseKey = `worktree:${wt.path}:base:main`;
+      const base = await json<FilesResponse>(await get(`/api/targets/${k(baseKey)}/files`));
+      expect(base.root).toBe(wt.path);
+      expect(base.files.map((f) => [f.path, f.status, f.untracked ?? false])).toEqual([
+        ['src/a.ts', 'modified', false],
+        ['src/b.ts', 'modified', false],
+        ['src/fresh.ts', 'added', true],
+      ]);
+      const oldSide = await json<{ content: string | null }>(await get(`/api/targets/${k(baseKey)}/file/full?path=${k('src/a.ts')}&side=old`));
+      expect(oldSide.content).toBe(['export function a() {', '  return 1;', '}', ''].join('\n'));
+      const newSide = await json<{ content: string | null }>(await get(`/api/targets/${k(baseKey)}/file/full?path=${k('src/b.ts')}&side=new`));
+      expect(newSide.content).toBe('changed, not committed\n');
+      // The range only sees the commit and the local views only the rest.
+      const committed = await json<FilesResponse>(await get(`/api/targets/${k(rangeKey)}/files`));
+      expect(committed.files.map((f) => f.path)).toEqual(['src/a.ts']);
+      const local = await json<FilesResponse>(await get(`/api/targets/${k(`worktree:${wt.path}:all`)}/files`));
+      expect(local.files.map((f) => f.path)).toEqual(['src/b.ts', 'src/fresh.ts']);
+      expect((await get(`/api/targets/${k(`worktree:${wt.path}:base:nope`)}/files`)).status).toBe(400);
     } finally {
       fx.git('worktree', 'remove', '--force', wtPath);
     }

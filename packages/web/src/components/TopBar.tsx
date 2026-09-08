@@ -11,11 +11,12 @@ function shortTime(iso: string | null): string {
 
 type Kind = Target['kind'];
 
-/** The five ways to pick what is under review, in the order they sit in the bar. */
+/** The six ways to pick what is under review, in the order they sit in the bar. */
 const KINDS: { kind: Kind; label: string; title: string }[] = [
   { kind: 'working', label: 'Unstaged', title: '工作区未提交的改动（含未跟踪文件）' },
   { kind: 'staged', label: 'Staged', title: '已暂存的改动' },
   { kind: 'all', label: 'All', title: '工作区全部改动（对比 HEAD）' },
+  { kind: 'base', label: 'Branch', title: '分支自 base 分叉以来的全部改动，已提交和未提交都算（含未跟踪文件）' },
   { kind: 'commit', label: 'Commit', title: '查看单个 commit' },
   { kind: 'range', label: 'Range', title: '对比两个 ref' },
 ];
@@ -53,6 +54,13 @@ export function TopBar() {
   const [sha, setSha] = useState(target.kind === 'commit' ? target.sha : '');
   const [base, setBase] = useState(target.kind === 'range' ? target.base : '@');
   const [head, setHead] = useState(target.kind === 'range' ? target.head : '');
+  const [baseRef, setBaseRef] = useState(target.kind === 'base' ? target.ref : '');
+
+  // Where the branch in worktree `wt` most likely forked off: the main worktree's branch when
+  // `wt` is a sibling of it, otherwise main / master if the repository has one.
+  const mainWorktree = repo.worktrees.find((w) => w.isMain);
+  const suggestBase = (wt: string): string =>
+    ((wt || repo.root) !== mainWorktree?.path && mainWorktree?.branch) || repo.defaultBase || 'main';
 
   // Keep the form in sync when the target changes from elsewhere (commit list, issue jump).
   const [syncedKey, setSyncedKey] = useState(targetKey);
@@ -65,9 +73,10 @@ export function TopBar() {
       setBase(target.base);
       setHead(target.head);
     }
+    if (target.kind === 'base') setBaseRef(target.ref);
   }
 
-  const apply = (next: Partial<{ kind: Kind; worktree: string; sha: string; base: string; head: string }> = {}) => {
+  const apply = (next: Partial<{ kind: Kind; worktree: string; sha: string; base: string; head: string; ref: string }> = {}) => {
     const k = next.kind ?? kind;
     const wt = next.worktree ?? worktree;
     const wtField = wt ? { worktree: wt } : {};
@@ -81,6 +90,9 @@ export function TopBar() {
       const h = (next.head ?? head).trim();
       if (!h) return;
       t = { kind: 'range', base: b, head: h, ...wtField };
+    } else if (k === 'base') {
+      // Has a sensible default, unlike a commit or a range, so an empty field is not a no-op.
+      t = { kind: 'base', ref: (next.ref ?? baseRef).trim() || suggestBase(wt), ...wtField };
     } else {
       t = { kind: k, ...wtField };
     }
@@ -94,7 +106,7 @@ export function TopBar() {
 
   // The segmented control already names the three local views; the label only adds
   // something for a commit, a range, or a worktree (which it prefixes with the name).
-  const showTargetLabel = target.kind === 'commit' || target.kind === 'range' || !!target.worktree;
+  const showTargetLabel = target.kind === 'commit' || target.kind === 'range' || target.kind === 'base' || !!target.worktree;
   const openIssues = issues.filter((i) => i.status === 'open').length;
   const otherWorktrees = repo.worktrees.filter((w) => w.path !== repo.root);
 
@@ -136,7 +148,9 @@ export function TopBar() {
               title={title}
               onClick={() => {
                 setKind(k);
-                if (k === 'working' || k === 'staged' || k === 'all') apply({ kind: k });
+                // The local views and the branch view can show right away; a commit or a
+                // range still needs a ref typed in first.
+                if (k === 'working' || k === 'staged' || k === 'all' || k === 'base') apply({ kind: k });
               }}
             >
               {label}
@@ -166,6 +180,19 @@ export function TopBar() {
             <input value={base} onChange={(e) => setBase(e.target.value)} placeholder="base (@ = HEAD)" spellCheck={false} />
             <span className="muted">..</span>
             <input value={head} onChange={(e) => setHead(e.target.value)} placeholder="head" spellCheck={false} />
+            <button type="submit">对比</button>
+          </form>
+        )}
+        {kind === 'base' && (
+          <form
+            className="inline-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              apply();
+            }}
+          >
+            <span className="muted">vs</span>
+            <input value={baseRef} onChange={(e) => setBaseRef(e.target.value)} placeholder={suggestBase(worktree)} spellCheck={false} />
             <button type="submit">对比</button>
           </form>
         )}

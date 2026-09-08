@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { realpath } from 'node:fs/promises';
 import type { RepoInfo, WorktreeInfo } from '@warden/shared';
-import { runGit } from './git.js';
+import { refExists, runGit } from './git.js';
 import { HttpError } from './errors.js';
 
 export interface RepoContext {
@@ -86,11 +86,18 @@ export async function currentBranch(cwd: string): Promise<string> {
   return sha ? sha.slice(0, 7) : 'HEAD';
 }
 
+/** The trunk a feature branch is most likely reviewed against: `main`, else `master`. */
+async function detectDefaultBase(cwd: string): Promise<string | undefined> {
+  for (const ref of ['main', 'master']) if (await refExists(cwd, ref)) return ref;
+  return undefined;
+}
+
 export async function getRepoInfo(ctx: RepoContext, defaultTarget: string): Promise<RepoInfo> {
-  const [branch, headRes, worktrees] = await Promise.all([
+  const [branch, headRes, worktrees, defaultBase] = await Promise.all([
     currentBranch(ctx.root),
     runGit(['rev-parse', 'HEAD'], { cwd: ctx.root }).catch(() => ({ stdout: '' })),
     listWorktrees(ctx),
+    detectDefaultBase(ctx.root),
   ]);
   return {
     root: ctx.root,
@@ -99,5 +106,6 @@ export async function getRepoInfo(ctx: RepoContext, defaultTarget: string): Prom
     head: headRes.stdout.trim(),
     worktrees,
     defaultTarget,
+    ...(defaultBase ? { defaultBase } : {}),
   };
 }

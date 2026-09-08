@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { HttpError } from './errors.js';
 
 /** Sub-commands the server is allowed to run. Everything else is rejected before spawning. */
-const ALLOWED_SUBCOMMANDS = new Set(['rev-parse', 'diff', 'show', 'log', 'worktree', 'ls-files', 'status']);
+const ALLOWED_SUBCOMMANDS = new Set(['rev-parse', 'diff', 'show', 'log', 'worktree', 'ls-files', 'status', 'merge-base']);
 
 /** Options that could make an otherwise read-only sub-command write somewhere. */
 const FORBIDDEN_OPTION_PREFIXES = ['--output', '--ext-diff', '--textconv', '-c', '--config-env', '--exec-path', '--git-dir', '--work-tree'];
@@ -120,6 +120,16 @@ export async function refExists(cwd: string, ref: string): Promise<boolean> {
 export async function revParse(cwd: string, ref: string): Promise<string | undefined> {
   try {
     const r = await runGit(['rev-parse', '--verify', '--quiet', ref], { cwd });
+    return r.stdout.trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Merge base of two refs; undefined when they share no history or a ref is unknown. */
+export async function mergeBase(cwd: string, a: string, b: string): Promise<string | undefined> {
+  try {
+    const r = await runGit(['merge-base', a, b], { cwd });
     return r.stdout.trim() || undefined;
   } catch {
     return undefined;

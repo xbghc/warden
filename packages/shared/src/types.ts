@@ -164,6 +164,8 @@ export interface RepoInfo {
   worktrees: WorktreeInfo[];
   /** Default target key (last used or `working`). */
   defaultTarget: TargetKey;
+  /** Trunk a `base` target is offered against by default: `main` or `master`, whichever exists. */
+  defaultBase?: string;
 }
 
 export interface FileEntry extends FileSummary {

@@ -2,7 +2,7 @@ import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 import type { FileDiff, FileSummary, Target, TargetKey, WorktreeInfo, CommentSide } from '@warden/shared';
 import { parseTargetKey, TargetKeyError } from '@warden/shared';
-import { EMPTY_TREE_SHA, refExists, revParse, runGit } from './git.js';
+import { EMPTY_TREE_SHA, mergeBase, refExists, revParse, runGit } from './git.js';
 import { parseUnifiedDiff } from './diffparse.js';
 import { badRequest, HttpError } from './errors.js';
 import type { RepoContext } from './repo.js';
@@ -37,6 +37,19 @@ async function hasHead(cwd: string): Promise<boolean> {
   return refExists(cwd, 'HEAD');
 }
 
+/**
+ * The commit a `base` target diffs against: where the branch forked off `ref`, so that commits
+ * which landed on `ref` afterwards do not show up as reversed changes (which is what a plain
+ * `git diff <ref>` would do). An unborn HEAD compares against the empty tree, like `all`.
+ */
+async function baseSha(ctx: TargetContext, ref: string): Promise<string> {
+  if (!(await refExists(ctx.cwd, ref))) throw badRequest(`unknown ref: ${ref}`, 'unknown_ref');
+  if (!(await hasHead(ctx.cwd))) return EMPTY_TREE_SHA;
+  const sha = await mergeBase(ctx.cwd, ref, 'HEAD');
+  if (!sha) throw badRequest(`${ref} and HEAD share no history`, 'no_merge_base');
+  return sha;
+}
+
 /** Build the git diff arguments (without pathspec) for a target. */
 async function diffArgs(ctx: TargetContext): Promise<string[]> {
   const t = ctx.target;
@@ -57,11 +70,13 @@ async function diffArgs(ctx: TargetContext): Promise<string[]> {
       if (!(await refExists(ctx.cwd, t.head))) throw badRequest(`unknown ref: ${t.head}`, 'unknown_ref');
       return [...DIFF_BASE_ARGS, `${t.base}...${t.head}`];
     }
+    case 'base':
+      return [...DIFF_BASE_ARGS, await baseSha(ctx, t.ref)];
   }
 }
 
 function includesUntracked(t: Target): boolean {
-  return t.kind === 'working' || t.kind === 'all';
+  return t.kind === 'working' || t.kind === 'all' || t.kind === 'base';
 }
 
 async function listUntracked(cwd: string): Promise<string[]> {
@@ -158,6 +173,8 @@ async function refForSide(ctx: TargetContext, side: CommentSide): Promise<string
       return (await revParse(ctx.cwd, `${t.sha}^`)) ?? EMPTY_TREE_SHA;
     case 'range':
       return side === 'new' ? t.head : t.base;
+    case 'base':
+      return side === 'new' ? undefined : baseSha(ctx, t.ref);
   }
 }
 

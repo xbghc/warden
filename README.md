@@ -4,7 +4,8 @@ Local web UI for reviewing git diffs — built for reviewing changes that a codi
 with line comments you can copy back to the agent as a prompt.
 
 - Runs as a single local process per repository (`127.0.0.1` only, no auth, no database).
-- Diff sources: working tree, staged, working tree vs HEAD, any commit, any two refs, and git worktrees.
+- Diff sources: working tree, staged, working tree vs HEAD, a branch since it forked off its base (commits and
+  uncommitted work together), any commit, any two refs, and git worktrees.
 - Side-by-side **Unstaged** and **Staged** file lists, so staging a hunk in your editor is what marks it reviewed.
 - GitHub-style unified / side-by-side diff with syntax highlighting, collapsed file tree, lazy per-file loading, context expansion, virtual scrolling.
 - Line comments (single line or a dragged range), Markdown, edit / delete.
@@ -45,10 +46,12 @@ Several instances on the same repository can run at the same time.
 | Working tree, uncommitted (incl. untracked) | `working` | `git diff` + `git diff --no-index /dev/null <file>` |
 | Staged | `staged` | `git diff --cached` |
 | Working tree, everything vs HEAD | `all` | `git diff HEAD` (+ untracked) |
+| Branch, everything since it forked off a base (committed or not) | `base:<ref>` | `git diff $(git merge-base <ref> HEAD)` (+ untracked) |
 | One commit | `commit:<sha>` | `git diff <sha>^ <sha>` |
 | Two refs | `range:<base>..<head>` | `git diff <base>...<head>` |
 | Worktree, working tree | `worktree:<path>:working` | same, run inside the worktree |
 | Worktree, branch vs base | `worktree:<path>:range:<base>..<head>` | same, run inside the worktree |
+| Worktree, everything since base | `worktree:<path>:base:<ref>` | same, run inside the worktree |
 
 Refs accept anything git can resolve (`main`, `v1.2`, `HEAD~3`, a sha). `@` is `HEAD`.
 Worktrees are discovered with `git worktree list` and share the review state of the main repository.
@@ -57,7 +60,17 @@ Worktrees are discovered with `git worktree list` and share the review state of 
 selected the sidebar shows two blocks — Unstaged (`working`) and Staged (`staged`) — instead of a
 single tree, and clicking a file switches to the view it belongs to. A file that is only partly
 staged appears in both. Switching between the three keeps your comments, the draft you are typing
-and the current selection; only the diff is reloaded. Commit and range targets keep the single tree.
+and the current selection; only the diff is reloaded. Commit, range and `base` targets keep the single tree.
+
+`base:<ref>` is for a branch a coding agent has been working on, committing as it goes: one tree with
+everything since the branch forked off `<ref>` — the commits plus whatever is still uncommitted or
+untracked. The diff runs against the merge base, so commits that landed on `<ref>` after the fork are
+not listed as reverted (which is what a plain `git diff <ref>` would do). The *Branch* button picks the
+base for you — the main worktree's branch when a sibling worktree is under review, otherwise `main` or
+`master` — and the field next to it takes any ref. Unlike the three local views, `base` keeps its own
+pool of comments and a commit never deletes them: the round under review is not over when the agent
+commits, so a comment whose lines changed stays *orphaned*, snippet and all, until you have checked
+the fix and delete or re-attach it.
 
 ## Keyboard
 
@@ -119,6 +132,9 @@ them — the comment's current view first, then `working`, `staged`, `all`. So:
 - `git commit` → re-anchoring notices HEAD moved. Comments that no longer have a home anywhere are
   **deleted** (and unlinked from any issue), because the code they were about is now history.
   Anything still visible in Unstaged or Staged survives, including as a context line.
+
+Commit, range and `base` targets each keep their own pool and only ever search themselves, and none of
+them deletes on a moved HEAD.
 
 Comment markers in the diff belong to one view; the rail's *全部* tab lists the whole pool and
 *此文件* lists every comment on the open file regardless of which view it currently sits in.
@@ -201,7 +217,7 @@ move into the matching scope the first time the file is read.
 
 Single user, local only. The server binds to `127.0.0.1`, executes git only through
 `execFile('git', [...])` with an argument whitelist (`rev-parse`, `diff`, `show`, `log`, `worktree list`,
-`ls-files`, `status`), refuses option-looking refs and any write-capable flag, and never writes into the
+`ls-files`, `status`, `merge-base`), refuses option-looking refs and any write-capable flag, and never writes into the
 repository. Requests that would need anything else get HTTP 400.
 
 ## Development
