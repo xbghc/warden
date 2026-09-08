@@ -113,6 +113,16 @@ textarea:focus {
   outline: 2px solid var(--accent-bg);
   border-color: var(--accent);
 }
+/* Keyboard focus only: a mouse click does not match :focus-visible, so buttons stay
+   unringed while pointing and become visible the moment you start tabbing. */
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
 kbd {
   font-family: var(--mono);
   font-size: 11px;
@@ -185,6 +195,11 @@ kbd {
 }
 .seg button:last-child {
   border-radius: 0 6px 6px 0;
+}
+/* The -1px overlap would otherwise bury the accent border under the next button. */
+.seg button.active {
+  position: relative;
+  z-index: 1;
 }
 .error-box {
   color: var(--del-fg);
@@ -283,14 +298,8 @@ kbd {
 .actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
-}
-.comment-stats {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  white-space: nowrap;
 }
 .nvim {
   display: inline-flex;
@@ -309,7 +318,7 @@ kbd {
 
 /* ---- sidebar / tree ------------------------------------------------------------ */
 .sidebar {
-  width: 320px;
+  width: 280px;
   min-width: 200px;
   border-right: 1px solid var(--border);
   display: flex;
@@ -318,17 +327,9 @@ kbd {
   resize: horizontal;
   overflow: hidden;
 }
-.sidebar-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--border);
-  font-size: 12px;
-  white-space: nowrap;
-}
 .tree-tools {
-  margin-left: auto;
+  display: inline-flex;
+  gap: 6px;
 }
 .tree {
   flex: 1;
@@ -440,17 +441,6 @@ kbd {
   width: auto;
   text-transform: uppercase;
 }
-.orphaned-block {
-  border-bottom: 1px solid var(--border);
-  background: var(--warn-bg);
-  padding: 8px 12px;
-  max-height: 40vh;
-  overflow: auto;
-}
-.orphaned-title {
-  color: var(--warn-fg);
-  margin-bottom: 6px;
-}
 .diff-scroll {
   flex: 1;
   overflow: auto;
@@ -472,6 +462,42 @@ kbd {
 .row {
   display: flex;
   min-height: 20px;
+}
+/* Anchors the comment pin and pill of the row. */
+.row.line,
+.cell {
+  position: relative;
+}
+.pin {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--accent);
+}
+.pin.muted {
+  background: var(--muted);
+}
+.pill {
+  position: absolute;
+  right: 10px;
+  top: 2px;
+  height: 16px;
+  min-width: 16px;
+  padding: 0 5px;
+  border: none;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-family: var(--sans);
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+  cursor: pointer;
+}
+.pill.muted {
+  background: var(--muted);
 }
 .row.hunk-head {
   background: var(--accent-bg);
@@ -536,6 +562,16 @@ kbd {
 .cell:hover .add-btn {
   opacity: 1;
 }
+/* Same badge shown inline in prose ("click the + next to a line"), not over a row. */
+.add-btn.static {
+  position: static;
+  display: inline-block;
+  opacity: 1;
+  width: 16px;
+  height: 16px;
+  line-height: 16px;
+  font-size: 11px;
+}
 .marker {
   flex: 0 0 14px;
   text-align: center;
@@ -547,7 +583,8 @@ kbd {
   min-width: 0;
   white-space: pre-wrap;
   word-break: break-all;
-  padding-right: 12px;
+  /* Keeps the text clear of the lane the comment pin and pill sit in. */
+  padding-right: 40px;
 }
 .nonl {
   color: var(--del-fg);
@@ -575,6 +612,12 @@ kbd {
 .row.line.selected,
 .cell.selected {
   background: var(--sel-bg) !important;
+}
+/* Keep after .selected: these tie on specificity and both are !important, so the
+   focused row only wins by source order. */
+.row.line.focused,
+.cell.focused {
+  background: var(--accent-bg) !important;
 }
 .row.line.flash,
 .cell.flash {
@@ -610,13 +653,8 @@ kbd {
 }
 
 /* ---- comments ---------------------------------------------------------------- */
-.comment-thread {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  max-width: 900px;
-}
 .comment-card {
+  position: relative;
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -638,6 +676,31 @@ kbd {
 }
 .comment-head .time {
   font-size: 11px;
+}
+/* Out of flow, so four text buttons stop pushing the metadata onto a second line in a
+   360px rail. `background: inherit` picks up whatever the card is painted with,
+   including the cream of an orphaned one, so the overlay reads as part of the card. */
+.card-actions {
+  position: absolute;
+  right: 6px;
+  top: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding-left: 8px;
+  border-radius: 4px;
+  background: inherit;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+/* :focus-within is not optional here — keyboard users never hover, and the buttons stay
+   in the tab order while transparent. */
+.comment-card:hover .card-actions,
+.comment-card:focus-within .card-actions,
+/* 重新附着 is a toggle; hiding it once the pointer leaves would leave no way back
+   except the rail banner. */
+.comment-card.reattaching .card-actions {
+  opacity: 1;
 }
 .comment-editor {
   background: var(--bg);
@@ -881,10 +944,7 @@ kbd {
   background: var(--del-fg);
 }
 
-/* ---- comment rail (direction B) ------------------------------------------------ */
-.sidebar {
-  width: 280px;
-}
+/* ---- comment rail ---------------------------------------------------------------- */
 .rail {
   width: 360px;
   min-width: 300px;
@@ -961,58 +1021,6 @@ kbd {
 .rail .comment-editor {
   max-width: none;
 }
-.add-btn.static {
-  position: static;
-  display: inline-block;
-  opacity: 1;
-  width: 16px;
-  height: 16px;
-  line-height: 16px;
-  font-size: 11px;
-}
-.row.line,
-.cell {
-  position: relative;
-}
-.pin {
-  position: absolute;
-  right: 0;
-  top: 0;
-  bottom: 0;
-  width: 4px;
-  background: var(--accent);
-}
-.pin.muted {
-  background: var(--muted);
-}
-.pill {
-  position: absolute;
-  right: 10px;
-  top: 2px;
-  height: 16px;
-  min-width: 16px;
-  padding: 0 5px;
-  border: none;
-  border-radius: 8px;
-  background: var(--accent);
-  color: #fff;
-  font-family: var(--sans);
-  font-size: 11px;
-  line-height: 16px;
-  text-align: center;
-  cursor: pointer;
-}
-.pill.muted {
-  background: var(--muted);
-}
-.row.line.focused,
-.cell.focused {
-  background: var(--accent-bg) !important;
-}
-.row.line .code,
-.cell .code {
-  padding-right: 40px;
-}
 
 /* ---- dual file tree (Unstaged / Staged) ----------------------------------- */
 .sidebar.dual {
@@ -1046,11 +1054,6 @@ kbd {
 }
 .block-title {
   font-weight: 600;
-}
-.block-head .tree-tools {
-  display: inline-flex;
-  gap: 6px;
-  margin-left: 0;
 }
 
 /* ---- todos ---------------------------------------------------------------- */
@@ -1094,7 +1097,4 @@ kbd {
 }
 .todo-body p:first-child {
   margin-top: 0;
-}
-.last-refresh {
-  font-family: var(--mono);
 }

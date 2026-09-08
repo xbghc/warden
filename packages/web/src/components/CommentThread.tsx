@@ -49,7 +49,7 @@ export function CommentCard({ comment, showSnippet = false, showFile = false }: 
   const elsewhere = comment.status !== 'orphaned' && comment.targetKey !== targetKey ? viewLabel(comment.targetKey) : null;
   return (
     <div
-      className={`comment-card status-${comment.status} ${selected ? 'selected' : ''} ${focused ? 'focused' : ''}`}
+      className={`comment-card status-${comment.status} ${selected ? 'selected' : ''} ${focused ? 'focused' : ''} ${reattaching ? 'reattaching' : ''}`}
       onClick={() => {
         if (!focused) void focusComment(comment.id);
       }}
@@ -75,46 +75,47 @@ export function CommentCard({ comment, showSnippet = false, showFile = false }: 
         <span className="muted time" title={`created ${fmtTime(comment.createdAt)}${comment.exportedAt ? `\nexported ${fmtTime(comment.exportedAt)}` : ''}`}>
           {shortTime(comment.updatedAt)}
         </span>
-        <span className="spacer" />
-        {comment.status === 'orphaned' && (
+        <span className="card-actions">
+          {comment.status === 'orphaned' && (
+            <button
+              className={`link ${reattaching ? 'active' : ''}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                setReattaching(reattaching ? null : comment.id);
+              }}
+            >
+              {reattaching ? '取消重附着' : '重新附着'}
+            </button>
+          )}
           <button
-            className={`link ${reattaching ? 'active' : ''}`}
+            className="link"
             onClick={(e) => {
               e.stopPropagation();
-              setReattaching(reattaching ? null : comment.id);
+              void exportComments([comment.id]);
+            }}
+            title="复制此条评论"
+          >
+            复制
+          </button>
+          <button
+            className="link"
+            onClick={(e) => {
+              e.stopPropagation();
+              setEditing(true);
             }}
           >
-            {reattaching ? '取消重附着' : '重新附着到选区'}
+            编辑
           </button>
-        )}
-        <button
-          className="link"
-          onClick={(e) => {
-            e.stopPropagation();
-            void exportComments([comment.id]);
-          }}
-          title="复制此条评论"
-        >
-          复制
-        </button>
-        <button
-          className="link"
-          onClick={(e) => {
-            e.stopPropagation();
-            setEditing(true);
-          }}
-        >
-          编辑
-        </button>
-        <button
-          className="link danger"
-          onClick={(e) => {
-            e.stopPropagation();
-            if (window.confirm('删除这条评论？')) void deleteComment(comment.id);
-          }}
-        >
-          删除
-        </button>
+          <button
+            className="link danger"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (window.confirm('删除这条评论？')) void deleteComment(comment.id);
+            }}
+          >
+            删除
+          </button>
+        </span>
       </div>
       {(showSnippet || comment.status === 'orphaned') && comment.codeSnippet.length > 0 && (
         <pre className="snippet">

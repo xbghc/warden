@@ -74,6 +74,9 @@ export function TopBar() {
     else void setTarget(key);
   };
 
+  // The select two elements over already says "工作区未提交" / "已 staged"; the label only
+  // adds something for a commit, a range, or a worktree (which it prefixes with the name).
+  const showTargetLabel = target.kind === 'commit' || target.kind === 'range' || !!target.worktree;
   const branch = branchOf(repo, root);
   const openIssues = issues.filter((i) => i.status === 'open').length;
   const openTodos = todos.filter((t) => t.branch === branch && t.status === 'open').length;
@@ -107,6 +110,7 @@ export function TopBar() {
         )}
         <select
           value={kind}
+          title={targetKey}
           onChange={(e) => {
             const k = e.target.value as Kind;
             setKind(k);
@@ -145,23 +149,27 @@ export function TopBar() {
             <button type="submit">对比</button>
           </form>
         )}
-        <span className="target-label" title={targetKey}>
-          {targetLabel(target)}
-        </span>
+        {showTargetLabel && (
+          <span className="target-label" title={targetKey}>
+            {targetLabel(target)}
+          </span>
+        )}
       </div>
 
       <div className="spacer" />
 
       <div className="actions">
-        <button className={panel === 'commits' ? 'active' : ''} onClick={() => setPanel(panel === 'commits' ? 'diff' : 'commits')} title="历史 commit">
-          Commits
-        </button>
-        <button className={panel === 'issues' ? 'active' : ''} onClick={() => setPanel(panel === 'issues' ? 'diff' : 'issues')} title="本地 Issue">
-          Issues{openIssues ? ` (${openIssues})` : ''}
-        </button>
-        <button className={panel === 'todos' ? 'active' : ''} onClick={() => setPanel(panel === 'todos' ? 'diff' : 'todos')} title={`${branch} 分支的 Todo`}>
-          Todos{openTodos ? ` (${openTodos})` : ''}
-        </button>
+        <div className="seg">
+          <button className={panel === 'commits' ? 'active' : ''} onClick={() => setPanel(panel === 'commits' ? 'diff' : 'commits')} title="历史 commit">
+            Commits
+          </button>
+          <button className={panel === 'issues' ? 'active' : ''} onClick={() => setPanel(panel === 'issues' ? 'diff' : 'issues')} title="本地 Issue">
+            Issues{openIssues ? ` (${openIssues})` : ''}
+          </button>
+          <button className={panel === 'todos' ? 'active' : ''} onClick={() => setPanel(panel === 'todos' ? 'diff' : 'todos')} title={`${branch} 分支的 Todo`}>
+            Todos{openTodos ? ` (${openTodos})` : ''}
+          </button>
+        </div>
         <div className="seg">
           <button className={viewMode === 'unified' ? 'active' : ''} onClick={() => setViewMode('unified')}>
             Unified
@@ -171,14 +179,22 @@ export function TopBar() {
           </button>
         </div>
         <NvimSelector />
-        <label className="check" title="仓库发生变化时自动刷新">
-          <input type="checkbox" checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)} />
-          自动刷新
-        </label>
-        <button onClick={() => void refresh()} disabled={filesLoading} title={lastRefreshAt ? `上次刷新 ${shortTime(lastRefreshAt)}（r）` : '刷新 (r)'}>
-          {filesLoading ? '刷新中…' : '刷新'}
-        </button>
-        {lastRefreshAt && <span className="muted small last-refresh">{shortTime(lastRefreshAt)}</span>}
+        <div className="seg">
+          <button onClick={() => void refresh()} disabled={filesLoading} title={lastRefreshAt ? `上次刷新 ${shortTime(lastRefreshAt)}（r）` : '刷新 (r)'}>
+            {filesLoading ? '刷新中…' : '刷新'}
+          </button>
+          {/* A button rather than a checkbox, and no separate timestamp: the label and the
+              time cost ~140px in a bar that already wraps, and the refresh button's title
+              still carries the last refresh. */}
+          <button
+            className={autoRefresh ? 'active' : ''}
+            aria-pressed={autoRefresh}
+            onClick={() => setAutoRefresh(!autoRefresh)}
+            title={`仓库发生变化时自动刷新（当前${autoRefresh ? '开启' : '关闭'}）`}
+          >
+            自动
+          </button>
+        </div>
       </div>
     </header>
   );
