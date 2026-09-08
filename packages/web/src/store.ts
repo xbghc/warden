@@ -27,6 +27,15 @@ export interface Toast {
   kind: 'info' | 'error';
 }
 
+export interface EditorTarget {
+  filePath: string;
+  side: CommentSide;
+  startLine: number;
+  endLine: number;
+}
+
+export type RailFilter = 'file' | 'all' | 'unexported';
+
 export interface JumpTarget {
   file: string;
   side: CommentSide;
@@ -58,6 +67,11 @@ export interface AppStore {
   toast: Toast | null;
   reattaching: string | null;
   refreshNonce: number;
+  /** Selection a new comment is being written for (rendered in the comment rail). */
+  editor: EditorTarget | null;
+  /** Comment highlighted in both the rail and the diff. */
+  focusedCommentId: string | null;
+  railFilter: RailFilter;
 
   init(): Promise<void>;
   setTarget(key: TargetKey): Promise<void>;
@@ -86,6 +100,9 @@ export interface AppStore {
   clearSelectedComments(): void;
   jumpToComment(comment: Comment): Promise<void>;
   setReattaching(id: string | null): void;
+  setEditor(editor: EditorTarget | null): void;
+  focusComment(id: string | null, scroll?: boolean): Promise<void>;
+  setRailFilter(filter: RailFilter): void;
   showToast(message: string, kind?: Toast['kind']): void;
 }
 
@@ -140,6 +157,9 @@ export const useStore = create<AppStore>((set, get) => {
     toast: null,
     reattaching: null,
     refreshNonce: 0,
+    editor: null,
+    focusedCommentId: null,
+    railFilter: 'file',
 
     async init() {
       try {
@@ -152,7 +172,7 @@ export const useStore = create<AppStore>((set, get) => {
     },
 
     async setTarget(key) {
-      set({ targetKey: key, files: [], diffs: {}, activeFile: null, comments: [], filesError: null, selectedCommentIds: [], reattaching: null, panel: 'diff' });
+      set({ targetKey: key, files: [], diffs: {}, activeFile: null, comments: [], filesError: null, selectedCommentIds: [], reattaching: null, panel: 'diff', editor: null, focusedCommentId: null });
       api.patchPrefs({ lastTarget: key }).catch(() => undefined);
       await get().loadFiles();
     },
@@ -215,7 +235,7 @@ export const useStore = create<AppStore>((set, get) => {
     async createComment(body) {
       try {
         const c = await api.createComment(get().targetKey, body);
-        set((s) => ({ comments: [...s.comments, c] }));
+        set((s) => ({ comments: [...s.comments, c], editor: null, focusedCommentId: c.id }));
         return c;
       } catch (e) {
         fail(e);
@@ -240,6 +260,7 @@ export const useStore = create<AppStore>((set, get) => {
         set((s) => ({
           comments: s.comments.filter((x) => x.id !== id),
           selectedCommentIds: s.selectedCommentIds.filter((x) => x !== id),
+          focusedCommentId: s.focusedCommentId === id ? null : s.focusedCommentId,
           issues: s.issues.map((i) => (i.commentIds.includes(id) ? { ...i, commentIds: i.commentIds.filter((x) => x !== id) } : i)),
         }));
       } catch (e) {
@@ -393,8 +414,24 @@ export const useStore = create<AppStore>((set, get) => {
     },
 
     setReattaching(id) {
-      set({ reattaching: id });
+      set({ reattaching: id, editor: id ? null : get().editor });
       if (id) get().showToast('在 diff 中点击或拖选行，将评论重新附着到该位置');
+    },
+
+    setEditor(editor) {
+      set({ editor, focusedCommentId: editor ? null : get().focusedCommentId });
+    },
+
+    async focusComment(id, scroll = true) {
+      set({ focusedCommentId: id });
+      if (!id || !scroll) return;
+      const c = get().comments.find((x) => x.id === id) ?? get().allComments.find((x) => x.id === id);
+      if (!c || c.status === 'orphaned') return;
+      await get().jumpToComment(c);
+    },
+
+    setRailFilter(filter) {
+      set({ railFilter: filter });
     },
 
     showToast(message, kind = 'info') {

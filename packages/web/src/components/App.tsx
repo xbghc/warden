@@ -5,6 +5,7 @@ import { FileTree } from './FileTree';
 import { DiffPanel } from './DiffPanel';
 import { CommitsPanel } from './CommitsPanel';
 import { IssuesDrawer } from './IssuesDrawer';
+import { CommentRail } from './CommentRail';
 import { Toast } from './Toast';
 
 function isEditable(el: EventTarget | null): boolean {
@@ -40,6 +41,8 @@ export function App() {
         if (f) void s.openFile(f.path);
       } else if (e.key === 'Escape') {
         if (s.reattaching) s.setReattaching(null);
+        else if (s.editor) s.setEditor(null);
+        else if (s.focusedCommentId) void s.focusComment(null);
         else if (s.panel !== 'diff') s.setPanel('diff');
       }
     };
@@ -64,7 +67,7 @@ export function App() {
       <div className="body">
         <FileTree />
         <main className="main">{panel === 'commits' ? <CommitsPanel /> : <DiffPanel />}</main>
-        {panel === 'issues' && <IssuesDrawer />}
+        {panel === 'issues' ? <IssuesDrawer /> : panel === 'diff' ? <CommentRail /> : null}
       </div>
       <Toast />
     </div>

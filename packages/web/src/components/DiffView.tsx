@@ -3,10 +3,8 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import type { CommentSide, DiffLine, FileDiff, Hunk } from '@warden/shared';
 import { useStore } from '../store';
 import { api } from '../api';
-import { buildRows, findRowIndex, hunkRowIndices, type EditorState, type Expansion, type Gap, type Row } from '../lib/rows';
+import { buildRows, findRowIndex, hunkRowIndices, type Expansion, type Gap, type Row } from '../lib/rows';
 import { langForPath, tokenizeLines, type Token } from '../lib/highlight';
-import { CommentThread } from './CommentThread';
-import { CommentEditor } from './CommentEditor';
 
 interface Selection {
   side: CommentSide;
@@ -54,10 +52,6 @@ function nvimLine(line: DiffLine, hunk: Hunk | undefined): number {
 
 function estimateRow(row: Row): number {
   switch (row.kind) {
-    case 'comments':
-      return 90 * row.comments.length;
-    case 'editor':
-      return 170;
     case 'hunk':
     case 'gap':
       return 26;
@@ -71,8 +65,11 @@ export function DiffView({ diff }: { diff: FileDiff }) {
   const targetKey = useStore((s) => s.targetKey);
   const allComments = useStore((s) => s.comments);
   const comments = useMemo(() => allComments.filter((c) => c.filePath === diff.path), [allComments, diff.path]);
-  const createComment = useStore((s) => s.createComment);
   const updateComment = useStore((s) => s.updateComment);
+  const setEditor = useStore((s) => s.setEditor);
+  const focusComment = useStore((s) => s.focusComment);
+  const editor = useStore((s) => s.editor);
+  const focusedCommentId = useStore((s) => s.focusedCommentId);
   const openInNvim = useStore((s) => s.openInNvim);
   const showToast = useStore((s) => s.showToast);
   const reattaching = useStore((s) => s.reattaching);
@@ -81,7 +78,6 @@ export function DiffView({ diff }: { diff: FileDiff }) {
   const [expansions, setExpansions] = useState<Record<number, Expansion>>({});
   const [fullLines, setFullLines] = useState<string[] | null>(null);
   const fullLoading = useRef<Promise<string[] | null> | null>(null);
-  const [editor, setEditor] = useState<EditorState | null>(null);
   const [sel, setSelState] = useState<Selection | null>(null);
   const selRef = useRef<Selection | null>(null);
   const setSel = useCallback((s: Selection | null) => {
@@ -90,10 +86,24 @@ export function DiffView({ diff }: { diff: FileDiff }) {
   }, []);
   const [flash, setFlash] = useState<{ side: CommentSide; line: number } | null>(null);
 
-  const rows = useMemo(
-    () => buildRows({ diff, viewMode, comments, editor, expansions, fullLines }),
-    [diff, viewMode, comments, editor, expansions, fullLines],
-  );
+  const rows = useMemo(() => buildRows({ diff, viewMode, expansions, fullLines }), [diff, viewMode, expansions, fullLines]);
+
+  /** side:line -> comments anchored (by end line) there; drives the pin + count in the row. */
+  const markers = useMemo(() => {
+    const m = new Map<string, { count: number; active: boolean; ids: string[] }>();
+    for (const c of comments) {
+      if (c.status === 'orphaned') continue;
+      const k = `${c.side}:${c.endLine}`;
+      const cur = m.get(k) ?? { count: 0, active: false, ids: [] };
+      cur.count++;
+      cur.ids.push(c.id);
+      if (c.status === 'active') cur.active = true;
+      m.set(k, cur);
+    }
+    return m;
+  }, [comments]);
+  const focused = useMemo(() => comments.find((c) => c.id === focusedCommentId && c.status !== 'orphaned') ?? null, [comments, focusedCommentId]);
+  const editorHere = editor && editor.filePath === diff.path ? editor : null;
 
   // ---- syntax highlighting -------------------------------------------------
   const lang = useMemo(() => langForPath(diff.path), [diff.path]);
@@ -210,12 +220,12 @@ export function DiffView({ diff }: { diff: FileDiff }) {
       if (re) {
         void updateComment(re, { side: s.side, startLine, endLine });
       } else {
-        setEditor({ side: s.side, startLine, endLine });
+        setEditor({ filePath: diff.path, side: s.side, startLine, endLine });
       }
     };
     window.addEventListener('mouseup', up);
     return () => window.removeEventListener('mouseup', up);
-  }, [setSel, updateComment]);
+  }, [setSel, updateComment, setEditor, diff.path]);
 
   const startSel = (e: React.MouseEvent, side: CommentSide, hunkIndex: number, line: number) => {
     if (e.button !== 0) return;
@@ -233,6 +243,27 @@ export function DiffView({ diff }: { diff: FileDiff }) {
     return line >= Math.min(sel.anchor, sel.head) && line <= Math.max(sel.anchor, sel.head);
   };
   const isFlash = (side: CommentSide, line: number | undefined) => !!flash && flash.side === side && flash.line === line;
+  const inRange = (r: { side: CommentSide; startLine: number; endLine: number } | null, side: CommentSide, line: number | undefined) =>
+    !!r && line !== undefined && r.side === side && line >= r.startLine && line <= r.endLine;
+  const lineClasses = (side: CommentSide, no: number | undefined) =>
+    [
+      isSelected(side, no) || inRange(editorHere, side, no) ? 'selected' : '',
+      inRange(focused, side, no) ? 'focused' : '',
+      isFlash(side, no) ? 'flash' : '',
+    ].join(' ');
+  const renderMarker = (side: CommentSide, no: number | undefined) => {
+    if (no === undefined) return null;
+    const m = markers.get(`${side}:${no}`);
+    if (!m) return null;
+    return (
+      <>
+        <button className={`pill ${m.active ? '' : 'muted'}`} title="查看评论" onClick={() => void focusComment(m.ids[0] ?? null, false)}>
+          {m.count}
+        </button>
+        <span className={`pin ${m.active ? '' : 'muted'}`} />
+      </>
+    );
+  };
 
   // ---- context expansion -------------------------------------------------------
   const ensureFull = useCallback(async (): Promise<string[] | null> => {
@@ -305,13 +336,9 @@ export function DiffView({ diff }: { diff: FileDiff }) {
     const l = row.line;
     const side: CommentSide = l.type === 'del' ? 'old' : 'new';
     const no = side === 'old' ? l.oldLineNo : l.newLineNo;
-    const selected = isSelected(side, no);
     const tokens = tokenCache.current.get(tokenKey(l, side));
     return (
-      <div
-        className={`row line ${l.type} ${selected ? 'selected' : ''} ${isFlash(side, no) ? 'flash' : ''} ${row.expanded ? 'expanded' : ''}`}
-        onMouseEnter={() => no !== undefined && extendSel(side, row.hunkIndex, no)}
-      >
+      <div className={`row line ${l.type} ${lineClasses(side, no)} ${row.expanded ? 'expanded' : ''}`} onMouseEnter={() => no !== undefined && extendSel(side, row.hunkIndex, no)}>
         <span className="gut" onClick={() => gutterClick(l, row.hunkIndex)} title="在 nvim 中打开此行">
           {l.oldLineNo ?? ''}
         </span>
@@ -330,6 +357,7 @@ export function DiffView({ diff }: { diff: FileDiff }) {
           <CodeLine content={l.content} tokens={tokens} />
           {l.noNewline && <span className="nonl" title="No newline at end of file">⏎</span>}
         </span>
+        {renderMarker(side, no)}
       </div>
     );
   };
@@ -338,10 +366,9 @@ export function DiffView({ diff }: { diff: FileDiff }) {
     if (!l) return <span className="cell empty" />;
     const no = side === 'old' ? l.oldLineNo : l.newLineNo;
     const type = l.type === 'context' ? 'context' : side === 'old' ? 'del' : 'add';
-    const selected = isSelected(side, no);
     const tokens = tokenCache.current.get(tokenKey(l, side));
     return (
-      <span className={`cell ${type} ${selected ? 'selected' : ''} ${isFlash(side, no) ? 'flash' : ''}`} onMouseEnter={() => no !== undefined && extendSel(side, hunkIndex, no)}>
+      <span className={`cell ${type} ${lineClasses(side, no)}`} onMouseEnter={() => no !== undefined && extendSel(side, hunkIndex, no)}>
         <span className="gut" onClick={() => gutterClick(l, hunkIndex)} title="在 nvim 中打开此行">
           {no ?? ''}
         </span>
@@ -355,6 +382,7 @@ export function DiffView({ diff }: { diff: FileDiff }) {
         <span className="code">
           <CodeLine content={l.content} tokens={tokens} />
         </span>
+        {renderMarker(side, no)}
       </span>
     );
   };
@@ -376,25 +404,6 @@ export function DiffView({ diff }: { diff: FileDiff }) {
           <div className={`row pair ${row.expanded ? 'expanded' : ''}`}>
             {renderSplitCell(row.left, 'old', row.hunkIndex, row.expanded)}
             {renderSplitCell(row.right, 'new', row.hunkIndex, row.expanded)}
-          </div>
-        );
-      case 'comments':
-        return (
-          <div className="row attach">
-            <CommentThread comments={row.comments} />
-          </div>
-        );
-      case 'editor':
-        return (
-          <div className="row attach">
-            <CommentEditor
-              title={`评论 ${diff.path}:${row.startLine === row.endLine ? row.startLine : `${row.startLine}-${row.endLine}`} (${row.side})`}
-              onSave={async (body) => {
-                const c = await createComment({ filePath: diff.path, side: row.side, startLine: row.startLine, endLine: row.endLine, body });
-                if (c) setEditor(null);
-              }}
-              onCancel={() => setEditor(null)}
-            />
           </div>
         );
     }

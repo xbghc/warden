@@ -880,3 +880,136 @@ kbd {
 .toast-error {
   background: var(--del-fg);
 }
+
+/* ---- comment rail (direction B) ------------------------------------------------ */
+.sidebar {
+  width: 280px;
+}
+.rail {
+  width: 360px;
+  min-width: 300px;
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-2);
+  min-height: 0;
+}
+.rail-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  height: 34px;
+  border-bottom: 1px solid var(--border);
+}
+.seg.small button {
+  height: 22px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+.rail-notice {
+  padding: 6px 10px;
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.rail-list {
+  flex: 1;
+  overflow: auto;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.rail-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.rail-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+.rail-foot-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.rail .comment-card {
+  cursor: pointer;
+}
+.rail .comment-card.focused {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-bg);
+}
+.rail .comment-card.status-orphaned {
+  background: #fffdf2;
+}
+.comment-head .file {
+  color: var(--muted);
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rail .comment-editor {
+  max-width: none;
+}
+.add-btn.static {
+  position: static;
+  display: inline-block;
+  opacity: 1;
+  width: 16px;
+  height: 16px;
+  line-height: 16px;
+  font-size: 11px;
+}
+.row.line,
+.cell {
+  position: relative;
+}
+.pin {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--accent);
+}
+.pin.muted {
+  background: var(--muted);
+}
+.pill {
+  position: absolute;
+  right: 10px;
+  top: 2px;
+  height: 16px;
+  min-width: 16px;
+  padding: 0 5px;
+  border: none;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-family: var(--sans);
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+  cursor: pointer;
+}
+.pill.muted {
+  background: var(--muted);
+}
+.row.line.focused,
+.cell.focused {
+  background: var(--accent-bg) !important;
+}
+.row.line .code,
+.cell .code {
+  padding-right: 40px;
+}

@@ -1,4 +1,4 @@
-import type { Comment, CommentSide, DiffLine, FileDiff, Hunk, ViewMode } from '@warden/shared';
+import type { CommentSide, DiffLine, FileDiff, Hunk, ViewMode } from '@warden/shared';
 
 export interface Gap {
   /** 0 = before the first hunk, i = between hunk i-1 and hunk i, hunks.length = after the last hunk */
@@ -21,17 +21,7 @@ export type Row =
   | { key: string; kind: 'gap'; gap: Gap; hidden: number | null }
   | { key: string; kind: 'hunk'; hunkIndex: number; hunk: Hunk }
   | { key: string; kind: 'line'; line: DiffLine; hunkIndex: number; expanded: boolean }
-  | { key: string; kind: 'pair'; left?: DiffLine; right?: DiffLine; hunkIndex: number; expanded: boolean }
-  | { key: string; kind: 'comments'; side: CommentSide; line: number; comments: Comment[] }
-  | { key: string; kind: 'editor'; side: CommentSide; startLine: number; endLine: number; commentId?: string };
-
-export interface EditorState {
-  side: CommentSide;
-  startLine: number;
-  endLine: number;
-  /** editing an existing comment */
-  commentId?: string;
-}
+  | { key: string; kind: 'pair'; left?: DiffLine; right?: DiffLine; hunkIndex: number; expanded: boolean };
 
 export function computeGaps(diff: FileDiff, totalNewLines: number | null): Gap[] {
   const gaps: Gap[] = [];
@@ -106,78 +96,43 @@ function pairLines(lines: DiffLine[]): { left?: DiffLine; right?: DiffLine }[] {
 export interface BuildRowsInput {
   diff: FileDiff;
   viewMode: ViewMode;
-  comments: Comment[];
-  editor: EditorState | null;
   expansions: Record<number, Expansion>;
   fullLines: string[] | null;
 }
 
-export function buildRows({ diff, viewMode, comments, editor, expansions, fullLines }: BuildRowsInput): Row[] {
+/** Rows of the diff column. Comments never interrupt the code: they live in the comment rail. */
+export function buildRows({ diff, viewMode, expansions, fullLines }: BuildRowsInput): Row[] {
   const rows: Row[] = [];
-  const byAnchor = new Map<string, Comment[]>();
-  for (const c of comments) {
-    if (c.status === 'orphaned') continue;
-    const k = `${c.side}:${c.endLine}`;
-    const list = byAnchor.get(k) ?? [];
-    list.push(c);
-    byAnchor.set(k, list);
-  }
-  const editorKey = editor ? `${editor.side}:${editor.endLine}` : null;
-
   const canExpand = diff.status !== 'deleted' && diff.status !== 'added' && !diff.binary;
   const gaps = canExpand ? computeGaps(diff, fullLines ? fullLines.length : null) : [];
 
-  const pushAttachments = (line: DiffLine, pushed: Set<string>) => {
-    const sides: [CommentSide, number | undefined][] = [
-      ['old', line.oldLineNo],
-      ['new', line.newLineNo],
-    ];
-    for (const [side, no] of sides) {
-      if (no === undefined) continue;
-      const k = `${side}:${no}`;
-      if (pushed.has(k)) continue;
-      pushed.add(k);
-      const list = byAnchor.get(k);
-      if (list && list.length) rows.push({ key: `c:${k}`, kind: 'comments', side, line: no, comments: list });
-      if (editor && editorKey === k && (!editor.commentId || true)) {
-        rows.push({ key: `e:${k}`, kind: 'editor', side, startLine: editor.startLine, endLine: editor.endLine, commentId: editor.commentId });
-      }
-    }
-  };
-
-  const emitLines = (lines: DiffLine[], hunkIndex: number, expanded: boolean, pushed: Set<string>) => {
+  const emitLines = (lines: DiffLine[], hunkIndex: number, expanded: boolean) => {
     if (viewMode === 'unified') {
       for (const l of lines) {
         rows.push({ key: `l:${hunkIndex}:${l.oldLineNo ?? '-'}:${l.newLineNo ?? '-'}`, kind: 'line', line: l, hunkIndex, expanded });
-        pushAttachments(l, pushed);
       }
     } else {
       for (const p of pairLines(lines)) {
         rows.push({ key: `p:${hunkIndex}:${p.left?.oldLineNo ?? '-'}:${p.right?.newLineNo ?? '-'}`, kind: 'pair', left: p.left, right: p.right, hunkIndex, expanded });
-        const attach = new Set<string>();
-        if (p.left) pushAttachments(p.left, attach);
-        if (p.right) pushAttachments(p.right, attach);
-        for (const a of attach) pushed.add(a);
       }
     }
   };
 
-  const pushed = new Set<string>();
   diff.hunks.forEach((hunk, hunkIndex) => {
     const gap = gaps[hunkIndex];
     if (gap) {
       const { top, bottom, hidden } = expandedLines(gap, expansions[gap.index], fullLines);
-      if (top.length) emitLines(top, hunkIndex - 1, true, pushed);
+      if (top.length) emitLines(top, hunkIndex - 1, true);
       if (hidden === null || hidden > 0) rows.push({ key: `g:${gap.index}`, kind: 'gap', gap, hidden });
-      if (bottom.length) emitLines(bottom, hunkIndex, true, pushed);
+      if (bottom.length) emitLines(bottom, hunkIndex, true);
     }
     rows.push({ key: `h:${hunkIndex}`, kind: 'hunk', hunkIndex, hunk });
-    emitLines(hunk.lines, hunkIndex, false, pushed);
+    emitLines(hunk.lines, hunkIndex, false);
   });
   const tail = gaps[diff.hunks.length];
   if (tail) {
     const { top, hidden } = expandedLines(tail, expansions[tail.index], fullLines);
-    if (top.length) emitLines(top, diff.hunks.length - 1, true, pushed);
+    if (top.length) emitLines(top, diff.hunks.length - 1, true);
     if (hidden === null || hidden > 0) rows.push({ key: `g:${tail.index}`, kind: 'gap', gap: tail, hidden });
   }
   return rows;

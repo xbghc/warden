@@ -13,14 +13,9 @@ export function TopBar() {
   const filesLoading = useStore((s) => s.filesLoading);
   const viewMode = useStore((s) => s.prefs.viewMode);
   const setViewMode = useStore((s) => s.setViewMode);
-  const comments = useStore((s) => s.comments);
-  const includeExported = useStore((s) => s.includeExported);
-  const setIncludeExported = useStore((s) => s.setIncludeExported);
-  const copyAll = useStore((s) => s.copyAllComments);
   const panel = useStore((s) => s.panel);
   const setPanel = useStore((s) => s.setPanel);
   const issues = useStore((s) => s.issues);
-  const selectedIds = useStore((s) => s.selectedCommentIds);
 
   const target = useMemo(() => parseTargetKey(targetKey), [targetKey]);
   const [kind, setKind] = useState<Kind>(target.kind);
@@ -63,9 +58,6 @@ export function TopBar() {
     if (key !== targetKey) void setTarget(key);
   };
 
-  const active = comments.filter((c) => c.status === 'active').length;
-  const exported = comments.filter((c) => c.status === 'exported').length;
-  const orphaned = comments.filter((c) => c.status === 'orphaned').length;
   const openIssues = issues.filter((i) => i.status === 'open').length;
   const otherWorktrees = repo.worktrees.filter((w) => w.path !== repo.root);
 
@@ -161,28 +153,6 @@ export function TopBar() {
         <button onClick={() => void refresh()} disabled={filesLoading} title="刷新 (r)">
           {filesLoading ? '刷新中…' : '刷新'}
         </button>
-        <div className="comment-stats" title={`active ${active} / exported ${exported} / orphaned ${orphaned}`}>
-          评论 {comments.length}
-          {active > 0 && <span className="badge badge-active">{active} 未导出</span>}
-          {orphaned > 0 && <span className="badge badge-orphaned">{orphaned} orphaned</span>}
-        </div>
-        <label className="check">
-          <input type="checkbox" checked={includeExported} onChange={(e) => setIncludeExported(e.target.checked)} />
-          含已导出
-        </label>
-        <button className="primary" onClick={() => void copyAll()} disabled={active + (includeExported ? exported : 0) === 0}>
-          复制评论
-        </button>
-        {selectedIds.length > 0 && (
-          <button
-            className="accent"
-            onClick={() => {
-              setPanel('issues');
-            }}
-          >
-            从 {selectedIds.length} 条评论创建 Issue
-          </button>
-        )}
       </div>
     </header>
   );

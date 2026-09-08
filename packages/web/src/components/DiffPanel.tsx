@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react';
 import type { FileEntry } from '@warden/shared';
 import { useStore } from '../store';
 import { DiffView } from './DiffView';
-import { CommentCard } from './CommentThread';
 import { totalDiffLines } from '../lib/rows';
 
 const BIG_FILE_LINES = 5000;
@@ -48,8 +47,6 @@ export function DiffPanel() {
   const activeFile = useStore((s) => s.activeFile);
   const entry = useStore((s) => s.files.find((f) => f.path === s.activeFile));
   const diffState = useStore((s) => (s.activeFile ? s.diffs[s.activeFile] : undefined));
-  const allComments = useStore((s) => s.comments);
-  const orphaned = useMemo(() => allComments.filter((c) => c.filePath === activeFile && c.status === 'orphaned'), [allComments, activeFile]);
   const filesLoading = useStore((s) => s.filesLoading);
   const files = useStore((s) => s.files);
   const openFile = useStore((s) => s.openFile);
@@ -108,16 +105,6 @@ export function DiffPanel() {
   return (
     <div className="diff-panel">
       <FileHeader entry={entry} />
-      {orphaned.length > 0 && (
-        <div className="orphaned-block">
-          <div className="orphaned-title">
-            {orphaned.length} 条评论找不到原位置（orphaned）。原代码已变化或被删除；可删除，或点击「重新附着到选区」后在 diff 中选择新位置。
-          </div>
-          {orphaned.map((c) => (
-            <CommentCard key={c.id} comment={c} showSnippet />
-          ))}
-        </div>
-      )}
       {body}
     </div>
   );
