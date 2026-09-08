@@ -140,8 +140,10 @@ refreshes by hand.
 ## Todos
 
 Notes attached to a branch rather than to a line of code, for the things you notice while reviewing
-that do not belong in a comment. They are not deleted when you commit. The Todos drawer filters by
-status, defaults to the current branch and can show all branches; *复制 Todo* copies the open ones
+that do not belong in a comment. They are not deleted when you commit. They sit in the right-hand
+rail next to the comments, under the *Todo* tab: type a title and press Enter to add one, expand a
+card to read or edit its Markdown body, filter by status, and switch between the current branch
+and all branches; *复制 Todo* copies the open ones
 (optionally including the done ones, marked ` (done)`) as:
 
 ```markdown

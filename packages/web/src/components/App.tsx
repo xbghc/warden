@@ -8,8 +8,7 @@ import { FileTree } from './FileTree';
 import { DiffPanel } from './DiffPanel';
 import { CommitsPanel } from './CommitsPanel';
 import { IssuesDrawer } from './IssuesDrawer';
-import { TodosDrawer } from './TodosDrawer';
-import { CommentRail } from './CommentRail';
+import { Rail } from './Rail';
 import { Toast } from './Toast';
 
 function isEditable(el: EventTarget | null): boolean {
@@ -118,7 +117,7 @@ export function App() {
       <div className="body">
         <FileTree />
         <main className="main">{panel === 'commits' ? <CommitsPanel /> : <DiffPanel />}</main>
-        {panel === 'issues' ? <IssuesDrawer /> : panel === 'todos' ? <TodosDrawer /> : panel === 'diff' ? <CommentRail /> : null}
+        {panel === 'issues' ? <IssuesDrawer /> : panel === 'diff' ? <Rail /> : null}
       </div>
       <Toast />
     </div>

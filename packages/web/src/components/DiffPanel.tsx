@@ -2,9 +2,21 @@ import { useMemo, useState } from 'react';
 import type { FileEntry } from '@warden/shared';
 import { useStore } from '../store';
 import { DiffView } from './DiffView';
+import { STATUS_LETTER } from './FileTree';
 import { totalDiffLines } from '../lib/rows';
 
 const BIG_FILE_LINES = 5000;
+
+/** Directory in the quiet colour, basename in the strong one — the name is what you scan for. */
+function PathParts({ path }: { path: string }) {
+  const cut = path.lastIndexOf('/') + 1;
+  return (
+    <>
+      {cut > 0 && <span className="dir">{path.slice(0, cut)}</span>}
+      <span className="base">{path.slice(cut)}</span>
+    </>
+  );
+}
 
 function FileHeader({ entry }: { entry: FileEntry }) {
   const toggleViewed = useStore((s) => s.toggleViewed);
@@ -12,15 +24,16 @@ function FileHeader({ entry }: { entry: FileEntry }) {
   const nvimReady = useStore((s) => !!s.nvim?.selected);
   return (
     <div className="file-head">
-      <span className={`status status-${entry.status}`}>{entry.status}</span>
-      <span className="path mono">
-        {entry.oldPath ? (
+      <span className={`status status-${entry.status}`} title={entry.status}>
+        {STATUS_LETTER[entry.status]}
+      </span>
+      <span className="path">
+        {entry.oldPath && (
           <>
-            <span className="muted">{entry.oldPath}</span> → {entry.path}
+            <span className="dir">{entry.oldPath}</span> <span className="muted">→</span>{' '}
           </>
-        ) : (
-          entry.path
         )}
+        <PathParts path={entry.path} />
       </span>
       {entry.oldMode && entry.newMode && (
         <span className="muted mono">

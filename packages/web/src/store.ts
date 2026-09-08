@@ -30,7 +30,7 @@ export function branchOf(repo: RepoInfo | null, root: string): string {
 }
 
 export type DiffState = { status: 'loading' } | { status: 'ok'; diff: FileDiff } | { status: 'error'; message: string };
-export type Panel = 'diff' | 'commits' | 'issues' | 'todos';
+export type Panel = 'diff' | 'commits' | 'issues';
 
 export interface Toast {
   id: number;
@@ -46,6 +46,8 @@ export interface EditorTarget {
 }
 
 export type RailFilter = 'file' | 'all' | 'unexported';
+/** The two notebooks of the right-hand rail. */
+export type RailTab = 'comments' | 'todos';
 
 export interface JumpTarget {
   file: string;
@@ -97,6 +99,7 @@ export interface AppStore {
   /** Comment highlighted in both the rail and the diff. */
   focusedCommentId: string | null;
   railFilter: RailFilter;
+  railTab: RailTab;
 
   init(): Promise<void>;
   setTarget(key: TargetKey): Promise<void>;
@@ -134,6 +137,7 @@ export interface AppStore {
   setEditor(editor: EditorTarget | null): void;
   focusComment(id: string | null, scroll?: boolean): Promise<void>;
   setRailFilter(filter: RailFilter): void;
+  setRailTab(tab: RailTab): void;
   loadTodos(): Promise<void>;
   createTodo(body: CreateTodoRequest): Promise<Todo | undefined>;
   updateTodo(id: string, body: UpdateTodoRequest): Promise<void>;
@@ -226,6 +230,7 @@ export const useStore = create<AppStore>((set, get) => {
     editor: null,
     focusedCommentId: null,
     railFilter: 'file',
+    railTab: 'comments',
 
     async init() {
       try {
@@ -560,7 +565,6 @@ export const useStore = create<AppStore>((set, get) => {
     setPanel(panel) {
       set({ panel });
       if (panel === 'issues') void get().loadIssues();
-      if (panel === 'todos') void get().loadTodos();
     },
 
     setIncludeExported(v) {
@@ -607,6 +611,10 @@ export const useStore = create<AppStore>((set, get) => {
 
     setRailFilter(filter) {
       set({ railFilter: filter });
+    },
+    setRailTab(tab) {
+      set({ railTab: tab });
+      if (tab === 'todos') void get().loadTodos();
     },
 
     async loadTodos() {

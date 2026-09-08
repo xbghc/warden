@@ -82,13 +82,13 @@ export function CommentRail() {
   );
 
   return (
-    <aside className="rail">
-      <div className="rail-head">
-        <strong>评论 {counts.all}</strong>
-        <div className="seg small">
+    <>
+      <div className="rail-tools">
+        <div className="seg small" role="group" aria-label="评论筛选">
           {filters.map(([key, label, n]) => (
-            <button key={key} className={filter === key ? 'active' : ''} onClick={() => setFilter(key)}>
-              {label} {n}
+            <button key={key} className={filter === key ? 'active' : ''} aria-pressed={filter === key} onClick={() => setFilter(key)}>
+              {label}
+              <span className="tab-count">{n}</span>
             </button>
           ))}
         </div>
@@ -124,8 +124,9 @@ export function CommentRail() {
       </div>
       <div className="rail-foot">
         <div className="rail-foot-row">
-          <button className="primary" onClick={() => void copyAll()} disabled={unexported === 0}>
-            复制评论{counts.unexported > 0 ? ` (${counts.unexported} 未导出)` : ''}
+          <button className="send" onClick={() => void copyAll()} disabled={unexported === 0} title="把评论复制为 agent 可读的提示词">
+            复制评论
+            {counts.unexported > 0 && <span className="send-n">{counts.unexported} 未导出</span>}
           </button>
           <label className="check">
             <input type="checkbox" checked={includeExported} onChange={(e) => setIncludeExported(e.target.checked)} />
@@ -138,6 +139,6 @@ export function CommentRail() {
           </button>
         )}
       </div>
-    </aside>
+    </>
   );
 }

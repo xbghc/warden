@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { commentScopeKey, formatTargetKey, isLocalTarget, parseTargetKey, targetLabel, type Target } from '@warden/shared';
-import { branchOf, useStore } from '../store';
+import { useStore } from '../store';
 import { NvimSelector } from './NvimSelector';
 
 function shortTime(iso: string | null): string {
@@ -10,6 +10,26 @@ function shortTime(iso: string | null): string {
 }
 
 type Kind = Target['kind'];
+
+/** The five ways to pick what is under review, in the order they sit in the bar. */
+const KINDS: { kind: Kind; label: string; title: string }[] = [
+  { kind: 'working', label: 'Unstaged', title: '工作区未提交的改动（含未跟踪文件）' },
+  { kind: 'staged', label: 'Staged', title: '已暂存的改动' },
+  { kind: 'all', label: 'All', title: '工作区全部改动（对比 HEAD）' },
+  { kind: 'commit', label: 'Commit', title: '查看单个 commit' },
+  { kind: 'range', label: 'Range', title: '对比两个 ref' },
+];
+
+/** A pin beside two lines of text — the comment marker, which is also the favicon. */
+function Mark() {
+  return (
+    <svg className="mark" viewBox="0 0 16 16" aria-hidden="true">
+      <rect width="16" height="16" rx="3" fill="#5b47d9" />
+      <rect x="3.5" y="4" width="2" height="8" rx="1" fill="#fff" />
+      <path d="M8 5.5h4.5M8 10.5h3" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
 
 export function TopBar() {
   const repo = useStore((s) => s.repo)!;
@@ -21,8 +41,6 @@ export function TopBar() {
   const autoRefresh = useStore((s) => s.prefs.autoRefresh);
   const setAutoRefresh = useStore((s) => s.setAutoRefresh);
   const lastRefreshAt = useStore((s) => s.lastRefreshAt);
-  const todos = useStore((s) => s.todos);
-  const root = useStore((s) => s.root);
   const viewMode = useStore((s) => s.prefs.viewMode);
   const setViewMode = useStore((s) => s.setViewMode);
   const panel = useStore((s) => s.panel);
@@ -74,23 +92,21 @@ export function TopBar() {
     else void setTarget(key);
   };
 
-  // The select two elements over already says "工作区未提交" / "已 staged"; the label only
-  // adds something for a commit, a range, or a worktree (which it prefixes with the name).
+  // The segmented control already names the three local views; the label only adds
+  // something for a commit, a range, or a worktree (which it prefixes with the name).
   const showTargetLabel = target.kind === 'commit' || target.kind === 'range' || !!target.worktree;
-  const branch = branchOf(repo, root);
   const openIssues = issues.filter((i) => i.status === 'open').length;
-  const openTodos = todos.filter((t) => t.branch === branch && t.status === 'open').length;
   const otherWorktrees = repo.worktrees.filter((w) => w.path !== repo.root);
 
   return (
     <header className="topbar">
       <div className="brand" title={repo.root}>
-        <span className="logo">warden</span>
+        <Mark />
+        <span className="wordmark">warden</span>
+      </div>
+      <div className="scope">
         <span className="repo-name">{repo.root.split('/').filter(Boolean).pop()}</span>
         <span className="branch">{repo.branch}</span>
-      </div>
-
-      <div className="target-switcher">
         {otherWorktrees.length > 0 && (
           <select
             value={worktree}
@@ -108,21 +124,25 @@ export function TopBar() {
             ))}
           </select>
         )}
-        <select
-          value={kind}
-          title={targetKey}
-          onChange={(e) => {
-            const k = e.target.value as Kind;
-            setKind(k);
-            if (k === 'working' || k === 'staged' || k === 'all') apply({ kind: k });
-          }}
-        >
-          <option value="working">工作区未提交</option>
-          <option value="staged">已 staged</option>
-          <option value="all">工作区全部 (vs HEAD)</option>
-          <option value="commit">单个 commit</option>
-          <option value="range">两个 ref 对比</option>
-        </select>
+      </div>
+
+      <div className="target">
+        <div className="seg" role="group" aria-label="审查目标">
+          {KINDS.map(({ kind: k, label, title }) => (
+            <button
+              key={k}
+              className={kind === k ? 'active' : ''}
+              aria-pressed={kind === k}
+              title={title}
+              onClick={() => {
+                setKind(k);
+                if (k === 'working' || k === 'staged' || k === 'all') apply({ kind: k });
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
         {kind === 'commit' && (
           <form
             className="inline-form"
@@ -144,7 +164,7 @@ export function TopBar() {
             }}
           >
             <input value={base} onChange={(e) => setBase(e.target.value)} placeholder="base (@ = HEAD)" spellCheck={false} />
-            <span>..</span>
+            <span className="muted">..</span>
             <input value={head} onChange={(e) => setHead(e.target.value)} placeholder="head" spellCheck={false} />
             <button type="submit">对比</button>
           </form>
@@ -156,45 +176,42 @@ export function TopBar() {
         )}
       </div>
 
-      <div className="spacer" />
-
-      <div className="actions">
-        <div className="seg">
-          <button className={panel === 'commits' ? 'active' : ''} onClick={() => setPanel(panel === 'commits' ? 'diff' : 'commits')} title="历史 commit">
+      {/* One block, so a narrow window wraps tabs and tools together and keeps them on the right. */}
+      <div className="topbar-right">
+        <nav className="tabs" aria-label="面板">
+          <button className={`tab ${panel === 'commits' ? 'active' : ''}`} onClick={() => setPanel(panel === 'commits' ? 'diff' : 'commits')} title="历史 commit">
             Commits
           </button>
-          <button className={panel === 'issues' ? 'active' : ''} onClick={() => setPanel(panel === 'issues' ? 'diff' : 'issues')} title="本地 Issue">
-            Issues{openIssues ? ` (${openIssues})` : ''}
+          <button className={`tab ${panel === 'issues' ? 'active' : ''}`} onClick={() => setPanel(panel === 'issues' ? 'diff' : 'issues')} title="本地 Issue">
+            Issues
+            {openIssues > 0 && <span className="tab-count">{openIssues}</span>}
           </button>
-          <button className={panel === 'todos' ? 'active' : ''} onClick={() => setPanel(panel === 'todos' ? 'diff' : 'todos')} title={`${branch} 分支的 Todo`}>
-            Todos{openTodos ? ` (${openTodos})` : ''}
-          </button>
-        </div>
-        <div className="seg">
-          <button className={viewMode === 'unified' ? 'active' : ''} onClick={() => setViewMode('unified')}>
+        </nav>
+        <div className="tools">
+        <div className="seg" role="group" aria-label="diff 布局">
+          <button className={viewMode === 'unified' ? 'active' : ''} aria-pressed={viewMode === 'unified'} onClick={() => setViewMode('unified')}>
             Unified
           </button>
-          <button className={viewMode === 'split' ? 'active' : ''} onClick={() => setViewMode('split')}>
+          <button className={viewMode === 'split' ? 'active' : ''} aria-pressed={viewMode === 'split'} onClick={() => setViewMode('split')}>
             Split
           </button>
         </div>
         <NvimSelector />
-        <div className="seg">
-          <button onClick={() => void refresh()} disabled={filesLoading} title={lastRefreshAt ? `上次刷新 ${shortTime(lastRefreshAt)}（r）` : '刷新 (r)'}>
-            {filesLoading ? '刷新中…' : '刷新'}
-          </button>
-          {/* A button rather than a checkbox, and no separate timestamp: the label and the
-              time cost ~140px in a bar that already wraps, and the refresh button's title
-              still carries the last refresh. */}
-          <button
-            className={autoRefresh ? 'active' : ''}
-            aria-pressed={autoRefresh}
-            aria-label="自动刷新"
-            onClick={() => setAutoRefresh(!autoRefresh)}
-            title={`仓库发生变化时自动刷新（当前${autoRefresh ? '开启' : '关闭'}）`}
-          >
-            自动
-          </button>
+        <button onClick={() => void refresh()} disabled={filesLoading} title={lastRefreshAt ? `上次刷新 ${shortTime(lastRefreshAt)}（r）` : '刷新 (r)'}>
+          {filesLoading ? '刷新中…' : '刷新'}
+        </button>
+        {/* A button rather than a checkbox, and no separate timestamp: the label and the
+            time cost ~140px in a bar that already wraps, and the refresh button's title
+            still carries the last refresh. */}
+        <button
+          className="toggle"
+          aria-pressed={autoRefresh}
+          aria-label="自动刷新"
+          onClick={() => setAutoRefresh(!autoRefresh)}
+          title={`仓库发生变化时自动刷新（当前${autoRefresh ? '开启' : '关闭'}）`}
+        >
+          自动
+        </button>
         </div>
       </div>
     </header>

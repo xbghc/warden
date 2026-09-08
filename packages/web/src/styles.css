@@ -1,23 +1,36 @@
+/* Fonts (IBM Plex Sans / Mono, latin subsets) are imported in main.tsx; CJK text falls back to
+   the system face in the stacks below. */
 :root {
-  --bg: #ffffff;
-  --bg-2: #f6f8fa;
-  --bg-3: #eaeef2;
-  --border: #d0d7de;
-  --fg: #1f2328;
-  --muted: #656d76;
-  --accent: #0969da;
-  --accent-bg: #ddf4ff;
-  --add-bg: #e6ffec;
-  --add-bg-strong: #abf2bc;
-  --add-fg: #1a7f37;
-  --del-bg: #ffebe9;
-  --del-bg-strong: #ff818266;
-  --del-fg: #cf222e;
-  --warn-bg: #fff8c5;
-  --warn-fg: #9a6700;
-  --sel-bg: #fff3b0;
-  --mono: ui-monospace, SFMono-Regular, 'JetBrains Mono', Menlo, Consolas, monospace;
-  --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', 'PingFang SC', 'Microsoft YaHei', Helvetica, Arial, sans-serif;
+  --ground: #eef0f3;
+  --surface: #ffffff;
+  --surface-2: #f5f6f8;
+  --surface-3: #e4e7ec;
+  --line: #d9dde3;
+  --line-strong: #b7bdc7;
+  --ink: #16181d;
+  --ink-2: #454b58;
+  --muted: #626977;
+  /* Reserved for comments and everything that feeds back to the agent: pins, the + button,
+     the editor, the copy button. Nothing else in the chrome is painted with it. */
+  --accent: #5b47d9;
+  --accent-strong: #4a38bf;
+  --accent-soft: #ebe8fb;
+  --accent-line: #c4bbf2;
+  --add-bg: #e3f5e7;
+  --add-bg-strong: #bfe9c9;
+  --add-fg: #1e7a3a;
+  --del-bg: #fce8e8;
+  --del-bg-strong: #f5c2c2;
+  --del-fg: #c42b2b;
+  --warn-bg: #f6e7b8;
+  --warn-soft: #fdf8e6;
+  --warn-fg: #8a6100;
+  --warn-line: #d9b64a;
+  --r-ctl: 3px;
+  --r-card: 6px;
+  --ctl-h: 26px;
+  --sans: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
+  --mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'Noto Sans Mono CJK SC', monospace;
 }
 
 * {
@@ -30,9 +43,10 @@ body,
   margin: 0;
 }
 body {
-  font: 13px/1.45 var(--sans);
-  color: var(--fg);
-  background: var(--bg);
+  font: 13px/1.5 var(--sans);
+  color: var(--ink);
+  background: var(--ground);
+  -webkit-font-smoothing: antialiased;
 }
 button,
 input,
@@ -42,83 +56,116 @@ textarea {
   color: inherit;
 }
 button {
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 3px 10px;
+  height: var(--ctl-h);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-ctl);
+  padding: 0 10px;
   cursor: pointer;
   white-space: nowrap;
 }
 button:hover:not(:disabled) {
-  background: var(--bg-3);
+  border-color: var(--line-strong);
+  background: var(--surface-2);
 }
 button:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: default;
 }
 button.primary {
-  background: #1f883d;
-  border-color: #1f883d;
+  background: var(--ink);
+  border-color: var(--ink);
   color: #fff;
 }
 button.primary:hover:not(:disabled) {
-  background: #1a7f37;
+  background: #2b2f38;
+  border-color: #2b2f38;
 }
 button.accent {
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
 }
-button.active {
-  background: var(--accent-bg);
-  border-color: var(--accent);
-  color: var(--accent);
+button.accent:hover:not(:disabled) {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
 }
 button.link {
+  height: auto;
   background: none;
   border: none;
-  color: var(--accent);
+  color: var(--ink-2);
   padding: 0 4px;
 }
 button.link:hover:not(:disabled) {
   background: none;
+  color: var(--ink);
   text-decoration: underline;
+  text-underline-offset: 2px;
 }
 button.link.danger {
   color: var(--del-fg);
 }
 button.link.active {
-  font-weight: 600;
+  color: var(--accent);
+  font-weight: 500;
 }
 button.icon {
-  padding: 2px 7px;
+  padding: 0 7px;
+}
+/* On/off button: the dot is the state, so the label can stay two characters wide. */
+button.toggle::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+}
+button.toggle[aria-pressed='true'] {
+  border-color: var(--ink);
+}
+button.toggle[aria-pressed='true']::before {
+  background: currentColor;
 }
 input,
 select,
 textarea {
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 3px 8px;
-  background: var(--bg);
+  height: var(--ctl-h);
+  border: 1px solid var(--line);
+  border-radius: var(--r-ctl);
+  padding: 0 8px;
+  background: var(--surface);
+}
+select {
+  padding-right: 4px;
 }
 textarea {
+  height: auto;
   width: 100%;
   resize: vertical;
   font-family: var(--mono);
   font-size: 12px;
+  line-height: 1.6;
+  padding: 6px 8px;
+}
+input[type='checkbox'] {
+  height: auto;
+  margin: 0;
+  accent-color: var(--ink);
 }
 input:focus,
 select:focus,
 textarea:focus {
-  outline: 2px solid var(--accent-bg);
+  outline: none;
   border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
 }
 /* Keyboard focus only: a mouse click does not match :focus-visible, so buttons stay
    unringed while pointing and become visible the moment you start tabbing. */
 button:focus-visible,
-input:focus-visible,
-select:focus-visible,
-textarea:focus-visible,
 [tabindex]:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
@@ -126,11 +173,12 @@ textarea:focus-visible,
 kbd {
   font-family: var(--mono);
   font-size: 11px;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
+  background: var(--surface);
+  border: 1px solid var(--line);
   border-bottom-width: 2px;
-  border-radius: 4px;
-  padding: 0 4px;
+  border-radius: 3px;
+  padding: 0 5px;
+  color: var(--ink-2);
 }
 .mono {
   font-family: var(--mono);
@@ -154,63 +202,138 @@ kbd {
 .check {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   white-space: nowrap;
   cursor: pointer;
 }
 .badge {
-  display: inline-block;
-  font-size: 11px;
-  line-height: 16px;
+  display: inline-flex;
+  align-items: center;
+  height: 17px;
   padding: 0 6px;
-  border-radius: 10px;
-  background: var(--bg-3);
-  color: var(--muted);
+  border-radius: var(--r-ctl);
+  font-family: var(--mono);
+  font-size: 11px;
+  background: var(--surface-3);
+  color: var(--ink-2);
   white-space: nowrap;
 }
-.badge-active,
-.badge-open {
-  background: var(--add-bg);
-  color: var(--add-fg);
-}
-.badge-exported,
-.badge-closed {
-  background: var(--accent-bg);
+.badge-active {
+  background: var(--accent-soft);
   color: var(--accent);
+}
+.badge-exported {
+  background: var(--surface-3);
+  color: var(--muted);
 }
 .badge-orphaned {
   background: var(--warn-bg);
   color: var(--warn-fg);
 }
+.badge-open {
+  background: var(--ink);
+  color: #fff;
+}
+.badge-closed {
+  background: var(--surface-3);
+  color: var(--muted);
+}
+
+/* Segmented control: a recessed track with one raised segment. */
 .seg {
   display: inline-flex;
+  gap: 1px;
+  padding: 2px;
+  background: var(--surface-3);
+  border-radius: 4px;
 }
 .seg button {
-  border-radius: 0;
-  margin-left: -1px;
+  height: 22px;
+  padding: 0 9px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-ctl);
+  color: var(--ink-2);
 }
-.seg button:first-child {
-  border-radius: 6px 0 0 6px;
-  margin-left: 0;
+.seg button:hover:not(:disabled) {
+  background: transparent;
+  border-color: transparent;
+  color: var(--ink);
 }
-.seg button:last-child {
-  border-radius: 0 6px 6px 0;
-}
-/* The -1px overlap would otherwise bury the accent border under the next button. */
 .seg button.active {
-  position: relative;
-  z-index: 1;
+  background: var(--surface);
+  border-color: var(--line);
+  color: var(--ink);
+  font-weight: 500;
 }
+.seg.small button {
+  height: 20px;
+  padding: 0 7px;
+  font-size: 12px;
+}
+.seg button.active .tab-count {
+  color: var(--ink);
+}
+
+/* Text tabs: the underline sits on the bottom edge of whatever bar holds them. */
+.tabs {
+  display: inline-flex;
+  align-self: stretch;
+  align-items: stretch;
+  gap: 2px;
+}
+.tab {
+  height: auto;
+  background: none;
+  border: none;
+  border-radius: 0;
+  padding: 0 6px;
+  color: var(--ink-2);
+  position: relative;
+}
+.tab:hover:not(:disabled) {
+  background: none;
+  color: var(--ink);
+}
+.tab.active {
+  color: var(--ink);
+  font-weight: 500;
+}
+.tab.active::after {
+  content: '';
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: -1px;
+  height: 2px;
+  background: var(--ink);
+}
+.tab-count {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+.tab.active .tab-count {
+  color: var(--ink);
+}
+.tabs.small .tab {
+  padding: 0 5px;
+  font-size: 12px;
+}
+
 .error-box {
   color: var(--del-fg);
   background: var(--del-bg);
   padding: 8px 12px;
-  border-radius: 6px;
+  border-radius: var(--r-card);
   margin: 8px;
 }
 .empty {
-  padding: 16px;
+  padding: 20px 12px;
   text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 /* ---- layout -------------------------------------------------------------- */
@@ -229,52 +352,78 @@ kbd {
   min-width: 0;
   display: flex;
   flex-direction: column;
+  background: var(--surface);
 }
 .loading-screen,
 .fatal {
-  padding: 40px;
-  text-align: center;
-}
-.placeholder {
-  padding: 40px 24px;
+  padding: 48px;
   text-align: center;
   color: var(--muted);
+}
+.fatal h1 {
+  font-family: var(--mono);
+  font-weight: 500;
+  font-size: 20px;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+.placeholder {
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--muted);
+}
+.placeholder p {
+  margin: 6px 0;
 }
 
 /* ---- top bar ---------------------------------------------------------------- */
 .topbar {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-2);
+  gap: 14px;
+  padding: 0 12px;
+  min-height: 42px;
+  background: var(--ground);
+  border-bottom: 1px solid var(--line);
   flex-wrap: wrap;
 }
 .brand {
   display: flex;
-  align-items: baseline;
+  align-items: center;
+  gap: 7px;
+}
+.mark {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+.wordmark {
+  font-family: var(--mono);
+  font-weight: 500;
+  font-size: 15px;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+.scope {
+  display: flex;
+  align-items: center;
   gap: 8px;
 }
-.logo {
-  font-weight: 700;
-  color: var(--accent);
-  font-size: 15px;
-}
 .repo-name {
-  font-weight: 600;
+  font-weight: 500;
 }
 .branch {
   font-family: var(--mono);
   font-size: 11px;
-  background: var(--bg-3);
-  border-radius: 10px;
-  padding: 0 7px;
+  color: var(--ink-2);
+  background: var(--surface-3);
+  border-radius: var(--r-ctl);
+  padding: 1px 6px;
 }
-.target-switcher {
+.target {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 .target-label {
   font-family: var(--mono);
@@ -291,15 +440,23 @@ kbd {
   gap: 4px;
 }
 .inline-form input {
-  width: 140px;
+  width: 130px;
   font-family: var(--mono);
   font-size: 12px;
 }
-.actions {
+/* Stretched to the bar's height so the tab underline lands on its bottom edge; when the bar
+   wraps, the whole block moves to the next line and stays right-aligned. */
+.topbar-right {
+  margin-left: auto;
+  align-self: stretch;
+  display: flex;
+  align-items: stretch;
+  gap: 14px;
+}
+.tools {
   display: flex;
   align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
+  gap: 8px;
 }
 .nvim {
   display: inline-flex;
@@ -313,44 +470,106 @@ kbd {
 .nvim-one {
   font-family: var(--mono);
   font-size: 12px;
-  color: var(--add-fg);
+  color: var(--ink-2);
+}
+.nvim .muted {
+  font-size: 12px;
 }
 
 /* ---- sidebar / tree ------------------------------------------------------------ */
 .sidebar {
   width: 280px;
   min-width: 200px;
-  border-right: 1px solid var(--border);
+  border-right: 1px solid var(--line);
   display: flex;
   flex-direction: column;
-  background: var(--bg);
+  background: var(--ground);
   resize: horizontal;
   overflow: hidden;
 }
+.tree-block {
+  display: flex;
+  flex-direction: column;
+  /* Content-sized, shrinking proportionally, so an empty Staged block does not
+     claim half the sidebar while Unstaged has twenty files in it. */
+  flex: 0 1 auto;
+  min-height: 66px;
+  min-width: 0;
+}
+.tree-block + .tree-block {
+  border-top: 1px solid var(--line);
+}
+.block-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px 4px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.block-title {
+  font-weight: 600;
+}
+.block-n {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+.block-head .counts {
+  font-family: var(--mono);
+  font-size: 11px;
+  display: inline-flex;
+  gap: 4px;
+}
+.block-viewed {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+/* How much of the block has been read: the only progress indicator in the app. */
+.block-progress {
+  height: 2px;
+  margin: 0 10px 4px;
+  background: var(--line);
+  border-radius: 1px;
+  overflow: hidden;
+}
+.block-progress > span {
+  display: block;
+  height: 100%;
+  background: var(--ink);
+  transition: width 0.2s;
+}
 .tree-tools {
   display: inline-flex;
-  gap: 6px;
+  gap: 2px;
+}
+.tree-tools .link {
+  font-size: 11px;
+  color: var(--muted);
 }
 .tree {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
-  padding: 4px 0;
+  padding: 2px 0 6px;
 }
 .tree-row {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 2px 8px;
+  padding: 0 10px;
+  height: 24px;
   cursor: pointer;
   white-space: nowrap;
   user-select: none;
-  line-height: 20px;
 }
 .tree-row:hover {
-  background: var(--bg-2);
+  background: var(--surface-3);
 }
 .tree-row.active {
-  background: var(--accent-bg);
+  background: var(--surface);
+  box-shadow: inset 2px 0 var(--ink);
 }
 .tree-row.viewed .name {
   color: var(--muted);
@@ -360,11 +579,13 @@ kbd {
   text-overflow: ellipsis;
 }
 .tree-row.dir .name {
-  font-weight: 600;
+  font-weight: 500;
+  color: var(--ink-2);
 }
 .chev {
   display: inline-block;
   width: 12px;
+  font-size: 10px;
   color: var(--muted);
   transition: transform 0.1s;
 }
@@ -379,6 +600,7 @@ kbd {
   gap: 4px;
 }
 .tree-row .count {
+  font-family: var(--mono);
   font-size: 11px;
 }
 .viewed-box {
@@ -387,7 +609,7 @@ kbd {
 .status {
   font-family: var(--mono);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 500;
   width: 14px;
   text-align: center;
 }
@@ -401,21 +623,22 @@ kbd {
   color: var(--del-fg);
 }
 .status-renamed {
-  color: var(--accent);
+  color: var(--ink-2);
 }
 .changed {
   font-size: 11px;
   background: var(--warn-bg);
   color: var(--warn-fg);
-  border-radius: 10px;
-  padding: 0 6px;
+  border-radius: var(--r-ctl);
+  padding: 0 5px;
 }
 .cc {
+  font-family: var(--mono);
   font-size: 11px;
-  background: var(--accent-bg);
+  background: var(--accent-soft);
   color: var(--accent);
-  border-radius: 10px;
-  padding: 0 6px;
+  border-radius: var(--r-ctl);
+  padding: 0 5px;
 }
 
 /* ---- diff panel ---------------------------------------------------------------- */
@@ -429,17 +652,30 @@ kbd {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-2);
+  padding: 0 12px;
+  min-height: 38px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
   flex-wrap: wrap;
 }
 .file-head .path {
-  font-weight: 600;
+  font-family: var(--mono);
+  font-size: 12px;
 }
-.file-head .status {
-  width: auto;
-  text-transform: uppercase;
+.file-head .path .dir {
+  color: var(--muted);
+}
+.file-head .path .base {
+  font-weight: 500;
+}
+.file-head .counts {
+  font-family: var(--mono);
+  font-size: 11px;
+  display: inline-flex;
+  gap: 4px;
+}
+.file-head .check {
+  font-size: 12px;
 }
 .diff-scroll {
   flex: 1;
@@ -448,6 +684,7 @@ kbd {
   font-size: 12px;
   line-height: 20px;
   tab-size: 4;
+  background: var(--surface);
 }
 .diff-scroll.selecting {
   user-select: none;
@@ -473,11 +710,11 @@ kbd {
   right: 0;
   top: 0;
   bottom: 0;
-  width: 4px;
+  width: 3px;
   background: var(--accent);
 }
 .pin.muted {
-  background: var(--muted);
+  background: var(--line-strong);
 }
 .pill {
   position: absolute;
@@ -486,6 +723,7 @@ kbd {
   height: 16px;
   min-width: 16px;
   padding: 0 5px;
+  justify-content: center;
   border: none;
   border-radius: 8px;
   background: var(--accent);
@@ -493,33 +731,40 @@ kbd {
   font-family: var(--sans);
   font-size: 11px;
   line-height: 16px;
-  text-align: center;
-  cursor: pointer;
+}
+.pill:hover:not(:disabled) {
+  background: var(--accent-strong);
+  border-color: transparent;
 }
 .pill.muted {
-  background: var(--muted);
+  background: var(--line-strong);
 }
 .row.hunk-head {
-  background: var(--accent-bg);
+  background: var(--surface-2);
   color: var(--muted);
+  font-size: 11.5px;
   padding: 3px 12px 3px 110px;
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
   white-space: pre-wrap;
 }
 .row.gap-row {
-  background: var(--bg-2);
+  background: var(--surface-2);
   justify-content: center;
   gap: 16px;
   padding: 2px 0;
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
   font-family: var(--sans);
+  font-size: 12px;
+}
+.gap-row .link {
+  color: var(--muted);
 }
 .row.attach {
-  background: var(--bg-2);
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
   padding: 6px 12px 6px 60px;
   font-family: var(--sans);
   font-size: 13px;
@@ -529,13 +774,13 @@ kbd {
   flex: 0 0 48px;
   text-align: right;
   padding-right: 6px;
+  font-size: 11px;
   color: var(--muted);
   cursor: pointer;
   user-select: none;
 }
 .gut:hover {
-  color: var(--accent);
-  text-decoration: underline;
+  color: var(--ink);
 }
 .addc {
   flex: 0 0 18px;
@@ -544,19 +789,25 @@ kbd {
 .add-btn {
   position: absolute;
   left: 0;
-  top: 1px;
-  width: 18px;
-  height: 18px;
+  top: 2px;
+  width: 16px;
+  height: 16px;
   padding: 0;
+  justify-content: center;
   line-height: 16px;
-  border-radius: 4px;
+  border-radius: var(--r-ctl);
   background: var(--accent);
   color: #fff;
   border: none;
-  font-weight: 700;
+  font-weight: 600;
+  font-size: 13px;
   opacity: 0;
   cursor: pointer;
   z-index: 1;
+}
+.add-btn:hover:not(:disabled) {
+  background: var(--accent-strong);
+  border-color: transparent;
 }
 .row:hover .add-btn,
 .cell:hover .add-btn {
@@ -565,12 +816,12 @@ kbd {
 /* Same badge shown inline in prose ("click the + next to a line"), not over a row. */
 .add-btn.static {
   position: static;
-  display: inline-block;
+  display: inline-flex;
   opacity: 1;
   width: 16px;
   height: 16px;
-  line-height: 16px;
   font-size: 11px;
+  vertical-align: -3px;
 }
 .marker {
   flex: 0 0 14px;
@@ -606,18 +857,19 @@ kbd {
 }
 .row.expanded,
 .row.pair.expanded .cell {
-  background: var(--bg);
+  background: var(--surface);
   color: var(--muted);
 }
 .row.line.selected,
 .cell.selected {
-  background: var(--sel-bg) !important;
+  background: var(--accent-soft) !important;
 }
 /* Keep after .selected: these tie on specificity and both are !important, so the
    focused row only wins by source order. */
 .row.line.focused,
 .cell.focused {
-  background: var(--accent-bg) !important;
+  background: var(--accent-soft) !important;
+  box-shadow: inset 3px 0 var(--accent);
 }
 .row.line.flash,
 .cell.flash {
@@ -625,7 +877,7 @@ kbd {
 }
 @keyframes flash {
   0% {
-    background: #ffd33d;
+    background: var(--accent-line);
   }
   100% {
     background: transparent;
@@ -640,42 +892,56 @@ kbd {
 .cell {
   display: flex;
   min-width: 0;
-  border-left: 1px solid var(--border);
+  border-left: 1px solid var(--line);
 }
 .cell:first-child {
   border-left: none;
 }
 .cell.empty {
-  background: var(--bg-2);
+  background: var(--surface-2);
 }
 .diff-list.split .row.hunk-head {
   padding-left: 60px;
 }
 
 /* ---- comments ---------------------------------------------------------------- */
-.comment-card {
+/* A card is a note headed back to the agent; the left rule says where it stands. */
+.comment-card,
+.todo-card {
   position: relative;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--r-card);
+  padding: 7px 10px 8px;
+}
+.comment-card.status-exported {
+  border-left-color: var(--line-strong);
 }
 .comment-card.status-orphaned {
-  border-color: var(--warn-fg);
+  border-color: var(--warn-line);
+  border-left-style: dashed;
+  background: var(--warn-soft);
 }
 .comment-card.selected {
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-bg);
+  box-shadow: 0 0 0 2px var(--accent-soft);
 }
 .comment-head {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-height: 20px;
   font-size: 12px;
+  color: var(--ink-2);
   flex-wrap: wrap;
+}
+.comment-head .mono {
+  font-size: 11px;
 }
 .comment-head .time {
   font-size: 11px;
+  color: var(--muted);
 }
 /* Out of flow, so four text buttons stop pushing the metadata onto a second line in a
    360px rail. `background: inherit` picks up whatever the card is painted with,
@@ -683,48 +949,66 @@ kbd {
 .card-actions {
   position: absolute;
   right: 6px;
-  top: 4px;
+  top: 5px;
   display: inline-flex;
   align-items: center;
   gap: 2px;
   padding-left: 8px;
-  border-radius: 4px;
+  border-radius: var(--r-ctl);
   background: inherit;
   opacity: 0;
   transition: opacity 0.1s;
+}
+.card-actions .link {
+  font-size: 12px;
 }
 /* :focus-within is not optional here — keyboard users never hover, and the buttons stay
    in the tab order while transparent. */
 .comment-card:hover .card-actions,
 .comment-card:focus-within .card-actions,
+.todo-card:hover .card-actions,
+.todo-card:focus-within .card-actions,
 /* 重新附着 is a toggle; hiding it once the pointer leaves would leave no way back
    except the rail banner. */
 .comment-card.reattaching .card-actions {
   opacity: 1;
 }
 .comment-editor {
-  background: var(--bg);
+  background: var(--surface);
   border: 1px solid var(--accent);
-  border-radius: 6px;
+  border-left-width: 3px;
+  border-radius: var(--r-card);
   padding: 8px 10px;
   max-width: 900px;
 }
 .comment-editor-head {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: 11px;
   color: var(--muted);
   margin-bottom: 6px;
+}
+.comment-editor textarea {
+  border-color: var(--line);
 }
 .comment-editor-actions {
   display: flex;
   gap: 6px;
-  margin-top: 6px;
+  margin-top: 8px;
+}
+.comment-editor .primary {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.comment-editor .primary:hover:not(:disabled) {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
 }
 .snippet {
   font-family: var(--mono);
-  font-size: 12px;
-  background: var(--bg-2);
-  border-radius: 4px;
+  font-size: 11.5px;
+  line-height: 18px;
+  background: var(--surface-2);
+  border-radius: var(--r-ctl);
   padding: 4px 8px;
   margin: 6px 0;
   overflow-x: auto;
@@ -745,15 +1029,15 @@ kbd {
   margin: 4px 0;
 }
 .md pre {
-  background: var(--bg-2);
+  background: var(--surface-2);
   padding: 6px 8px;
-  border-radius: 4px;
+  border-radius: var(--r-ctl);
   overflow-x: auto;
 }
 .md code {
   font-family: var(--mono);
   font-size: 12px;
-  background: var(--bg-2);
+  background: var(--surface-2);
   padding: 0 3px;
   border-radius: 3px;
 }
@@ -769,7 +1053,7 @@ kbd {
 .md blockquote {
   margin: 4px 0;
   padding-left: 10px;
-  border-left: 3px solid var(--border);
+  border-left: 3px solid var(--line);
   color: var(--muted);
 }
 
@@ -785,34 +1069,40 @@ kbd {
   align-items: center;
   gap: 10px;
   padding: 6px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-2);
+  border-bottom: 1px solid var(--line);
+  background: var(--ground);
   flex-wrap: wrap;
 }
 .commits-tools input {
   width: 260px;
 }
+.commits-tools .muted {
+  font-size: 12px;
+}
 .commits-list {
   flex: 1;
   overflow: auto;
+  background: var(--surface);
 }
 .commit-row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 4px 12px;
-  border-bottom: 1px solid var(--bg-3);
+  gap: 12px;
+  height: 30px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--surface-3);
   cursor: pointer;
   white-space: nowrap;
 }
 .commit-row:hover {
-  background: var(--bg-2);
+  background: var(--surface-2);
 }
 .commit-row.active {
-  background: var(--accent-bg);
+  background: var(--surface-2);
+  box-shadow: inset 2px 0 var(--ink);
 }
 .commit-row .sha {
-  color: var(--accent);
+  color: var(--ink-2);
   flex: 0 0 70px;
 }
 .commit-row .subject {
@@ -824,35 +1114,41 @@ kbd {
   flex: 0 0 120px;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-size: 12px;
 }
 .commit-row .date {
   flex: 0 0 150px;
-  font-size: 12px;
+  font-family: var(--mono);
+  font-size: 11px;
 }
 
-/* ---- issues drawer ----------------------------------------------------------------- */
+/* ---- issues / todos drawer ------------------------------------------------------- */
 .issues-drawer {
   width: 440px;
-  border-left: 1px solid var(--border);
+  border-left: 1px solid var(--line);
   display: flex;
   flex-direction: column;
-  background: var(--bg);
+  background: var(--ground);
   min-height: 0;
 }
 .drawer-head {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-2);
+  gap: 10px;
+  padding: 0 10px;
+  min-height: 36px;
+  border-bottom: 1px solid var(--line);
+}
+.drawer-title {
+  font-weight: 600;
 }
 .issue-form {
   display: flex;
   flex-direction: column;
   gap: 6px;
   padding: 10px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
 }
 .row-actions {
   display: flex;
@@ -866,12 +1162,13 @@ kbd {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--bg-3);
+  min-height: 34px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--line);
   cursor: pointer;
 }
 .issue-row:hover {
-  background: var(--bg-2);
+  background: var(--surface-3);
 }
 .issue-row .title {
   flex: 1;
@@ -879,13 +1176,19 @@ kbd {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.issue-row .muted {
+  font-size: 12px;
+}
 .issue-detail {
   flex: 1;
   overflow: auto;
-  padding: 10px;
+  padding: 12px;
+  background: var(--surface);
 }
 .issue-detail h3 {
-  margin: 6px 0;
+  margin: 8px 0;
+  font-size: 15px;
+  font-weight: 600;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -897,19 +1200,25 @@ kbd {
 }
 .section-title {
   font-weight: 600;
-  margin: 14px 0 6px;
+  margin: 16px 0 6px;
   display: flex;
   align-items: center;
   gap: 8px;
 }
 .linked-comment {
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line-strong);
+  border-radius: var(--r-card);
   padding: 6px 8px;
   margin-bottom: 6px;
 }
+.linked-comment.status-active {
+  border-left-color: var(--accent);
+}
 .linked-comment.status-orphaned {
-  border-color: var(--warn-fg);
+  border-color: var(--warn-line);
+  border-left-style: dashed;
+  background: var(--warn-soft);
 }
 .linked-head {
   display: flex;
@@ -932,11 +1241,11 @@ kbd {
   bottom: 20px;
   left: 50%;
   transform: translateX(-50%);
-  background: #24292f;
+  background: var(--ink);
   color: #fff;
   padding: 8px 16px;
-  border-radius: 6px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  border-radius: var(--r-card);
+  box-shadow: 0 6px 20px rgba(22, 24, 29, 0.25);
   z-index: 100;
   max-width: 80vw;
 }
@@ -948,33 +1257,42 @@ kbd {
 .rail {
   width: 360px;
   min-width: 300px;
-  border-left: 1px solid var(--border);
+  border-left: 1px solid var(--line);
   display: flex;
   flex-direction: column;
-  background: var(--bg-2);
+  background: var(--ground);
   min-height: 0;
 }
 .rail-head {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  height: 34px;
-  border-bottom: 1px solid var(--border);
+  gap: 10px;
+  padding: 0 10px;
+  min-height: 36px;
+  border-bottom: 1px solid var(--line);
 }
-.seg.small button {
-  height: 22px;
-  padding: 0 8px;
+/* Second row of the rail: the filters of whichever notebook is open. */
+.rail-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  min-height: 34px;
+  border-bottom: 1px solid var(--line);
   font-size: 12px;
 }
 .rail-notice {
   padding: 6px 10px;
   background: var(--warn-bg);
   color: var(--warn-fg);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--warn-line);
   display: flex;
   gap: 8px;
   align-items: center;
+  font-size: 12px;
+}
+.rail-notice .link {
+  color: var(--warn-fg);
 }
 .rail-list {
   flex: 1;
@@ -992,25 +1310,44 @@ kbd {
 .rail-foot {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   padding: 10px;
-  border-top: 1px solid var(--border);
-  background: var(--bg);
+  border-top: 1px solid var(--line);
+  background: var(--ground);
 }
 .rail-foot-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+}
+/* The one loud control in the app: what you wrote goes back to the agent from here. */
+.send {
+  height: 30px;
+  padding: 0 14px;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 500;
+}
+.send:hover:not(:disabled) {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+.send-n {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 16px;
+  padding: 0 5px;
+  border-radius: var(--r-ctl);
+  background: rgba(255, 255, 255, 0.22);
 }
 .rail .comment-card {
   cursor: pointer;
 }
 .rail .comment-card.focused {
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-bg);
-}
-.rail .comment-card.status-orphaned {
-  background: #fffdf2;
+  box-shadow: 0 0 0 2px var(--accent-soft);
 }
 .comment-head .file {
   color: var(--muted);
@@ -1026,75 +1363,69 @@ kbd {
 .sidebar.dual {
   overflow: hidden;
 }
-.tree-block {
-  display: flex;
-  flex-direction: column;
-  /* Content-sized, shrinking proportionally, so an empty Staged block does not
-     claim half the sidebar while Unstaged has twenty files in it. */
-  flex: 0 1 auto;
-  min-height: 62px;
-  min-width: 0;
-}
-.tree-block + .tree-block {
-  border-top: 1px solid var(--border);
-}
-.tree-block .tree {
-  flex: 1 1 auto;
-  min-height: 0;
-}
-.block-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 10px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-2);
-  font-size: 12px;
-  white-space: nowrap;
-}
-.block-title {
-  font-weight: 600;
-}
 
-/* ---- todos ---------------------------------------------------------------- */
-.drawer-tools {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 5px 10px;
-  border-bottom: 1px solid var(--border);
-  font-size: 12px;
-}
-.todo-list {
-  flex: 1;
-  overflow: auto;
-}
-.todo-row {
-  border-bottom: 1px solid var(--bg-3);
+/* ---- todos (rail) ------------------------------------------------------------ */
+.todo-add input {
+  width: 100%;
 }
 .todo-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
-  padding: 6px 10px;
+  min-height: 20px;
   cursor: pointer;
 }
-.todo-head:hover {
-  background: var(--bg-2);
+.todo-head input[type='checkbox'] {
+  margin-top: 3px;
 }
+/* A checklist line wraps rather than truncates: the title is the whole item. */
 .todo-head .title {
   flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  min-width: 0;
+  line-height: 20px;
+  overflow-wrap: anywhere;
 }
-.todo-row.status-done .todo-head .title {
+.todo-head .badge {
+  margin-top: 1px;
+}
+.todo-head .time {
+  font-size: 11px;
+  line-height: 20px;
+  color: var(--muted);
+}
+/* In flow, not overlaid: the title runs the full width of the head, so an overlay would
+   cover its last characters. The space stays reserved, so hovering moves nothing. */
+.todo-head .card-actions {
+  position: static;
+  padding-left: 0;
+  line-height: 20px;
+}
+.todo-card.status-done {
+  border-left-color: var(--line-strong);
+}
+.todo-card.status-done .title {
   text-decoration: line-through;
   color: var(--muted);
 }
+/* Indented to the title, past the checkbox. */
 .todo-body {
-  padding: 0 10px 8px 32px;
+  margin-top: 6px;
+  padding-left: 21px;
 }
 .todo-body p:first-child {
   margin-top: 0;
+}
+.todo-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chev,
+  .card-actions,
+  .block-progress > span {
+    transition: none;
+  }
 }

@@ -4,7 +4,7 @@ import { commentScopeKey, formatTargetKey, isLocalTarget, tryParseTargetKey } fr
 import { useStore } from '../store';
 import { allDirPaths, buildTree, type DirNode, type TreeNode } from '../lib/tree';
 
-const STATUS_LETTER: Record<FileEntry['status'], string> = { added: 'A', modified: 'M', deleted: 'D', renamed: 'R' };
+export const STATUS_LETTER: Record<FileEntry['status'], string> = { added: 'A', modified: 'M', deleted: 'D', renamed: 'R' };
 
 function FileRow({ node, depth, view }: { node: Extract<TreeNode, { kind: 'file' }>; depth: number; view: TargetKey }) {
   // A file staged halfway appears in both blocks; only the one in the view in front is highlighted.
@@ -112,11 +112,17 @@ function TreeBlock({ title, view, files, empty }: { title: string; view: TargetK
     <section className="tree-block">
       <div className="block-head">
         <span className="block-title">{title}</span>
-        <span className="muted">{files.length}</span>
-        <span className="add">+{add}</span>
-        <span className="del">-{del}</span>
+        <span className="block-n">{files.length}</span>
+        <span className="counts">
+          <span className="add">+{add}</span>
+          <span className="del">-{del}</span>
+        </span>
         <span className="spacer" />
-        {files.length > 0 && <span className="muted">{viewed}/{files.length} viewed</span>}
+        {files.length > 0 && (
+          <span className="block-viewed" title="已标记为 viewed 的文件">
+            {viewed}/{files.length} viewed
+          </span>
+        )}
         <span className="tree-tools">
           <button className="link" onClick={() => setOpen(new Set(allDirPaths(tree)))} title="展开全部目录">
             展开
@@ -126,6 +132,11 @@ function TreeBlock({ title, view, files, empty }: { title: string; view: TargetK
           </button>
         </span>
       </div>
+      {files.length > 0 && (
+        <div className="block-progress" role="progressbar" aria-label={`${title} 已查看`} aria-valuemin={0} aria-valuemax={files.length} aria-valuenow={viewed}>
+          <span style={{ width: `${(viewed / files.length) * 100}%` }} />
+        </div>
+      )}
       <div className="tree">
         {files.length === 0 ? (
           <div className="muted empty">{empty}</div>

@@ -168,10 +168,10 @@ export function IssuesDrawer() {
   return (
     <aside className="issues-drawer">
       <div className="drawer-head">
-        <strong>Issues</strong>
-        <div className="seg">
+        <span className="drawer-title">Issues</span>
+        <div className="tabs small" role="group" aria-label="Issue 筛选">
           {(['open', 'closed', 'all'] as Filter[]).map((f) => (
-            <button key={f} className={filter === f ? 'active' : ''} onClick={() => setFilter(f)}>
+            <button key={f} className={`tab ${filter === f ? 'active' : ''}`} onClick={() => setFilter(f)}>
               {f}
             </button>
           ))}
