@@ -2,6 +2,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { mkdir, open, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import type { Prefs, ReviewState, TargetState } from '@warden/shared';
+import { commentScopeKey } from '@warden/shared';
 import { sha1 } from './hash.js';
 
 export function dataDir(): string {
@@ -19,11 +20,11 @@ export function stateFilePath(repoRoot: string, baseDir = dataDir()): string {
 }
 
 export function defaultPrefs(): Prefs {
-  return { viewMode: 'unified', nvimSocketByRoot: {} };
+  return { viewMode: 'unified', nvimSocketByRoot: {}, autoRefresh: true };
 }
 
 export function defaultState(repoRoot: string): ReviewState {
-  return { schemaVersion: 1, repoRoot, targets: {}, issues: [], prefs: defaultPrefs() };
+  return { schemaVersion: 1, repoRoot, targets: {}, issues: [], todos: [], prefs: defaultPrefs() };
 }
 
 export function ensureTarget(state: ReviewState, key: string): TargetState {
@@ -46,15 +47,45 @@ function normalise(raw: unknown, repoRoot: string): ReviewState {
     targets[k] = {
       viewed: typeof v.viewed === 'object' && v.viewed ? v.viewed : {},
       comments: Array.isArray(v.comments) ? v.comments : [],
+      ...(typeof v.head === 'string' ? { head: v.head } : {}),
     };
   }
+  migrateLocalComments(targets);
   return {
     schemaVersion: 1,
     repoRoot: r.repoRoot ?? repoRoot,
     targets,
     issues: Array.isArray(r.issues) ? r.issues : [],
-    prefs: { ...defaultPrefs(), ...(r.prefs ?? {}), nvimSocketByRoot: r.prefs?.nvimSocketByRoot ?? {} },
+    todos: Array.isArray(r.todos) ? r.todos : [],
+    prefs: {
+      ...defaultPrefs(),
+      ...(r.prefs ?? {}),
+      nvimSocketByRoot: r.prefs?.nvimSocketByRoot ?? {},
+      autoRefresh: typeof r.prefs?.autoRefresh === 'boolean' ? r.prefs.autoRefresh : true,
+    },
   };
+}
+
+/**
+ * Comments used to live under the view they were written in (`working` / `staged` / `all`). They
+ * now share one scope per worktree so they can follow the code across `git add`. Moves them in
+ * place; `viewed` stays on the view key, which is still where it belongs.
+ */
+function migrateLocalComments(targets: ReviewState['targets']): void {
+  // Sorted so a state file with several stale views migrates in a stable order.
+  for (const key of Object.keys(targets).sort()) {
+    const scope = commentScopeKey(key);
+    if (scope === key) continue;
+    const src = targets[key]!;
+    if (src.comments.length === 0) continue;
+    let dst = targets[scope];
+    if (!dst) {
+      dst = { viewed: {}, comments: [] };
+      targets[scope] = dst;
+    }
+    dst.comments.push(...src.comments);
+    src.comments = [];
+  }
 }
 
 const LOCK_STALE_MS = 5_000;

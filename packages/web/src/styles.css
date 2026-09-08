@@ -1013,3 +1013,88 @@ kbd {
 .cell .code {
   padding-right: 40px;
 }
+
+/* ---- dual file tree (Unstaged / Staged) ----------------------------------- */
+.sidebar.dual {
+  overflow: hidden;
+}
+.tree-block {
+  display: flex;
+  flex-direction: column;
+  /* Content-sized, shrinking proportionally, so an empty Staged block does not
+     claim half the sidebar while Unstaged has twenty files in it. */
+  flex: 0 1 auto;
+  min-height: 62px;
+  min-width: 0;
+}
+.tree-block + .tree-block {
+  border-top: 1px solid var(--border);
+}
+.tree-block .tree {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.block-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-2);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.block-title {
+  font-weight: 600;
+}
+.block-head .tree-tools {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: 0;
+}
+
+/* ---- todos ---------------------------------------------------------------- */
+.drawer-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.todo-list {
+  flex: 1;
+  overflow: auto;
+}
+.todo-row {
+  border-bottom: 1px solid var(--bg-3);
+}
+.todo-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+.todo-head:hover {
+  background: var(--bg-2);
+}
+.todo-head .title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.todo-row.status-done .todo-head .title {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+.todo-body {
+  padding: 0 10px 8px 32px;
+}
+.todo-body p:first-child {
+  margin-top: 0;
+}
+.last-refresh {
+  font-family: var(--mono);
+}

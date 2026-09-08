@@ -111,3 +111,31 @@ export function tryParseTargetKey(key: string): Target | undefined {
     return undefined;
   }
 }
+
+/** Working tree / index views of one worktree, as opposed to a commit or a range. */
+export function isLocalTarget(t: Target): boolean {
+  return t.kind === 'working' || t.kind === 'staged' || t.kind === 'all';
+}
+
+/**
+ * State key under which the comments of `key` live. The three local views of a worktree share a
+ * single scope so a comment survives `git add` (it moves between views instead of being orphaned).
+ * Commit and range targets keep their own key. Scope keys are state indices only — never targets,
+ * so they are deliberately not parseable by `parseTargetKey`.
+ */
+export function commentScopeKey(key: TargetKey): TargetKey {
+  const t = tryParseTargetKey(key);
+  if (!t || !isLocalTarget(t)) return key;
+  return t.worktree ? `worktree:${t.worktree}:local` : 'local';
+}
+
+/** The local view keys of the same worktree as `key`, in reanchor-candidate order. */
+export function localViewKeys(key: TargetKey): TargetKey[] {
+  const t = tryParseTargetKey(key);
+  const wt = t?.worktree ? { worktree: t.worktree } : {};
+  return [
+    formatTargetKey({ kind: 'working', ...wt }),
+    formatTargetKey({ kind: 'staged', ...wt }),
+    formatTargetKey({ kind: 'all', ...wt }),
+  ];
+}

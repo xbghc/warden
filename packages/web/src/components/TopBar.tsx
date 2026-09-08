@@ -1,7 +1,13 @@
 import { useMemo, useState } from 'react';
-import { formatTargetKey, parseTargetKey, targetLabel, type Target } from '@warden/shared';
-import { useStore } from '../store';
+import { commentScopeKey, formatTargetKey, isLocalTarget, parseTargetKey, targetLabel, type Target } from '@warden/shared';
+import { branchOf, useStore } from '../store';
 import { NvimSelector } from './NvimSelector';
+
+function shortTime(iso: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
 
 type Kind = Target['kind'];
 
@@ -9,8 +15,14 @@ export function TopBar() {
   const repo = useStore((s) => s.repo)!;
   const targetKey = useStore((s) => s.targetKey);
   const setTarget = useStore((s) => s.setTarget);
+  const switchView = useStore((s) => s.switchView);
   const refresh = useStore((s) => s.refresh);
   const filesLoading = useStore((s) => s.filesLoading);
+  const autoRefresh = useStore((s) => s.prefs.autoRefresh);
+  const setAutoRefresh = useStore((s) => s.setAutoRefresh);
+  const lastRefreshAt = useStore((s) => s.lastRefreshAt);
+  const todos = useStore((s) => s.todos);
+  const root = useStore((s) => s.root);
   const viewMode = useStore((s) => s.prefs.viewMode);
   const setViewMode = useStore((s) => s.setViewMode);
   const panel = useStore((s) => s.panel);
@@ -55,10 +67,16 @@ export function TopBar() {
       t = { kind: k, ...wtField };
     }
     const key = formatTargetKey(t);
-    if (key !== targetKey) void setTarget(key);
+    if (key === targetKey) return;
+    // Moving between the three local views keeps the comments, the draft and the selection;
+    // anything else (another worktree, a commit, a range) is a different review altogether.
+    if (isLocalTarget(t) && commentScopeKey(key) === commentScopeKey(targetKey)) void switchView(key);
+    else void setTarget(key);
   };
 
+  const branch = branchOf(repo, root);
   const openIssues = issues.filter((i) => i.status === 'open').length;
+  const openTodos = todos.filter((t) => t.branch === branch && t.status === 'open').length;
   const otherWorktrees = repo.worktrees.filter((w) => w.path !== repo.root);
 
   return (
@@ -141,6 +159,9 @@ export function TopBar() {
         <button className={panel === 'issues' ? 'active' : ''} onClick={() => setPanel(panel === 'issues' ? 'diff' : 'issues')} title="本地 Issue">
           Issues{openIssues ? ` (${openIssues})` : ''}
         </button>
+        <button className={panel === 'todos' ? 'active' : ''} onClick={() => setPanel(panel === 'todos' ? 'diff' : 'todos')} title={`${branch} 分支的 Todo`}>
+          Todos{openTodos ? ` (${openTodos})` : ''}
+        </button>
         <div className="seg">
           <button className={viewMode === 'unified' ? 'active' : ''} onClick={() => setViewMode('unified')}>
             Unified
@@ -150,9 +171,14 @@ export function TopBar() {
           </button>
         </div>
         <NvimSelector />
-        <button onClick={() => void refresh()} disabled={filesLoading} title="刷新 (r)">
+        <label className="check" title="仓库发生变化时自动刷新">
+          <input type="checkbox" checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)} />
+          自动刷新
+        </label>
+        <button onClick={() => void refresh()} disabled={filesLoading} title={lastRefreshAt ? `上次刷新 ${shortTime(lastRefreshAt)}（r）` : '刷新 (r)'}>
           {filesLoading ? '刷新中…' : '刷新'}
         </button>
+        {lastRefreshAt && <span className="muted small last-refresh">{shortTime(lastRefreshAt)}</span>}
       </div>
     </header>
   );

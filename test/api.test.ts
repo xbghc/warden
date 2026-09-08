@@ -209,7 +209,7 @@ describe('viewed, comments, export, issues', () => {
     expect(res.count).toBe(1);
     expect(res.text).toContain('# Review comments\nTarget: working\nRepo: ' + fx.root + '\nCount: 1\n\n## src/a.ts:3 (new)\n```ts\n3 |   return 4;\n```\n> why 3?');
     const state = await json<ReviewState>(await get('/api/state'));
-    const c = state.targets.working!.comments[0]!;
+    const c = state.targets.local!.comments[0]!;
     expect(c.status).toBe('exported');
     expect(c.exportedAt).toBeTruthy();
     // editing the body keeps it exported; re-anchoring an exported comment keeps exported status
@@ -231,7 +231,7 @@ describe('viewed, comments, export, issues', () => {
     const fresh = new StateStore(stateFile, repo.commonRoot);
     const state = await fresh.load();
     expect(state.issues[0]).toMatchObject({ title: 'Totals', status: 'closed', commentIds: [comment.id] });
-    expect(state.targets.working!.comments).toHaveLength(1);
+    expect(state.targets.local!.comments).toHaveLength(1);
     // deleting a comment unlinks it from issues
     await send('DELETE', `/api/targets/${k('working')}/comments/${comment.id}`);
     const after = await json<{ issues: { commentIds: string[] }[] }>(await get('/api/issues'));

@@ -15,6 +15,23 @@ interface Selection {
 
 const EXPAND_STEP = 20;
 
+/**
+ * Top visible line per file, so a refresh that re-renders the diff can put the reader back where
+ * they were. Module scope on purpose: DiffView is remounted whenever the diff content changes.
+ */
+const scrollMemory = new Map<string, { side: CommentSide; line: number }>();
+
+/** The line a row shows, preferring the new side in split view. */
+function rowAnchor(row: Row): { side: CommentSide; line: number } | undefined {
+  const from = (line: DiffLine, side: CommentSide) => {
+    const no = side === 'old' ? line.oldLineNo : line.newLineNo;
+    return no === undefined ? undefined : { side, line: no };
+  };
+  if (row.kind === 'line') return from(row.line, row.line.type === 'del' ? 'old' : 'new');
+  if (row.kind === 'pair') return (row.right && from(row.right, 'new')) ?? (row.left && from(row.left, 'old'));
+  return undefined;
+}
+
 function tokenKey(line: DiffLine, side: CommentSide): string {
   if (line.type === 'context' || side === 'new') return `new:${line.newLineNo ?? line.oldLineNo}`;
   return `old:${line.oldLineNo}`;
@@ -64,7 +81,12 @@ export function DiffView({ diff }: { diff: FileDiff }) {
   const viewMode = useStore((s) => s.prefs.viewMode);
   const targetKey = useStore((s) => s.targetKey);
   const allComments = useStore((s) => s.comments);
-  const comments = useMemo(() => allComments.filter((c) => c.filePath === diff.path), [allComments, diff.path]);
+  // Comments are shared by the local views, but a marker only belongs on the view it currently
+  // sits in — the same hunk staged and unstaged is two different sets of line numbers.
+  const comments = useMemo(
+    () => allComments.filter((c) => c.filePath === diff.path && c.targetKey === targetKey),
+    [allComments, diff.path, targetKey],
+  );
   const updateComment = useStore((s) => s.updateComment);
   const setEditor = useStore((s) => s.setEditor);
   const focusComment = useStore((s) => s.focusComment);
@@ -165,6 +187,39 @@ export function DiffView({ diff }: { diff: FileDiff }) {
     overscan: 12,
     getItemKey: (i) => rows[i]!.key,
   });
+
+  // ---- scroll position across refreshes ------------------------------------
+  useEffect(() => {
+    const el = parentRef.current;
+    if (!el) return;
+    let frame = 0;
+    const remember = () => {
+      frame = 0;
+      const first = virtualizer.getVirtualItems()[0];
+      const anchor = first ? rowAnchor(rows[first.index]!) : undefined;
+      if (anchor) scrollMemory.set(diff.path, anchor);
+    };
+    const onScroll = () => {
+      if (!frame) frame = requestAnimationFrame(remember);
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, [rows, virtualizer, diff.path]);
+
+  const restored = useRef(false);
+  useEffect(() => {
+    if (restored.current) return;
+    restored.current = true;
+    if (!useStore.getState().consumeRestoreScroll()) return;
+    const mem = scrollMemory.get(diff.path);
+    if (!mem) return;
+    const idx = findRowIndex(rows, mem.side, mem.line);
+    if (idx >= 0) virtualizer.scrollToIndex(idx, { align: 'start' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ---- jump to a line (issue / comment navigation) -------------------------
   useEffect(() => {

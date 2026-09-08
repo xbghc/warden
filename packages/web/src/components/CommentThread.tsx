@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import type { Comment } from '@warden/shared';
+import type { Comment, TargetKey } from '@warden/shared';
+import { targetLabel, tryParseTargetKey } from '@warden/shared';
 import { useStore } from '../store';
 import { Markdown } from './Markdown';
 import { CommentEditor } from './CommentEditor';
@@ -19,6 +20,16 @@ function shortTime(iso: string): string {
   return sameDay ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : d.toLocaleDateString([], { month: 'numeric', day: 'numeric' });
 }
 
+/** Short name of the view a comment sits in, for cards showing a comment from another view. */
+function viewLabel(key: TargetKey): string {
+  const t = tryParseTargetKey(key);
+  if (!t) return key;
+  if (t.kind === 'working') return 'Unstaged';
+  if (t.kind === 'staged') return 'Staged';
+  if (t.kind === 'all') return 'All';
+  return targetLabel(t);
+}
+
 export function CommentCard({ comment, showSnippet = false, showFile = false }: { comment: Comment; showSnippet?: boolean; showFile?: boolean }) {
   const updateComment = useStore((s) => s.updateComment);
   const deleteComment = useStore((s) => s.deleteComment);
@@ -29,9 +40,13 @@ export function CommentCard({ comment, showSnippet = false, showFile = false }: 
   const reattaching = useStore((s) => s.reattaching === comment.id);
   const focused = useStore((s) => s.focusedCommentId === comment.id);
   const focusComment = useStore((s) => s.focusComment);
+  const targetKey = useStore((s) => s.targetKey);
   const [editing, setEditing] = useState(false);
 
   const range = comment.startLine === comment.endLine ? `${comment.startLine}` : `${comment.startLine}-${comment.endLine}`;
+  // Staging a hunk carries its comments into the Staged view; say so, otherwise the missing
+  // marker in the diff in front looks like the comment lost its anchor.
+  const elsewhere = comment.status !== 'orphaned' && comment.targetKey !== targetKey ? viewLabel(comment.targetKey) : null;
   return (
     <div
       className={`comment-card status-${comment.status} ${selected ? 'selected' : ''} ${focused ? 'focused' : ''}`}
@@ -52,6 +67,11 @@ export function CommentCard({ comment, showSnippet = false, showFile = false }: 
           {comment.side} {range}
         </span>
         <span className={`badge badge-${comment.status}`}>{comment.status}</span>
+        {elsewhere && (
+          <span className="badge" title={`这条评论现在位于 ${comment.targetKey}，点击卡片可跳转`}>
+            {elsewhere}
+          </span>
+        )}
         <span className="muted time" title={`created ${fmtTime(comment.createdAt)}${comment.exportedAt ? `\nexported ${fmtTime(comment.exportedAt)}` : ''}`}>
           {shortTime(comment.updatedAt)}
         </span>

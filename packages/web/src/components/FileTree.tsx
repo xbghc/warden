@@ -1,21 +1,31 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { FileEntry } from '@warden/shared';
+import type { FileEntry, TargetKey } from '@warden/shared';
+import { commentScopeKey, formatTargetKey, isLocalTarget, tryParseTargetKey } from '@warden/shared';
 import { useStore } from '../store';
 import { allDirPaths, buildTree, type DirNode, type TreeNode } from '../lib/tree';
 
 const STATUS_LETTER: Record<FileEntry['status'], string> = { added: 'A', modified: 'M', deleted: 'D', renamed: 'R' };
 
-function FileRow({ node, depth }: { node: Extract<TreeNode, { kind: 'file' }>; depth: number }) {
-  const active = useStore((s) => s.activeFile === node.path);
+function FileRow({ node, depth, view }: { node: Extract<TreeNode, { kind: 'file' }>; depth: number; view: TargetKey }) {
+  // A file staged halfway appears in both blocks; only the one in the view in front is highlighted.
+  const active = useStore((s) => s.activeFile === node.path && s.targetKey === view);
+  const inView = useStore((s) => s.targetKey === view);
   const openFile = useStore((s) => s.openFile);
+  const switchView = useStore((s) => s.switchView);
   const toggleViewed = useStore((s) => s.toggleViewed);
-  const commentCount = useStore((s) => s.comments.filter((c) => c.filePath === node.path).length);
+  const commentCount = useStore((s) => s.comments.filter((c) => c.filePath === node.path && c.targetKey === view).length);
   const e = node.entry;
+
+  const open = async () => {
+    if (!inView) await switchView(view, node.path);
+    await openFile(node.path);
+  };
+
   return (
     <div
       className={`tree-row file ${active ? 'active' : ''} ${e.viewed ? 'viewed' : ''}`}
       style={{ paddingLeft: 8 + depth * 14 }}
-      onClick={() => void openFile(node.path)}
+      onClick={() => void open()}
       title={e.oldPath ? `${e.oldPath} → ${e.path}` : e.path}
     >
       <input
@@ -23,7 +33,7 @@ function FileRow({ node, depth }: { node: Extract<TreeNode, { kind: 'file' }>; d
         className="viewed-box"
         checked={e.viewed}
         onClick={(ev) => ev.stopPropagation()}
-        onChange={() => void toggleViewed(node.path)}
+        onChange={() => void toggleViewed(node.path, view)}
         title="标记为已查看"
       />
       <span className={`status status-${e.status}`}>{STATUS_LETTER[e.status]}</span>
@@ -44,7 +54,7 @@ function FileRow({ node, depth }: { node: Extract<TreeNode, { kind: 'file' }>; d
   );
 }
 
-function DirRow({ node, depth, open, toggle }: { node: DirNode; depth: number; open: Set<string>; toggle: (p: string) => void }) {
+function DirRow({ node, depth, view, open, toggle }: { node: DirNode; depth: number; view: TargetKey; open: Set<string>; toggle: (p: string) => void }) {
   const isOpen = open.has(node.path);
   return (
     <>
@@ -53,35 +63,32 @@ function DirRow({ node, depth, open, toggle }: { node: DirNode; depth: number; o
         <span className="name">{node.name}</span>
         <span className="muted count">{node.fileCount}</span>
       </div>
-      {isOpen && node.children.map((c) => (c.kind === 'dir' ? <DirRow key={c.path} node={c} depth={depth + 1} open={open} toggle={toggle} /> : <FileRow key={c.path} node={c} depth={depth + 1} />))}
+      {isOpen &&
+        node.children.map((c) =>
+          c.kind === 'dir' ? (
+            <DirRow key={c.path} node={c} depth={depth + 1} view={view} open={open} toggle={toggle} />
+          ) : (
+            <FileRow key={c.path} node={c} depth={depth + 1} view={view} />
+          ),
+        )}
     </>
   );
 }
 
-export function FileTree() {
-  const files = useStore((s) => s.files);
-  const loading = useStore((s) => s.filesLoading);
-  const error = useStore((s) => s.filesError);
-  const targetKey = useStore((s) => s.targetKey);
-  const activeFile = useStore((s) => s.activeFile);
-  const tree = useMemo(() => buildTree(files), [files]);
+function useTreeState(tree: DirNode, view: TargetKey) {
   const [open, setOpen] = useState<Set<string>>(new Set());
+  const activeFile = useStore((s) => s.activeFile);
+  const inView = useStore((s) => s.targetKey === view);
 
-  // Collapse everything when the target changes.
+  // Reveal the active file after j/k navigation or a jump from a comment.
   useEffect(() => {
-    setOpen(new Set());
-  }, [targetKey]);
-
-  // Make sure the active file's ancestors are open (e.g. after j/k navigation or an issue jump).
-  useEffect(() => {
-    if (!activeFile) return;
+    if (!activeFile || !inView) return;
     setOpen((prev) => {
       const next = new Set(prev);
-      const dirs = allDirPaths(tree);
-      for (const d of dirs) if (activeFile.startsWith(d + '/')) next.add(d);
+      for (const d of allDirPaths(tree)) if (activeFile.startsWith(d + '/')) next.add(d);
       return next.size === prev.size ? prev : next;
     });
-  }, [activeFile, tree]);
+  }, [activeFile, inView, tree]);
 
   const toggle = (p: string) =>
     setOpen((prev) => {
@@ -91,32 +98,94 @@ export function FileTree() {
       return next;
     });
 
+  return { open, setOpen, toggle };
+}
+
+function TreeBlock({ title, view, files, empty }: { title: string; view: TargetKey; files: FileEntry[]; empty: string }) {
+  const tree = useMemo(() => buildTree(files), [files]);
+  const { open, setOpen, toggle } = useTreeState(tree, view);
+  const add = files.reduce((n, f) => n + f.additions, 0);
+  const del = files.reduce((n, f) => n + f.deletions, 0);
   const viewed = files.filter((f) => f.viewed).length;
-  const totalAdd = files.reduce((n, f) => n + f.additions, 0);
-  const totalDel = files.reduce((n, f) => n + f.deletions, 0);
 
   return (
-    <aside className="sidebar">
-      <div className="sidebar-head">
-        <span>
-          {files.length} 个文件 <span className="add">+{totalAdd}</span> <span className="del">-{totalDel}</span>
-        </span>
-        <span className="muted">{viewed}/{files.length} viewed</span>
+    <section className="tree-block">
+      <div className="block-head">
+        <span className="block-title">{title}</span>
+        <span className="muted">{files.length}</span>
+        <span className="add">+{add}</span>
+        <span className="del">-{del}</span>
+        <span className="spacer" />
+        {files.length > 0 && <span className="muted">{viewed}/{files.length} viewed</span>}
         <span className="tree-tools">
-          <button className="link" onClick={() => setOpen(new Set(allDirPaths(tree)))}>
+          <button className="link" onClick={() => setOpen(new Set(allDirPaths(tree)))} title="展开全部目录">
             展开
           </button>
-          <button className="link" onClick={() => setOpen(new Set())}>
+          <button className="link" onClick={() => setOpen(new Set())} title="折叠全部目录">
             折叠
           </button>
         </span>
       </div>
       <div className="tree">
-        {error && <div className="error-box">{error}</div>}
-        {!error && !loading && files.length === 0 && <div className="muted empty">没有改动</div>}
-        {loading && files.length === 0 && <div className="muted empty">加载中…</div>}
-        {tree.children.map((c) => (c.kind === 'dir' ? <DirRow key={c.path} node={c} depth={0} open={open} toggle={toggle} /> : <FileRow key={c.path} node={c} depth={0} />))}
+        {files.length === 0 ? (
+          <div className="muted empty">{empty}</div>
+        ) : (
+          tree.children.map((c) =>
+            c.kind === 'dir' ? <DirRow key={c.path} node={c} depth={0} view={view} open={open} toggle={toggle} /> : <FileRow key={c.path} node={c} depth={0} view={view} />,
+          )
+        )}
       </div>
+    </section>
+  );
+}
+
+export function FileTree() {
+  const files = useStore((s) => s.files);
+  const unstaged = useStore((s) => s.unstaged);
+  const staged = useStore((s) => s.staged);
+  const loading = useStore((s) => s.filesLoading);
+  const error = useStore((s) => s.filesError);
+  const targetKey = useStore((s) => s.targetKey);
+
+  const target = useMemo(() => tryParseTargetKey(targetKey), [targetKey]);
+  const local = !!target && isLocalTarget(target);
+  const worktree = target?.worktree ? { worktree: target.worktree } : {};
+  // Remounts the blocks when the scope changes (another worktree), keeping the expanded
+  // directories across a plain view switch — which is not supposed to reset anything.
+  const scope = commentScopeKey(targetKey);
+
+  if (error) {
+    return (
+      <aside className="sidebar">
+        <div className="error-box">{error}</div>
+      </aside>
+    );
+  }
+
+  if (local) {
+    return (
+      <aside className="sidebar dual">
+        <TreeBlock
+          key={`${scope}:unstaged`}
+          title="Unstaged"
+          view={formatTargetKey({ kind: 'working', ...worktree })}
+          files={unstaged}
+          empty={loading ? '加载中…' : '没有未暂存的改动'}
+        />
+        <TreeBlock
+          key={`${scope}:staged`}
+          title="Staged"
+          view={formatTargetKey({ kind: 'staged', ...worktree })}
+          files={staged}
+          empty={loading ? '加载中…' : '暂存区为空'}
+        />
+      </aside>
+    );
+  }
+
+  return (
+    <aside className="sidebar">
+      <TreeBlock key={scope} title="改动" view={targetKey} files={files} empty={loading ? '加载中…' : '没有改动'} />
     </aside>
   );
 }

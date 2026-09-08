@@ -76,16 +76,26 @@ export async function listWorktrees(ctx: RepoContext): Promise<WorktreeInfo[]> {
   return out;
 }
 
+/** Branch checked out at `cwd`. A detached HEAD is identified by its short sha instead. */
+export async function currentBranch(cwd: string): Promise<string> {
+  const res = await runGit(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd }).catch(() => ({ stdout: '' }));
+  const name = res.stdout.trim();
+  if (name && name !== 'HEAD') return name;
+  const head = await runGit(['rev-parse', '--verify', '--quiet', 'HEAD'], { cwd }).catch(() => ({ stdout: '' }));
+  const sha = head.stdout.trim();
+  return sha ? sha.slice(0, 7) : 'HEAD';
+}
+
 export async function getRepoInfo(ctx: RepoContext, defaultTarget: string): Promise<RepoInfo> {
-  const [branchRes, headRes, worktrees] = await Promise.all([
-    runGit(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: ctx.root }).catch(() => ({ stdout: 'HEAD' })),
+  const [branch, headRes, worktrees] = await Promise.all([
+    currentBranch(ctx.root),
     runGit(['rev-parse', 'HEAD'], { cwd: ctx.root }).catch(() => ({ stdout: '' })),
     listWorktrees(ctx),
   ]);
   return {
     root: ctx.root,
     commonRoot: ctx.commonRoot,
-    branch: branchRes.stdout.trim(),
+    branch,
     head: headRes.stdout.trim(),
     worktrees,
     defaultTarget,

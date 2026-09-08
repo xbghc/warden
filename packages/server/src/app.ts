@@ -1,14 +1,18 @@
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
+import { streamSSE } from 'hono/streaming';
 import type {
+  ChangeEvent,
   Comment,
   CommitInfo,
   CommitsResponse,
   CreateCommentRequest,
   CreateIssueRequest,
+  CreateTodoRequest,
   ExportRequest,
   ExportResponse,
+  ExportTodosRequest,
   FileDiff,
   FileEntry,
   FilesResponse,
@@ -21,19 +25,24 @@ import type {
   ReanchorResponse,
   RepoInfo,
   ReviewState,
+  Todo,
+  TodoExportResponse,
+  TodosResponse,
   UpdateCommentRequest,
   UpdateIssueRequest,
+  UpdateTodoRequest,
   WorktreeInfo,
 } from '@warden/shared';
-import { isValidRef } from '@warden/shared';
+import { commentScopeKey, isLocalTarget, isValidRef, localViewKeys } from '@warden/shared';
 import { badRequest, HttpError, notFound } from './errors.js';
-import { runGit } from './git.js';
-import { getRepoInfo, listWorktrees, type RepoContext } from './repo.js';
+import { revParse, runGit } from './git.js';
+import { currentBranch, getRepoInfo, listWorktrees, type RepoContext } from './repo.js';
 import { getFileDiff, getFullFile, listTargetDiffs, resolveTargetContext, toSummary, type TargetContext } from './targets.js';
 import { buildAnchor, reanchorComment } from './anchor.js';
 import { ensureTarget, StateStore } from './state.js';
-import { formatCommentsExport, formatIssueExport } from './export.js';
+import { formatCommentsExport, formatIssueExport, formatTodosExport } from './export.js';
 import { NvimService } from './nvim.js';
+import { RepoWatcher } from './watcher.js';
 import { serveStaticFile } from './static.js';
 
 
@@ -43,7 +52,11 @@ export interface AppOptions {
   nvim?: NvimService;
   /** Directory of the built web app; when omitted only /api is served. */
   webDir?: string;
+  /** Poll interval of the repository watchers; tests use a short one. */
+  watchIntervalMs?: number;
 }
+
+const SSE_HEARTBEAT_MS = 15_000;
 
 interface ListingCache {
   at: number;
@@ -61,6 +74,16 @@ export function createApp(opts: AppOptions): Hono {
   const listings = new Map<string, ListingCache>();
   /** Files whose viewed flag was dropped because their diff changed (in-memory notice). */
   const changedNotices = new Map<string, Set<string>>();
+  /** One watcher per worktree root, started lazily and stopped when the last client disconnects. */
+  const watchers = new Map<string, RepoWatcher>();
+  const watcherFor = (root: string): RepoWatcher => {
+    let w = watchers.get(root);
+    if (!w) {
+      w = new RepoWatcher(root, opts.watchIntervalMs);
+      watchers.set(root, w);
+    }
+    return w;
+  };
 
   let worktreeCache: { at: number; list: WorktreeInfo[] } | null = null;
   const worktrees = async (force = false): Promise<WorktreeInfo[]> => {
@@ -132,6 +155,7 @@ export function createApp(opts: AppOptions): Hono {
     const prefs = await store.update((s) => {
       if (body.viewMode === 'unified' || body.viewMode === 'split') s.prefs.viewMode = body.viewMode;
       if (typeof body.lastTarget === 'string') s.prefs.lastTarget = body.lastTarget;
+      if (typeof body.autoRefresh === 'boolean') s.prefs.autoRefresh = body.autoRefresh;
       if (body.nvimSocketByRoot && typeof body.nvimSocketByRoot === 'object') {
         s.prefs.nvimSocketByRoot = { ...s.prefs.nvimSocketByRoot, ...body.nvimSocketByRoot };
       }
@@ -175,7 +199,8 @@ export function createApp(opts: AppOptions): Hono {
       viewed: !stale.includes(d.path) && viewed[d.path] === d.contentHash,
       changed: notices.has(d.path),
     }));
-    const res: FilesResponse = { targetKey: key, root: ctx.cwd, files, comments: t?.comments ?? [] };
+    const scope = state.targets[commentScopeKey(key)];
+    const res: FilesResponse = { targetKey: key, root: ctx.cwd, files, comments: scope?.comments ?? [] };
     return c.json(res);
   });
 
@@ -222,7 +247,7 @@ export function createApp(opts: AppOptions): Hono {
   api.get('/targets/:key/comments', async (c) => {
     const key = decodeKey(c.req.param('key'));
     const state = await store.load();
-    return c.json({ comments: state.targets[key]?.comments ?? [] });
+    return c.json({ comments: state.targets[commentScopeKey(key)]?.comments ?? [] });
   });
 
   api.post('/targets/:key/comments', async (c) => {
@@ -254,7 +279,7 @@ export function createApp(opts: AppOptions): Hono {
       updatedAt: now,
     };
     await store.update((s) => {
-      ensureTarget(s, key).comments.push(comment);
+      ensureTarget(s, commentScopeKey(key)).comments.push(comment);
     });
     return c.json(comment, 201);
   });
@@ -264,8 +289,9 @@ export function createApp(opts: AppOptions): Hono {
     const id = c.req.param('id');
     const ctx = await targetCtx(key);
     const body = (await c.req.json()) as UpdateCommentRequest;
+    const scope = commentScopeKey(key);
     const state = await store.load();
-    const existing = state.targets[key]?.comments.find((x) => x.id === id);
+    const existing = state.targets[scope]?.comments.find((x) => x.id === id);
     if (!existing) throw notFound('comment not found');
 
     let patch: Partial<Comment> = {};
@@ -290,10 +316,12 @@ export function createApp(opts: AppOptions): Hono {
         codeSnippet: anchored.snippet,
         anchor: anchored.anchor,
         status: existing.exportedAt ? 'exported' : 'active',
+        // Re-attaching in a view moves the comment to it.
+        targetKey: key,
       };
     }
     const updated = await store.update((s) => {
-      const t = ensureTarget(s, key);
+      const t = ensureTarget(s, scope);
       const idx = t.comments.findIndex((x) => x.id === id);
       if (idx < 0) throw notFound('comment not found');
       const next: Comment = { ...t.comments[idx]!, ...patch, updatedAt: new Date().toISOString() };
@@ -307,7 +335,7 @@ export function createApp(opts: AppOptions): Hono {
     const key = decodeKey(c.req.param('key'));
     const id = c.req.param('id');
     const removed = await store.update((s) => {
-      const t = s.targets[key];
+      const t = s.targets[commentScopeKey(key)];
       if (!t) return false;
       const before = t.comments.length;
       t.comments = t.comments.filter((x) => x.id !== id);
@@ -321,31 +349,108 @@ export function createApp(opts: AppOptions): Hono {
   api.post('/targets/:key/comments/reanchor', async (c) => {
     const key = decodeKey(c.req.param('key'));
     const ctx = await targetCtx(key);
+    const scope = commentScopeKey(key);
+    const local = isLocalTarget(ctx.target);
     const body = ((await c.req.json().catch(() => ({}))) ?? {}) as ReanchorRequest;
     const provided = new Map<string, FileDiff>();
     for (const f of body.files ?? []) if (f && typeof f.path === 'string' && Array.isArray(f.hunks)) provided.set(f.path, f);
 
+    // Staging a hunk moves it from `working` to `staged` without changing the code, so a comment
+    // that vanished from one view has most likely just reappeared in another. Every local view of
+    // this worktree is therefore a candidate; commit/range targets only ever look at themselves.
+    const views = local ? localViewKeys(key) : [key];
+    const contexts = new Map<string, TargetContext>([[key, ctx]]);
+    /** view key -> file path -> diff, computed at most once per pass. */
+    const diffs = new Map<string, Map<string, Promise<FileDiff | undefined>>>();
+    const diffFor = (view: string, filePath: string): Promise<FileDiff | undefined> => {
+      let byPath = diffs.get(view);
+      if (!byPath) {
+        byPath = new Map();
+        diffs.set(view, byPath);
+      }
+      let pending = byPath.get(filePath);
+      if (!pending) {
+        pending = (async () => {
+          // Diffs in the request body describe the view the client is looking at, nothing else.
+          if (view === key && provided.has(filePath)) return provided.get(filePath);
+          try {
+            let viewCtx = contexts.get(view);
+            if (!viewCtx) {
+              viewCtx = await targetCtx(view);
+              contexts.set(view, viewCtx);
+            }
+            return await fileDiffWithHints(viewCtx, filePath);
+          } catch {
+            return undefined;
+          }
+        })();
+        byPath.set(filePath, pending);
+      }
+      return pending;
+    };
+
     const state = await store.load();
-    const comments = state.targets[key]?.comments ?? [];
-    const paths = [...new Set(comments.map((x) => x.filePath))];
-    const diffs = new Map<string, FileDiff | undefined>();
+    const comments = state.targets[scope]?.comments ?? [];
+    const prevHead = state.targets[scope]?.head;
+    const head = (await revParse(ctx.cwd, 'HEAD')) ?? '';
+    // A moved HEAD means the round under review was committed: comments with nowhere left to sit
+    // are finished work, not orphans. Never on the first pass, when there is no HEAD to compare to.
+    const committed = local && prevHead !== undefined && prevHead !== head;
+
+    const now = new Date().toISOString();
+    /** comment id -> the view it was located in, and the fields that follow from that location. */
+    const located = new Map<string, Partial<Comment>>();
     await Promise.all(
-      paths.map(async (p) => {
-        if (provided.has(p)) {
-          diffs.set(p, provided.get(p));
+      comments.map(async (cm) => {
+        const ordered = views.includes(cm.targetKey) ? [cm.targetKey, ...views.filter((v) => v !== cm.targetKey)] : views;
+        for (const view of ordered) {
+          const diff = await diffFor(view, cm.filePath);
+          if (!diff) continue;
+          const next = reanchorComment(cm, diff, now);
+          if (next.status === 'orphaned') continue;
+          located.set(cm.id, {
+            side: next.side,
+            startLine: next.startLine,
+            endLine: next.endLine,
+            codeSnippet: next.codeSnippet,
+            anchor: next.anchor,
+            status: next.status,
+            targetKey: view,
+          });
           return;
-        }
-        try {
-          diffs.set(p, await fileDiffWithHints(ctx, p));
-        } catch {
-          diffs.set(p, undefined);
         }
       }),
     );
-    const now = new Date().toISOString();
+
     const result = await store.update((s) => {
-      const t = ensureTarget(s, key);
-      t.comments = t.comments.map((cm) => reanchorComment(cm, diffs.get(cm.filePath), now));
+      const t = ensureTarget(s, scope);
+      const dropped: string[] = [];
+      // The patch is applied to the freshest copy so a body edited while the diffs were computed
+      // is not overwritten by the snapshot this pass started from.
+      t.comments = t.comments.flatMap((cm): Comment[] => {
+        const patch = located.get(cm.id);
+        if (!patch) {
+          // Created after the snapshot: not part of this pass, leave untouched.
+          if (!comments.some((x) => x.id === cm.id)) return [cm];
+          if (committed) {
+            dropped.push(cm.id);
+            return [];
+          }
+          return [cm.status === 'orphaned' ? cm : { ...cm, status: 'orphaned', updatedAt: now }];
+        }
+        const next: Comment = { ...cm, ...patch };
+        const unchanged =
+          cm.targetKey === next.targetKey &&
+          cm.status === next.status &&
+          cm.startLine === next.startLine &&
+          cm.endLine === next.endLine &&
+          cm.anchor.hunkHash === next.anchor.hunkHash;
+        return [unchanged ? cm : { ...next, updatedAt: now }];
+      });
+      for (const id of dropped) {
+        for (const issue of s.issues) issue.commentIds = issue.commentIds.filter((x) => x !== id);
+      }
+      t.head = head;
       return t.comments;
     });
     const res: ReanchorResponse = { comments: result };
@@ -453,6 +558,82 @@ export function createApp(opts: AppOptions): Hono {
     return c.json(res);
   });
 
+  // ---- todos ---------------------------------------------------------------
+
+  /** A root the server is willing to answer for: this worktree, the main one, or a listed sibling. */
+  const knownRoot = async (rootParam?: string): Promise<string> => {
+    if (!rootParam) return repo.root;
+    if (rootParam === repo.root || rootParam === repo.commonRoot) return rootParam;
+    if ((await worktrees()).some((w) => w.path === rootParam)) return rootParam;
+    throw badRequest(`unknown root: ${rootParam}`, 'unknown_worktree');
+  };
+
+  api.get('/todos', async (c) => {
+    const branch = c.req.query('branch') || undefined;
+    const s = await store.load();
+    const res: TodosResponse = {
+      todos: branch ? s.todos.filter((t) => t.branch === branch) : s.todos,
+      ...(branch ? { branch } : {}),
+    };
+    return c.json(res);
+  });
+
+  api.post('/todos', async (c) => {
+    const body = (await c.req.json()) as CreateTodoRequest;
+    if (!body.title || !body.title.trim()) throw badRequest('title is required');
+    const branch = body.branch?.trim() || (await currentBranch(await knownRoot(body.root)));
+    const now = new Date().toISOString();
+    const todo: Todo = {
+      id: randomUUID(),
+      branch,
+      title: body.title.trim(),
+      body: typeof body.body === 'string' ? body.body : '',
+      status: 'open',
+      createdAt: now,
+      updatedAt: now,
+    };
+    await store.update((s) => {
+      s.todos.push(todo);
+    });
+    return c.json(todo, 201);
+  });
+
+  api.post('/todos/export', async (c) => {
+    const body = (await c.req.json()) as ExportTodosRequest;
+    const branch = typeof body.branch === 'string' ? body.branch.trim() : '';
+    if (!branch) throw badRequest('branch is required');
+    const s = await store.load();
+    const todos = s.todos.filter((t) => t.branch === branch && (body.includeDone === true || t.status === 'open'));
+    const res: TodoExportResponse = { text: formatTodosExport({ repoRoot: repo.root, branch, todos }), count: todos.length };
+    return c.json(res);
+  });
+
+  api.patch('/todos/:id', async (c) => {
+    const id = c.req.param('id');
+    const body = (await c.req.json()) as UpdateTodoRequest;
+    const updated = await store.update((s) => {
+      const todo = s.todos.find((t) => t.id === id);
+      if (!todo) throw notFound('todo not found');
+      if (typeof body.title === 'string' && body.title.trim()) todo.title = body.title.trim();
+      if (typeof body.body === 'string') todo.body = body.body;
+      if (body.status === 'open' || body.status === 'done') todo.status = body.status;
+      todo.updatedAt = new Date().toISOString();
+      return todo;
+    });
+    return c.json(updated);
+  });
+
+  api.delete('/todos/:id', async (c) => {
+    const id = c.req.param('id');
+    const removed = await store.update((s) => {
+      const before = s.todos.length;
+      s.todos = s.todos.filter((t) => t.id !== id);
+      return s.todos.length !== before;
+    });
+    if (!removed) throw notFound('todo not found');
+    return c.json({ ok: true });
+  });
+
   // ---- commits -----------------------------------------------------------
 
   api.get('/commits', async (c) => {
@@ -495,6 +676,37 @@ export function createApp(opts: AppOptions): Hono {
     const hasMore = commits.length > limit;
     const res: CommitsResponse = { commits: commits.slice(0, limit), hasMore };
     return c.json(res);
+  });
+
+  // ---- change events -------------------------------------------------------
+
+  api.get('/events', async (c) => {
+    const root = c.req.query('root') || repo.root;
+    const known = root === repo.root || root === repo.commonRoot || (await worktrees()).some((w) => w.path === root);
+    if (!known) throw badRequest(`unknown root: ${root}`, 'unknown_worktree');
+    return streamSSE(c, async (stream) => {
+      const watcher = watcherFor(root);
+      // Writes are chained so an event arriving mid-heartbeat cannot interleave with it.
+      let chain: Promise<unknown> = Promise.resolve();
+      const enqueue = (write: () => Promise<unknown>) => {
+        chain = chain.then(write).catch(() => stream.abort());
+        return chain;
+      };
+      const release = watcher.subscribe((change) => {
+        const event: ChangeEvent = { type: 'changed', ...change };
+        void enqueue(() => stream.writeSSE({ event: 'changed', data: JSON.stringify(event) }));
+      });
+      stream.onAbort(release);
+      try {
+        while (!stream.aborted && !stream.closed) {
+          await stream.sleep(SSE_HEARTBEAT_MS);
+          if (stream.aborted || stream.closed) break;
+          await enqueue(() => stream.write(': ping\n\n'));
+        }
+      } finally {
+        release();
+      }
+    });
   });
 
   // ---- nvim --------------------------------------------------------------

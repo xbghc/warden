@@ -4,7 +4,9 @@ import type {
   CommitsResponse,
   CreateCommentRequest,
   CreateIssueRequest,
+  CreateTodoRequest,
   ExportResponse,
+  ExportTodosRequest,
   FileDiff,
   FilesResponse,
   FullFileResponse,
@@ -15,8 +17,12 @@ import type {
   RepoInfo,
   ReviewState,
   TargetKey,
+  Todo,
+  TodoExportResponse,
+  TodosResponse,
   UpdateCommentRequest,
   UpdateIssueRequest,
+  UpdateTodoRequest,
 } from '@warden/shared';
 
 export class ApiError extends Error {
@@ -87,6 +93,15 @@ export const api = {
   updateIssue: (id: string, body: UpdateIssueRequest) => req<Issue>('PATCH', `/api/issues/${enc(id)}`, body),
   deleteIssue: (id: string) => req<{ ok: true }>('DELETE', `/api/issues/${enc(id)}`),
   exportIssue: (id: string) => req<ExportResponse>('POST', `/api/issues/${enc(id)}/export`),
+
+  todos: (branch?: string) => req<TodosResponse>('GET', `/api/todos${q({ branch })}`),
+  createTodo: (body: CreateTodoRequest) => req<Todo>('POST', '/api/todos', body),
+  updateTodo: (id: string, body: UpdateTodoRequest) => req<Todo>('PATCH', `/api/todos/${enc(id)}`, body),
+  deleteTodo: (id: string) => req<{ ok: true }>('DELETE', `/api/todos/${enc(id)}`),
+  exportTodos: (body: ExportTodosRequest) => req<TodoExportResponse>('POST', '/api/todos/export', body),
+
+  /** Server-sent stream of repository changes for one worktree root. Caller owns `close()`. */
+  events: (root: string) => new EventSource(`/api/events${q({ root })}`),
 
   commits: (params: { path?: string; before?: string; limit?: number; root?: string; ref?: string }) =>
     req<CommitsResponse>('GET', `/api/commits${q(params)}`),

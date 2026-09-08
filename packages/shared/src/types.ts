@@ -102,12 +102,34 @@ export interface Prefs {
   lastTarget?: TargetKey;
   /** repo/worktree root -> nvim socket path */
   nvimSocketByRoot: Record<string, string>;
+  /** Re-run the refresh cycle when the watcher reports a repository change. */
+  autoRefresh: boolean;
 }
 
 export interface TargetState {
   /** filePath -> contentHash at the time it was marked viewed */
   viewed: Record<string, string>;
   comments: Comment[];
+  /**
+   * HEAD sha recorded at the last reanchor of this scope. A different HEAD on the next reanchor
+   * means a commit happened, which is what turns "no longer locatable" into a deletion.
+   */
+  head?: string;
+}
+
+export type TodoStatus = 'open' | 'done';
+
+/** A branch-scoped note. Unlike comments, todos are not anchored to code and survive commits. */
+export interface Todo {
+  id: string;
+  /** Branch the todo was created on; short sha when HEAD was detached. */
+  branch: string;
+  title: string;
+  /** Markdown, may be empty. */
+  body: string;
+  status: TodoStatus;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface ReviewState {
@@ -115,6 +137,7 @@ export interface ReviewState {
   repoRoot: string;
   targets: Record<TargetKey, TargetState>;
   issues: Issue[];
+  todos: Todo[];
   prefs: Prefs;
 }
 
@@ -245,6 +268,44 @@ export interface NvimOpenRequest {
   socket: string;
   absPath: string;
   line: number;
+}
+
+export interface CreateTodoRequest {
+  title: string;
+  body?: string;
+  /** Defaults to the current branch of `root` (or of the repository root). */
+  branch?: string;
+  root?: string;
+}
+
+export interface UpdateTodoRequest {
+  title?: string;
+  body?: string;
+  status?: TodoStatus;
+}
+
+export interface TodosResponse {
+  todos: Todo[];
+  /** Branch the listing was filtered by, when one was requested. */
+  branch?: string;
+}
+
+export interface ExportTodosRequest {
+  branch: string;
+  includeDone?: boolean;
+}
+
+export interface TodoExportResponse {
+  text: string;
+  count: number;
+}
+
+/** Payload of the `changed` SSE event emitted by the repository watcher. */
+export interface ChangeEvent {
+  type: 'changed';
+  head: string;
+  branch: string;
+  at: string;
 }
 
 export interface ApiError {

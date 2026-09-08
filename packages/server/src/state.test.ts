@@ -22,7 +22,14 @@ describe('StateStore', () => {
   it('returns default state when nothing is stored', async () => {
     const store = new StateStore(path.join(dir, 'state.json'), '/repo');
     const s = await store.load();
-    expect(s).toEqual({ schemaVersion: 1, repoRoot: '/repo', targets: {}, issues: [], prefs: { viewMode: 'unified', nvimSocketByRoot: {} } });
+    expect(s).toEqual({
+      schemaVersion: 1,
+      repoRoot: '/repo',
+      targets: {},
+      issues: [],
+      todos: [],
+      prefs: { viewMode: 'unified', nvimSocketByRoot: {}, autoRefresh: true },
+    });
   });
 
   it('persists mutations atomically and reloads them', async () => {
@@ -70,6 +77,45 @@ describe('StateStore', () => {
     expect(s.targets).toEqual({});
     const files = await readdir(dir);
     expect(files.some((f) => f.startsWith('state.json.corrupt-'))).toBe(true);
+  });
+
+  it('migrates comments from the local views into the shared scope', async () => {
+    const file = path.join(dir, 'state.json');
+    const comment = (id: string, targetKey: string) => ({
+      id,
+      targetKey,
+      filePath: 'a.ts',
+      side: 'new',
+      startLine: 1,
+      endLine: 1,
+      codeSnippet: [],
+      body: id,
+      status: 'active',
+      anchor: { hunkHash: '', lineHashes: [], contextBefore: [], contextAfter: [], hunkLineOffset: 0 },
+      createdAt: '',
+      updatedAt: '',
+    });
+    await writeFile(
+      file,
+      JSON.stringify({
+        schemaVersion: 1,
+        targets: {
+          working: { viewed: { 'a.ts': 'h' }, comments: [comment('c1', 'working')] },
+          staged: { viewed: {}, comments: [comment('c2', 'staged')] },
+          'commit:abc': { viewed: {}, comments: [comment('c3', 'commit:abc')] },
+        },
+        issues: [],
+      }),
+    );
+    const s = await new StateStore(file, '/repo').load();
+    // Sorted key order: staged before working.
+    expect(s.targets.local!.comments.map((c) => c.id)).toEqual(['c2', 'c1']);
+    expect(s.targets.working!.comments).toEqual([]);
+    expect(s.targets.staged!.comments).toEqual([]);
+    // `viewed` is per view and stays where it was; commit targets keep their own comments.
+    expect(s.targets.working!.viewed).toEqual({ 'a.ts': 'h' });
+    expect(s.targets['commit:abc']!.comments.map((c) => c.id)).toEqual(['c3']);
+    expect(s.todos).toEqual([]);
   });
 
   it('ignores unknown schema versions', async () => {

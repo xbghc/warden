@@ -9,11 +9,12 @@ export { createApp } from './app.js';
 export { resolveRepo } from './repo.js';
 export { StateStore, stateFilePath } from './state.js';
 export { NvimService } from './nvim.js';
+export { RepoWatcher, statusPaths, DEFAULT_POLL_INTERVAL_MS } from './watcher.js';
 export { HttpError } from './errors.js';
 export { runGit, GitError, assertAllowedGitArgs } from './git.js';
 export { parseUnifiedDiff } from './diffparse.js';
 export { buildAnchor, reanchorComment } from './anchor.js';
-export { formatCommentsExport, formatIssueExport } from './export.js';
+export { formatCommentsExport, formatIssueExport, formatTodosExport } from './export.js';
 
 export const HOST = '127.0.0.1';
 export const DEFAULT_PORT_START = 4100;
