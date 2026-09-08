@@ -166,6 +166,34 @@ describe('repo & targets', () => {
       fx.git('worktree', 'remove', '--force', wtPath);
     }
   });
+
+  it('forgets a remembered target whose worktree is gone', async () => {
+    const wtPath = path.join(os.tmpdir(), `warden-wt-gone-${process.pid}-${Date.now()}`);
+    fx.git('worktree', 'add', '-q', '--detach', wtPath);
+    try {
+      const wt = (await json<RepoInfo>(await get('/api/repo'))).worktrees.find((w) => !w.isMain)!;
+      const key = `worktree:${wt.path}:working`;
+      await send('PATCH', '/api/prefs', { lastTarget: key });
+      expect((await json<RepoInfo>(await get('/api/repo'))).defaultTarget).toBe(key);
+
+      // Deleted behind git's back: `git worktree list` still names it, as prunable.
+      await rm(wtPath, { recursive: true, force: true });
+      const info = await json<RepoInfo>(await get('/api/repo'));
+      expect(info.worktrees.map((w) => w.isMain)).toEqual([true]);
+      expect(info.defaultTarget).toBe('working');
+      expect((await json<ReviewState>(await get('/api/state'))).prefs.lastTarget).toBe('working');
+      const res = await get(`/api/targets/${k(key)}/files`);
+      expect(res.status).toBe(400);
+      expect((await json<{ code: string }>(res)).code).toBe('unknown_worktree');
+      expect((await send('POST', '/api/todos', { title: 'nowhere', root: wt.path })).status).toBe(400);
+
+      // A key that does not parse at all is not handed back either.
+      await send('PATCH', '/api/prefs', { lastTarget: 'bogus' });
+      expect((await json<RepoInfo>(await get('/api/repo'))).defaultTarget).toBe('working');
+    } finally {
+      fx.git('worktree', 'prune');
+    }
+  });
 });
 
 describe('viewed, comments, export, issues', () => {

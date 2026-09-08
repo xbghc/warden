@@ -38,9 +38,11 @@ export async function resolveRepo(dir: string): Promise<RepoContext> {
 export async function listWorktrees(ctx: RepoContext): Promise<WorktreeInfo[]> {
   const r = await runGit(['worktree', 'list', '--porcelain'], { cwd: ctx.root });
   const out: WorktreeInfo[] = [];
-  let cur: Partial<WorktreeInfo> | null = null;
+  let cur: (Partial<WorktreeInfo> & { prunable?: boolean }) | null = null;
   const flush = () => {
-    if (cur && cur.path) {
+    // A worktree whose directory was deleted behind git's back is still listed, marked prunable.
+    // Nothing can be reviewed there, so it is not offered — the same as after `git worktree remove`.
+    if (cur && cur.path && !cur.prunable) {
       out.push({
         path: cur.path,
         head: cur.head ?? '',
@@ -66,6 +68,7 @@ export async function listWorktrees(ctx: RepoContext): Promise<WorktreeInfo[]> {
     else if (line.startsWith('branch ')) cur.branch = line.slice(7).replace(/^refs\/heads\//, '');
     else if (line === 'detached') cur.detached = true;
     else if (line === 'bare') cur.bare = true;
+    else if (line.startsWith('prunable')) cur.prunable = true;
   }
   flush();
   // Normalise paths through realpath so they match ctx.root/commonRoot comparisons.

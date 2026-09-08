@@ -30,7 +30,7 @@ import type {
   UpdateTodoRequest,
   WorktreeInfo,
 } from '@warden/shared';
-import { commentScopeKey, isLocalTarget, isValidRef, localViewKeys } from '@warden/shared';
+import { commentScopeKey, isLocalTarget, isValidRef, localViewKeys, tryParseTargetKey } from '@warden/shared';
 import { badRequest, HttpError, notFound } from './errors.js';
 import { COMMIT_FORMAT, parseCommitLog } from './commits.js';
 import { revParse, runGit } from './git.js';
@@ -146,8 +146,16 @@ export function createApp(opts: AppOptions): Hono {
 
   api.get('/repo', async (c) => {
     const state = await store.load();
-    const info: RepoInfo = await getRepoInfo(repo, state.prefs.lastTarget ?? 'working');
+    const info: RepoInfo = await getRepoInfo(repo, 'working');
     worktreeCache = { at: Date.now(), list: info.worktrees };
+    // The remembered target is handed back only while it can still be opened. One inside a
+    // worktree that has since been removed would strand the page on an error: everything it
+    // could click next carries that worktree along, and the next load would land there again.
+    const last = state.prefs.lastTarget;
+    const target = last ? tryParseTargetKey(last) : undefined;
+    const usable = !!target && (!target.worktree || info.worktrees.some((w) => w.path === target.worktree));
+    if (last && usable) info.defaultTarget = last;
+    else if (last) await store.update((s) => void (s.prefs.lastTarget = 'working'));
     return c.json(info);
   });
 

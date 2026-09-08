@@ -168,15 +168,23 @@ export function FileTree() {
 
   // A commit, a range or a branch view is entered from the Commits panel, so the sidebar says which
   // one is up and holds the only way back to the working tree — even when the listing failed (a
-  // bad ref, say). The worktree is already named in the top bar's selector, so the label leaves it out.
-  const back = !local && (
+  // bad ref, say). A worktree target that failed to list is the one case where the way back must
+  // leave the worktree: it may itself be what is wrong (removed while the page was open), and every
+  // other control on the page would carry it along. Otherwise the worktree is already named in the
+  // top bar's selector, so the label leaves it out.
+  const stranded = !!error && !!target?.worktree;
+  const back = (!local || stranded) && (
     <div className="sidebar-target">
       <span className="sidebar-target-name" title={targetKey}>
-        {target ? targetLabel({ ...target, worktree: undefined }) : targetKey}
+        {!target ? targetKey : stranded ? targetLabel(target) : targetLabel({ ...target, worktree: undefined })}
       </span>
       <span className="spacer" />
-      <button className="link" onClick={() => void setTarget(formatTargetKey({ kind: 'working', ...worktree }))} title="回到工作区的 Unstaged / Staged 视图">
-        ← 返回工作区
+      <button
+        className="link"
+        onClick={() => void setTarget(formatTargetKey(stranded ? { kind: 'working' } : { kind: 'working', ...worktree }))}
+        title={stranded ? '回到主仓库的工作区' : '回到工作区的 Unstaged / Staged 视图'}
+      >
+        {stranded ? '← 回到主仓库' : '← 返回工作区'}
       </button>
     </div>
   );

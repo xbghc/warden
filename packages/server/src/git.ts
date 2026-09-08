@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { HttpError } from './errors.js';
 
 /** Sub-commands the server is allowed to run. Everything else is rejected before spawning. */
@@ -89,6 +90,12 @@ export async function runGit(args: readonly string[], opts: GitRunOptions): Prom
             return;
           }
           if (err.code === 'ENOENT') {
+            // execFile reports a working directory that is gone exactly like a missing binary. The
+            // former is a worktree deleted since it was listed: a request problem, not a setup one.
+            if (opts.cwd && !existsSync(opts.cwd)) {
+              reject(new GitError(`working directory no longer exists: ${opts.cwd}`, null, '', 400, 'unknown_worktree'));
+              return;
+            }
             reject(new GitError('git executable not found in PATH', null, '', 500, 'git_missing'));
             return;
           }

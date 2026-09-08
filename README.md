@@ -57,6 +57,10 @@ Several instances on the same repository can run at the same time.
 
 Refs accept anything git can resolve (`main`, `v1.2`, `HEAD~3`, a sha). `@` is `HEAD`.
 Worktrees are discovered with `git worktree list` and share the review state of the main repository.
+One whose directory is gone (git lists it as *prunable*) is not offered, and a remembered target
+inside a removed worktree falls back to the working tree on the next load. The comments and viewed
+flags kept under that worktree's key stay in the state file and come back if a worktree is created
+at the same path again.
 
 There is no target switcher in the UI: the sidebar's two blocks *are* the working tree, a commit is
 picked from the *Commits* panel, and the *Branch vs* and *Range* fields at the top of that panel open
