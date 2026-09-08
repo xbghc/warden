@@ -168,6 +168,12 @@ test/                API integration tests on a generated git repository
 
 Only `dist/`, `README.md`, `LICENSE` and `package.json` are published.
 
+Releasing: bump `version` in `package.json`, commit, then push a matching tag —
+`git tag v0.1.0 && git push --tags`. The `Publish to npm` workflow checks the tag against the version,
+runs build + tests through `prepublishOnly`, and publishes with the `NPM_TOKEN` repository secret
+(an npm automation token). CI runs typecheck, tests, build and a `publish --dry-run` on every push to
+`main` and every pull request.
+
 ## License
 
 MIT
