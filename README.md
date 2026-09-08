@@ -226,11 +226,12 @@ Only `dist/`, `README.md`, `LICENSE` and `package.json` are published.
 
 Releasing: bump `version` in `package.json`, commit, then push a matching tag —
 `git tag v0.2.0 && git push origin v0.2.0`. The `Publish to npm` workflow checks the tag against the
-version, runs build + tests through `prepublishOnly`, and publishes over OIDC trusted publishing —
-no `NPM_TOKEN` secret, and provenance is attested automatically. It relies on a trusted publisher
-configured on the package's npmjs.com settings page (user `xbghc`, repo `warden`, workflow
-`publish.yml`). CI runs typecheck, tests, build and a `publish --dry-run` on every push to `main` and
-every pull request.
+version, runs build + tests through `prepublishOnly`, and publishes over OIDC trusted publishing — no
+`NPM_TOKEN` secret to store or rotate. It relies on a trusted publisher configured on the package's
+npmjs.com settings page (user `xbghc`, repo `warden`, workflow `publish.yml`), and passes
+`--provenance` explicitly, because npm's automatic attestation does not fire through `pnpm publish`
+(0.2.0 shipped without one). CI runs typecheck, tests, build and a `publish --dry-run` on every push
+to `main` and every pull request.
 
 ## License
 

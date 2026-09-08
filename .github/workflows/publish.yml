@@ -3,8 +3,7 @@ name: Publish to npm
 # Push a tag like v0.1.0 (matching package.json "version") to publish @xbghc/warden.
 #
 # Auth is npm trusted publishing (OIDC) — no NPM_TOKEN secret, no token to rotate.
-# The registry hands out a short-lived credential only to this repo's publish.yml,
-# and provenance is attested automatically.
+# The registry hands out a short-lived credential only to this repo's publish.yml.
 #
 # This requires a Trusted Publisher configured on the package's npmjs.com settings
 # page (user `xbghc`, repo `warden`, workflow `publish.yml`). That page only exists
@@ -50,4 +49,7 @@ jobs:
             exit 1
           fi
       # prepublishOnly runs `pnpm build && pnpm test` before anything is uploaded.
-      - run: pnpm publish --access public --no-git-checks
+      # `--provenance` is explicit on purpose: npm generates an attestation on its own for a
+      # trusted publish, but that did not happen through `pnpm publish` (0.2.0 shipped without
+      # one). pnpm's own release workflow passes the flag for the same reason.
+      - run: pnpm publish --access public --no-git-checks --provenance
