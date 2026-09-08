@@ -10,11 +10,11 @@ name: Publish to npm
 # once the package does, so 0.1.0 was published from a laptop with `npm login`;
 # npm cannot bootstrap a brand-new package over OIDC (npm/cli#8544).
 #
-# Note there is deliberately no `registry-url:` on setup-node. It writes
-# `_authToken=${NODE_AUTH_TOKEN}` into .npmrc, which expands to empty with no token
-# set and can convince npm that auth is already configured, so it never starts the
-# OIDC exchange and fails with ENEEDAUTH or E404 (actions/setup-node#1551).
-# registry.npmjs.org is the default registry anyway.
+# There is deliberately no `registry-url:` on setup-node. Older versions wrote
+# `_authToken=${NODE_AUTH_TOKEN}` into .npmrc, which expands to empty with no token set and
+# could convince npm auth was already configured so it never started the OIDC exchange
+# (actions/setup-node#1551; fixed in v7 by dropping that dummy export). It is not needed
+# either way — registry.npmjs.org is the default registry.
 on:
   push:
     tags: ['v*']
@@ -29,9 +29,9 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
