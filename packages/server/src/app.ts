@@ -5,7 +5,6 @@ import { streamSSE } from 'hono/streaming';
 import type {
   ChangeEvent,
   Comment,
-  CommitInfo,
   CommitsResponse,
   CreateCommentRequest,
   CreateIssueRequest,
@@ -35,6 +34,7 @@ import type {
 } from '@warden/shared';
 import { commentScopeKey, isLocalTarget, isValidRef, localViewKeys } from '@warden/shared';
 import { badRequest, HttpError, notFound } from './errors.js';
+import { COMMIT_FORMAT, parseCommitLog } from './commits.js';
 import { revParse, runGit } from './git.js';
 import { currentBranch, getRepoInfo, listWorktrees, type RepoContext } from './repo.js';
 import { getFileDiff, getFullFile, listTargetDiffs, resolveTargetContext, toSummary, type TargetContext } from './targets.js';
@@ -644,24 +644,34 @@ export function createApp(opts: AppOptions): Hono {
   api.get('/commits', async (c) => {
     const limitRaw = Number(c.req.query('limit') ?? 200);
     const limit = Math.min(Math.max(Number.isFinite(limitRaw) ? Math.floor(limitRaw) : 200, 1), 1000);
-    const before = c.req.query('before') || undefined;
+    // Pages are an offset into one walk from `ref`, not "everything before the last sha seen":
+    // resuming from a sha only reaches that sha's ancestors, which in a history with merges
+    // silently drops the other branch's commits at every page boundary.
+    const offsetRaw = Number(c.req.query('offset') ?? 0);
+    const offset = Number.isFinite(offsetRaw) && offsetRaw > 0 ? Math.floor(offsetRaw) : 0;
     const filePath = c.req.query('path') || undefined;
     const ref = c.req.query('ref') || undefined;
     const rootParam = c.req.query('root') || undefined;
+    const q = (c.req.query('q') ?? '').trim();
+    const author = (c.req.query('author') ?? '').trim();
+    const firstParent = c.req.query('firstParent') === '1';
     let cwd = repo.root;
     if (rootParam) {
       const wt = (await worktrees()).find((w) => w.path === rootParam);
       if (!wt && rootParam !== repo.root) throw badRequest('unknown root', 'unknown_worktree');
       cwd = rootParam;
     }
-    if (before && !isValidRef(before)) throw badRequest('invalid before ref');
     if (ref && !isValidRef(ref)) throw badRequest('invalid ref');
     if (filePath && (filePath.startsWith('/') || filePath.split('/').includes('..'))) throw badRequest('invalid path');
+    if (q.length > 200 || author.length > 200) throw badRequest('search text too long');
 
-    const SEP = '\x1f';
-    const args = ['log', `--max-count=${limit + 1}`, `--format=%H${SEP}%h${SEP}%an${SEP}%ae${SEP}%aI${SEP}%P${SEP}%s`];
-    if (before) args.push(before);
-    else if (ref) args.push(ref);
+    const args = ['log', `--max-count=${limit + 1}`, `--skip=${offset}`, `--format=${COMMIT_FORMAT}`];
+    if (firstParent) args.push('--first-parent');
+    // Both patterns are literal, case-insensitive substrings — what a search box promises.
+    if (q || author) args.push('--fixed-strings', '--regexp-ignore-case');
+    if (q) args.push(`--grep=${q}`);
+    if (author) args.push(`--author=${author}`);
+    if (ref) args.push(ref);
     if (filePath) args.push('--', filePath);
     let stdout = '';
     try {
@@ -670,16 +680,20 @@ export function createApp(opts: AppOptions): Hono {
       if (e instanceof HttpError && e.code === 'git_failed') stdout = '';
       else throw e;
     }
-    let commits: CommitInfo[] = stdout
-      .split('\n')
-      .filter(Boolean)
-      .map((line) => {
-        const [sha = '', shortSha = '', author = '', email = '', date = '', parents = '', ...rest] = line.split(SEP);
-        return { sha, shortSha, author, email, date, parents: parents.split(' ').filter(Boolean), subject: rest.join(SEP) };
-      });
-    if (before) commits = commits.filter((x) => x.sha !== before && !x.sha.startsWith(before));
-    const hasMore = commits.length > limit;
-    const res: CommitsResponse = { commits: commits.slice(0, limit), hasMore };
+    const rows = parseCommitLog(stdout);
+    const hasMore = rows.length > limit;
+    let commits = rows.slice(0, limit);
+    // A search term that looks like a sha also resolves as one, so pasting a sha from a terminal
+    // finds the commit even though the message does not mention it. Only on the first page: the
+    // pages after it carry the same `q`, and the hit would repeat at the top of every one.
+    if (q && offset === 0 && /^[0-9a-f]{4,40}$/i.test(q)) {
+      const sha = await revParse(cwd, `${q}^{commit}`);
+      if (sha && !commits.some((x) => x.sha === sha)) {
+        const hit = parseCommitLog((await runGit(['log', '--max-count=1', `--format=${COMMIT_FORMAT}`, sha], { cwd })).stdout)[0];
+        if (hit) commits = [hit, ...commits];
+      }
+    }
+    const res: CommitsResponse = { commits, hasMore };
     return c.json(res);
   });
 

@@ -189,6 +189,12 @@ export interface FullFileResponse {
   content: string | null;
 }
 
+/** A branch or tag that points at a commit, as `git log --decorate` lists them. */
+export interface CommitRef {
+  name: string;
+  kind: 'branch' | 'tag';
+}
+
 export interface CommitInfo {
   sha: string;
   shortSha: string;
@@ -197,6 +203,10 @@ export interface CommitInfo {
   date: string;
   subject: string;
   parents: string[];
+  /** Branches (local and remote) and tags on this commit; the branch HEAD sits on comes first. */
+  refs: CommitRef[];
+  /** HEAD of the worktree the log was taken in is this commit. */
+  head: boolean;
 }
 
 export interface CommitsResponse {

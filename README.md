@@ -15,7 +15,9 @@ with line comments you can copy back to the agent as a prompt.
 - Auto-refresh — warden watches the repository and reloads itself when you edit, stage, commit or switch branches.
 - Local issues (title, Markdown body, open/closed) that link comments.
 - Branch-scoped todos, exportable as a numbered checklist.
-- Commit history browser.
+- Commit history browser: grouped by day, branch / tag labels, search by message, sha, author or
+  path (each a `git log` on the server, not a filter over the rows already loaded), and a
+  first-parent view that folds merged branches into their merge commits.
 - Click a line number to jump to that line in a running nvim instance (WSL2 friendly).
 - Read-only with respect to git: only whitelisted read sub-commands are ever executed.
 

@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import type { ChangeEvent, TargetKey } from '@warden/shared';
 import { formatTargetKey, isLocalTarget, tryParseTargetKey } from '@warden/shared';
 import { useStore } from '../store';
@@ -34,6 +34,11 @@ export function App() {
   const repo = useStore((s) => s.repo);
   const panel = useStore((s) => s.panel);
   const root = useStore((s) => s.root);
+
+  // Once opened, the commit list stays mounted behind the diff: picking a commit switches to its
+  // diff, and coming back should land on the same page and scroll position, not at the top.
+  const [commitsOpened, setCommitsOpened] = useState(panel === 'commits');
+  if (panel === 'commits' && !commitsOpened) setCommitsOpened(true);
 
   useEffect(() => {
     void init();
@@ -116,7 +121,10 @@ export function App() {
       <TopBar />
       <div className="body">
         <FileTree />
-        <main className="main">{panel === 'commits' ? <CommitsPanel /> : <DiffPanel />}</main>
+        <main className="main">
+          {commitsOpened && <CommitsPanel active={panel === 'commits'} />}
+          {panel !== 'commits' && <DiffPanel />}
+        </main>
         {panel === 'issues' ? <IssuesDrawer /> : panel === 'diff' ? <Rail /> : null}
       </div>
       <Toast />

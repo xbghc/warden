@@ -105,7 +105,7 @@ describe('repo & targets', () => {
     expect(range.files.map((f) => f.path)).toEqual(['src/a.ts', 'src/util/c.ts']);
     const page = await json<CommitsResponse>(await get(`/api/commits?limit=1`));
     expect(page.hasMore).toBe(true);
-    const next = await json<CommitsResponse>(await get(`/api/commits?limit=5&before=${c2}`));
+    const next = await json<CommitsResponse>(await get(`/api/commits?limit=5&offset=1`));
     expect(next.commits.map((c) => c.sha)).toEqual([c1]);
     const byPath = await json<CommitsResponse>(await get(`/api/commits?path=${k('src/util/c.ts')}`));
     expect(byPath.commits.map((c) => c.sha)).toEqual([c2]);
@@ -117,7 +117,7 @@ describe('repo & targets', () => {
     expect((await get(`/api/targets/${k('range:-x..HEAD')}/files`)).status).toBe(400);
     expect((await get(`/api/targets/${k('bogus')}/files`)).status).toBe(400);
     expect((await get(`/api/targets/${k('worktree:/nope:working')}/files`)).status).toBe(400);
-    expect((await get(`/api/commits?before=--output=x`)).status).toBe(400);
+    expect((await get(`/api/commits?ref=--output=x`)).status).toBe(400);
     expect((await get(`/api/targets/${k('working')}/file?path=${k('../etc/passwd')}`)).status).toBe(400);
   });
 
@@ -279,6 +279,75 @@ describe('viewed, comments, export, issues', () => {
     expect(res.selected).toBeUndefined();
     const open = await send('POST', '/api/nvim/open', { socket: '/nope.sock', absPath: '/x', line: 1 });
     expect(open.status).toBe(400);
+  });
+});
+
+describe('commit log', () => {
+  const log = async (query: string) => json<CommitsResponse>(await get(`/api/commits?${query}`));
+  const subjects = (r: CommitsResponse) => r.commits.map((c) => c.subject.slice(0, 2)).sort();
+
+  beforeAll(async () => {
+    // Settle whatever the earlier tests left in the working tree, then merge a topic branch, so the
+    // history has a tag, a side branch and a merge commit: c5 (merge) → c4 (topic) + c3 (tag) → c2 → c1.
+    fx.git('add', '-A');
+    fx.git('commit', '-q', '-m', 'c3: settle the tree');
+    fx.git('tag', 'v1.0');
+    fx.git('checkout', '-q', '-b', 'topic');
+    await fx.write('topic.txt', 'topic\n');
+    fx.git('add', 'topic.txt');
+    fx.git('commit', '-q', '-m', 'c4: topic work');
+    fx.git('checkout', '-q', 'main');
+    fx.git('merge', '-q', '--no-ff', '-m', 'c5: merge topic', 'topic');
+  });
+
+  it('decorates commits with HEAD, branches and tags', async () => {
+    const { commits, hasMore } = await log('limit=10');
+    expect(commits).toHaveLength(5);
+    expect(hasMore).toBe(false);
+    const by = (prefix: string) => commits.find((c) => c.subject.startsWith(prefix))!;
+    expect(commits[0]!.sha).toBe(by('c5').sha);
+    expect(by('c5')).toMatchObject({ head: true, refs: [{ name: 'main', kind: 'branch' }] });
+    expect(by('c5').parents).toHaveLength(2);
+    expect(by('c4')).toMatchObject({ head: false, refs: [{ name: 'topic', kind: 'branch' }] });
+    expect(by('c3').refs).toEqual([{ name: 'v1.0', kind: 'tag' }]);
+    expect(by('c1').refs).toEqual([]);
+  });
+
+  it('pages through a merged history without losing or repeating a commit', async () => {
+    const seen: string[] = [];
+    let pages = 0;
+    for (;;) {
+      const page = await log(`limit=2&offset=${seen.length}`);
+      pages++;
+      seen.push(...page.commits.map((c) => c.sha));
+      if (!page.hasMore) break;
+      if (pages > 10) throw new Error('paging never ends');
+    }
+    expect(pages).toBe(3);
+    expect(seen).toHaveLength(5);
+    expect(new Set(seen).size).toBe(5);
+  });
+
+  it('searches message, author, sha and path on the server', async () => {
+    expect(subjects(await log('q=TOPIC'))).toEqual(['c4', 'c5']);
+    expect(subjects(await log('q=topic&firstParent=1'))).toEqual(['c5']);
+    expect(subjects(await log('firstParent=1'))).toEqual(['c1', 'c2', 'c3', 'c5']);
+    expect(subjects(await log('author=fixture'))).toHaveLength(5);
+    expect(subjects(await log('author=nobody'))).toEqual([]);
+    expect(subjects(await log(`q=topic&path=${k('topic.txt')}`))).toEqual(['c4']);
+
+    const all = (await log('limit=10')).commits;
+    const c1 = all.find((c) => c.subject.startsWith('c1'))!;
+    const c5 = all[0]!;
+    // A sha (or a prefix of one) finds the commit itself, ahead of any message matches.
+    expect((await log(`q=${c1.sha.slice(0, 7)}`)).commits[0]!.sha).toBe(c1.sha);
+    expect((await log(`q=${c1.sha}`)).commits.map((c) => c.sha)).toEqual([c1.sha]);
+    // ...but only on the first page, or it would head every page of the same search.
+    expect((await log(`q=${c1.sha}&offset=1`)).commits).toEqual([]);
+    // Pages walk from the given ref, so the list is stable while HEAD moves on.
+    expect((await log(`ref=${c5.parents[0]}&limit=10`)).commits.map((c) => c.sha)).not.toContain(c5.sha);
+    // Search text is never an option to git.
+    expect((await get('/api/commits?q=--output=x&author=--exec-path')).status).toBe(200);
   });
 });
 

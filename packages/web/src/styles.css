@@ -1064,30 +1064,58 @@ kbd {
   flex-direction: column;
   min-height: 0;
 }
+/* Mounted but hidden while the diff is showing; the class above would otherwise win over [hidden]. */
+.commits-panel[hidden] {
+  display: none;
+}
 .commits-tools {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   padding: 6px 12px;
   border-bottom: 1px solid var(--line);
   background: var(--ground);
   flex-wrap: wrap;
 }
 .commits-tools input {
+  width: 140px;
+}
+.commits-tools input.search {
   width: 260px;
 }
-.commits-tools .muted {
+.commits-tools input.path {
   font-size: 12px;
+}
+.commits-count {
+  margin-left: auto;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .commits-list {
   flex: 1;
   overflow: auto;
   background: var(--surface);
 }
+/* Day headers stay put while their commits scroll under them. */
+.commit-day {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 12px;
+  background: var(--ground);
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-2);
+  font-size: 12px;
+  font-weight: 500;
+}
 .commit-row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   height: 30px;
   padding: 0 12px;
   border-bottom: 1px solid var(--surface-3);
@@ -1102,24 +1130,78 @@ kbd {
   box-shadow: inset 2px 0 var(--ink);
 }
 .commit-row .sha {
+  /* git widens the abbreviation as the repository grows; 7ch is the floor, not the width. */
+  flex: 0 0 auto;
+  min-width: 7ch;
   color: var(--ink-2);
-  flex: 0 0 70px;
 }
 .commit-row .subject {
   flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.commit-row .author {
-  flex: 0 0 120px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.commit-row .subject .pr {
+  margin-left: 6px;
+  color: var(--muted);
+  font-family: var(--mono);
   font-size: 12px;
 }
-.commit-row .date {
-  flex: 0 0 150px;
+.commit-row .refs {
+  display: inline-flex;
+  gap: 4px;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+.ref {
+  display: inline-block;
+  max-width: 180px;
+  height: 17px;
+  padding: 0 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  color: var(--ink-2);
   font-family: var(--mono);
   font-size: 11px;
+  line-height: 15px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ref-tag {
+  background: var(--surface-3);
+  border-color: var(--surface-3);
+}
+.ref-head {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #fff;
+}
+.ref-more {
+  border-style: dashed;
+  color: var(--muted);
+}
+.commit-row .author {
+  flex: 0 0 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ink-2);
+  font-size: 12px;
+}
+.commit-row .time {
+  flex: 0 0 40px;
+  text-align: right;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.commits-foot {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 44px;
+  font-size: 12px;
 }
 
 /* ---- issues / todos drawer ------------------------------------------------------- */

@@ -103,7 +103,7 @@ export const api = {
   /** Server-sent stream of repository changes for one worktree root. Caller owns `close()`. */
   events: (root: string) => new EventSource(`/api/events${q({ root })}`),
 
-  commits: (params: { path?: string; before?: string; limit?: number; root?: string; ref?: string }) =>
+  commits: (params: { path?: string; q?: string; author?: string; firstParent?: boolean; offset?: number; limit?: number; root?: string; ref?: string }) =>
     req<CommitsResponse>('GET', `/api/commits${q(params)}`),
 
   nvimInstances: (root: string, rescan = false) => req<NvimInstancesResponse>('GET', `/api/nvim/instances${q({ root, rescan })}`),
