@@ -134,7 +134,8 @@ branch name, plus mtime and size of the paths status reports — enough to notic
 already-modified file) and pushes a change event over `GET /api/events` (SSE). The page then re-runs
 the normal refresh: re-anchor, reload both file lists, reload the open diff. Your draft comment,
 selection, current view and current file are left alone, and the diff is scrolled back to where you
-were reading. Turn it off with the *自动刷新* checkbox; `r` still refreshes by hand.
+were reading. Turn it off with the *自动* toggle next to the refresh button; `r` still
+refreshes by hand.
 
 ## Todos
 

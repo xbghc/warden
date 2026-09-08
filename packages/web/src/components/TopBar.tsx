@@ -189,6 +189,7 @@ export function TopBar() {
           <button
             className={autoRefresh ? 'active' : ''}
             aria-pressed={autoRefresh}
+            aria-label="自动刷新"
             onClick={() => setAutoRefresh(!autoRefresh)}
             title={`仓库发生变化时自动刷新（当前${autoRefresh ? '开启' : '关闭'}）`}
           >
