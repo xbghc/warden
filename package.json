@@ -1,6 +1,6 @@
 {
   "name": "@xbghc/warden",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Local web UI to review git diffs (working tree, staged, commits, ranges, worktrees) with line comments exported as agent-ready prompts.",
   "type": "module",
   "license": "MIT",
