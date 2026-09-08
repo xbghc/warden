@@ -35,6 +35,21 @@ describe('RepoWatcher', () => {
   // A long interval keeps the timer out of the way; poll() is stepped by hand instead.
   const watcher = () => new RepoWatcher(fx.root, 60_000);
 
+  it('sees edits inside an untracked directory, not only its creation', async () => {
+    const w = watcher();
+    await w.poll();
+    await fx.write('newdir/sub/a.ts', 'a\n');
+    expect(await w.poll()).toBeDefined();
+    expect(await w.poll()).toBeUndefined();
+    await fx.write('newdir/sub/a.ts', 'aa\n');
+    expect(await w.poll()).toBeDefined();
+    await fx.write('newdir/sub/b.ts', 'b\n');
+    expect(await w.poll()).toBeDefined();
+    expect(await w.poll()).toBeUndefined();
+    await rm(path.join(fx.root, 'newdir'), { recursive: true, force: true });
+    expect(await w.poll()).toBeDefined();
+  });
+
   it('reports each edit, stage, commit and branch switch exactly once', async () => {
     const w = watcher();
     expect(await w.poll()).toBeUndefined(); // first poll only records the baseline

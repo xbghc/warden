@@ -106,14 +106,6 @@ export function createApp(opts: AppOptions): Hono {
     }
   };
 
-  const decodeKey = (raw: string): string => {
-    try {
-      return decodeURIComponent(raw);
-    } catch {
-      throw badRequest('malformed target key', 'invalid_target');
-    }
-  };
-
   const fileDiffWithHints = async (ctx: TargetContext, filePath: string, explicit?: { oldPath?: string; untracked?: boolean }) => {
     const cached = listings.get(ctx.key);
     const hint = cached && Date.now() - cached.at < LISTING_HINT_TTL_MS ? cached.files.find((f) => f.path === filePath) : undefined;
@@ -178,7 +170,7 @@ export function createApp(opts: AppOptions): Hono {
   // ---- targets -----------------------------------------------------------
 
   api.get('/targets/:key/files', async (c) => {
-    const key = decodeKey(c.req.param('key'));
+    const key = c.req.param('key');
     const ctx = await targetCtx(key);
     const diffs = await listTargetDiffs(ctx);
     listings.set(key, { at: Date.now(), files: diffs });
@@ -216,7 +208,7 @@ export function createApp(opts: AppOptions): Hono {
   });
 
   api.get('/targets/:key/file', async (c) => {
-    const key = decodeKey(c.req.param('key'));
+    const key = c.req.param('key');
     const filePath = c.req.query('path');
     if (!filePath) throw badRequest('missing path');
     const ctx = await targetCtx(key);
@@ -228,7 +220,7 @@ export function createApp(opts: AppOptions): Hono {
   });
 
   api.get('/targets/:key/file/full', async (c) => {
-    const key = decodeKey(c.req.param('key'));
+    const key = c.req.param('key');
     const filePath = c.req.query('path');
     if (!filePath) throw badRequest('missing path');
     const side = c.req.query('side') === 'old' ? 'old' : 'new';
@@ -239,7 +231,7 @@ export function createApp(opts: AppOptions): Hono {
   });
 
   api.put('/targets/:key/viewed', async (c) => {
-    const key = decodeKey(c.req.param('key'));
+    const key = c.req.param('key');
     await targetCtx(key);
     const body = (await c.req.json()) as { path?: string; viewed?: boolean; contentHash?: string };
     if (!body.path) throw badRequest('missing path');
@@ -256,13 +248,13 @@ export function createApp(opts: AppOptions): Hono {
   // ---- comments ----------------------------------------------------------
 
   api.get('/targets/:key/comments', async (c) => {
-    const key = decodeKey(c.req.param('key'));
+    const key = c.req.param('key');
     const state = await store.load();
     return c.json({ comments: state.targets[commentScopeKey(key)]?.comments ?? [] });
   });
 
   api.post('/targets/:key/comments', async (c) => {
-    const key = decodeKey(c.req.param('key'));
+    const key = c.req.param('key');
     const ctx = await targetCtx(key);
     const body = (await c.req.json()) as CreateCommentRequest;
     if (!body.filePath || typeof body.body !== 'string' || !body.body.trim()) throw badRequest('filePath and body are required');
@@ -296,7 +288,7 @@ export function createApp(opts: AppOptions): Hono {
   });
 
   api.patch('/targets/:key/comments/:id', async (c) => {
-    const key = decodeKey(c.req.param('key'));
+    const key = c.req.param('key');
     const id = c.req.param('id');
     const ctx = await targetCtx(key);
     const body = (await c.req.json()) as UpdateCommentRequest;
@@ -343,7 +335,7 @@ export function createApp(opts: AppOptions): Hono {
   });
 
   api.delete('/targets/:key/comments/:id', async (c) => {
-    const key = decodeKey(c.req.param('key'));
+    const key = c.req.param('key');
     const id = c.req.param('id');
     const removed = await store.update((s) => {
       const t = s.targets[commentScopeKey(key)];
@@ -358,7 +350,7 @@ export function createApp(opts: AppOptions): Hono {
   });
 
   api.post('/targets/:key/comments/reanchor', async (c) => {
-    const key = decodeKey(c.req.param('key'));
+    const key = c.req.param('key');
     const ctx = await targetCtx(key);
     const scope = commentScopeKey(key);
     const local = isLocalTarget(ctx.target);

@@ -158,8 +158,8 @@ bound to a hash of the file's diff; when the diff changes the flag is dropped an
 
 ## Auto-refresh
 
-warden polls the worktree every 1.5 s while the page is open (`git status --porcelain`, HEAD, the
-branch name, plus mtime and size of the paths status reports — enough to notice a second edit to an
+warden polls the worktree every 1.5 s while the page is open (`git status --porcelain
+--untracked-files=all`, HEAD, the branch name, plus mtime and size of the paths status reports — enough to notice a second edit to an
 already-modified file) and pushes a change event over `GET /api/events` (SSE). The page then re-runs
 the normal refresh: re-anchor, reload both file lists, reload the open diff. Your draft comment,
 selection, current view and current file are left alone, and the diff is scrolled back to where you

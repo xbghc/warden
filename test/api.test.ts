@@ -119,6 +119,60 @@ describe('repo & targets', () => {
     expect((await get(`/api/targets/${k('worktree:/nope:working')}/files`)).status).toBe(400);
     expect((await get(`/api/commits?ref=--output=x`)).status).toBe(400);
     expect((await get(`/api/targets/${k('working')}/file?path=${k('../etc/passwd')}`)).status).toBe(400);
+    expect((await get(`/api/targets/${k('working')}/file?path=${k('src/b.ts')}&old=${k('../x')}`)).status).toBe(400);
+    expect((await get(`/api/targets/${k('working')}/file?path=${k('src/b.ts')}&old=${k('/etc/hostname')}`)).status).toBe(400);
+  });
+
+  it('a range whose ends share no history is a 400, like base', async () => {
+    // An orphan root, made without touching the index or the working tree.
+    const sha = fx.git('commit-tree', '4b825dc642cb6eb9a060e54bf8d69288fbee4904', '-m', 'island').trim();
+    fx.git('branch', 'island', sha);
+    try {
+      const res = await get(`/api/targets/${k('range:main..island')}/files`);
+      expect(res.status).toBe(400);
+      expect((await json<{ code: string }>(res)).code).toBe('no_merge_base');
+    } finally {
+      fx.git('branch', '-D', 'island');
+    }
+  });
+
+  it('decodes a target key exactly once', async () => {
+    fx.git('branch', 'feat/a%b');
+    try {
+      expect((await get(`/api/targets/${k('range:main..feat/a%b')}/files`)).status).toBe(200);
+    } finally {
+      fx.git('branch', '-D', 'feat/a%b');
+    }
+  });
+
+  it('keeps names with spaces, quotes and a leading colon intact end to end', async () => {
+    const names = ['docs/my notes.md', 'sp "q.ts', ':colon.ts'];
+    const spec = (p: string) => `:(literal)${p}`;
+    for (const p of names) await fx.write(p, 'one\n');
+    fx.git('add', '--', ...names.map(spec));
+    for (const p of names) await fx.write(p, 'two\n');
+    await fx.write(':untracked.ts', 'new\n');
+    try {
+      const staged = await json<FilesResponse>(await get(`/api/targets/${k('staged')}/files`));
+      const added = staged.files.filter((f) => names.includes(f.path));
+      expect(added.map((f) => f.path).sort()).toEqual([...names].sort());
+      expect(added.every((f) => f.status === 'added')).toBe(true);
+      const working = await json<FilesResponse>(await get(`/api/targets/${k('working')}/files`));
+      expect(working.files.map((f) => f.path)).toEqual(expect.arrayContaining([...names, ':untracked.ts']));
+      for (const p of [...names, ':untracked.ts']) {
+        const diff = await json<FileDiff>(await get(`/api/targets/${k('working')}/file?path=${k(p)}`));
+        expect(diff.path).toBe(p);
+        expect(diff.hunks[0]!.lines.some((l) => l.type === 'add')).toBe(true);
+      }
+      for (const p of names) {
+        const full = await json<{ content: string | null }>(await get(`/api/targets/${k('working')}/file/full?path=${k(p)}&side=old`));
+        expect(full.content).toBe('one\n');
+      }
+    } finally {
+      fx.git('rm', '-q', '-f', '--cached', '--', ...names.map(spec));
+      for (const p of [...names, ':untracked.ts']) await rm(path.join(fx.root, p), { force: true });
+      await rm(path.join(fx.root, 'docs'), { recursive: true, force: true });
+    }
   });
 
   it('worktree targets', async () => {

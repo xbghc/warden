@@ -186,12 +186,14 @@ export function parseUnifiedDiff(text: string): FileDiff[] {
       continue;
     }
 
+    // A name with a space in it gets a tab after it on these two lines (quoted or not), so a
+    // reader can tell where the name ends. A tab that is part of a name is quoted, never bare.
     if (line.startsWith('--- ')) {
-      c.fromMinus = stripPrefix(line.slice(4), 'a/');
+      c.fromMinus = stripPrefix(line.slice(4).replace(/\t$/, ''), 'a/');
       continue;
     }
     if (line.startsWith('+++ ')) {
-      c.fromPlus = stripPrefix(line.slice(4), 'b/');
+      c.fromPlus = stripPrefix(line.slice(4).replace(/\t$/, ''), 'b/');
       continue;
     }
     if (line.startsWith('new file mode ')) {
