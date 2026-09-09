@@ -84,7 +84,10 @@ everything since the branch forked off `<ref>` — the commits plus whatever is 
 untracked. The diff runs against the merge base, so commits that landed on `<ref>` after the fork are
 not listed as reverted (which is what a plain `git diff <ref>` would do). The *Branch vs* field in the
 Commits panel suggests the base for you — the main worktree's branch when a sibling worktree is under
-review, otherwise `main` or `master` — and takes any ref. Unlike the three local views, `base` keeps its own
+review, otherwise `main` or `master` — and takes any ref. Beside it the panel names the fork point (the
+merge base with that ref, `GET /api/fork-point`) with how many commits the branch is ahead of it and how
+many landed on the base since, and the list marks that commit with a *分叉自* chip and a rule above it:
+what sits above is the branch's own work. Unlike the three local views, `base` keeps its own
 pool of comments and a commit never deletes them: the round under review is not over when the agent
 commits, so a comment whose lines changed stays *orphaned*, snippet and all, until you have checked
 the fix and delete or re-attach it.
@@ -276,7 +279,7 @@ move into the matching scope the first time the file is read.
 
 Single user, local only. The server binds to `127.0.0.1` and executes git only through
 `execFile('git', [...])`. Reads go through an argument whitelist (`rev-parse`, `diff`, `show`, `log`,
-`worktree list`, `ls-files`, `status`, `merge-base`) that refuses option-looking refs and any write-capable
+`worktree list`, `ls-files`, `status`, `merge-base`, `rev-list`) that refuses option-looking refs and any write-capable
 flag; requests that would need anything else get HTTP 400. The one write is `POST /api/targets/:key/stage`,
 which runs `git apply --cached` (with `--reverse` for the Staged view) on a patch the server itself builds
 from the diff it just produced — the patch is never taken from the request, only the line indices are,

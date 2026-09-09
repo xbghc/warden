@@ -214,6 +214,18 @@ export interface CommitsResponse {
   hasMore: boolean;
 }
 
+/** Where HEAD forked off a base ref: what the Commits panel reports beside its *Branch vs* field. */
+export interface ForkPointResponse {
+  /** The ref the fork point was computed against, as requested. */
+  base: string;
+  /** `merge-base(base, HEAD)`: the last commit the branch shares with `base`. */
+  sha: string;
+  /** Commits on HEAD that `base` does not have. */
+  ahead: number;
+  /** Commits that landed on `base` after the fork. */
+  behind: number;
+}
+
 export interface NvimInstance {
   socket: string;
   cwd: string;

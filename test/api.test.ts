@@ -3,7 +3,7 @@ import path from 'node:path';
 import { mkdtemp, rm, unlink } from 'node:fs/promises';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Hono } from 'hono';
-import type { Comment, CommitsResponse, ExportResponse, FileDiff, FilesResponse, ReanchorResponse, RepoInfo, ReviewState, StageResponse } from '@warden/shared';
+import type { Comment, CommitsResponse, ExportResponse, FileDiff, FilesResponse, ForkPointResponse, ReanchorResponse, RepoInfo, ReviewState, StageResponse } from '@warden/shared';
 import { createApp, resolveRepo, StateStore, NvimService } from '@warden/server';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
@@ -216,6 +216,9 @@ describe('repo & targets', () => {
       const local = await json<FilesResponse>(await get(`/api/targets/${k(`worktree:${wt.path}:all`)}/files`));
       expect(local.files.map((f) => f.path)).toEqual(['src/b.ts', 'src/fresh.ts']);
       expect((await get(`/api/targets/${k(`worktree:${wt.path}:base:nope`)}/files`)).status).toBe(400);
+      // The fork point that `base` diffs against, seen from inside the worktree: one commit each side since.
+      const fork = await json<ForkPointResponse>(await get(`/api/fork-point?root=${k(wt.path)}&base=main`));
+      expect(fork).toEqual({ base: 'main', sha: fx.git('rev-parse', 'HEAD~1').trim(), ahead: 1, behind: 1 });
     } finally {
       fx.git('worktree', 'remove', '--force', wtPath);
     }
@@ -612,6 +615,29 @@ describe('commit log', () => {
     expect((await log(`ref=${c5.parents[0]}&limit=10`)).commits.map((c) => c.sha)).not.toContain(c5.sha);
     // Search text is never an option to git.
     expect((await get('/api/commits?q=--output=x&author=--exec-path')).status).toBe(200);
+  });
+
+  it('reports where HEAD forked off a base', async () => {
+    const fork = (query: string) => get(`/api/fork-point?${query}`);
+    const all = (await log('limit=10')).commits;
+    const by = (prefix: string) => all.find((c) => c.subject.startsWith(prefix))!;
+    // topic is merged in, so the fork point is its tip and main is the merge commit ahead of it.
+    expect(await json(await fork('base=topic'))).toEqual({ base: 'topic', sha: by('c4').sha, ahead: 1, behind: 0 });
+    expect(await json(await fork('base=v1.0'))).toMatchObject({ sha: by('c3').sha, ahead: 2, behind: 0 });
+    expect(await json(await fork('base=main'))).toMatchObject({ sha: by('c5').sha, ahead: 0, behind: 0 });
+    expect(await json(await fork(`base=${by('c1').sha}`))).toMatchObject({ sha: by('c1').sha, ahead: 4, behind: 0 });
+    expect(await json<{ code: string }>(await fork('base=nope'))).toMatchObject({ code: 'unknown_ref' });
+    expect((await fork('')).status).toBe(400);
+    expect((await fork('base=--output=x')).status).toBe(400);
+    expect((await fork('base=main&root=/nowhere')).status).toBe(400);
+    // An orphan root shares nothing with HEAD, like for a `base` target.
+    const island = fx.git('commit-tree', '4b825dc642cb6eb9a060e54bf8d69288fbee4904', '-m', 'island').trim();
+    fx.git('branch', 'island', island);
+    try {
+      expect(await json<{ code: string }>(await fork('base=island'))).toMatchObject({ code: 'no_merge_base' });
+    } finally {
+      fx.git('branch', '-D', 'island');
+    }
   });
 });
 

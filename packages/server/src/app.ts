@@ -11,6 +11,7 @@ import type {
   CreateTodoRequest,
   ExportRequest,
   ExportResponse,
+  ForkPointResponse,
   FileDiff,
   FileEntry,
   FilesResponse,
@@ -36,7 +37,7 @@ import type {
 import { commentScopeKey, insertAfter, isLocalTarget, isValidRef, localViewKeys, moveBefore, stageModeFor, tryParseTargetKey } from '@warden/shared';
 import { badRequest, HttpError, notFound } from './errors.js';
 import { COMMIT_FORMAT, parseCommitLog } from './commits.js';
-import { applyToIndex, revParse, runGit } from './git.js';
+import { applyToIndex, mergeBase, refExists, revParse, runGit } from './git.js';
 import { currentBranch, getRepoInfo, listWorktrees, type RepoContext } from './repo.js';
 import { getFileDiff, getFullFile, listTargetDiffs, resolveTargetContext, toSummary, type TargetContext } from './targets.js';
 import { buildAnchor, reanchorComment } from './anchor.js';
@@ -742,6 +743,23 @@ export function createApp(opts: AppOptions): Hono {
       }
     }
     const res: CommitsResponse = { commits, hasMore };
+    return c.json(res);
+  });
+
+  // Where HEAD forked off a base: the commit a `base` target diffs against, with how far the two
+  // sides have moved since. Its own route, not a field of the log, so that editing the base in the
+  // Commits panel does not re-walk the history.
+  api.get('/fork-point', async (c) => {
+    const base = (c.req.query('base') ?? '').trim();
+    if (!isValidRef(base)) throw badRequest('invalid base ref');
+    const cwd = await knownRoot(c.req.query('root') || undefined);
+    if (!(await refExists(cwd, base))) throw badRequest(`unknown ref: ${base}`, 'unknown_ref');
+    // An unborn HEAD forked off nothing; the `base` target diffs it against the empty tree instead.
+    const sha = (await refExists(cwd, 'HEAD')) ? await mergeBase(cwd, base, 'HEAD') : undefined;
+    if (!sha) throw badRequest(`${base} and HEAD share no history`, 'no_merge_base');
+    // `<only on base>\t<only on HEAD>`. `base` cannot contain `..`, so the range is ours.
+    const counts = (await runGit(['rev-list', '--left-right', '--count', `${base}...HEAD`], { cwd })).stdout.trim().split(/\s+/);
+    const res: ForkPointResponse = { base, sha, ahead: Number(counts[1] ?? 0), behind: Number(counts[0] ?? 0) };
     return c.json(res);
   });
 

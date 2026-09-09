@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import type { CommitInfo, CommitRef } from '@warden/shared';
+import type { CommitInfo, CommitRef, ForkPointResponse } from '@warden/shared';
 import { formatTargetKey, parseTargetKey } from '@warden/shared';
-import { api } from '../api';
+import { api, ApiError } from '../api';
 import { useStore } from '../store';
 
 const PAGE = 200;
@@ -63,6 +63,24 @@ function Refs({ refs, head }: { refs: CommitRef[]; head: boolean }) {
 
 type Row = { kind: 'day'; key: string; label: string } | { kind: 'commit'; c: CommitInfo };
 
+type ForkState = { kind: 'ok'; base: string; fork: ForkPointResponse } | { kind: 'error'; base: string; message: string };
+
+/** Beside the *Branch vs* field: where HEAD forked off the base, and how far each side has moved since. */
+function ForkNote({ state, shortSha, onPick }: { state: ForkState; shortSha: (sha: string) => string; onPick: (sha: string) => void }) {
+  if (state.kind === 'error') return <span className="fork-note muted">{state.message}</span>;
+  const { base, sha, ahead, behind } = state.fork;
+  if (ahead === 0 && behind === 0) return <span className="fork-note muted">与 {base} 相同</span>;
+  return (
+    <span className="fork-note muted">
+      分叉于{' '}
+      <button type="button" className="link mono" onClick={() => onPick(sha)} title={`${sha}\n查看这个提交`}>
+        {shortSha(sha)}
+      </button>{' '}
+      · 领先 {ahead} · 落后 {behind}
+    </span>
+  );
+}
+
 export function CommitsPanel({ active }: { active: boolean }) {
   const root = useStore((s) => s.root);
   const repo = useStore((s) => s.repo);
@@ -98,6 +116,33 @@ export function CommitsPanel({ active }: { active: boolean }) {
     const h = rangeHead.trim();
     if (h) void setTarget(formatTargetKey({ kind: 'range', base: rangeBase.trim() || '@', head: h, ...wt }));
   };
+
+  // Where HEAD forked off the base in the field (or the suggested one). Looked up apart from the
+  // list, so editing the field does not re-walk the history; `head` is a dependency because a
+  // commit landing moves the counts.
+  const effectiveBase = baseRef.trim() || suggestedBase;
+  const [fork, setFork] = useState<ForkState | null>(null);
+  const forkSeq = useRef(0);
+  useEffect(() => {
+    const id = ++forkSeq.current;
+    const t = setTimeout(async () => {
+      try {
+        const res = await api.forkPoint({ root, base: effectiveBase });
+        if (id === forkSeq.current) setFork({ kind: 'ok', base: effectiveBase, fork: res });
+      } catch (e) {
+        if (id !== forkSeq.current) return;
+        // A half-typed ref is not worth a message; anything else is said in place, never as a toast.
+        if (e instanceof ApiError && e.code === 'unknown_ref') setFork(null);
+        else if (e instanceof ApiError && e.code === 'no_merge_base') setFork({ kind: 'error', base: effectiveBase, message: `与 ${effectiveBase} 没有共同历史` });
+        else setFork({ kind: 'error', base: effectiveBase, message: e instanceof Error ? e.message : String(e) });
+      }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [root, effectiveBase, head]);
+  // A result for the base the field no longer names is not shown while the new one is on its way.
+  const forkShown = fork?.base === effectiveBase ? fork : null;
+  const forkSha = forkShown?.kind === 'ok' && (forkShown.fork.ahead > 0 || forkShown.fork.behind > 0) ? forkShown.fork.sha : null;
+  const pickCommit = (sha: string) => void setTarget(formatTargetKey({ kind: 'commit', sha, ...wt }));
 
   // Typing settles for a moment before it reaches git; Enter applies at once.
   const apply = useCallback((next: Filters) => setFilters((prev) => (sameFilters(prev, next) ? prev : next)), []);
@@ -257,6 +302,9 @@ export function CommitsPanel({ active }: { active: boolean }) {
           <span className="compare-label">Branch vs</span>
           <input value={baseRef} onChange={(e) => setBaseRef(e.target.value)} placeholder={suggestedBase} spellCheck={false} aria-label="base 分支" />
           <button type="submit">对比</button>
+          {forkShown && (
+            <ForkNote state={forkShown} shortSha={(sha) => commits.find((c) => c.sha === sha)?.shortSha ?? sha.slice(0, 7)} onPick={pickCommit} />
+          )}
         </form>
         <form
           className="inline-form"
@@ -289,11 +337,12 @@ export function CommitsPanel({ active }: { active: boolean }) {
           const time = Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
           const { text, pr } = splitSubject(c.subject);
           const isCurrent = !!currentSha && (c.sha === currentSha || c.sha.startsWith(currentSha));
+          const isFork = c.sha === forkSha;
           return (
             <div
               key={c.sha}
-              className={`commit-row ${isCurrent ? 'active' : ''}`}
-              onClick={() => void setTarget(formatTargetKey({ kind: 'commit', sha: c.sha, ...wt }))}
+              className={`commit-row ${isCurrent ? 'active' : ''} ${isFork ? 'fork' : ''}`}
+              onClick={() => pickCommit(c.sha)}
               title={`${c.sha}\n${c.author} <${c.email}>\n${d.toLocaleString()}`}
             >
               <span className="mono sha">{c.shortSha}</span>
@@ -302,6 +351,11 @@ export function CommitsPanel({ active }: { active: boolean }) {
                 {pr && <span className="pr">{pr}</span>}
               </span>
               <Refs refs={c.refs} head={c.head} />
+              {isFork && (
+                <span className="ref ref-fork" title={`与 ${effectiveBase} 的共同祖先（merge-base）`}>
+                  分叉自 {effectiveBase}
+                </span>
+              )}
               {c.parents.length > 1 && <span className="badge">merge</span>}
               <span className="author">{c.author}</span>
               <span className="time">{time}</span>

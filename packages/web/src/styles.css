@@ -1312,6 +1312,24 @@ kbd {
   border-style: dashed;
   color: var(--muted);
 }
+/* The fork point: the last commit shared with the base. The rule above it is where the branch begins. */
+.ref-fork {
+  border-style: dashed;
+  border-color: var(--ink-2);
+  color: var(--ink);
+}
+.commit-row.fork {
+  border-top: 1px dashed var(--line-strong);
+}
+.fork-note {
+  margin-left: 6px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.fork-note .link {
+  padding: 0;
+  font-size: 12px;
+}
 .commit-row .author {
   flex: 0 0 110px;
   overflow: hidden;

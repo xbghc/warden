@@ -8,6 +8,7 @@ import type {
   ExportResponse,
   FileDiff,
   FilesResponse,
+  ForkPointResponse,
   FullFileResponse,
   Issue,
   NvimInstancesResponse,
@@ -108,6 +109,7 @@ export const api = {
 
   commits: (params: { path?: string; q?: string; author?: string; firstParent?: boolean; offset?: number; limit?: number; root?: string; ref?: string }) =>
     req<CommitsResponse>('GET', `/api/commits${q(params)}`),
+  forkPoint: (params: { root?: string; base: string }) => req<ForkPointResponse>('GET', `/api/fork-point${q(params)}`),
 
   nvimInstances: (root: string, rescan = false) => req<NvimInstancesResponse>('GET', `/api/nvim/instances${q({ root, rescan })}`),
   nvimSelect: (root: string, socket: string) => req<{ ok: true }>('POST', '/api/nvim/select', { root, socket }),
