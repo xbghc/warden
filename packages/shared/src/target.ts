@@ -146,6 +146,19 @@ export function commentScopeKey(key: TargetKey): TargetKey {
   return t.worktree ? `worktree:${t.worktree}:local` : 'local';
 }
 
+export type StageMode = 'stage' | 'unstage';
+
+/**
+ * What staging means in a view, or undefined where it means nothing. `working` diffs the index
+ * against the working tree, so its hunks can be moved into the index; `staged` shows what is in
+ * the index, so its hunks can be taken back out. `all` mixes the two and a commit is history.
+ */
+export function stageModeFor(t: Target): StageMode | undefined {
+  if (t.kind === 'working') return 'stage';
+  if (t.kind === 'staged') return 'unstage';
+  return undefined;
+}
+
 /** The local view keys of the same worktree as `key`, in reanchor-candidate order. */
 export function localViewKeys(key: TargetKey): TargetKey[] {
   const t = tryParseTargetKey(key);

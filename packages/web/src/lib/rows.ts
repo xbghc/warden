@@ -17,11 +17,17 @@ export interface Expansion {
   all: boolean;
 }
 
+/**
+ * A code row also knows where it sits in its hunk: `pos` is its ordinal among the rows of that
+ * hunk in the current layout (a line in unified view, a pair in split view) and `indices` are the
+ * changed lines of `hunk.lines` it shows — none for context, one for a unified row, up to two for
+ * a pair. Staging picks rows, and a pick is turned into line indices through these.
+ */
 export type Row =
   | { key: string; kind: 'gap'; gap: Gap; hidden: number | null }
   | { key: string; kind: 'hunk'; hunkIndex: number; hunk: Hunk }
-  | { key: string; kind: 'line'; line: DiffLine; hunkIndex: number; expanded: boolean }
-  | { key: string; kind: 'pair'; left?: DiffLine; right?: DiffLine; hunkIndex: number; expanded: boolean };
+  | { key: string; kind: 'line'; line: DiffLine; hunkIndex: number; expanded: boolean; pos: number; indices: number[] }
+  | { key: string; kind: 'pair'; left?: DiffLine; right?: DiffLine; hunkIndex: number; expanded: boolean; pos: number; indices: number[] };
 
 export function computeGaps(diff: FileDiff, totalNewLines: number | null): Gap[] {
   const gaps: Gap[] = [];
@@ -70,25 +76,33 @@ function expandedLines(gap: Gap, exp: Expansion | undefined, fullLines: string[]
   return { top: topLines, bottom: bottomLines, hidden: size - top - bottom };
 }
 
-/** Pair del/add runs for side-by-side display. */
-function pairLines(lines: DiffLine[]): { left?: DiffLine; right?: DiffLine }[] {
-  const out: { left?: DiffLine; right?: DiffLine }[] = [];
-  let dels: DiffLine[] = [];
-  let adds: DiffLine[] = [];
+/** Pair del/add runs for side-by-side display; `indices` are the positions of the paired lines. */
+function pairLines(lines: DiffLine[]): { left?: DiffLine; right?: DiffLine; indices: number[] }[] {
+  const out: { left?: DiffLine; right?: DiffLine; indices: number[] }[] = [];
+  let dels: number[] = [];
+  let adds: number[] = [];
   const flush = () => {
     const n = Math.max(dels.length, adds.length);
-    for (let i = 0; i < n; i++) out.push({ left: dels[i], right: adds[i] });
+    for (let i = 0; i < n; i++) {
+      const l = dels[i];
+      const r = adds[i];
+      out.push({
+        left: l === undefined ? undefined : lines[l],
+        right: r === undefined ? undefined : lines[r],
+        indices: [l, r].filter((x): x is number => x !== undefined),
+      });
+    }
     dels = [];
     adds = [];
   };
-  for (const l of lines) {
-    if (l.type === 'del') dels.push(l);
-    else if (l.type === 'add') adds.push(l);
+  lines.forEach((l, i) => {
+    if (l.type === 'del') dels.push(i);
+    else if (l.type === 'add') adds.push(i);
     else {
       flush();
-      out.push({ left: l, right: l });
+      out.push({ left: l, right: l, indices: [] });
     }
-  }
+  });
   flush();
   return out;
 }
@@ -106,15 +120,33 @@ export function buildRows({ diff, viewMode, expansions, fullLines }: BuildRowsIn
   const canExpand = diff.status !== 'deleted' && diff.status !== 'added' && !diff.binary;
   const gaps = canExpand ? computeGaps(diff, fullLines ? fullLines.length : null) : [];
 
+  // Expanded context is borrowed from the full file, not part of any hunk: no position, no lines.
   const emitLines = (lines: DiffLine[], hunkIndex: number, expanded: boolean) => {
     if (viewMode === 'unified') {
-      for (const l of lines) {
-        rows.push({ key: `l:${hunkIndex}:${l.oldLineNo ?? '-'}:${l.newLineNo ?? '-'}`, kind: 'line', line: l, hunkIndex, expanded });
-      }
+      lines.forEach((l, i) => {
+        rows.push({
+          key: `l:${hunkIndex}:${l.oldLineNo ?? '-'}:${l.newLineNo ?? '-'}`,
+          kind: 'line',
+          line: l,
+          hunkIndex,
+          expanded,
+          pos: expanded ? -1 : i,
+          indices: expanded || l.type === 'context' ? [] : [i],
+        });
+      });
     } else {
-      for (const p of pairLines(lines)) {
-        rows.push({ key: `p:${hunkIndex}:${p.left?.oldLineNo ?? '-'}:${p.right?.newLineNo ?? '-'}`, kind: 'pair', left: p.left, right: p.right, hunkIndex, expanded });
-      }
+      pairLines(lines).forEach((p, i) => {
+        rows.push({
+          key: `p:${hunkIndex}:${p.left?.oldLineNo ?? '-'}:${p.right?.newLineNo ?? '-'}`,
+          kind: 'pair',
+          left: p.left,
+          right: p.right,
+          hunkIndex,
+          expanded,
+          pos: expanded ? -1 : i,
+          indices: expanded ? [] : p.indices,
+        });
+      });
     }
   };
 
@@ -145,6 +177,18 @@ export function findRowIndex(rows: Row[], side: CommentSide, line: number): numb
     if (r.kind === 'pair') return side === 'new' ? r.right?.newLineNo === line : r.left?.oldLineNo === line;
     return false;
   });
+}
+
+/** Changed lines (indices into the hunk) shown by the rows of `hunkIndex` whose position lies in [a, b]. */
+export function pickedLineIndices(rows: Row[], hunkIndex: number, a: number, b: number): number[] {
+  const lo = Math.min(a, b);
+  const hi = Math.max(a, b);
+  const out: number[] = [];
+  for (const r of rows) {
+    if ((r.kind !== 'line' && r.kind !== 'pair') || r.hunkIndex !== hunkIndex || r.pos < lo || r.pos > hi) continue;
+    out.push(...r.indices);
+  }
+  return out.sort((x, y) => x - y);
 }
 
 export function hunkRowIndices(rows: Row[]): number[] {

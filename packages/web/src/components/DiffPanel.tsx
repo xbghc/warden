@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { FileEntry } from '@warden/shared';
-import { useStore } from '../store';
+import { useStageMode, useStore } from '../store';
 import { DiffView } from './DiffView';
 import { STATUS_LETTER } from './FileTree';
 import { totalDiffLines } from '../lib/rows';
@@ -22,6 +22,9 @@ function FileHeader({ entry }: { entry: FileEntry }) {
   const toggleViewed = useStore((s) => s.toggleViewed);
   const openInNvim = useStore((s) => s.openInNvim);
   const nvimReady = useStore((s) => !!s.nvim?.selected);
+  const stageLines = useStore((s) => s.stageLines);
+  const staging = useStore((s) => s.staging);
+  const mode = useStageMode();
   return (
     <div className="file-head">
       <span className={`status status-${entry.status}`} title={entry.status}>
@@ -48,10 +51,51 @@ function FileHeader({ entry }: { entry: FileEntry }) {
       <button className="link" disabled={!nvimReady} onClick={() => void openInNvim(entry.path, 1)} title="在 nvim 中打开">
         在 nvim 中打开
       </button>
+      {mode && (
+        <button
+          disabled={staging || entry.binary}
+          onClick={() => void stageLines(entry.path)}
+          title={
+            entry.binary
+              ? '二进制文件无法从这里暂存，请用 git add / git restore --staged'
+              : mode === 'stage'
+                ? '把这个文件的全部改动放入暂存区（含模式变更）'
+                : '把这个文件的全部改动移出暂存区'
+          }
+        >
+          {mode === 'stage' ? '暂存文件' : '取消暂存文件'}
+        </button>
+      )}
       <label className="check">
         <input type="checkbox" checked={entry.viewed} onChange={() => void toggleViewed(entry.path)} />
         Viewed
       </label>
+    </div>
+  );
+}
+
+/** Floats over the diff while rows are picked: what was picked, and the one thing to do with it. */
+function StageBar({ filePath }: { filePath: string }) {
+  const sel = useStore((s) => (s.stageSel?.filePath === filePath ? s.stageSel : null));
+  const staging = useStore((s) => s.staging);
+  const stageSelection = useStore((s) => s.stageSelection);
+  const setStageSel = useStore((s) => s.setStageSel);
+  const mode = useStageMode();
+  if (!sel || !mode) return null;
+  const n = sel.lines.length;
+  return (
+    <div className="stage-bar" role="toolbar" aria-label="暂存所选行">
+      <span className="stage-bar-count">
+        已选 <b>{n}</b> 行
+      </span>
+      <button className="primary" disabled={staging || n === 0} onClick={() => void stageSelection()} title="s">
+        {staging ? '处理中…' : mode === 'stage' ? '暂存所选' : '取消暂存所选'}
+        <kbd>s</kbd>
+      </button>
+      <button onClick={() => setStageSel(null)} title="Esc">
+        放弃
+        <kbd>Esc</kbd>
+      </button>
     </div>
   );
 }
@@ -119,6 +163,7 @@ export function DiffPanel() {
     <div className="diff-panel">
       <FileHeader entry={entry} />
       {body}
+      <StageBar filePath={activeFile} />
     </div>
   );
 }

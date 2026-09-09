@@ -8,6 +8,7 @@ import type {
   CreateTodoRequest,
   FileDiff,
   FileEntry,
+  HunkSelection,
   Issue,
   NvimInstancesResponse,
   Prefs,
@@ -19,7 +20,7 @@ import type {
   UpdateTodoRequest,
   ViewMode,
 } from '@warden/shared';
-import { isLocalTarget, localViewKeys, tryParseTargetKey } from '@warden/shared';
+import { insertAfter, isLocalTarget, localViewKeys, moveBefore, stageModeFor, tryParseTargetKey, type StageMode } from '@warden/shared';
 import { api, ApiError } from './api';
 import { copyText } from './lib/clipboard';
 import { todoText } from './lib/todos';
@@ -33,10 +34,17 @@ export function branchOf(repo: RepoInfo | null, root: string): string {
 export type DiffState = { status: 'loading' } | { status: 'ok'; diff: FileDiff } | { status: 'error'; message: string };
 export type Panel = 'diff' | 'commits' | 'issues';
 
+/** The one thing a toast can offer besides its text: the way back (撤消). */
+export interface ToastAction {
+  label: string;
+  run: () => void;
+}
+
 export interface Toast {
   id: number;
   message: string;
   kind: 'info' | 'error';
+  action?: ToastAction;
 }
 
 export interface EditorTarget {
@@ -49,6 +57,28 @@ export interface EditorTarget {
 export type RailFilter = 'file' | 'all' | 'unexported';
 /** The two notebooks of the right-hand rail. */
 export type RailTab = 'comments' | 'todos';
+
+/**
+ * Rows picked for staging in the open diff: a drag over one hunk, kept as the positions it
+ * started and ended on plus the changed lines those rows show (see `Row.indices`). Positions
+ * mean nothing once the diff or the layout changes, so the pick is dropped with them.
+ */
+export interface StageSelection {
+  filePath: string;
+  hunkIndex: number;
+  anchor: number;
+  head: number;
+  /** Indices into `hunk.lines` of the changed lines picked. */
+  lines: number[];
+}
+
+/** Whether the view in front stages, unstages, or neither (a commit, a range, `all`). */
+export function useStageMode(): StageMode | undefined {
+  return useStore((s) => {
+    const t = tryParseTargetKey(s.targetKey);
+    return t ? stageModeFor(t) : undefined;
+  });
+}
 
 export interface JumpTarget {
   file: string;
@@ -101,6 +131,9 @@ export interface AppStore {
   focusedCommentId: string | null;
   railFilter: RailFilter;
   railTab: RailTab;
+  stageSel: StageSelection | null;
+  /** A stage request is in flight; the controls wait for it rather than queue a second one. */
+  staging: boolean;
 
   init(): Promise<void>;
   setTarget(key: TargetKey): Promise<void>;
@@ -124,7 +157,11 @@ export interface AppStore {
   loadIssues(): Promise<void>;
   createIssue(body: CreateIssueRequest): Promise<Issue | undefined>;
   updateIssue(id: string, body: UpdateIssueRequest): Promise<void>;
+  /** No confirmation: the toast offers 撤消 instead, as a task list would. */
   deleteIssue(id: string): Promise<void>;
+  deleteIssues(ids: string[]): Promise<void>;
+  /** Put the issue right before `before` in the list, or last. */
+  moveIssue(id: string, before: string | null): Promise<void>;
   exportIssue(id: string): Promise<void>;
   scanNvim(force?: boolean): Promise<void>;
   selectNvim(socket: string): Promise<void>;
@@ -143,9 +180,20 @@ export interface AppStore {
   createTodo(body: CreateTodoRequest): Promise<Todo | undefined>;
   updateTodo(id: string, body: UpdateTodoRequest): Promise<void>;
   deleteTodo(id: string): Promise<void>;
+  deleteTodos(ids: string[]): Promise<void>;
+  moveTodo(id: string, before: string | null): Promise<void>;
   /** Copy one todo to the clipboard — its title and body, nothing about where it lives. */
   copyTodo(id: string): Promise<void>;
-  showToast(message: string, kind?: Toast['kind']): void;
+  setStageSel(sel: StageSelection | null): void;
+  /**
+   * Stage (Unstaged view) or unstage (Staged view) lines of a file; no hunks means the whole file.
+   * `view` defaults to the one in front — the sidebar blocks pass their own. Resolves to whether
+   * the index changed.
+   */
+  stageLines(path: string, hunks?: HunkSelection[], view?: TargetKey): Promise<boolean>;
+  /** Stage or unstage whatever `stageSel` holds. */
+  stageSelection(): Promise<void>;
+  showToast(message: string, kind?: Toast['kind'], action?: ToastAction): void;
 }
 
 let toastSeq = 0;
@@ -233,6 +281,8 @@ export const useStore = create<AppStore>((set, get) => {
     focusedCommentId: null,
     railFilter: 'file',
     railTab: 'comments',
+    stageSel: null,
+    staging: false,
 
     async init() {
       try {
@@ -260,6 +310,7 @@ export const useStore = create<AppStore>((set, get) => {
         panel: 'diff',
         editor: null,
         focusedCommentId: null,
+        stageSel: null,
       });
       api.patchPrefs({ lastTarget: key }).catch(() => undefined);
       await get().loadFiles();
@@ -276,7 +327,7 @@ export const useStore = create<AppStore>((set, get) => {
       const cached = target.kind === 'working' ? unstaged : target.kind === 'staged' ? staged : allFiles;
       // A file present in both views has different hunks in each, so cached diffs cannot carry over.
       // Everything else — comments, the editor draft, the selection — deliberately survives.
-      set({ targetKey: key, files: cached, diffs: {}, filesError: null, activeFile });
+      set({ targetKey: key, files: cached, diffs: {}, filesError: null, activeFile, stageSel: null });
       api.patchPrefs({ lastTarget: key }).catch(() => undefined);
       // `all` is only listed while it is the view in front, so it has to be fetched on arrival.
       if (target.kind === 'all') await get().loadFiles();
@@ -343,7 +394,7 @@ export const useStore = create<AppStore>((set, get) => {
         return;
       }
       const { activeFile } = get();
-      set({ refreshing: true, restoreScroll: true, diffs: {}, refreshNonce: get().refreshNonce + 1 });
+      set({ refreshing: true, restoreScroll: true, diffs: {}, stageSel: null, refreshNonce: get().refreshNonce + 1 });
       try {
         await get().loadFiles();
         if (activeFile && get().files.some((f) => f.path === activeFile)) await loadDiff(activeFile);
@@ -380,7 +431,7 @@ export const useStore = create<AppStore>((set, get) => {
     },
 
     async openFile(path, force = false) {
-      set({ activeFile: path, panel: 'diff' });
+      set((s) => ({ activeFile: path, panel: 'diff', stageSel: s.stageSel?.filePath === path ? s.stageSel : null }));
       const cur = get().diffs[path];
       if (!force && cur && cur.status !== 'error') return;
       await loadDiff(path);
@@ -392,7 +443,8 @@ export const useStore = create<AppStore>((set, get) => {
     },
 
     setViewMode(mode) {
-      set((s) => ({ prefs: { ...s.prefs, viewMode: mode } }));
+      // Row positions are per layout, so a pick made in the other one no longer names anything.
+      set((s) => ({ prefs: { ...s.prefs, viewMode: mode }, stageSel: null }));
       api.patchPrefs({ viewMode: mode }).catch(fail);
     },
 
@@ -484,8 +536,7 @@ export const useStore = create<AppStore>((set, get) => {
     async createIssue(body) {
       try {
         const issue = await api.createIssue(body);
-        set((s) => ({ issues: [...s.issues, issue], selectedCommentIds: [] }));
-        get().showToast(`已创建 Issue「${issue.title}」`);
+        set((s) => ({ issues: insertAfter(s.issues, issue, body.after), selectedCommentIds: [] }));
         return issue;
       } catch (e) {
         fail(e);
@@ -503,11 +554,58 @@ export const useStore = create<AppStore>((set, get) => {
     },
 
     async deleteIssue(id) {
+      const issues = get().issues;
+      const idx = issues.findIndex((i) => i.id === id);
+      const issue = issues[idx];
+      if (!issue) return;
+      const prev = issues[idx - 1]?.id;
       try {
         await api.deleteIssue(id);
         set((s) => ({ issues: s.issues.filter((i) => i.id !== id) }));
+        get().showToast(`已删除「${issue.title}」`, 'info', {
+          label: '撤消',
+          run: () => void get().createIssue({ title: issue.title, body: issue.body, commentIds: issue.commentIds, status: issue.status, after: prev }),
+        });
       } catch (e) {
         fail(e);
+      }
+    },
+
+    async deleteIssues(ids) {
+      const gone: Issue[] = [];
+      for (const id of ids) {
+        const issue = get().issues.find((i) => i.id === id);
+        if (!issue) continue;
+        try {
+          await api.deleteIssue(id);
+          gone.push(issue);
+          set((s) => ({ issues: s.issues.filter((i) => i.id !== id) }));
+        } catch (e) {
+          fail(e);
+          break;
+        }
+      }
+      if (gone.length === 0) return;
+      get().showToast(`已删除 ${gone.length} 个 Issue`, 'info', {
+        label: '撤消',
+        run: async () => {
+          // Each goes back on top, last first, so they end up in the order they were in.
+          for (const i of [...gone].reverse()) await get().createIssue({ title: i.title, body: i.body, commentIds: i.commentIds, status: i.status });
+        },
+      });
+    },
+
+    async moveIssue(id, before) {
+      const prev = get().issues;
+      const next = moveBefore(prev, id, before);
+      if (!next) return;
+      set({ issues: next });
+      try {
+        const res = await api.moveIssue(id, before);
+        set({ issues: res.issues });
+      } catch (e) {
+        fail(e);
+        set({ issues: prev });
       }
     },
 
@@ -631,7 +729,7 @@ export const useStore = create<AppStore>((set, get) => {
     async createTodo(body) {
       try {
         const todo = await api.createTodo({ ...body, root: body.root ?? get().root });
-        set((s) => ({ todos: [...s.todos, todo] }));
+        set((s) => ({ todos: insertAfter(s.todos, todo, body.after) }));
         return todo;
       } catch (e) {
         fail(e);
@@ -649,11 +747,57 @@ export const useStore = create<AppStore>((set, get) => {
     },
 
     async deleteTodo(id) {
+      const todos = get().todos;
+      const idx = todos.findIndex((t) => t.id === id);
+      const todo = todos[idx];
+      if (!todo) return;
+      const prev = todos[idx - 1]?.id;
       try {
         await api.deleteTodo(id);
         set((s) => ({ todos: s.todos.filter((t) => t.id !== id) }));
+        get().showToast(`已删除「${todo.title}」`, 'info', {
+          label: '撤消',
+          run: () => void get().createTodo({ title: todo.title, body: todo.body, branch: todo.branch, status: todo.status, after: prev }),
+        });
       } catch (e) {
         fail(e);
+      }
+    },
+
+    async deleteTodos(ids) {
+      const gone: Todo[] = [];
+      for (const id of ids) {
+        const todo = get().todos.find((t) => t.id === id);
+        if (!todo) continue;
+        try {
+          await api.deleteTodo(id);
+          gone.push(todo);
+          set((s) => ({ todos: s.todos.filter((t) => t.id !== id) }));
+        } catch (e) {
+          fail(e);
+          break;
+        }
+      }
+      if (gone.length === 0) return;
+      get().showToast(`已删除 ${gone.length} 条 Todo`, 'info', {
+        label: '撤消',
+        run: async () => {
+          for (const t of [...gone].reverse()) await get().createTodo({ title: t.title, body: t.body, branch: t.branch, status: t.status });
+        },
+      });
+    },
+
+    async moveTodo(id, before) {
+      const prev = get().todos;
+      const next = moveBefore(prev, id, before);
+      if (!next) return;
+      set({ todos: next });
+      try {
+        const res = await api.moveTodo(id, before);
+        set({ todos: res.todos });
+      } catch (e) {
+        fail(e);
+        set({ todos: prev });
       }
     },
 
@@ -668,13 +812,56 @@ export const useStore = create<AppStore>((set, get) => {
       }
     },
 
-    showToast(message, kind = 'info') {
+    setStageSel(sel) {
+      set({ stageSel: sel });
+    },
+
+    async stageLines(path, hunks, view) {
+      const key = view ?? get().targetKey;
+      const target = tryParseTargetKey(key);
+      if (!target || !stageModeFor(target)) return false;
+      if (get().staging) return false;
+      // The diff in front is the freshest hash for the open file; the listing serves the others.
+      const open = key === get().targetKey ? get().diffs[path] : undefined;
+      const contentHash = open?.status === 'ok' ? open.diff.contentHash : entriesOf(key).find((f) => f.path === path)?.contentHash;
+      if (!contentHash) return false;
+      set({ staging: true });
+      try {
+        await api.stage(key, { path, contentHash, hunks });
+      } catch (e) {
+        set({ staging: false });
+        fail(e);
+        // The selection was made on a diff that is no longer what git sees: show what is.
+        if (e instanceof ApiError && (e.code === 'diff_changed' || e.code === 'apply_failed')) void get().refresh();
+        return false;
+      }
+      const before = get().files.map((f) => f.path);
+      const active = get().activeFile;
+      set({ staging: false, stageSel: null });
+      await get().refresh();
+      // A file that left the view (all of it moved) hands over to its neighbour, as `j` would.
+      if (active && active === path && key === get().targetKey && !get().files.some((f) => f.path === active)) {
+        const files = get().files;
+        const next = files[Math.min(Math.max(before.indexOf(active), 0), files.length - 1)];
+        if (next) void get().openFile(next.path);
+      }
+      return true;
+    },
+
+    async stageSelection() {
+      const sel = get().stageSel;
+      if (!sel || sel.lines.length === 0) return;
+      await get().stageLines(sel.filePath, [{ index: sel.hunkIndex, lines: sel.lines }]);
+    },
+
+    showToast(message, kind = 'info', action) {
       const id = ++toastSeq;
-      set({ toast: { id, message, kind } });
+      set({ toast: { id, message, kind, ...(action ? { action } : {}) } });
       if (toastTimer) clearTimeout(toastTimer);
+      // Long enough to read and reach for the button when there is one.
       toastTimer = setTimeout(() => {
         if (get().toast?.id === id) set({ toast: null });
-      }, kind === 'error' ? 6000 : 3000);
+      }, action ? 8000 : kind === 'error' ? 6000 : 3000);
     },
   };
 });

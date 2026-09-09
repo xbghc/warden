@@ -1,178 +1,87 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { Todo } from '@warden/shared';
 import { branchOf, useStore } from '../store';
-import { Markdown } from './Markdown';
+import { TaskList } from './TaskList';
 
-type Filter = 'open' | 'done' | 'all';
-
-function shortTime(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  const sameDay = d.toDateString() === new Date().toDateString();
-  return sameDay ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : d.toLocaleDateString();
-}
-
-function TodoCard({ todo, showBranch }: { todo: Todo; showBranch: boolean }) {
-  const updateTodo = useStore((s) => s.updateTodo);
-  const deleteTodo = useStore((s) => s.deleteTodo);
-  const copyTodo = useStore((s) => s.copyTodo);
-  const [open, setOpen] = useState(false);
-  const [editing, setEditing] = useState(false);
-  const [title, setTitle] = useState(todo.title);
-  const [body, setBody] = useState(todo.body);
-  const done = todo.status === 'done';
-
-  const startEditing = () => {
-    setTitle(todo.title);
-    setBody(todo.body);
-    setEditing(true);
-    setOpen(true);
-  };
-
-  return (
-    <div className={`todo-card status-${todo.status}`}>
-      <div className="todo-head" onClick={() => setOpen((v) => !v)}>
-        <input
-          type="checkbox"
-          checked={done}
-          onClick={(ev) => ev.stopPropagation()}
-          onChange={() => void updateTodo(todo.id, { status: done ? 'open' : 'done' })}
-          title={done ? '标记为未完成' : '标记为完成'}
-        />
-        <span className="title">{todo.title}</span>
-        {showBranch && <span className="badge">{todo.branch}</span>}
-        <span className="time" title={todo.updatedAt}>
-          {shortTime(todo.updatedAt)}
-        </span>
-        <span className="card-actions">
-          {/* One todo is one task for the agent: it goes over on its own, title and body only. */}
-          <button
-            className="link"
-            onClick={(e) => {
-              e.stopPropagation();
-              void copyTodo(todo.id);
-            }}
-            title="只复制这条 Todo 的标题和描述"
-          >
-            复制
-          </button>
-          <button
-            className="link"
-            onClick={(e) => {
-              e.stopPropagation();
-              startEditing();
-            }}
-          >
-            编辑
-          </button>
-          <button
-            className="link danger"
-            onClick={(e) => {
-              e.stopPropagation();
-              if (window.confirm(`删除 Todo「${todo.title}」？`)) void deleteTodo(todo.id);
-            }}
-          >
-            删除
-          </button>
-        </span>
-      </div>
-      {open &&
-        (editing ? (
-          <div className="todo-edit">
-            <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="标题" autoFocus />
-            <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={4} placeholder="描述（Markdown，可选）" />
-            <div className="row-actions">
-              <button
-                className="primary"
-                disabled={!title.trim()}
-                onClick={async () => {
-                  await updateTodo(todo.id, { title, body });
-                  setEditing(false);
-                }}
-              >
-                保存
-              </button>
-              <button onClick={() => setEditing(false)}>取消</button>
-            </div>
-          </div>
-        ) : (
-          <div className="todo-body">{todo.body ? <Markdown text={todo.body} /> : <p className="muted">没有描述</p>}</div>
-        ))}
-    </div>
-  );
-}
-
-/** The Todo notebook of the rail: this branch's checklist, kept next to the comments it grows out of. */
+/**
+ * The Todo notebook of the rail: this branch's checklist, kept next to the comments it grows out
+ * of. A branch is a list, the way Google Tasks has lists — the picker at the top switches between
+ * the branches that have todos, and "所有分支" shows everything with the branch on each row.
+ */
 export function TodoRail() {
   const todos = useStore((s) => s.todos);
   const loadTodos = useStore((s) => s.loadTodos);
   const createTodo = useStore((s) => s.createTodo);
+  const updateTodo = useStore((s) => s.updateTodo);
+  const deleteTodo = useStore((s) => s.deleteTodo);
+  const deleteTodos = useStore((s) => s.deleteTodos);
+  const moveTodo = useStore((s) => s.moveTodo);
+  const copyTodo = useStore((s) => s.copyTodo);
   const repo = useStore((s) => s.repo);
   const root = useStore((s) => s.root);
   const branch = branchOf(repo, root);
 
-  const [filter, setFilter] = useState<Filter>('open');
-  const [allBranches, setAllBranches] = useState(false);
-  const [draft, setDraft] = useState('');
+  /** `current`, `all`, or `b:<branch>`. */
+  const [list, setList] = useState('current');
+  const [adding, setAdding] = useState(false);
 
   useEffect(() => {
     void loadTodos();
   }, [loadTodos]);
 
-  const pool = useMemo(() => (allBranches ? todos : todos.filter((t) => t.branch === branch)), [todos, allBranches, branch]);
-  const shown = useMemo(
-    () =>
-      pool
-        .filter((t) => filter === 'all' || t.status === filter)
-        .slice()
-        .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0)),
-    [pool, filter],
+  const others = useMemo(() => [...new Set(todos.map((t) => t.branch))].filter((b) => b !== branch).sort(), [todos, branch]);
+  // A picked branch whose last todo is gone falls back to the current one.
+  useEffect(() => {
+    if (list.startsWith('b:') && !others.includes(list.slice(2))) setList('current');
+  }, [list, others]);
+  const shownBranch = list === 'all' ? null : list === 'current' ? branch : list.slice(2);
+  const items = useMemo(
+    () => todos.filter((t) => shownBranch === null || t.branch === shownBranch).map((t) => ({ ...t, done: t.status === 'done' })),
+    [todos, shownBranch],
   );
-  const filters: [Filter, string, number][] = [
-    ['open', 'open', pool.filter((t) => t.status === 'open').length],
-    ['done', 'done', pool.filter((t) => t.status === 'done').length],
-    ['all', 'all', pool.length],
-  ];
-  const emptyText = filter === 'done' ? '没有已完成的 Todo' : filter === 'open' && pool.length > 0 ? '全部完成了' : '还没有 Todo，在上面写第一条。';
-
-  const submit = async () => {
-    const title = draft.trim();
-    if (!title) return;
-    const todo = await createTodo({ title, body: '' });
-    if (todo) setDraft('');
-  };
+  const openCount = items.filter((t) => !t.done).length;
 
   return (
     <>
       <div className="rail-tools">
-        <div className="seg small" role="group" aria-label="Todo 筛选">
-          {filters.map(([key, label, n]) => (
-            <button key={key} className={filter === key ? 'active' : ''} aria-pressed={filter === key} onClick={() => setFilter(key)}>
-              {label}
-              <span className="tab-count">{n}</span>
-            </button>
+        <select className="task-list-pick" value={list} onChange={(e) => setList(e.target.value)} aria-label="Todo 列表" title="哪个分支的 Todo">
+          <option value="current">{branch}（当前分支）</option>
+          {others.map((b) => (
+            <option key={b} value={`b:${b}`}>
+              {b}
+            </option>
           ))}
-        </div>
+          <option value="all">所有分支</option>
+        </select>
         <span className="spacer" />
-        <label className="check">
-          <input type="checkbox" checked={allBranches} onChange={(e) => setAllBranches(e.target.checked)} />
-          所有分支
-        </label>
+        <span className="muted">{openCount} 待办</span>
       </div>
-      <div className="rail-list">
-        <form
-          className="todo-add"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void submit();
-          }}
-        >
-          <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder={`给 ${branch} 添加 Todo，回车创建`} aria-label="新 Todo" />
-        </form>
-        {shown.length === 0 && <div className="muted empty">{emptyText}</div>}
-        {shown.map((t) => (
-          <TodoCard key={t.id} todo={t} showBranch={allBranches} />
-        ))}
+      <div className="rail-list tasks">
+        <button type="button" className="task-add" onClick={() => setAdding(true)} title="添加一条 Todo（回车可以连着写）">
+          <span className="task-add-plus">+</span>
+          添加 Todo
+        </button>
+        <TaskList
+          items={items}
+          adding={adding}
+          onAddingChange={setAdding}
+          titlePlaceholder="标题"
+          doneLabel="已完成"
+          emptyText={`${shownBranch ?? '所有分支'} 还没有 Todo。点上面的“添加 Todo”写第一条。`}
+          allDoneText="全部完成了"
+          onCreate={(title, after) => createTodo({ title, body: '', branch: shownBranch ?? branch, after })}
+          onUpdate={(id, patch) => updateTodo(id, patch)}
+          onToggle={(id, done) => updateTodo(id, { status: done ? 'done' : 'open' })}
+          onDelete={deleteTodo}
+          onMove={moveTodo}
+          onClearDone={() => deleteTodos(items.filter((t) => t.done).map((t) => t.id))}
+          meta={(t) => (shownBranch === null ? <span className="badge">{t.branch}</span> : null)}
+          actions={(t) => (
+            // One todo is one task for the agent: it goes over on its own, title and body only.
+            <button type="button" className="link" onClick={() => void copyTodo(t.id)} title="只复制这条 Todo 的标题和描述">
+              复制
+            </button>
+          )}
+        />
       </div>
     </>
   );

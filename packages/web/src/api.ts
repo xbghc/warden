@@ -15,6 +15,8 @@ import type {
   ReanchorResponse,
   RepoInfo,
   ReviewState,
+  StageRequest,
+  StageResponse,
   TargetKey,
   Todo,
   TodosResponse,
@@ -79,6 +81,8 @@ export const api = {
   setViewed: (key: TargetKey, path: string, viewed: boolean, contentHash: string) =>
     req<{ viewed: Record<string, string> }>('PUT', `/api/targets/${enc(key)}/viewed`, { path, viewed, contentHash }),
 
+  stage: (key: TargetKey, body: StageRequest) => req<StageResponse>('POST', `/api/targets/${enc(key)}/stage`, body),
+
   createComment: (key: TargetKey, body: CreateCommentRequest) => req<Comment>('POST', `/api/targets/${enc(key)}/comments`, body),
   updateComment: (key: TargetKey, id: string, body: UpdateCommentRequest) =>
     req<Comment>('PATCH', `/api/targets/${enc(key)}/comments/${enc(id)}`, body),
@@ -90,12 +94,14 @@ export const api = {
   createIssue: (body: CreateIssueRequest) => req<Issue>('POST', '/api/issues', body),
   updateIssue: (id: string, body: UpdateIssueRequest) => req<Issue>('PATCH', `/api/issues/${enc(id)}`, body),
   deleteIssue: (id: string) => req<{ ok: true }>('DELETE', `/api/issues/${enc(id)}`),
+  moveIssue: (id: string, before: string | null) => req<{ issues: Issue[] }>('POST', `/api/issues/${enc(id)}/move`, { before }),
   exportIssue: (id: string) => req<ExportResponse>('POST', `/api/issues/${enc(id)}/export`),
 
   todos: (branch?: string) => req<TodosResponse>('GET', `/api/todos${q({ branch })}`),
   createTodo: (body: CreateTodoRequest) => req<Todo>('POST', '/api/todos', body),
   updateTodo: (id: string, body: UpdateTodoRequest) => req<Todo>('PATCH', `/api/todos/${enc(id)}`, body),
   deleteTodo: (id: string) => req<{ ok: true }>('DELETE', `/api/todos/${enc(id)}`),
+  moveTodo: (id: string, before: string | null) => req<TodosResponse>('POST', `/api/todos/${enc(id)}/move`, { before }),
 
   /** Server-sent stream of repository changes for one worktree root. Caller owns `close()`. */
   events: (root: string) => new EventSource(`/api/events${q({ root })}`),

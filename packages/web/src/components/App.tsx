@@ -79,6 +79,10 @@ export function App() {
       if (e.key === 'r') {
         e.preventDefault();
         void s.refresh();
+      } else if (e.key === 's') {
+        if (s.panel !== 'diff' || !s.stageSel || s.staging) return;
+        e.preventDefault();
+        void s.stageSelection();
       } else if (e.key === 'j' || e.key === 'k') {
         if (s.panel !== 'diff') return;
         const seq = navigableFiles(s);
@@ -95,7 +99,8 @@ export function App() {
           await s.openFile(item.path);
         })();
       } else if (e.key === 'Escape') {
-        if (s.reattaching) s.setReattaching(null);
+        if (s.stageSel) s.setStageSel(null);
+        else if (s.reattaching) s.setReattaching(null);
         else if (s.editor) s.setEditor(null);
         else if (s.focusedCommentId) void s.focusComment(null);
         else if (s.panel !== 'diff') s.setPanel('diff');

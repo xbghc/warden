@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { FileDiff, Hunk } from '@warden/shared';
-import { buildRows, computeGaps, findRowIndex } from './rows';
+import { buildRows, computeGaps, findRowIndex, pickedLineIndices } from './rows';
 
 function hunk(oldStart: number, newStart: number, spec: string[]): Hunk {
   let o = oldStart;
@@ -78,6 +78,34 @@ describe('buildRows', () => {
     // trailing gap: 40 lines total, last hunk ends at 32 -> 8 hidden
     const tail = all.find((r) => r.kind === 'gap' && r.gap.index === 2);
     expect(tail && tail.kind === 'gap' ? tail.hidden : null).toBe(8);
+  });
+
+  it('maps picked rows back to the changed lines of the hunk in either layout', () => {
+    // Hunk 0 lines: 0 ctx a, 1 del b, 2 add B, 3 add B2, 4 ctx c.
+    const unified = buildRows({ diff, viewMode: 'unified', expansions: {}, fullLines: null });
+    expect(unified.filter((r) => r.kind === 'line' && r.hunkIndex === 0).map((r) => (r.kind === 'line' ? [r.pos, r.indices] : null))).toEqual([
+      [0, []],
+      [1, [1]],
+      [2, [2]],
+      [3, [3]],
+      [4, []],
+    ]);
+    expect(pickedLineIndices(unified, 0, 3, 1)).toEqual([1, 2, 3]);
+    expect(pickedLineIndices(unified, 0, 0, 0)).toEqual([]);
+    // Split: the pair (b | B) is one row, so picking it picks both lines; the next row is B2 alone.
+    const split = buildRows({ diff, viewMode: 'split', expansions: {}, fullLines: null });
+    expect(split.filter((r) => r.kind === 'pair' && r.hunkIndex === 0).map((r) => (r.kind === 'pair' ? [r.pos, r.indices] : null))).toEqual([
+      [0, []],
+      [1, [1, 2]],
+      [2, [3]],
+      [3, []],
+    ]);
+    expect(pickedLineIndices(split, 0, 1, 1)).toEqual([1, 2]);
+    expect(pickedLineIndices(split, 0, 2, 3)).toEqual([3]);
+    // Expanded context has no position, so it can never be picked.
+    const fullLines = Array.from({ length: 40 }, (_, i) => `L${i + 1}`);
+    const expanded = buildRows({ diff, viewMode: 'unified', expansions: { 1: { top: 2, bottom: 0, all: false } }, fullLines });
+    expect(expanded.filter((r) => r.kind === 'line' && r.expanded).every((r) => r.kind === 'line' && r.pos === -1 && r.indices.length === 0)).toBe(true);
   });
 
   it('added/deleted files have no expandable gaps', () => {

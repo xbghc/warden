@@ -6,20 +6,24 @@ with line comments you can copy back to the agent as a prompt.
 - Runs as a single local process per repository (`127.0.0.1` only, no auth, no database).
 - Diff sources: working tree, staged, working tree vs HEAD, a branch since it forked off its base (commits and
   uncommitted work together), any commit, any two refs, and git worktrees.
-- Side-by-side **Unstaged** and **Staged** file lists, so staging a hunk in your editor is what marks it reviewed.
+- Side-by-side **Unstaged** and **Staged** file lists: staged means reviewed. Stage from the UI by dragging
+  over the lines you have read (or a hunk, or a file), and unstage the same way from the Staged view.
 - GitHub-style unified / side-by-side diff with syntax highlighting, collapsed file tree, lazy per-file loading, context expansion, virtual scrolling.
 - Line comments (single line or a dragged range), Markdown, edit / delete.
 - One click copies all comments as an agent-readable prompt to the clipboard.
 - Review state (viewed files, comments, local issues, todos, preferences) persists outside the repo and survives restarts.
 - Comments follow the code: they move with a hunk that gets staged, re-attach after the agent edits the file, and are cleaned up once the change is committed.
 - Auto-refresh — warden watches the repository and reloads itself when you edit, stage, commit or switch branches.
-- Local issues (title, Markdown body, open/closed) that link comments.
-- Branch-scoped todos, each copied to the clipboard on its own — one task at a time for the agent.
+- Local issues (title, Markdown body, open/closed) that link comments, and branch-scoped todos, each
+  copied to the clipboard on its own — one task at a time for the agent. Both are task lists in the
+  manner of Google Tasks: add at the top, Enter for the next one, tick to file it under 已完成, drag
+  into your own order, edit in place, 撤消 after a delete.
 - Commit history browser: grouped by day, branch / tag labels, search by message, sha, author or
   path (each a `git log` on the server, not a filter over the rows already loaded), and a
   first-parent view that folds merged branches into their merge commits.
 - Click a line number to jump to that line in a running nvim instance (WSL2 friendly).
-- Read-only with respect to git: only whitelisted read sub-commands are ever executed.
+- Git is touched through whitelisted read sub-commands plus exactly one write, `git apply --cached`, which is
+  what the stage / unstage controls run. The working tree and HEAD are never written.
 
 ## Install / run
 
@@ -92,8 +96,36 @@ the fix and delete or re-attach it.
 | `r` | Refresh the current target (file list + open diff, then re-anchor comments) |
 | `j` / `k` | Next / previous file, walking Unstaged then Staged and switching view at the boundary |
 | `n` / `p` | Next / previous hunk |
+| `s` | Stage (Unstaged view) or unstage (Staged view) the picked lines |
 | `Ctrl+Enter` | Save the comment being edited |
-| `Esc` | Cancel editing / close a panel / cancel re-attach mode |
+| `Esc` | Drop the picked lines / cancel editing / close a panel / cancel re-attach mode |
+
+## Staging
+
+The Staged block is the "reviewed" pile, and warden can move lines into it without a trip to the
+terminal. In the Unstaged view every changed line has a small box at the left edge; press it and drag
+to pick a range inside one hunk (in split view a replacement is one row, so its old and new line go
+together). The picked rows are outlined in ink, a bar at the bottom of the diff says how many lines
+are in, and `s` or the bar's button stages them. Each hunk header has *暂存此 hunk*, the file header
+and the sidebar rows have *暂存文件* / *暂存*. The Staged view has the same controls the other way
+round: *取消暂存* takes lines back out of the index.
+
+A partial pick is turned into the patch `git add -p`'s edit mode would want — the unpicked deletions
+stay as context and the unpicked additions are left out (the mirror image when unstaging) — and applied
+with `git apply --cached`. It never touches the working tree, so what you did not pick is still
+there to stage next. Comments on the lines you staged follow them into the Staged view (see
+[Re-anchoring](#re-anchoring)); the file's *viewed* flag is dropped because its diff changed. Every
+page open on the worktree reloads at once.
+
+Limits, each reported as a plain error rather than a half-applied patch:
+
+- Only the Unstaged and Staged views stage; `all`, `base`, commits and ranges are read-only.
+- Binary files and mode-only changes go whole or not at all; a mode change rides along only with *暂存文件*.
+- A staged deletion can be unstaged whole, not by line: the index has nothing left to put lines back into.
+- A pick that would split a file's missing trailing newline from its neighbours is refused; include them.
+- The request carries the hash of the diff the pick was made on. If the file or the index moved since
+  (the agent kept editing), the server answers 409 and the page reloads instead of staging the wrong lines.
+- If another git process holds the index lock the server retries briefly, then gives up with 409.
 
 ## Comments and export
 
@@ -170,11 +202,28 @@ refreshes by hand.
 
 Notes attached to a branch rather than to a line of code, for the things you notice while reviewing
 that do not belong in a comment. They are not deleted when you commit. They sit in the right-hand
-rail next to the comments, under the *Todo* tab: type a title and press Enter to add one, expand a
-card to read or edit its Markdown body, filter by status, and switch between the current branch
-and all branches.
+rail next to the comments, under the *Todo* tab, as a task list that works the way Google Tasks does:
 
-Each card has its own *复制* button, and there is deliberately no "copy all": a todo is one task to
+- *添加 Todo* opens an empty row at the top; type the title and press Enter, and the next row opens
+  right under it. Esc or Backspace on an empty row drops it.
+- Titles and details are edited where they are: click into the text. Enter at the end of a title
+  starts the next todo under it; Backspace on an emptied title deletes the todo. The details field
+  (Markdown) appears while the row is open, and is rendered under the title otherwise.
+- The circle strikes the todo through and files it under *已完成 (N)* at the bottom, collapsed;
+  open it to tick one back or *全部删除*.
+- Rows are dragged into your own order by the handle at their left edge. That order is what the state
+  file keeps, and new todos go on top.
+- Delete asks nothing; the toast offers *撤消* for a few seconds.
+- The picker at the top is the list selector: the current branch, any other branch that has todos,
+  or all of them with the branch on each row. A new todo goes to the branch being shown.
+
+Issues (the *Issues* tab in the top bar) are the same list: closing an issue is ticking it, a
+*已关闭* section holds the closed ones, and the comments linked to an issue sit under its open row
+like subtasks, each with *跳转* and *解除关联*. Tick comments in the rail and the *创建 Issue* button
+opens the drawer with the add row ready and the comments attached on creation; for an existing
+issue, open its row and use *关联选中的评论*.
+
+Each row has its own *复制* button, and there is deliberately no "copy all": a todo is one task to
 hand to an agent, and the agent it goes to is already working in that branch. So the clipboard gets
 the title and the body — no branch, repo, count or numbering:
 
@@ -225,17 +274,21 @@ move into the matching scope the first time the file is read.
 
 ## Security model
 
-Single user, local only. The server binds to `127.0.0.1`, executes git only through
-`execFile('git', [...])` with an argument whitelist (`rev-parse`, `diff`, `show`, `log`, `worktree list`,
-`ls-files`, `status`, `merge-base`), refuses option-looking refs and any write-capable flag, and never writes into the
-repository. Requests that would need anything else get HTTP 400.
+Single user, local only. The server binds to `127.0.0.1` and executes git only through
+`execFile('git', [...])`. Reads go through an argument whitelist (`rev-parse`, `diff`, `show`, `log`,
+`worktree list`, `ls-files`, `status`, `merge-base`) that refuses option-looking refs and any write-capable
+flag; requests that would need anything else get HTTP 400. The one write is `POST /api/targets/:key/stage`,
+which runs `git apply --cached` (with `--reverse` for the Staged view) on a patch the server itself builds
+from the diff it just produced — the patch is never taken from the request, only the line indices are,
+and they are checked against the diff's hash first. Nothing writes to the working tree, HEAD or the
+refs, and the review state lives outside the repository.
 
 ## Development
 
 ```sh
 pnpm install
 pnpm dev          # API server on :4100 (tsx watch) + Vite dev server on :5173 with /api proxied
-pnpm test         # vitest: diff parser, anchoring, comment scopes, watcher, todos, export, state, HTTP API
+pnpm test         # vitest: diff parser, staging patches, anchoring, comment scopes, watcher, todos, export, state, HTTP API
 pnpm typecheck
 pnpm build        # dist/web (Vite) + dist/cli.js (tsup, zero runtime dependencies)
 node dist/cli.js path/to/repo
@@ -246,7 +299,7 @@ Layout:
 ```
 bin/cli.ts           argument parsing, start server, open browser
 packages/shared      types + target key / comment scope helpers (bundled into both sides)
-packages/server      Hono API, git wrapper, diff parser, targets, anchoring, watcher, state, export, nvim
+packages/server      Hono API, git wrapper, diff parser, staging patches, targets, anchoring, watcher, state, export, nvim
 packages/web         React + Vite UI (shiki highlighting, @tanstack/react-virtual, react-markdown)
 test/                API integration tests on a generated git repository
 ```

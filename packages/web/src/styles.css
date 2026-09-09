@@ -654,6 +654,8 @@ kbd {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  /* The stage bar floats over the diff, anchored to the panel. */
+  position: relative;
 }
 .file-head {
   display: flex;
@@ -693,7 +695,8 @@ kbd {
   tab-size: 4;
   background: var(--surface);
 }
-.diff-scroll.selecting {
+.diff-scroll.selecting,
+.diff-scroll.picking {
   user-select: none;
   cursor: row-resize;
 }
@@ -747,13 +750,121 @@ kbd {
   background: var(--line-strong);
 }
 .row.hunk-head {
+  align-items: center;
   background: var(--surface-2);
   color: var(--muted);
   font-size: 11.5px;
-  padding: 3px 12px 3px 110px;
+  padding: 3px 12px 3px 128px;
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
   white-space: pre-wrap;
+}
+.hunk-text {
+  flex: 1;
+  min-width: 0;
+}
+.hunk-stage {
+  font-family: var(--sans);
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+/* ---- staging: pick rows, then move them ---- */
+/* The first column of every code row. Ink, not violet: staging is the reviewer's bookkeeping,
+   nothing that goes back to the agent. */
+.stagec {
+  flex: 0 0 18px;
+  position: relative;
+  user-select: none;
+}
+.stage-box {
+  position: absolute;
+  left: 4px;
+  top: 4px;
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border: 1.5px solid var(--ink-2);
+  border-radius: 2px;
+  background: var(--surface);
+  opacity: 0;
+  cursor: pointer;
+  z-index: 1;
+}
+.stage-box:hover:not(:disabled) {
+  background: var(--surface-3);
+  border-color: var(--ink);
+}
+.row:hover .stage-box,
+.cell:hover .stage-box,
+.stage-box.on {
+  opacity: 1;
+}
+.stage-box.on,
+.stage-box.on:hover:not(:disabled) {
+  background: var(--ink);
+  border-color: var(--ink);
+}
+.stage-box.on::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 0;
+  width: 3px;
+  height: 6px;
+  border: solid #fff;
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+}
+/* A picked row keeps its colour and turns it up, with the same ink rule the sidebar uses for
+   the active file. Kept above .selected/.focused so a comment drag still shows on top. */
+.row.line.picked,
+.cell.picked {
+  box-shadow: inset 3px 0 var(--ink);
+}
+.row.line.add.picked,
+.cell.add.picked {
+  background: var(--add-bg-strong);
+}
+.row.line.del.picked,
+.cell.del.picked {
+  background: var(--del-bg-strong);
+}
+.stage-bar {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 12px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-card);
+  box-shadow: 0 6px 20px rgba(22, 24, 29, 0.14);
+  font-size: 12px;
+  white-space: nowrap;
+  z-index: 3;
+}
+.stage-bar-count {
+  margin-right: 4px;
+}
+.stage-bar kbd {
+  margin-left: 2px;
+}
+.stage-bar .primary kbd {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.3);
+  color: #fff;
+}
+.tree-row .stage-file {
+  display: none;
+  font-size: 11px;
+  padding: 0 2px;
+}
+.tree-row:hover .stage-file {
+  display: inline-flex;
 }
 .row.gap-row {
   background: var(--surface-2);
@@ -908,13 +1019,12 @@ kbd {
   background: var(--surface-2);
 }
 .diff-list.split .row.hunk-head {
-  padding-left: 60px;
+  padding-left: 78px;
 }
 
 /* ---- comments ---------------------------------------------------------------- */
 /* A card is a note headed back to the agent; the left rule says where it stands. */
-.comment-card,
-.todo-card {
+.comment-card {
   position: relative;
   background: var(--surface);
   border: 1px solid var(--line);
@@ -973,8 +1083,6 @@ kbd {
    in the tab order while transparent. */
 .comment-card:hover .card-actions,
 .comment-card:focus-within .card-actions,
-.todo-card:hover .card-actions,
-.todo-card:focus-within .card-actions,
 /* 重新附着 is a toggle; hiding it once the pointer leaves would leave no way back
    except the rail banner. */
 .comment-card.reattaching .card-actions {
@@ -1246,97 +1354,312 @@ kbd {
 .drawer-title {
   font-weight: 600;
 }
-.issue-form {
+/* ---- task lists: todos and issues, in the shape of Google Tasks -------------------- */
+.rail-list.tasks {
+  padding: 4px 0 12px;
+  gap: 0;
+}
+/* The first row of the list: a plus in a circle, in the column the checks sit in. */
+.task-add {
+  height: 34px;
+  margin: 0 4px 2px;
+  padding: 0 10px 0 24px;
+  justify-content: flex-start;
+  gap: 10px;
+  border: none;
+  border-radius: var(--r-card);
+  background: none;
+  color: var(--ink-2);
+  font-weight: 500;
+}
+.task-add:hover:not(:disabled) {
+  background: var(--surface-3);
+  border-color: transparent;
+  color: var(--ink);
+}
+.task-add-plus {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--ink);
+  color: #fff;
+  font-size: 15px;
+  line-height: 1;
+}
+.task-list {
   display: flex;
   flex-direction: column;
+}
+.task-row {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
   gap: 6px;
-  padding: 10px;
-  border-bottom: 1px solid var(--line);
+  margin: 0 4px;
+  padding: 5px 10px 5px 4px;
+  border-radius: var(--r-card);
+}
+.task-row:hover,
+.task-row.open {
   background: var(--surface);
 }
-.row-actions {
+.task-row.open {
+  box-shadow: 0 0 0 1px var(--line);
+}
+.task-grip {
+  flex: 0 0 14px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  cursor: grab;
+  visibility: hidden;
+}
+.task-row:hover .task-grip {
+  visibility: visible;
+}
+.task-list.dragging .task-grip {
+  visibility: hidden;
+}
+/* The circle: hollow to do, a faint check on hover, ink once done. */
+.task-check {
+  position: relative;
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  padding: 0;
+  border: 1.5px solid var(--ink-2);
+  border-radius: 50%;
+  background: var(--surface);
+}
+.task-check::after {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 1.5px;
+  width: 4px;
+  height: 8px;
+  border: solid var(--ink);
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+  opacity: 0;
+}
+.task-check:hover:not(:disabled) {
+  background: var(--surface);
+  border-color: var(--ink);
+}
+.task-check:hover:not(:disabled)::after {
+  opacity: 0.45;
+}
+.task-row.done .task-check,
+.task-row.completing .task-check {
+  background: var(--ink);
+  border-color: var(--ink);
+}
+.task-row.done .task-check::after,
+.task-row.completing .task-check::after {
+  border-color: #fff;
+  opacity: 1;
+}
+.task-row.draft .task-check {
+  border-style: dashed;
+  border-color: var(--muted);
+}
+.task-main {
+  flex: 1;
+  min-width: 0;
   display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.task-line {
+  display: flex;
+  align-items: flex-start;
   gap: 6px;
 }
-.issue-list {
-  flex: 1;
-  overflow: auto;
-}
-.issue-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 34px;
-  padding: 4px 10px;
-  border-bottom: 1px solid var(--line);
-  cursor: pointer;
-}
-.issue-row:hover {
-  background: var(--surface-3);
-}
-.issue-row .title {
-  flex: 1;
+/* Text that happens to be editable: no box until you are in it, and none then either. */
+.task-ta {
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  resize: none;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-family: var(--sans);
+  line-height: 20px;
 }
-.issue-row .muted {
+.task-ta:focus {
+  box-shadow: none;
+}
+.task-title {
+  flex: 1;
+  font-size: 13px;
+}
+.task-body {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--ink-2);
+}
+.task-details {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--muted);
+  cursor: text;
+}
+.task-details .md {
   font-size: 12px;
 }
-.issue-detail {
-  flex: 1;
-  overflow: auto;
-  padding: 12px;
-  background: var(--surface);
+.task-details .md p {
+  margin: 0 0 2px;
 }
-.issue-detail h3 {
-  margin: 8px 0;
-  font-size: 15px;
-  font-weight: 600;
+.task-row.done .task-title,
+.task-row.completing .task-title {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+.task-row.completing {
+  opacity: 0.55;
+  transition: opacity 0.3s;
+}
+.task-row .badge {
+  margin-top: 2px;
+}
+.task-count {
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 20px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+/* In flow, space reserved: the title never gets covered and nothing moves on hover. */
+.task-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  line-height: 20px;
+  white-space: nowrap;
+  visibility: hidden;
+}
+.task-actions .link {
+  font-size: 12px;
+}
+.task-row:hover .task-actions,
+.task-row:focus-within .task-actions,
+.task-sub:hover .task-actions {
+  visibility: visible;
+}
+.task-row.dragging {
+  opacity: 0.4;
+}
+.task-row.drop-before {
+  box-shadow: 0 -2px 0 0 var(--ink);
+}
+.task-row.drop-after {
+  box-shadow: 0 2px 0 0 var(--ink);
+}
+.task-empty {
+  padding: 14px 20px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.task-add-hint {
+  padding: 0 10px 6px 46px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.task-done {
+  margin-top: 8px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+.task-done-head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  min-height: 28px;
+  padding: 0 14px 0 10px;
 }
-.issue-detail-head {
+.task-done-toggle {
+  height: auto;
+  padding: 0 4px;
+  gap: 6px;
+  border: none;
+  background: none;
+  color: var(--ink-2);
+  font-weight: 500;
+}
+.task-done-toggle:hover:not(:disabled) {
+  background: none;
+  border-color: transparent;
+  color: var(--ink);
+}
+.task-list-pick {
+  max-width: 220px;
+}
+/* An issue's linked comments, under the open row like subtasks. */
+.task-subs {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 4px;
+  margin-top: 6px;
 }
-.section-title {
-  font-weight: 600;
-  margin: 16px 0 6px;
+.task-sub {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
+  padding: 4px 6px;
+  border-radius: var(--r-ctl);
+  background: var(--surface-2);
+  font-size: 12px;
 }
-.linked-comment {
-  border: 1px solid var(--line);
-  border-left: 3px solid var(--line-strong);
-  border-radius: var(--r-card);
-  padding: 6px 8px;
-  margin-bottom: 6px;
+.task-sub-dot {
+  flex: 0 0 8px;
+  width: 8px;
+  height: 8px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: var(--accent);
 }
-.linked-comment.status-active {
-  border-left-color: var(--accent);
+.task-sub.status-exported .task-sub-dot {
+  background: var(--line-strong);
 }
-.linked-comment.status-orphaned {
-  border-color: var(--warn-line);
-  border-left-style: dashed;
-  background: var(--warn-soft);
+.task-sub.status-orphaned .task-sub-dot {
+  background: var(--warn-line);
 }
-.linked-head {
+.task-sub-main {
+  flex: 1;
+  min-width: 0;
+}
+.task-sub-head {
   display: flex;
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
+}
+.task-sub-head .mono {
+  font-size: 11px;
+}
+.task-sub-body {
+  color: var(--muted);
+  white-space: pre-wrap;
+  max-height: 54px;
+  overflow: hidden;
+}
+.task-sub-add {
+  align-self: flex-start;
   font-size: 12px;
 }
-.linked-body {
-  margin-top: 4px;
-  white-space: pre-wrap;
+.task-sub-none {
+  font-size: 12px;
   color: var(--muted);
-  max-height: 80px;
-  overflow: hidden;
 }
 
 /* ---- toast ------------------------------------------------------------------------- */
@@ -1355,6 +1678,19 @@ kbd {
 }
 .toast-error {
   background: var(--del-fg);
+}
+.toast-action {
+  height: 22px;
+  margin-left: 14px;
+  padding: 0 8px;
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.35);
+  color: #fff;
+  font-weight: 500;
+}
+.toast-action:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.26);
+  border-color: rgba(255, 255, 255, 0.5);
 }
 
 /* ---- comment rail ---------------------------------------------------------------- */
@@ -1468,67 +1804,10 @@ kbd {
   overflow: hidden;
 }
 
-/* ---- todos (rail) ------------------------------------------------------------ */
-.todo-add input {
-  width: 100%;
-}
-.todo-head {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  min-height: 20px;
-  cursor: pointer;
-}
-.todo-head input[type='checkbox'] {
-  margin-top: 3px;
-}
-/* A checklist line wraps rather than truncates: the title is the whole item. */
-.todo-head .title {
-  flex: 1;
-  min-width: 0;
-  line-height: 20px;
-  overflow-wrap: anywhere;
-}
-.todo-head .badge {
-  margin-top: 1px;
-}
-.todo-head .time {
-  font-size: 11px;
-  line-height: 20px;
-  color: var(--muted);
-}
-/* In flow, not overlaid: the title runs the full width of the head, so an overlay would
-   cover its last characters. The space stays reserved, so hovering moves nothing. */
-.todo-head .card-actions {
-  position: static;
-  padding-left: 0;
-  line-height: 20px;
-}
-.todo-card.status-done {
-  border-left-color: var(--line-strong);
-}
-.todo-card.status-done .title {
-  text-decoration: line-through;
-  color: var(--muted);
-}
-/* Indented to the title, past the checkbox. */
-.todo-body {
-  margin-top: 6px;
-  padding-left: 21px;
-}
-.todo-body p:first-child {
-  margin-top: 0;
-}
-.todo-edit {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-top: 8px;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .chev,
   .card-actions,
+  .task-row.completing,
   .block-progress > span {
     transition: none;
   }

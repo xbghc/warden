@@ -16,6 +16,7 @@ import type {
   FilesResponse,
   FullFileResponse,
   Issue,
+  MoveRequest,
   NvimInstancesResponse,
   NvimOpenRequest,
   Prefs,
@@ -23,6 +24,8 @@ import type {
   ReanchorResponse,
   RepoInfo,
   ReviewState,
+  StageRequest,
+  StageResponse,
   Todo,
   TodosResponse,
   UpdateCommentRequest,
@@ -30,13 +33,14 @@ import type {
   UpdateTodoRequest,
   WorktreeInfo,
 } from '@warden/shared';
-import { commentScopeKey, isLocalTarget, isValidRef, localViewKeys, tryParseTargetKey } from '@warden/shared';
+import { commentScopeKey, insertAfter, isLocalTarget, isValidRef, localViewKeys, moveBefore, stageModeFor, tryParseTargetKey } from '@warden/shared';
 import { badRequest, HttpError, notFound } from './errors.js';
 import { COMMIT_FORMAT, parseCommitLog } from './commits.js';
-import { revParse, runGit } from './git.js';
+import { applyToIndex, revParse, runGit } from './git.js';
 import { currentBranch, getRepoInfo, listWorktrees, type RepoContext } from './repo.js';
 import { getFileDiff, getFullFile, listTargetDiffs, resolveTargetContext, toSummary, type TargetContext } from './targets.js';
 import { buildAnchor, reanchorComment } from './anchor.js';
+import { buildStagePatch } from './patch.js';
 import { ensureTarget, StateStore } from './state.js';
 import { formatCommentsExport, formatIssueExport } from './export.js';
 import { NvimService } from './nvim.js';
@@ -243,6 +247,33 @@ export function createApp(opts: AppOptions): Hono {
     });
     changedNotices.get(key)?.delete(body.path);
     return c.json({ viewed });
+  });
+
+  // ---- staging -----------------------------------------------------------
+
+  // The only route that writes to the repository, and only to the index: the lines picked in the
+  // Unstaged view go in, the ones picked in the Staged view come back out. Staging is how a
+  // reviewer says "these lines are done", so it belongs next to reading them.
+  api.post('/targets/:key/stage', async (c) => {
+    const key = c.req.param('key');
+    const ctx = await targetCtx(key);
+    const mode = stageModeFor(ctx.target);
+    if (!mode) throw badRequest('only the working (stage) and staged (unstage) views can be staged from', 'not_stageable');
+    const body = (await c.req.json()) as StageRequest;
+    if (!body.path || typeof body.path !== 'string') throw badRequest('missing path');
+    if (!body.contentHash || typeof body.contentHash !== 'string') throw badRequest('contentHash is required');
+    if (body.hunks !== undefined && !Array.isArray(body.hunks)) throw badRequest('hunks must be an array', 'bad_selection');
+    const diff = await fileDiffWithHints(ctx, body.path);
+    if (!diff) throw badRequest(`file ${body.path} is not part of ${key}`, 'no_diff');
+    // The selection is a set of indices into a diff the client saw; against any other diff they
+    // would name the wrong lines. The agent may well have edited the file since.
+    if (diff.contentHash !== body.contentHash) throw new HttpError(409, 'the diff changed since it was loaded; refresh and pick the lines again', 'diff_changed');
+    const { patch, lines } = buildStagePatch(diff, mode, body.hunks);
+    await applyToIndex(ctx.cwd, patch, { reverse: mode === 'unstage' });
+    // Tell every page on this worktree straight away rather than at the next poll.
+    void watchers.get(ctx.cwd)?.poll();
+    const res: StageResponse = { ok: true, lines };
+    return c.json(res);
   });
 
   // ---- comments ----------------------------------------------------------
@@ -499,15 +530,30 @@ export function createApp(opts: AppOptions): Hono {
       id: randomUUID(),
       title: body.title.trim(),
       body: typeof body.body === 'string' ? body.body : '',
-      status: 'open',
+      status: body.status === 'closed' ? 'closed' : 'open',
       commentIds: Array.isArray(body.commentIds) ? body.commentIds.filter((x): x is string => typeof x === 'string') : [],
       createdAt: now,
       updatedAt: now,
     };
+    // The list is in the reviewer's own order: a new issue goes on top, or under the one it was
+    // typed after (Enter at the end of a row), like a task list.
     await store.update((s) => {
-      s.issues.push(issue);
+      s.issues = insertAfter(s.issues, issue, typeof body.after === 'string' ? body.after : undefined);
     });
     return c.json(issue, 201);
+  });
+
+  api.post('/issues/:id/move', async (c) => {
+    const id = c.req.param('id');
+    const body = (await c.req.json()) as MoveRequest;
+    if (body.before !== null && typeof body.before !== 'string') throw badRequest('before must be an id or null');
+    const issues = await store.update((s) => {
+      const next = moveBefore(s.issues, id, body.before);
+      if (!next) throw notFound('issue not found');
+      s.issues = next;
+      return s.issues;
+    });
+    return c.json({ issues });
   });
 
   api.patch('/issues/:id', async (c) => {
@@ -591,14 +637,28 @@ export function createApp(opts: AppOptions): Hono {
       branch,
       title: body.title.trim(),
       body: typeof body.body === 'string' ? body.body : '',
-      status: 'open',
+      status: body.status === 'done' ? 'done' : 'open',
       createdAt: now,
       updatedAt: now,
     };
     await store.update((s) => {
-      s.todos.push(todo);
+      s.todos = insertAfter(s.todos, todo, typeof body.after === 'string' ? body.after : undefined);
     });
     return c.json(todo, 201);
+  });
+
+  api.post('/todos/:id/move', async (c) => {
+    const id = c.req.param('id');
+    const body = (await c.req.json()) as MoveRequest;
+    if (body.before !== null && typeof body.before !== 'string') throw badRequest('before must be an id or null');
+    const todos = await store.update((s) => {
+      const next = moveBefore(s.todos, id, body.before);
+      if (!next) throw notFound('todo not found');
+      s.todos = next;
+      return s.todos;
+    });
+    const res: TodosResponse = { todos };
+    return c.json(res);
   });
 
   api.patch('/todos/:id', async (c) => {

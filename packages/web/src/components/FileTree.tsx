@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { FileEntry, TargetKey } from '@warden/shared';
-import { commentScopeKey, formatTargetKey, isLocalTarget, targetLabel, tryParseTargetKey } from '@warden/shared';
+import { commentScopeKey, formatTargetKey, isLocalTarget, stageModeFor, targetLabel, tryParseTargetKey } from '@warden/shared';
 import { useStore } from '../store';
 import { allDirPaths, buildTree, type DirNode, type TreeNode } from '../lib/tree';
 
@@ -14,7 +14,14 @@ function FileRow({ node, depth, view }: { node: Extract<TreeNode, { kind: 'file'
   const switchView = useStore((s) => s.switchView);
   const toggleViewed = useStore((s) => s.toggleViewed);
   const commentCount = useStore((s) => s.comments.filter((c) => c.filePath === node.path && c.targetKey === view).length);
+  const stageLines = useStore((s) => s.stageLines);
+  const staging = useStore((s) => s.staging);
   const e = node.entry;
+  // The block decides the direction: a file in Unstaged goes in, one in Staged comes out.
+  const mode = useMemo(() => {
+    const t = tryParseTargetKey(view);
+    return t ? stageModeFor(t) : undefined;
+  }, [view]);
 
   const open = async () => {
     if (!inView) await switchView(view, node.path);
@@ -50,6 +57,19 @@ function FileRow({ node, depth, view }: { node: Extract<TreeNode, { kind: 'file'
           </>
         )}
       </span>
+      {mode && !e.binary && (
+        <button
+          className="link stage-file"
+          disabled={staging}
+          onClick={(ev) => {
+            ev.stopPropagation();
+            void stageLines(node.path, undefined, view);
+          }}
+          title={mode === 'stage' ? '把这个文件的全部改动放入暂存区' : '把这个文件的全部改动移出暂存区'}
+        >
+          {mode === 'stage' ? '暂存' : '取消暂存'}
+        </button>
+      )}
     </div>
   );
 }

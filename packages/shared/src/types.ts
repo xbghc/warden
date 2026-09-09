@@ -251,6 +251,28 @@ export interface UpdateCommentRequest {
   endLine?: number;
 }
 
+/** Lines of one hunk to stage or unstage; `lines` omitted means the whole hunk. */
+export interface HunkSelection {
+  /** Index of the hunk in the file diff. */
+  index: number;
+  /** Indices into `hunk.lines`; context lines are ignored. */
+  lines?: number[];
+}
+
+export interface StageRequest {
+  path: string;
+  /** `contentHash` of the diff the selection was made on; a different diff on the server is a 409. */
+  contentHash: string;
+  /** Omitted: the whole file, mode change included. */
+  hunks?: HunkSelection[];
+}
+
+export interface StageResponse {
+  ok: true;
+  /** Changed (add/del) lines the patch carried. */
+  lines: number;
+}
+
 export interface ReanchorRequest {
   files?: FileDiff[];
 }
@@ -267,6 +289,14 @@ export interface CreateIssueRequest {
   title: string;
   body?: string;
   commentIds?: string[];
+  status?: IssueStatus;
+  /** Put the new issue right after this one; omitted = at the top of the list. */
+  after?: string;
+}
+
+/** Reorder: put the item right before `before`, or last when null. */
+export interface MoveRequest {
+  before: string | null;
 }
 
 export interface UpdateIssueRequest {
@@ -288,6 +318,9 @@ export interface CreateTodoRequest {
   /** Defaults to the current branch of `root` (or of the repository root). */
   branch?: string;
   root?: string;
+  status?: TodoStatus;
+  /** Put the new todo right after this one; omitted = at the top of the list. */
+  after?: string;
 }
 
 export interface UpdateTodoRequest {
