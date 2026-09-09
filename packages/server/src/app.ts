@@ -9,6 +9,7 @@ import type {
   CreateCommentRequest,
   CreateIssueRequest,
   CreateTodoRequest,
+  CreateWorktreeRequest,
   ExportRequest,
   ExportResponse,
   ForkPointResponse,
@@ -23,6 +24,7 @@ import type {
   Prefs,
   ReanchorRequest,
   ReanchorResponse,
+  RemoveWorktreeRequest,
   RepoInfo,
   ReviewState,
   StageRequest,
@@ -33,6 +35,7 @@ import type {
   UpdateIssueRequest,
   UpdateTodoRequest,
   WorktreeInfo,
+  WorktreesResponse,
 } from '@warden/shared';
 import { commentScopeKey, insertAfter, isLocalTarget, isValidRef, localViewKeys, moveBefore, stageModeFor, tryParseTargetKey } from '@warden/shared';
 import { badRequest, HttpError, notFound } from './errors.js';
@@ -42,6 +45,7 @@ import { currentBranch, getRepoInfo, listWorktrees, type RepoContext } from './r
 import { getFileDiff, getFullFile, listTargetDiffs, resolveTargetContext, toSummary, type TargetContext } from './targets.js';
 import { buildAnchor, reanchorComment } from './anchor.js';
 import { buildStagePatch } from './patch.js';
+import { addWorktree, listBranches, listWorktreesDetailed, removeWorktree, worktreePathPrefix } from './worktrees.js';
 import { ensureTarget, StateStore } from './state.js';
 import { formatCommentsExport, formatIssueExport } from './export.js';
 import { NvimService } from './nvim.js';
@@ -137,6 +141,17 @@ export function createApp(opts: AppOptions): Hono {
   });
 
   const api = new Hono();
+
+  // The server trusts the browser it was opened in; what it must not trust is a page from another
+  // origin driving that browser, which could stage lines or remove a worktree. Browsers label such
+  // requests, so they are refused before any route sees them. Reads stay open: a page from
+  // elsewhere cannot read the response anyway.
+  api.use('*', async (c, next) => {
+    if (c.req.method !== 'GET' && c.req.method !== 'HEAD' && c.req.header('sec-fetch-site') === 'cross-site') {
+      throw new HttpError(403, 'cross-site requests are refused', 'cross_site');
+    }
+    await next();
+  });
 
   // Cheap identity check: no git, no state file. See wsl.ts for who asks and why.
   api.get('/ping', (c) => c.text(opts.instanceToken ?? ''));
@@ -760,6 +775,31 @@ export function createApp(opts: AppOptions): Hono {
     // `<only on base>\t<only on HEAD>`. `base` cannot contain `..`, so the range is ours.
     const counts = (await runGit(['rev-list', '--left-right', '--count', `${base}...HEAD`], { cwd })).stdout.trim().split(/\s+/);
     const res: ForkPointResponse = { base, sha, ahead: Number(counts[1] ?? 0), behind: Number(counts[0] ?? 0) };
+    return c.json(res);
+  });
+
+  // ---- worktrees -----------------------------------------------------------
+
+  api.get('/worktrees', async (c) => {
+    const list = await listWorktreesDetailed(repo);
+    const res: WorktreesResponse = { worktrees: list, branches: await listBranches(repo, list), pathPrefix: worktreePathPrefix(repo) };
+    return c.json(res);
+  });
+
+  api.post('/worktrees', async (c) => {
+    const body = (await c.req.json()) as CreateWorktreeRequest;
+    if (typeof body.path !== 'string' || typeof body.branch !== 'string') throw badRequest('path and branch are required');
+    if (body.base !== undefined && typeof body.base !== 'string') throw badRequest('base must be a ref');
+    const made = await addWorktree(repo, body);
+    worktreeCache = null;
+    return c.json(made, 201);
+  });
+
+  api.post('/worktrees/remove', async (c) => {
+    const body = (await c.req.json()) as RemoveWorktreeRequest;
+    if (typeof body.path !== 'string') throw badRequest('path is required');
+    const res = await removeWorktree(repo, body);
+    worktreeCache = null;
     return c.json(res);
   });
 

@@ -1353,6 +1353,115 @@ kbd {
 }
 
 /* ---- issues / todos drawer ------------------------------------------------------- */
+/* Worktrees panel: the add form above one row per checkout. */
+.worktrees-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.wt-tools {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--ground);
+  flex-wrap: wrap;
+}
+.wt-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.wt-add {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--ground);
+  flex-wrap: wrap;
+}
+.wt-add label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.wt-add input {
+  width: 200px;
+}
+.wt-add input.mono {
+  width: 360px;
+}
+.wt-list {
+  flex: 1;
+  overflow: auto;
+  background: var(--surface);
+}
+.wt-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--surface-3);
+}
+.wt-row.active {
+  background: var(--surface-2);
+  box-shadow: inset 2px 0 var(--ink);
+}
+.wt-row.gone .wt-name {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+.wt-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.wt-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.wt-name {
+  font-weight: 500;
+}
+.wt-path {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wt-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+.wt-confirm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 6px 8px;
+  border-radius: var(--r-ctl);
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+  font-size: 12px;
+}
+.wt-empty {
+  padding: 24px 12px;
+  text-align: center;
+}
+
 .issues-drawer {
   width: 440px;
   border-left: 1px solid var(--line);

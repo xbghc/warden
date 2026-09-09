@@ -6,6 +6,7 @@ with line comments you can copy back to the agent as a prompt.
 - Runs as a single local process per repository (`127.0.0.1` only, no auth, no database).
 - Diff sources: working tree, staged, working tree vs HEAD, a branch since it forked off its base (commits and
   uncommitted work together), any commit, any two refs, and git worktrees.
+- Worktrees are made and taken down from the page, one per agent branch, with the path ready to paste.
 - Side-by-side **Unstaged** and **Staged** file lists: staged means reviewed. Stage from the UI by dragging
   over the lines you have read (or a hunk, or a file), and unstage the same way from the Staged view.
 - GitHub-style unified / side-by-side diff with syntax highlighting, collapsed file tree, lazy per-file loading, context expansion, virtual scrolling.
@@ -60,7 +61,8 @@ Several instances on the same repository can run at the same time.
 | Worktree, everything since base | `worktree:<path>:base:<ref>` | same, run inside the worktree |
 
 Refs accept anything git can resolve (`main`, `v1.2`, `HEAD~3`, a sha). `@` is `HEAD`.
-Worktrees are discovered with `git worktree list` and share the review state of the main repository.
+Worktrees are discovered with `git worktree list` (and made in the *Worktrees* tab, see below) and
+share the review state of the main repository.
 One whose directory is gone (git lists it as *prunable*) is not offered, and a remembered target
 inside a removed worktree falls back to the working tree on the next load. The comments and viewed
 flags kept under that worktree's key stay in the state file and come back if a worktree is created
@@ -91,6 +93,28 @@ what sits above is the branch's own work. Unlike the three local views, `base` k
 pool of comments and a commit never deletes them: the round under review is not over when the agent
 commits, so a comment whose lines changed stays *orphaned*, snippet and all, until you have checked
 the fix and delete or re-attach it.
+
+## Worktrees
+
+Agents do their best work each in a worktree of its own, and the *Worktrees* tab in the top bar is
+where those are made and taken down without a trip to the terminal:
+
+- *新建 worktree* takes a branch and a base. A name that is not a branch yet becomes one from the
+  base (`main` or `master` unless you say otherwise; any ref goes) — `git worktree add -b <branch>
+  <path> <base>`; an existing branch is checked out as it is, unless another worktree already has it.
+  The path is suggested as a sibling of the main worktree named `<repo>-<branch>` (slashes become
+  dashes) and can be edited, within limits: it has to sit under the main worktree's parent directory,
+  outside every existing worktree, and be new or an empty directory.
+- Each row names the checkout, its branch, and whether it is clean or how many paths `git status`
+  reports. *查看* switches the review to it (the kind of target carries over, as with the selector
+  in the top bar), *复制路径* is for the agent's prompt.
+- *删除* runs `git worktree remove`, never with `--force` on its own: a worktree with uncommitted
+  changes is not removed until you confirm in the row, since those changes go with it, and whatever
+  else git refuses without `--force` is put to you the same way. With *一并删除已合并的分支* ticked
+  the branch goes too, by `git branch -d`: one that is not merged is kept and the toast says why. The
+  comments and viewed flags kept under the worktree's key stay in the state file, as before.
+- A worktree whose directory was deleted behind git's back is listed struck through; *清理* drops that
+  one entry (`git worktree remove` handles it; nothing is pruned wholesale).
 
 ## Keyboard
 
@@ -280,18 +304,24 @@ move into the matching scope the first time the file is read.
 Single user, local only. The server binds to `127.0.0.1` and executes git only through
 `execFile('git', [...])`. Reads go through an argument whitelist (`rev-parse`, `diff`, `show`, `log`,
 `worktree list`, `ls-files`, `status`, `merge-base`, `rev-list`) that refuses option-looking refs and any write-capable
-flag; requests that would need anything else get HTTP 400. The one write is `POST /api/targets/:key/stage`,
-which runs `git apply --cached` (with `--reverse` for the Staged view) on a patch the server itself builds
-from the diff it just produced — the patch is never taken from the request, only the line indices are,
-and they are checked against the diff's hash first. Nothing writes to the working tree, HEAD or the
-refs, and the review state lives outside the repository.
+flag; requests that would need anything else get HTTP 400. The writes are few and each composes its
+own arguments. `POST /api/targets/:key/stage` runs `git apply --cached` (with `--reverse` for the
+Staged view) on a patch the server itself builds from the diff it just produced — the patch is never
+taken from the request, only the line indices are, and they are checked against the diff's hash
+first. `POST /api/worktrees` and `POST /api/worktrees/remove` run `git worktree add`, `git worktree
+remove` and `git branch -d` with a branch name git has validated, a ref that resolves, and a
+path confined to the main worktree's parent directory. Nothing writes to the working tree or HEAD of
+an existing checkout; refs change only when a worktree is made (its new branch) or removed (its merged
+branch, on request), and the review state lives outside the repository. A mutating request the
+browser labels as coming from another site (`Sec-Fetch-Site: cross-site`) is refused with 403, so a
+page from elsewhere cannot drive the server through the browser it is open in.
 
 ## Development
 
 ```sh
 pnpm install
 pnpm dev          # API server on :4100 (tsx watch) + Vite dev server on :5173 with /api proxied
-pnpm test         # vitest: diff parser, staging patches, anchoring, comment scopes, watcher, todos, export, state, HTTP API
+pnpm test         # vitest: diff parser, staging patches, anchoring, comment scopes, watcher, todos, worktrees, export, state, HTTP API
 pnpm typecheck
 pnpm build        # dist/web (Vite) + dist/cli.js (tsup, zero runtime dependencies)
 node dist/cli.js path/to/repo
@@ -302,7 +332,7 @@ Layout:
 ```
 bin/cli.ts           argument parsing, start server, open browser
 packages/shared      types + target key / comment scope helpers (bundled into both sides)
-packages/server      Hono API, git wrapper, diff parser, staging patches, targets, anchoring, watcher, state, export, nvim
+packages/server      Hono API, git wrapper, diff parser, staging patches, targets, worktrees, anchoring, watcher, state, export, nvim
 packages/web         React + Vite UI (shiki highlighting, @tanstack/react-virtual, react-markdown)
 test/                API integration tests on a generated git repository
 ```

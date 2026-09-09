@@ -32,7 +32,7 @@ export function branchOf(repo: RepoInfo | null, root: string): string {
 }
 
 export type DiffState = { status: 'loading' } | { status: 'ok'; diff: FileDiff } | { status: 'error'; message: string };
-export type Panel = 'diff' | 'commits' | 'issues';
+export type Panel = 'diff' | 'commits' | 'issues' | 'worktrees';
 
 /** The one thing a toast can offer besides its text: the way back (撤消). */
 export interface ToastAction {
@@ -137,6 +137,8 @@ export interface AppStore {
 
   init(): Promise<void>;
   setTarget(key: TargetKey): Promise<void>;
+  /** Re-reads /api/repo after a worktree was made or removed; the target is left alone. */
+  reloadRepo(): Promise<void>;
   /** Move between the local views without dropping comments, selection or the editor draft. */
   switchView(key: TargetKey, nextActiveFile?: string | null): Promise<void>;
   loadFiles(): Promise<void>;
@@ -291,6 +293,14 @@ export const useStore = create<AppStore>((set, get) => {
         await get().setTarget(repo.defaultTarget || 'working');
       } catch (e) {
         set({ initError: errMsg(e) });
+      }
+    },
+
+    async reloadRepo() {
+      try {
+        set({ repo: await api.repo() });
+      } catch (e) {
+        fail(e);
       }
     },
 

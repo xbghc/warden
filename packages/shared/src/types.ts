@@ -154,6 +154,50 @@ export interface WorktreeInfo {
   bare: boolean;
 }
 
+/** A worktree as the management panel lists it: the review-time fields plus what removing it needs. */
+export interface WorktreeDetail extends WorktreeInfo {
+  /** Entries `git status` reports: modified, staged and untracked paths together. */
+  dirty: number;
+  /** git still lists it but its directory is gone; removing it drops the entry, nothing else. */
+  prunable: boolean;
+}
+
+export interface BranchInfo {
+  name: string;
+  sha: string;
+  /** Worktree the branch is checked out in, if any; a branch can be in only one at a time. */
+  worktree?: string;
+}
+
+export interface WorktreesResponse {
+  worktrees: WorktreeDetail[];
+  branches: BranchInfo[];
+  /** `<parent of the main worktree>/<repo>-`: a new worktree's path is suggested as this plus its branch. */
+  pathPrefix: string;
+}
+
+export interface CreateWorktreeRequest {
+  path: string;
+  branch: string;
+  /** Create `branch` from this ref; omitted = check out a branch that exists. */
+  base?: string;
+}
+
+export interface RemoveWorktreeRequest {
+  path: string;
+  /** `--force`: only ever sent after the reviewer confirmed a 409 (`worktree_dirty`, `needs_force`). */
+  force?: boolean;
+  /** Also `git branch -d` the worktree's branch; a branch that is not merged is kept and reported. */
+  deleteBranch?: boolean;
+}
+
+export interface RemoveWorktreeResponse {
+  ok: true;
+  branchDeleted: boolean;
+  /** Why the branch was kept, when deleting it was asked for. */
+  branchError?: string;
+}
+
 export interface RepoInfo {
   /** Root of the repository/worktree the server was started in. */
   root: string;

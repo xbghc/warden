@@ -8,6 +8,7 @@ import { FileTree } from './FileTree';
 import { DiffPanel } from './DiffPanel';
 import { CommitsPanel } from './CommitsPanel';
 import { IssuesDrawer } from './IssuesDrawer';
+import { WorktreesPanel } from './WorktreesPanel';
 import { Rail } from './Rail';
 import { Toast } from './Toast';
 
@@ -128,7 +129,8 @@ export function App() {
         <FileTree />
         <main className="main">
           {commitsOpened && <CommitsPanel active={panel === 'commits'} />}
-          {panel !== 'commits' && <DiffPanel />}
+          {panel === 'worktrees' && <WorktreesPanel />}
+          {panel !== 'commits' && panel !== 'worktrees' && <DiffPanel />}
         </main>
         {panel === 'issues' ? <IssuesDrawer /> : panel === 'diff' ? <Rail /> : null}
       </div>

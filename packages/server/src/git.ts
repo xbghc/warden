@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { HttpError } from './errors.js';
 
 /** Sub-commands the server is allowed to run. Everything else is rejected before spawning. */
-const ALLOWED_SUBCOMMANDS = new Set(['rev-parse', 'diff', 'show', 'log', 'worktree', 'ls-files', 'status', 'merge-base', 'rev-list']);
+const ALLOWED_SUBCOMMANDS = new Set(['rev-parse', 'diff', 'show', 'log', 'worktree', 'ls-files', 'status', 'merge-base', 'rev-list', 'for-each-ref', 'check-ref-format']);
 
 /** Options that could make an otherwise read-only sub-command write somewhere. */
 const FORBIDDEN_OPTION_PREFIXES = ['--output', '--ext-diff', '--textconv', '-c', '--config-env', '--exec-path', '--git-dir', '--work-tree'];
@@ -181,6 +181,53 @@ async function applyOnce(cwd: string, patch: string, opts: { reverse?: boolean; 
     );
     child.stdin?.on('error', () => undefined);
     child.stdin?.end(patch);
+  });
+}
+
+/**
+ * Runs a git command that writes to the repository, without the read whitelist. Only worktrees.ts
+ * calls it — `worktree add`, `worktree remove`, `branch -d` — each with an
+ * argument list it composes itself from a branch name, a ref and a path that were validated first,
+ * so nothing from a request reaches git as an option. A failure carries git's first stderr line,
+ * and `stderr` whole, so the caller can tell a refusal (dirty worktree, branch in use) from a crash.
+ */
+export async function runGitWrite(args: readonly string[], opts: { cwd: string; timeoutMs?: number }): Promise<GitResult> {
+  for (const arg of args) if (arg.includes('\0')) throw new GitError('NUL byte in git argument', null, '', 400, 'git_bad_argument');
+  return new Promise((resolve, reject) => {
+    execFile(
+      'git',
+      [...args],
+      {
+        cwd: opts.cwd,
+        timeout: opts.timeoutMs ?? DEFAULT_GIT_TIMEOUT_MS,
+        maxBuffer: 16 * 1024 * 1024,
+        encoding: 'utf8',
+        env: { ...process.env, LC_ALL: 'C', GIT_PAGER: 'cat', PAGER: 'cat', GIT_TERMINAL_PROMPT: '0' },
+        windowsHide: true,
+      },
+      (error, stdout, stderr) => {
+        const err = error as (NodeJS.ErrnoException & { code?: number | string; killed?: boolean; signal?: string }) | null;
+        if (!err) {
+          resolve({ stdout, stderr, code: 0 });
+          return;
+        }
+        if (err.killed || err.signal === 'SIGTERM') {
+          reject(new GitError(`git ${args[0]} timed out`, null, stderr, 504, 'git_timeout'));
+          return;
+        }
+        if (err.code === 'ENOENT') {
+          if (!existsSync(opts.cwd)) {
+            reject(new GitError(`working directory no longer exists: ${opts.cwd}`, null, '', 400, 'unknown_worktree'));
+            return;
+          }
+          reject(new GitError('git executable not found in PATH', null, '', 500, 'git_missing'));
+          return;
+        }
+        const code = typeof err.code === 'number' ? err.code : -1;
+        const first = stderr.split('\n').find((l) => l.trim()) ?? err.message;
+        reject(new GitError(first.trim().replace(/^(fatal|error): /, ''), code, stderr, 500, 'git_failed'));
+      },
+    );
   });
 }
 

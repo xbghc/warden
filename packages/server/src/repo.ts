@@ -35,14 +35,13 @@ export async function resolveRepo(dir: string): Promise<RepoContext> {
   return { root, commonRoot };
 }
 
-export async function listWorktrees(ctx: RepoContext): Promise<WorktreeInfo[]> {
+/** Every worktree git lists, including the ones whose directory is gone (`prunable`). */
+export async function listWorktreesAll(ctx: RepoContext): Promise<(WorktreeInfo & { prunable: boolean })[]> {
   const r = await runGit(['worktree', 'list', '--porcelain'], { cwd: ctx.root });
-  const out: WorktreeInfo[] = [];
+  const out: (WorktreeInfo & { prunable: boolean })[] = [];
   let cur: (Partial<WorktreeInfo> & { prunable?: boolean }) | null = null;
   const flush = () => {
-    // A worktree whose directory was deleted behind git's back is still listed, marked prunable.
-    // Nothing can be reviewed there, so it is not offered — the same as after `git worktree remove`.
-    if (cur && cur.path && !cur.prunable) {
+    if (cur && cur.path) {
       out.push({
         path: cur.path,
         head: cur.head ?? '',
@@ -50,6 +49,7 @@ export async function listWorktrees(ctx: RepoContext): Promise<WorktreeInfo[]> {
         isMain: false,
         detached: cur.detached ?? false,
         bare: cur.bare ?? false,
+        prunable: cur.prunable ?? false,
       });
     }
     cur = null;
@@ -77,6 +77,15 @@ export async function listWorktrees(ctx: RepoContext): Promise<WorktreeInfo[]> {
     wt.isMain = wt.path === ctx.commonRoot;
   }
   return out;
+}
+
+/**
+ * The worktrees something can be reviewed in. One whose directory was deleted behind git's back is
+ * still listed by git, marked prunable; nothing can be reviewed there, so it is not offered — the
+ * same as after `git worktree remove`. The Worktrees panel lists it, to be dropped.
+ */
+export async function listWorktrees(ctx: RepoContext): Promise<WorktreeInfo[]> {
+  return (await listWorktreesAll(ctx)).filter((w) => !w.prunable).map(({ prunable: _prunable, ...w }) => w);
 }
 
 /** Branch checked out at `cwd`. A detached HEAD is identified by its short sha instead. */

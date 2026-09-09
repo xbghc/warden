@@ -5,6 +5,7 @@ import type {
   CreateCommentRequest,
   CreateIssueRequest,
   CreateTodoRequest,
+  CreateWorktreeRequest,
   ExportResponse,
   FileDiff,
   FilesResponse,
@@ -14,6 +15,8 @@ import type {
   NvimInstancesResponse,
   Prefs,
   ReanchorResponse,
+  RemoveWorktreeRequest,
+  RemoveWorktreeResponse,
   RepoInfo,
   ReviewState,
   StageRequest,
@@ -24,6 +27,8 @@ import type {
   UpdateCommentRequest,
   UpdateIssueRequest,
   UpdateTodoRequest,
+  WorktreeInfo,
+  WorktreesResponse,
 } from '@warden/shared';
 
 export class ApiError extends Error {
@@ -110,6 +115,10 @@ export const api = {
   commits: (params: { path?: string; q?: string; author?: string; firstParent?: boolean; offset?: number; limit?: number; root?: string; ref?: string }) =>
     req<CommitsResponse>('GET', `/api/commits${q(params)}`),
   forkPoint: (params: { root?: string; base: string }) => req<ForkPointResponse>('GET', `/api/fork-point${q(params)}`),
+
+  worktrees: () => req<WorktreesResponse>('GET', '/api/worktrees'),
+  createWorktree: (body: CreateWorktreeRequest) => req<WorktreeInfo>('POST', '/api/worktrees', body),
+  removeWorktree: (body: RemoveWorktreeRequest) => req<RemoveWorktreeResponse>('POST', '/api/worktrees/remove', body),
 
   nvimInstances: (root: string, rescan = false) => req<NvimInstancesResponse>('GET', `/api/nvim/instances${q({ root, rescan })}`),
   nvimSelect: (root: string, socket: string) => req<{ ok: true }>('POST', '/api/nvim/select', { root, socket }),

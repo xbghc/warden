@@ -1,9 +1,25 @@
 import os from 'node:os';
 import path from 'node:path';
-import { mkdtemp, rm, unlink } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdtemp, realpath, rm, unlink, writeFile } from 'node:fs/promises';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Hono } from 'hono';
-import type { Comment, CommitsResponse, ExportResponse, FileDiff, FilesResponse, ForkPointResponse, ReanchorResponse, RepoInfo, ReviewState, StageResponse } from '@warden/shared';
+import type {
+  Comment,
+  CommitsResponse,
+  ExportResponse,
+  FileDiff,
+  FilesResponse,
+  ForkPointResponse,
+  ReanchorResponse,
+  RemoveWorktreeRequest,
+  RemoveWorktreeResponse,
+  RepoInfo,
+  ReviewState,
+  StageResponse,
+  WorktreeInfo,
+  WorktreesResponse,
+} from '@warden/shared';
 import { createApp, resolveRepo, StateStore, NvimService } from '@warden/server';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
@@ -638,6 +654,113 @@ describe('commit log', () => {
     } finally {
       fx.git('branch', '-D', 'island');
     }
+  });
+});
+
+describe('worktree management', () => {
+  // Beside the fixture, where the server suggests them: `<repo>-<name>`.
+  const wtDir = (name: string) => path.join(path.dirname(fx.root), `${path.basename(fx.root)}-${name}`);
+  const list = async () => json<WorktreesResponse>(await get('/api/worktrees'));
+  const create = (body: unknown) => send('POST', '/api/worktrees', body);
+  const remove = (body: RemoveWorktreeRequest) => send('POST', '/api/worktrees/remove', body);
+  const code = async (res: Response) => (await json<{ code: string }>(res)).code;
+
+  afterAll(async () => {
+    // Whatever a failing test left beside the fixture.
+    for (const name of ['one', 'two', 'gone']) {
+      try {
+        fx.git('worktree', 'remove', '--force', wtDir(name));
+      } catch {
+        /* not there */
+      }
+      await rm(wtDir(name), { recursive: true, force: true });
+    }
+    fx.git('worktree', 'prune');
+  });
+
+  it('lists the checkouts, the local branches and where a new one would go', async () => {
+    const res = await list();
+    expect(res.worktrees.map((w) => [w.isMain, w.branch, w.prunable])).toEqual([[true, 'main', false]]);
+    expect(res.branches.find((b) => b.name === 'main')).toMatchObject({ worktree: fx.root });
+    expect(res.branches.find((b) => b.name === 'topic')?.worktree).toBeUndefined();
+    expect(res.pathPrefix).toBe(wtDir(''));
+  });
+
+  it('makes a worktree on a new branch, counts its changes, and removes it only when forced', async () => {
+    const res = await create({ path: wtDir('one'), branch: 'agent/one', base: 'main' });
+    expect(res.status).toBe(201);
+    const made = await json<WorktreeInfo>(res);
+    expect(made).toMatchObject({ path: await realpath(wtDir('one')), branch: 'agent/one', isMain: false });
+    expect((await json<RepoInfo>(await get('/api/repo'))).worktrees.map((w) => w.branch)).toEqual(['main', 'agent/one']);
+    // The branch is taken now: neither a second checkout of it nor a second `-b` goes through.
+    expect(await code(await create({ path: wtDir('two'), branch: 'agent/one' }))).toBe('branch_in_use');
+    expect(await code(await create({ path: wtDir('two'), branch: 'agent/one', base: 'main' }))).toBe('branch_exists');
+
+    await writeFile(path.join(made.path, 'scratch.txt'), 'wip\n');
+    expect((await list()).worktrees.find((w) => w.path === made.path)).toMatchObject({ dirty: 1, prunable: false });
+    const dirty = await remove({ path: made.path });
+    expect(dirty.status).toBe(409);
+    expect(await code(dirty)).toBe('worktree_dirty');
+    expect(existsSync(made.path)).toBe(true);
+    // Forced, and the branch goes with it: nothing was committed on it, so `-d` agrees.
+    expect(await json<RemoveWorktreeResponse>(await remove({ path: made.path, force: true, deleteBranch: true }))).toEqual({ ok: true, branchDeleted: true });
+    expect((await list()).branches.map((b) => b.name)).not.toContain('agent/one');
+    expect(existsSync(made.path)).toBe(false);
+  });
+
+  it('checks out an existing branch, and keeps the branch on removal when it is not merged', async () => {
+    const made = await json<WorktreeInfo>(await create({ path: wtDir('two'), branch: 'topic' }));
+    expect(made.branch).toBe('topic');
+    await writeFile(path.join(made.path, 'more.txt'), 'more\n');
+    fx.git('-C', made.path, 'add', 'more.txt');
+    fx.git('-C', made.path, 'commit', '-q', '-m', 'topic: more');
+    const res = await json<RemoveWorktreeResponse>(await remove({ path: made.path, deleteBranch: true }));
+    expect(res.ok).toBe(true);
+    expect(res.branchDeleted).toBe(false);
+    expect(res.branchError).toMatch(/not fully merged/);
+    expect((await list()).branches.map((b) => b.name)).toContain('topic');
+    expect(existsSync(made.path)).toBe(false);
+  });
+
+  it('refuses a path outside the parent directory or inside a worktree, and bad names', async () => {
+    expect(await code(await create({ path: 'relative/dir', branch: 'x', base: 'main' }))).toBe('invalid_path');
+    expect(await code(await create({ path: '/nowhere/x', branch: 'x', base: 'main' }))).toBe('invalid_path');
+    expect(await code(await create({ path: path.join(fx.root, 'inside'), branch: 'x', base: 'main' }))).toBe('invalid_path');
+    expect(await code(await create({ path: fx.root, branch: 'x', base: 'main' }))).toBe('invalid_path');
+    expect(await code(await create({ path: path.dirname(fx.root), branch: 'x', base: 'main' }))).toBe('invalid_path');
+    expect(await code(await create({ path: wtDir('one'), branch: 'x', base: 'nope' }))).toBe('unknown_ref');
+    expect(await code(await create({ path: wtDir('one'), branch: 'nope' }))).toBe('unknown_ref');
+    for (const branch of ['-b', 'bad..name', 'a b', 'x@{-1}', 'refs/heads/x', 'x.lock', '']) {
+      expect(await code(await create({ path: wtDir('one'), branch, base: 'main' }))).toBe('invalid_branch');
+    }
+    expect(await code(await create({ path: wtDir('one'), branch: 'x', base: '--output=x' }))).toBe('invalid_ref');
+    expect((await create({ branch: 'x' })).status).toBe(400);
+    expect(await code(await remove({ path: fx.root }))).toBe('main_worktree');
+    expect(await code(await remove({ path: '/nowhere' }))).toBe('unknown_worktree');
+    expect(existsSync(wtDir('one'))).toBe(false);
+  });
+
+  it('drops the entry of a worktree whose directory is gone, branch included', async () => {
+    const made = await json<WorktreeInfo>(await create({ path: wtDir('gone'), branch: 'agent/gone', base: 'main' }));
+    await rm(made.path, { recursive: true, force: true });
+    // Not offered for review any more, but still listed here, and its branch is still taken.
+    expect((await json<RepoInfo>(await get('/api/repo'))).worktrees.map((w) => w.path)).not.toContain(made.path);
+    const res = await list();
+    expect(res.worktrees.find((w) => w.path === made.path)).toMatchObject({ prunable: true, dirty: 0 });
+    expect(res.branches.find((b) => b.name === 'agent/gone')?.worktree).toBe(made.path);
+    expect(await json<RemoveWorktreeResponse>(await remove({ path: made.path, deleteBranch: true }))).toEqual({ ok: true, branchDeleted: true });
+    const after = await list();
+    expect(after.worktrees.map((w) => w.path)).not.toContain(made.path);
+    expect(after.branches.map((b) => b.name)).not.toContain('agent/gone');
+  });
+
+  it('refuses a mutating request the browser marks as cross-site', async () => {
+    const headers = { 'content-type': 'application/json', 'sec-fetch-site': 'cross-site' };
+    const res = await app.request('/api/worktrees/remove', { method: 'POST', headers, body: JSON.stringify({ path: fx.root }) });
+    expect(res.status).toBe(403);
+    expect(await code(res)).toBe('cross_site');
+    expect((await app.request('/api/worktrees', { headers: { 'sec-fetch-site': 'cross-site' } })).status).toBe(200);
+    expect((await app.request('/api/worktrees', { headers: { 'sec-fetch-site': 'same-origin' } })).status).toBe(200);
   });
 });
 

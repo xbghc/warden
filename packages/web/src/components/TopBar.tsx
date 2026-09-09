@@ -82,6 +82,10 @@ export function TopBar() {
             Issues
             {openIssues > 0 && <span className="tab-count">{openIssues}</span>}
           </button>
+          <button className={`tab ${panel === 'worktrees' ? 'active' : ''}`} onClick={() => setPanel(panel === 'worktrees' ? 'diff' : 'worktrees')} title="新建、切换和删除 worktree">
+            Worktrees
+            {otherWorktrees.length > 0 && <span className="tab-count">{otherWorktrees.length}</span>}
+          </button>
         </nav>
         <div className="tools">
         <div className="seg" role="group" aria-label="diff 布局">
