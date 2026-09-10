@@ -29,7 +29,7 @@ export function CommentRail() {
   const includeExported = useStore((s) => s.includeExported);
   const setIncludeExported = useStore((s) => s.setIncludeExported);
   const selectedIds = useStore((s) => s.selectedCommentIds);
-  const setPanel = useStore((s) => s.setPanel);
+  const setRailTab = useStore((s) => s.setRailTab);
   const reattaching = useStore((s) => s.reattaching);
   const setReattaching = useStore((s) => s.setReattaching);
 
@@ -73,7 +73,7 @@ export function CommentRail() {
   const editorCard = editor && (
     <CommentEditor
       key={`${editor.filePath}:${editor.side}:${editor.startLine}:${editor.endLine}`}
-      title={`新评论 · ${editor.filePath.split('/').pop()} ${editor.side} ${editor.startLine === editor.endLine ? editor.startLine : `${editor.startLine}-${editor.endLine}`}`}
+      title={`新评论 · ${editor.filePath.split('/').pop()} ${editor.side === 'old' ? '−' : '+'}${editor.startLine === editor.endLine ? editor.startLine : `${editor.startLine}-${editor.endLine}`}`}
       onSave={async (body) => {
         await createComment({ filePath: editor.filePath, side: editor.side, startLine: editor.startLine, endLine: editor.endLine, body });
       }}
@@ -93,7 +93,7 @@ export function CommentRail() {
           ))}
         </div>
         <span className="spacer" />
-        {counts.orphaned > 0 && <span className="badge badge-orphaned">{counts.orphaned} orphaned</span>}
+        {counts.orphaned > 0 && <span className="badge badge-orphaned">{counts.orphaned} 条已失联</span>}
       </div>
       {reattaching && (
         <div className="rail-notice">
@@ -120,7 +120,16 @@ export function CommentRail() {
             还没有评论。在 diff 行旁点击 <span className="add-btn static">+</span> 或拖选多行开始。
           </div>
         )}
-        {counts.all > 0 && shown.orphaned.length + shown.attached.length === 0 && !editor && <div className="muted empty">没有符合筛选的评论</div>}
+        {/* A filter that hides everything is a dead end unless it says where the rest went — the
+            rail opens on 此文件, and the file in front is usually not the one with the comments. */}
+        {counts.all > 0 && shown.orphaned.length + shown.attached.length === 0 && !editor && (
+          <div className="muted empty">
+            这个筛选下没有评论。
+            <button className="link" onClick={() => setFilter('all')}>
+              查看全部 {counts.all} 条
+            </button>
+          </div>
+        )}
       </div>
       <div className="rail-foot">
         <div className="rail-foot-row">
@@ -134,7 +143,7 @@ export function CommentRail() {
           </label>
         </div>
         {selectedIds.length > 0 && (
-          <button className="accent" onClick={() => setPanel('issues')}>
+          <button className="accent" onClick={() => setRailTab('issues')}>
             从 {selectedIds.length} 条选中评论创建 Issue
           </button>
         )}

@@ -7,7 +7,7 @@ import { sha1 } from './hash.js';
 
 export function dataDir(): string {
   const xdg = process.env.XDG_DATA_HOME;
-  const base = xdg && xdg.trim() ? xdg : path.join(os.homedir(), '.local', 'share');
+  const base = xdg?.trim() ? xdg : path.join(os.homedir(), '.local', 'share');
   return path.join(base, 'warden');
 }
 
@@ -20,7 +20,7 @@ export function stateFilePath(repoRoot: string, baseDir = dataDir()): string {
 }
 
 export function defaultPrefs(): Prefs {
-  return { viewMode: 'unified', nvimSocketByRoot: {}, autoRefresh: true };
+  return { viewMode: 'unified', nvimSocketByRoot: {}, autoRefresh: true, railOpen: false };
 }
 
 export function defaultState(repoRoot: string): ReviewState {
@@ -66,6 +66,7 @@ function normalise(raw: unknown, repoRoot: string): ReviewState {
       ...(r.prefs ?? {}),
       nvimSocketByRoot: r.prefs?.nvimSocketByRoot ?? {},
       autoRefresh: typeof r.prefs?.autoRefresh === 'boolean' ? r.prefs.autoRefresh : true,
+      railOpen: typeof r.prefs?.railOpen === 'boolean' ? r.prefs.railOpen : false,
     },
   };
 }

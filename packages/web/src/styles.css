@@ -29,8 +29,17 @@
   --r-ctl: 3px;
   --r-card: 6px;
   --ctl-h: 26px;
-  --sans: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
-  --mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'Noto Sans Mono CJK SC', monospace;
+  /* Four steps and no more. Everything used to be 12 or 13px, which is why nothing on the page
+     could be more important than anything else. `figure` is spent once, on review progress. */
+  --t-meta: 11px;
+  --t-ui: 13px;
+  --t-lead: 15px;
+  --t-figure: 26px;
+  /* Chrome separates from the code by plane, not by a rule around every zone. The shadow is for
+     things that genuinely float — the stage bar, the toast — and nothing else. */
+  --lift: 0 4px 16px rgba(20, 24, 33, 0.13);
+  --sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "Noto Sans Mono CJK SC", monospace;
 }
 
 * {
@@ -43,7 +52,7 @@ body,
   margin: 0;
 }
 body {
-  font: 13px/1.5 var(--sans);
+  font: var(--t-ui) / 1.5 var(--sans);
   color: var(--ink);
   background: var(--ground);
   -webkit-font-smoothing: antialiased;
@@ -116,18 +125,35 @@ button.link.active {
 button.icon {
   padding: 0 7px;
 }
+/* Chrome controls that are always present and rarely pressed: no border until pointed at, so a
+   toolbar reads as a row of words rather than a row of boxes. */
+button.quiet {
+  background: none;
+  border-color: transparent;
+  color: var(--ink-2);
+}
+button.quiet:hover:not(:disabled) {
+  background: var(--surface-3);
+  border-color: transparent;
+  color: var(--ink);
+}
+/* A pointer dragging the sidebar edge must not select the text it passes over. */
+body.resizing {
+  cursor: col-resize;
+  user-select: none;
+}
 /* On/off button: the dot is the state, so the label can stay two characters wide. */
 button.toggle::before {
-  content: '';
+  content: "";
   width: 6px;
   height: 6px;
   border-radius: 50%;
   border: 1.5px solid currentColor;
 }
-button.toggle[aria-pressed='true'] {
+button.toggle[aria-pressed="true"] {
   border-color: var(--ink);
 }
-button.toggle[aria-pressed='true']::before {
+button.toggle[aria-pressed="true"]::before {
   background: currentColor;
 }
 input,
@@ -151,7 +177,7 @@ textarea {
   line-height: 1.6;
   padding: 6px 8px;
 }
-input[type='checkbox'] {
+input[type="checkbox"] {
   height: auto;
   margin: 0;
   accent-color: var(--ink);
@@ -300,7 +326,7 @@ kbd {
   font-weight: 500;
 }
 .tab.active::after {
-  content: '';
+  content: "";
   position: absolute;
   left: 6px;
   right: 6px;
@@ -381,10 +407,9 @@ kbd {
   display: flex;
   align-items: center;
   gap: 14px;
-  padding: 0 12px;
-  min-height: 42px;
+  padding: 0 10px 0 12px;
+  min-height: 40px;
   background: var(--ground);
-  border-bottom: 1px solid var(--line);
   flex-wrap: wrap;
 }
 .brand {
@@ -430,60 +455,272 @@ kbd {
   font-family: var(--mono);
   font-size: 12px;
 }
-/* Stretched to the bar's height so the tab underline lands on its bottom edge; when the bar
-   wraps, the whole block moves to the next line and stays right-aligned. */
+/* Only reading tools live here; navigation is the sidebar's. When the bar wraps, the whole block
+   moves to the next line and stays right-aligned. */
 .topbar-right {
   margin-left: auto;
-  align-self: stretch;
-  display: flex;
-  align-items: stretch;
-  gap: 14px;
-}
-.tools {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 .nvim {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  max-width: 320px;
+  max-width: 300px;
 }
 .nvim select {
-  max-width: 260px;
+  max-width: 240px;
 }
-.nvim-one {
+.nvim-one,
+.nvim-idle {
   font-family: var(--mono);
   font-size: 12px;
+  color: var(--muted);
+}
+/* The rail's switch, set apart from the reading tools by the gap it opens on its left. */
+.rail-switch {
+  margin-left: 8px;
+  background: none;
+  border-color: transparent;
   color: var(--ink-2);
 }
-.nvim .muted {
-  font-size: 12px;
+.rail-switch:hover:not(:disabled) {
+  background: var(--surface-3);
+  border-color: transparent;
+  color: var(--ink);
+}
+.rail-switch.active {
+  background: var(--surface);
+  border-color: var(--line);
+  color: var(--ink);
+}
+.rail-switch-n {
+  font-family: var(--mono);
+  font-size: var(--t-meta);
+  color: var(--muted);
+}
+/* Comments nobody has sent back yet are the one thing the tool exists to produce, so the switch
+   that reveals them carries the accent while any are outstanding. */
+.rail-switch.has-unexported .rail-switch-n {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: var(--r-ctl);
+  padding: 0 5px;
 }
 
 /* ---- sidebar / tree ------------------------------------------------------------ */
 .sidebar {
-  width: 280px;
-  min-width: 200px;
-  border-right: 1px solid var(--line);
+  flex: none;
   display: flex;
   flex-direction: column;
   background: var(--ground);
-  resize: horizontal;
   overflow: hidden;
+  position: relative;
+}
+/* The three destinations, and the only navigation in the app. */
+.side-nav {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 0 6px;
+  min-height: 32px;
+}
+.side-tab {
+  height: auto;
+  background: none;
+  border: none;
+  border-radius: 0;
+  padding: 0 8px;
+  color: var(--muted);
+  position: relative;
+}
+.side-tab:hover:not(:disabled) {
+  background: none;
+  color: var(--ink);
+}
+.side-tab.active {
+  color: var(--ink);
+  font-weight: 600;
+}
+.side-tab.active::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 0;
+  height: 2px;
+  background: var(--ink);
+}
+/* Where the commit and worktree panels portal their own controls. */
+.side-slot,
+.side-form {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  padding: 12px 12px 16px;
+}
+.side-form {
+  overflow: visible;
+  padding: 0;
+}
+.side-slot > .side-form {
+  flex: none;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: var(--t-meta);
+  color: var(--muted);
+}
+.field input {
+  width: 100%;
+  font-size: var(--t-ui);
+}
+.field-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.field-row input {
+  min-width: 0;
+  flex: 1;
+}
+.side-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.side-group-title {
+  font-weight: 600;
+  color: var(--ink-2);
+}
+/* Stacked under the fields, a button with an input's white ground and hairline border reads as
+   one more empty field. These keep a button's shape but take the chrome ground and centre their
+   label, which is what separates "press me" from "type here" in a column this narrow. */
+.side-form button {
+  justify-content: center;
+  background: var(--surface-2);
+  border-color: var(--line-strong);
+  font-weight: 500;
+}
+.side-form button:hover:not(:disabled) {
+  background: var(--surface-3);
+  border-color: var(--line-strong);
+}
+.side-form button.toggle {
+  justify-content: flex-start;
+  font-weight: 400;
+}
+.side-form button.toggle[aria-pressed="true"] {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #fff;
+}
+.side-form button.link {
+  justify-content: flex-start;
+  background: none;
+  border: none;
+  font-weight: 400;
+}
+.side-form-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+/* Drag the column's own edge. The CSS `resize` grip it replaces sat in the bottom corner, a
+   sidebar's height away from the border it moved. */
+.side-grip {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 5px;
+  cursor: col-resize;
+  background: var(--line);
+  background-clip: content-box;
+  border-left: 4px solid transparent;
+}
+.side-grip:hover {
+  background: var(--line-strong);
+}
+/* Both blocks share one scroll, so twenty unstaged files can spill past a short staged list
+   instead of each block scrolling inside its own half. */
+.tree-blocks {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
 }
 .tree-block {
   display: flex;
   flex-direction: column;
-  /* Content-sized, shrinking proportionally, so an empty Staged block does not
-     claim half the sidebar while Unstaged has twenty files in it. */
-  flex: 0 1 auto;
-  min-height: 66px;
+  flex: none;
   min-width: 0;
 }
 .tree-block + .tree-block {
+  margin-top: 6px;
   border-top: 1px solid var(--line);
+}
+/* An empty block is its title and one line saying so — no expand/collapse buttons over nothing
+   to expand, no body, no reserved height. */
+.tree-block.empty .block-head {
+  padding: 6px 12px;
+}
+
+/* The one figure in the app, and the question a review actually asks: how much is left. */
+.progress {
+  flex: none;
+  padding: 10px 12px 12px;
+}
+.progress-figure {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.progress-done {
+  font-family: var(--mono);
+  font-size: var(--t-figure);
+  font-weight: 500;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.progress-done.complete {
+  color: var(--add-fg);
+}
+.progress-of {
+  font-family: var(--mono);
+  font-size: var(--t-lead);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.progress-label {
+  font-size: var(--t-meta);
+  color: var(--muted);
+}
+.progress-track {
+  margin-top: 7px;
+  height: 3px;
+  background: var(--surface-3);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.progress-track > span {
+  display: block;
+  height: 100%;
+  background: var(--ink);
+  transition: width 0.25s;
 }
 /* Above a commit, range or branch tree only: the local views are home and need no way back. */
 .sidebar-target {
@@ -506,11 +743,16 @@ kbd {
 .sidebar-target .link {
   font-size: 12px;
 }
+/* Sticky so the block a long list belongs to is still named when it has scrolled past. */
 .block-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 10px 4px;
+  padding: 8px 12px 4px;
+  background: var(--ground);
   font-size: 12px;
   white-space: nowrap;
 }
@@ -519,47 +761,32 @@ kbd {
 }
 .block-n {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--t-meta);
   color: var(--muted);
 }
 .block-head .counts {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--t-meta);
   display: inline-flex;
   gap: 4px;
-}
-.block-viewed {
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--muted);
-}
-/* How much of the block has been read: the only progress indicator in the app. */
-.block-progress {
-  height: 2px;
-  margin: 0 10px 4px;
-  background: var(--line);
-  border-radius: 1px;
-  overflow: hidden;
-}
-.block-progress > span {
-  display: block;
-  height: 100%;
-  background: var(--ink);
-  transition: width 0.2s;
 }
 .tree-tools {
   display: inline-flex;
   gap: 2px;
+  /* Only while the block is being used: two permanent grey words in every header is chrome the
+     eye has to skip on the way to the file names. */
+  opacity: 0;
+}
+.tree-block:hover .tree-tools,
+.tree-tools:focus-within {
+  opacity: 1;
 }
 .tree-tools .link {
-  font-size: 11px;
+  font-size: var(--t-meta);
   color: var(--muted);
 }
 .tree {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: auto;
-  padding: 2px 0 6px;
+  padding: 0 0 4px;
 }
 .tree-row {
   display: flex;
@@ -574,9 +801,15 @@ kbd {
 .tree-row:hover {
   background: var(--surface-3);
 }
+/* The file in front reads as the same plane as the diff beside it, and carries the ink bar that
+   marks selection everywhere in the app. */
 .tree-row.active {
   background: var(--surface);
-  box-shadow: inset 2px 0 var(--ink);
+  box-shadow: inset 3px 0 var(--ink);
+  font-weight: 500;
+}
+.tree-row.active .name {
+  color: var(--ink);
 }
 .tree-row.viewed .name {
   color: var(--muted);
@@ -661,15 +894,18 @@ kbd {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 0 12px;
-  min-height: 38px;
+  padding: 0 14px;
+  min-height: 40px;
   border-bottom: 1px solid var(--line);
   background: var(--surface);
   flex-wrap: wrap;
 }
+/* The file being read is the heading of the whole middle column, so it is set a step up from the
+   code under it rather than the same 12px as everything else. */
 .file-head .path {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--t-lead);
+  letter-spacing: -0.01em;
 }
 .file-head .path .dir {
   color: var(--muted);
@@ -806,7 +1042,7 @@ kbd {
   border-color: var(--ink);
 }
 .stage-box.on::after {
-  content: '';
+  content: "";
   position: absolute;
   left: 3px;
   top: 0;
@@ -1183,45 +1419,6 @@ kbd {
 .commits-panel[hidden] {
   display: none;
 }
-.commits-tools {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--line);
-  background: var(--ground);
-  flex-wrap: wrap;
-}
-.commits-tools input {
-  width: 140px;
-}
-.commits-tools input.search {
-  width: 260px;
-}
-.commits-tools input.path {
-  font-size: 12px;
-}
-.commits-count {
-  margin-left: auto;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-/* Under the filters: the two history targets a click on a row cannot express. */
-.commits-compare {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--line);
-  background: var(--ground);
-  flex-wrap: wrap;
-}
-.compare-label {
-  font-size: 12px;
-  color: var(--ink-2);
-  margin-right: 2px;
-}
 .commits-list {
   flex: 1;
   overflow: auto;
@@ -1321,14 +1518,14 @@ kbd {
 .commit-row.fork {
   border-top: 1px dashed var(--line-strong);
 }
+/* Under the base field in the sidebar, where it wraps rather than pushing the button off. */
 .fork-note {
-  margin-left: 6px;
-  font-size: 12px;
-  white-space: nowrap;
+  font-size: var(--t-meta);
+  line-height: 1.6;
 }
 .fork-note .link {
   padding: 0;
-  font-size: 12px;
+  font-size: var(--t-meta);
 }
 .commit-row .author {
   flex: 0 0 110px;
@@ -1352,67 +1549,38 @@ kbd {
   font-size: 12px;
 }
 
-/* ---- issues / todos drawer ------------------------------------------------------- */
-/* Worktrees panel: the add form above one row per checkout. */
+/* ---- worktrees ------------------------------------------------------------------- */
+/* The form is in the sidebar; the middle is one card per checkout. */
 .worktrees-panel {
   flex: 1;
   display: flex;
   flex-direction: column;
   min-height: 0;
-}
-.wt-tools {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--line);
-  background: var(--ground);
-  flex-wrap: wrap;
-}
-.wt-opt {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 12px;
-  color: var(--ink-2);
-}
-.wt-add {
-  display: flex;
-  align-items: flex-end;
-  gap: 12px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--line);
-  background: var(--ground);
-  flex-wrap: wrap;
-}
-.wt-add label {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  font-size: 12px;
-  color: var(--ink-2);
-}
-.wt-add input {
-  width: 200px;
-}
-.wt-add input.mono {
-  width: 360px;
+  background: var(--surface);
 }
 .wt-list {
   flex: 1;
   overflow: auto;
-  background: var(--surface);
+  /* A worktree is a name, a branch and a path: a column, not a band across the window. Left
+     aligned, because the sidebar's form is what it is read against. */
+  max-width: 740px;
+  padding: 16px 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 .wt-row {
   display: flex;
   align-items: flex-start;
   gap: 12px;
   padding: 10px 12px;
-  border-bottom: 1px solid var(--surface-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  background: var(--surface);
 }
 .wt-row.active {
-  background: var(--surface-2);
-  box-shadow: inset 2px 0 var(--ink);
+  border-color: var(--line-strong);
+  box-shadow: inset 3px 0 var(--ink);
 }
 .wt-row.gone .wt-name {
   color: var(--muted);
@@ -1449,37 +1617,24 @@ kbd {
 .wt-confirm {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-top: 4px;
-  padding: 6px 8px;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+  padding: 7px 9px;
   border-radius: var(--r-ctl);
-  background: var(--warn-bg);
+  background: var(--warn-soft);
+  border: 1px solid var(--warn-line);
   color: var(--warn-fg);
   font-size: 12px;
 }
+.wt-confirm .link {
+  color: var(--warn-fg);
+}
+.wt-confirm .link.danger {
+  color: var(--del-fg);
+}
 .wt-empty {
-  padding: 24px 12px;
-  text-align: center;
-}
-
-.issues-drawer {
-  width: 440px;
-  border-left: 1px solid var(--line);
-  display: flex;
-  flex-direction: column;
-  background: var(--ground);
-  min-height: 0;
-}
-.drawer-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0 10px;
-  min-height: 36px;
-  border-bottom: 1px solid var(--line);
-}
-.drawer-title {
-  font-weight: 600;
+  padding: 20px 2px;
 }
 /* ---- task lists: todos and issues, in the shape of Google Tasks -------------------- */
 .rail-list.tasks {
@@ -1565,7 +1720,7 @@ kbd {
   background: var(--surface);
 }
 .task-check::after {
-  content: '';
+  content: "";
   position: absolute;
   left: 5px;
   top: 1.5px;
@@ -1820,15 +1975,19 @@ kbd {
   border-color: rgba(255, 255, 255, 0.5);
 }
 
-/* ---- comment rail ---------------------------------------------------------------- */
+/* ---- rail: comments, todos, issues ------------------------------------------------ */
 .rail {
   width: 360px;
-  min-width: 300px;
+  flex: none;
   border-left: 1px solid var(--line);
   display: flex;
   flex-direction: column;
   background: var(--ground);
   min-height: 0;
+}
+/* Issues carry their linked comments underneath, so they need the width the other two do not. */
+.rail.rail-wide {
+  width: 440px;
 }
 .rail-head {
   display: flex;
@@ -1926,16 +2085,11 @@ kbd {
   max-width: none;
 }
 
-/* ---- dual file tree (Unstaged / Staged) ----------------------------------- */
-.sidebar.dual {
-  overflow: hidden;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .chev,
   .card-actions,
   .task-row.completing,
-  .block-progress > span {
+  .progress-track > span {
     transition: none;
   }
 }

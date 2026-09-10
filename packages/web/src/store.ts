@@ -32,7 +32,8 @@ export function branchOf(repo: RepoInfo | null, root: string): string {
 }
 
 export type DiffState = { status: 'loading' } | { status: 'ok'; diff: FileDiff } | { status: 'error'; message: string };
-export type Panel = 'diff' | 'commits' | 'issues' | 'worktrees';
+/** What the middle of the window is showing. Issues moved to the rail, beside the other two things the reviewer writes. */
+export type Panel = 'diff' | 'commits' | 'worktrees';
 
 /** The one thing a toast can offer besides its text: the way back (撤消). */
 export interface ToastAction {
@@ -55,8 +56,8 @@ export interface EditorTarget {
 }
 
 export type RailFilter = 'file' | 'all' | 'unexported';
-/** The two notebooks of the right-hand rail. */
-export type RailTab = 'comments' | 'todos';
+/** The three notebooks of the right-hand rail — everything the reviewer writes. */
+export type RailTab = 'comments' | 'todos' | 'issues';
 
 /**
  * Rows picked for staging in the open diff: a drag over one hunk, kept as the positions it
@@ -132,6 +133,14 @@ export interface AppStore {
   railFilter: RailFilter;
   railTab: RailTab;
   stageSel: StageSelection | null;
+  /** Width the sidebar was dragged to, in px; kept here so it survives a panel switch. */
+  sidebarWidth: number;
+  /**
+   * The sidebar's slot element. The commit and worktree panels render their own controls into it
+   * through a portal: the controls belong in the left column, but their state is bound up with
+   * the list in the middle, and splitting the two would mean lifting a dozen fields.
+   */
+  sideSlot: HTMLElement | null;
   /** A stage request is in flight; the controls wait for it rather than queue a second one. */
   staging: boolean;
 
@@ -177,7 +186,11 @@ export interface AppStore {
   setEditor(editor: EditorTarget | null): void;
   focusComment(id: string | null, scroll?: boolean): Promise<void>;
   setRailFilter(filter: RailFilter): void;
+  /** Picking a tab also opens the rail; shutting it is the ✕, the top bar's switch or Esc. */
   setRailTab(tab: RailTab): void;
+  setRailOpen(open: boolean): void;
+  setSidebarWidth(px: number): void;
+  setSideSlot(el: HTMLElement | null): void;
   loadTodos(): Promise<void>;
   createTodo(body: CreateTodoRequest): Promise<Todo | undefined>;
   updateTodo(id: string, body: UpdateTodoRequest): Promise<void>;
@@ -209,6 +222,16 @@ function errMsg(e: unknown): string {
 
 export const useStore = create<AppStore>((set, get) => {
   const fail = (e: unknown) => get().showToast(errMsg(e), 'error');
+
+  /**
+   * Bring the rail out on the tab that is about to have something in it. Everything that writes a
+   * comment goes through here, because the editor and the cards only exist inside the rail: with
+   * it shut, clicking + on a line would otherwise do nothing visible.
+   */
+  const openRail = (tab: RailTab) => {
+    set({ railTab: tab });
+    get().setRailOpen(true);
+  };
 
   /** The listing behind a view key, whether or not it is the one in front. */
   const entriesOf = (view: TargetKey): FileEntry[] => {
@@ -251,7 +274,7 @@ export const useStore = create<AppStore>((set, get) => {
   return {
     repo: null,
     initError: null,
-    prefs: { viewMode: 'unified', nvimSocketByRoot: {}, autoRefresh: true },
+    prefs: { viewMode: 'unified', nvimSocketByRoot: {}, autoRefresh: true, railOpen: false },
     targetKey: 'working',
     root: '',
     files: [],
@@ -285,6 +308,8 @@ export const useStore = create<AppStore>((set, get) => {
     railTab: 'comments',
     stageSel: null,
     staging: false,
+    sidebarWidth: 280,
+    sideSlot: null,
 
     async init() {
       try {
@@ -324,6 +349,10 @@ export const useStore = create<AppStore>((set, get) => {
       });
       api.patchPrefs({ lastTarget: key }).catch(() => undefined);
       await get().loadFiles();
+      // A review starts by reading, so the diff opens on the first file rather than on a page
+      // that explains how to open one. Refreshes keep whatever is already in front.
+      const first = get().files[0];
+      if (first && !get().activeFile) await get().openFile(first.path);
     },
 
     async switchView(key, nextActiveFile) {
@@ -519,7 +548,9 @@ export const useStore = create<AppStore>((set, get) => {
         await copyText(res.text);
         const now = new Date().toISOString();
         set((s) => ({
-          comments: s.comments.map((c) => (res.commentIds.includes(c.id) ? { ...c, status: c.status === 'active' ? 'exported' : c.status, exportedAt: now } : c)),
+          comments: s.comments.map((c) =>
+            res.commentIds.includes(c.id) ? { ...c, status: c.status === 'active' ? 'exported' : c.status, exportedAt: now } : c,
+          ),
         }));
         get().showToast(`已复制 ${res.count} 条评论到剪贴板`);
       } catch (e) {
@@ -625,7 +656,9 @@ export const useStore = create<AppStore>((set, get) => {
         await copyText(res.text);
         const now = new Date().toISOString();
         set((s) => ({
-          comments: s.comments.map((c) => (res.commentIds.includes(c.id) ? { ...c, status: c.status === 'active' ? 'exported' : c.status, exportedAt: now } : c)),
+          comments: s.comments.map((c) =>
+            res.commentIds.includes(c.id) ? { ...c, status: c.status === 'active' ? 'exported' : c.status, exportedAt: now } : c,
+          ),
         }));
         get().showToast(`已复制 Issue（含 ${res.count} 条评论）到剪贴板`);
       } catch (e) {
@@ -674,7 +707,6 @@ export const useStore = create<AppStore>((set, get) => {
 
     setPanel(panel) {
       set({ panel });
-      if (panel === 'issues') void get().loadIssues();
     },
 
     setIncludeExported(v) {
@@ -709,10 +741,13 @@ export const useStore = create<AppStore>((set, get) => {
 
     setEditor(editor) {
       set({ editor, focusedCommentId: editor ? null : get().focusedCommentId });
+      // The editor is a card in the rail, so writing a comment has to bring the rail out.
+      if (editor) openRail('comments');
     },
 
     async focusComment(id, scroll = true) {
       set({ focusedCommentId: id });
+      if (id) openRail('comments');
       if (!id || !scroll) return;
       const c = get().comments.find((x) => x.id === id) ?? get().allComments.find((x) => x.id === id);
       if (!c || c.status === 'orphaned') return;
@@ -724,7 +759,20 @@ export const useStore = create<AppStore>((set, get) => {
     },
     setRailTab(tab) {
       set({ railTab: tab });
+      get().setRailOpen(true);
       if (tab === 'todos') void get().loadTodos();
+      if (tab === 'issues') void get().loadIssues();
+    },
+    setRailOpen(open) {
+      if (get().prefs.railOpen === open) return;
+      set((s) => ({ prefs: { ...s.prefs, railOpen: open } }));
+      api.patchPrefs({ railOpen: open }).catch(fail);
+    },
+    setSidebarWidth(px) {
+      set({ sidebarWidth: Math.round(px) });
+    },
+    setSideSlot(el) {
+      set({ sideSlot: el });
     },
 
     async loadTodos() {
@@ -789,7 +837,7 @@ export const useStore = create<AppStore>((set, get) => {
         }
       }
       if (gone.length === 0) return;
-      get().showToast(`已删除 ${gone.length} 条 Todo`, 'info', {
+      get().showToast(`已删除 ${gone.length} 条待办`, 'info', {
         label: '撤消',
         run: async () => {
           for (const t of [...gone].reverse()) await get().createTodo({ title: t.title, body: t.body, branch: t.branch, status: t.status });
@@ -816,7 +864,7 @@ export const useStore = create<AppStore>((set, get) => {
       if (!todo) return;
       try {
         await copyText(todoText(todo));
-        get().showToast('已复制 Todo 到剪贴板');
+        get().showToast('已复制待办到剪贴板');
       } catch (e) {
         fail(e);
       }
@@ -869,9 +917,12 @@ export const useStore = create<AppStore>((set, get) => {
       set({ toast: { id, message, kind, ...(action ? { action } : {}) } });
       if (toastTimer) clearTimeout(toastTimer);
       // Long enough to read and reach for the button when there is one.
-      toastTimer = setTimeout(() => {
-        if (get().toast?.id === id) set({ toast: null });
-      }, action ? 8000 : kind === 'error' ? 6000 : 3000);
+      toastTimer = setTimeout(
+        () => {
+          if (get().toast?.id === id) set({ toast: null });
+        },
+        action ? 8000 : kind === 'error' ? 6000 : 3000,
+      );
     },
   };
 });

@@ -104,6 +104,11 @@ export interface Prefs {
   nvimSocketByRoot: Record<string, string>;
   /** Re-run the refresh cycle when the watcher reports a repository change. */
   autoRefresh: boolean;
+  /**
+   * Whether the right-hand rail is showing. It costs 360px of the code column — most of it on a
+   * laptop in split view — so it stays shut until there is something to put in it.
+   */
+  railOpen: boolean;
 }
 
 export interface TargetState {

@@ -43,7 +43,7 @@ export function TodoRail() {
   return (
     <>
       <div className="rail-tools">
-        <select className="task-list-pick" value={list} onChange={(e) => setList(e.target.value)} aria-label="Todo 列表" title="哪个分支的 Todo">
+        <select className="task-list-pick" value={list} onChange={(e) => setList(e.target.value)} aria-label="待办列表" title="哪个分支的待办">
           <option value="current">{branch}（当前分支）</option>
           {others.map((b) => (
             <option key={b} value={`b:${b}`}>
@@ -56,9 +56,9 @@ export function TodoRail() {
         <span className="muted">{openCount} 待办</span>
       </div>
       <div className="rail-list tasks">
-        <button type="button" className="task-add" onClick={() => setAdding(true)} title="添加一条 Todo（回车可以连着写）">
+        <button type="button" className="task-add" onClick={() => setAdding(true)} title="添加一条待办（回车可以连着写）">
           <span className="task-add-plus">+</span>
-          添加 Todo
+          添加待办
         </button>
         <TaskList
           items={items}
@@ -66,7 +66,7 @@ export function TodoRail() {
           onAddingChange={setAdding}
           titlePlaceholder="标题"
           doneLabel="已完成"
-          emptyText={`${shownBranch ?? '所有分支'} 还没有 Todo。点上面的“添加 Todo”写第一条。`}
+          emptyText={`${shownBranch ?? '所有分支'} 还没有待办。点上面的“添加待办”写第一条。`}
           allDoneText="全部完成了"
           onCreate={(title, after) => createTodo({ title, body: '', branch: shownBranch ?? branch, after })}
           onUpdate={(id, patch) => updateTodo(id, patch)}

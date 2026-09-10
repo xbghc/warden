@@ -46,11 +46,15 @@ function FileHeader({ entry }: { entry: FileEntry }) {
       <span className="counts">
         <span className="add">+{entry.additions}</span> <span className="del">-{entry.deletions}</span>
       </span>
-      {entry.changed && <span className="changed">文件已变化，viewed 已取消</span>}
+      {entry.changed && <span className="changed">文件已变化，“已读”标记已取消</span>}
       <span className="spacer" />
-      <button className="link" disabled={!nvimReady} onClick={() => void openInNvim(entry.path, 1)} title="在 nvim 中打开">
-        在 nvim 中打开
-      </button>
+      {/* Only when there is an nvim to open it in: a permanently greyed-out button is a control
+          that never does anything, priced at full width in the busiest row of the panel. */}
+      {nvimReady && (
+        <button className="link" onClick={() => void openInNvim(entry.path, 1)} title="在 nvim 中打开这个文件">
+          在 nvim 中打开
+        </button>
+      )}
       {mode && (
         <button
           disabled={staging || entry.binary}
@@ -68,7 +72,7 @@ function FileHeader({ entry }: { entry: FileEntry }) {
       )}
       <label className="check">
         <input type="checkbox" checked={entry.viewed} onChange={() => void toggleViewed(entry.path)} />
-        Viewed
+        已读
       </label>
     </div>
   );
@@ -145,7 +149,11 @@ export function DiffPanel() {
   else if (diffState.diff.hunks.length === 0)
     body = (
       <div className="placeholder">
-        {entry.oldMode && entry.newMode ? `仅文件模式变更：${entry.oldMode} → ${entry.newMode}` : entry.status === 'renamed' ? '仅重命名，内容无变化' : '空文件 / 无内容变化'}
+        {entry.oldMode && entry.newMode
+          ? `仅文件模式变更：${entry.oldMode} → ${entry.newMode}`
+          : entry.status === 'renamed'
+            ? '仅重命名，内容无变化'
+            : '空文件 / 无内容变化'}
       </div>
     );
   else if (lineCount > BIG_FILE_LINES && forceBig !== activeFile)

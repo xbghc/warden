@@ -28,13 +28,24 @@ describe('StateStore', () => {
       targets: {},
       issues: [],
       todos: [],
-      prefs: { viewMode: 'unified', nvimSocketByRoot: {}, autoRefresh: true },
+      prefs: { viewMode: 'unified', nvimSocketByRoot: {}, autoRefresh: true, railOpen: false },
     });
   });
 
   it('drops rows that are missing the fields the server dereferences', async () => {
     const file = path.join(dir, 'state.json');
-    const ok = { id: 'ok', targetKey: 'local', filePath: 'a.ts', side: 'new', startLine: 1, endLine: 1, codeSnippet: [], body: '', status: 'active', anchor: { hunkHash: 'h' } };
+    const ok = {
+      id: 'ok',
+      targetKey: 'local',
+      filePath: 'a.ts',
+      side: 'new',
+      startLine: 1,
+      endLine: 1,
+      codeSnippet: [],
+      body: '',
+      status: 'active',
+      anchor: { hunkHash: 'h' },
+    };
     await writeFile(
       file,
       JSON.stringify({

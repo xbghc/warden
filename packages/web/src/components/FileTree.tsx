@@ -41,12 +41,20 @@ function FileRow({ node, depth, view }: { node: Extract<TreeNode, { kind: 'file'
         checked={e.viewed}
         onClick={(ev) => ev.stopPropagation()}
         onChange={() => void toggleViewed(node.path, view)}
-        title="标记为已查看"
+        title="标记为已读"
       />
       <span className={`status status-${e.status}`}>{STATUS_LETTER[e.status]}</span>
       <span className="name">{node.name}</span>
-      {e.changed && <span className="changed" title="文件自上次标记已查看后发生变化">已变化</span>}
-      {commentCount > 0 && <span className="cc" title="评论数">{commentCount}</span>}
+      {e.changed && (
+        <span className="changed" title="文件自上次标记已查看后发生变化">
+          已变化
+        </span>
+      )}
+      {commentCount > 0 && (
+        <span className="cc" title="评论数">
+          {commentCount}
+        </span>
+      )}
       <span className="counts">
         {e.binary ? (
           <span className="muted">bin</span>
@@ -121,12 +129,46 @@ function useTreeState(tree: DirNode, view: TargetKey) {
   return { open, setOpen, toggle };
 }
 
+/**
+ * How far the review has got, in the one number that answers it. Staging is the reviewing verb
+ * here — a file in the Staged block is a file that has been read and accepted — so that is what
+ * the figure counts. A commit or a range cannot be staged, and there the marker is `viewed`.
+ */
+function ReviewProgress({ done, total, label, hint }: { done: number; total: number; label: string; hint: string }) {
+  const pct = total === 0 ? 0 : (done / total) * 100;
+  return (
+    <div className="progress" role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={total} aria-valuenow={done} title={hint}>
+      <div className="progress-figure">
+        <span className={`progress-done ${done === total && total > 0 ? 'complete' : ''}`}>{done}</span>
+        <span className="progress-of">/ {total}</span>
+        <span className="progress-label">{label}</span>
+      </div>
+      <div className="progress-track">
+        <span style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
 function TreeBlock({ title, view, files, empty }: { title: string; view: TargetKey; files: FileEntry[]; empty: string }) {
   const tree = useMemo(() => buildTree(files), [files]);
   const { open, setOpen, toggle } = useTreeState(tree, view);
   const add = files.reduce((n, f) => n + f.additions, 0);
   const del = files.reduce((n, f) => n + f.deletions, 0);
-  const viewed = files.filter((f) => f.viewed).length;
+
+  // An empty block is one line saying so. It used to keep its full header, including 展开 and
+  // 折叠 buttons over nothing to expand, and a body that held the sentence alone.
+  if (files.length === 0) {
+    return (
+      <section className="tree-block empty">
+        <div className="block-head">
+          <span className="block-title">{title}</span>
+          <span className="spacer" />
+          <span className="muted small">{empty}</span>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="tree-block">
@@ -138,11 +180,6 @@ function TreeBlock({ title, view, files, empty }: { title: string; view: TargetK
           <span className="del">-{del}</span>
         </span>
         <span className="spacer" />
-        {files.length > 0 && (
-          <span className="block-viewed" title="已标记为 viewed 的文件">
-            {viewed}/{files.length} viewed
-          </span>
-        )}
         <span className="tree-tools">
           <button className="link" onClick={() => setOpen(new Set(allDirPaths(tree)))} title="展开全部目录">
             展开
@@ -152,18 +189,13 @@ function TreeBlock({ title, view, files, empty }: { title: string; view: TargetK
           </button>
         </span>
       </div>
-      {files.length > 0 && (
-        <div className="block-progress" role="progressbar" aria-label={`${title} 已查看`} aria-valuemin={0} aria-valuemax={files.length} aria-valuenow={viewed}>
-          <span style={{ width: `${(viewed / files.length) * 100}%` }} />
-        </div>
-      )}
       <div className="tree">
-        {files.length === 0 ? (
-          <div className="muted empty">{empty}</div>
-        ) : (
-          tree.children.map((c) =>
-            c.kind === 'dir' ? <DirRow key={c.path} node={c} depth={0} view={view} open={open} toggle={toggle} /> : <FileRow key={c.path} node={c} depth={0} view={view} />,
-          )
+        {tree.children.map((c) =>
+          c.kind === 'dir' ? (
+            <DirRow key={c.path} node={c} depth={0} view={view} open={open} toggle={toggle} />
+          ) : (
+            <FileRow key={c.path} node={c} depth={0} view={view} />
+          ),
         )}
       </div>
     </section>
@@ -211,38 +243,49 @@ export function FileTree() {
 
   if (error) {
     return (
-      <aside className="sidebar">
+      <>
         {back}
         <div className="error-box">{error}</div>
-      </aside>
+      </>
     );
   }
 
   if (local) {
+    // A file half staged sits in both blocks; it counts as read only once nothing of it is left
+    // in the working tree, which is exactly what "staged means reviewed" says.
+    const left = new Set(unstaged.map((f) => f.path));
+    const total = new Set([...left, ...staged.map((f) => f.path)]).size;
+    const done = staged.filter((f) => !left.has(f.path)).length;
     return (
-      <aside className="sidebar dual">
-        <TreeBlock
-          key={`${scope}:unstaged`}
-          title="Unstaged"
-          view={formatTargetKey({ kind: 'working', ...worktree })}
-          files={unstaged}
-          empty={loading ? '加载中…' : '没有未暂存的改动'}
-        />
-        <TreeBlock
-          key={`${scope}:staged`}
-          title="Staged"
-          view={formatTargetKey({ kind: 'staged', ...worktree })}
-          files={staged}
-          empty={loading ? '加载中…' : '暂存区为空'}
-        />
-      </aside>
+      <>
+        <ReviewProgress done={done} total={total} label="个文件已审" hint="暂存即视为已审：一个文件的改动全部进了暂存区，就算读完了" />
+        <div className="tree-blocks">
+          <TreeBlock
+            key={`${scope}:unstaged`}
+            title="未暂存"
+            view={formatTargetKey({ kind: 'working', ...worktree })}
+            files={unstaged}
+            empty={loading ? '加载中…' : '没有未暂存的改动'}
+          />
+          <TreeBlock
+            key={`${scope}:staged`}
+            title="已暂存"
+            view={formatTargetKey({ kind: 'staged', ...worktree })}
+            files={staged}
+            empty={loading ? '加载中…' : '空'}
+          />
+        </div>
+      </>
     );
   }
 
   return (
-    <aside className="sidebar">
+    <>
       {back}
-      <TreeBlock key={scope} title="改动" view={targetKey} files={files} empty={loading ? '加载中…' : '没有改动'} />
-    </aside>
+      <ReviewProgress done={files.filter((f) => f.viewed).length} total={files.length} label="个文件已读" hint="勾选文件旁的框，或用文件头的“已读”标记" />
+      <div className="tree-blocks">
+        <TreeBlock key={scope} title="改动" view={targetKey} files={files} empty={loading ? '加载中…' : '没有改动'} />
+      </div>
+    </>
   );
 }

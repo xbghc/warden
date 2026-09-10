@@ -46,12 +46,11 @@ import { getFileDiff, getFullFile, listTargetDiffs, resolveTargetContext, toSumm
 import { buildAnchor, reanchorComment } from './anchor.js';
 import { buildStagePatch } from './patch.js';
 import { addWorktree, listBranches, listWorktreesDetailed, removeWorktree, worktreePathPrefix } from './worktrees.js';
-import { ensureTarget, StateStore } from './state.js';
+import { ensureTarget, type StateStore } from './state.js';
 import { formatCommentsExport, formatIssueExport } from './export.js';
 import { NvimService } from './nvim.js';
 import { RepoWatcher } from './watcher.js';
 import { serveStaticFile } from './static.js';
-
 
 export interface AppOptions {
   repo: RepoContext;
@@ -167,7 +166,11 @@ export function createApp(opts: AppOptions): Hono {
     const target = last ? tryParseTargetKey(last) : undefined;
     const usable = !!target && (!target.worktree || info.worktrees.some((w) => w.path === target.worktree));
     if (last && usable) info.defaultTarget = last;
-    else if (last) await store.update((s) => void (s.prefs.lastTarget = 'working'));
+    else if (last) {
+      await store.update((s) => {
+        s.prefs.lastTarget = 'working';
+      });
+    }
     return c.json(info);
   });
 
@@ -179,6 +182,7 @@ export function createApp(opts: AppOptions): Hono {
       if (body.viewMode === 'unified' || body.viewMode === 'split') s.prefs.viewMode = body.viewMode;
       if (typeof body.lastTarget === 'string') s.prefs.lastTarget = body.lastTarget;
       if (typeof body.autoRefresh === 'boolean') s.prefs.autoRefresh = body.autoRefresh;
+      if (typeof body.railOpen === 'boolean') s.prefs.railOpen = body.railOpen;
       if (body.nvimSocketByRoot && typeof body.nvimSocketByRoot === 'object') {
         s.prefs.nvimSocketByRoot = { ...s.prefs.nvimSocketByRoot, ...body.nvimSocketByRoot };
       }
@@ -283,7 +287,8 @@ export function createApp(opts: AppOptions): Hono {
     if (!diff) throw badRequest(`file ${body.path} is not part of ${key}`, 'no_diff');
     // The selection is a set of indices into a diff the client saw; against any other diff they
     // would name the wrong lines. The agent may well have edited the file since.
-    if (diff.contentHash !== body.contentHash) throw new HttpError(409, 'the diff changed since it was loaded; refresh and pick the lines again', 'diff_changed');
+    if (diff.contentHash !== body.contentHash)
+      throw new HttpError(409, 'the diff changed since it was loaded; refresh and pick the lines again', 'diff_changed');
     const { patch, lines } = buildStagePatch(diff, mode, body.hunks);
     await applyToIndex(ctx.cwd, patch, { reverse: mode === 'unstage' });
     // Tell every page on this worktree straight away rather than at the next poll.
@@ -540,7 +545,7 @@ export function createApp(opts: AppOptions): Hono {
 
   api.post('/issues', async (c) => {
     const body = (await c.req.json()) as CreateIssueRequest;
-    if (!body.title || !body.title.trim()) throw badRequest('title is required');
+    if (!body.title?.trim()) throw badRequest('title is required');
     const now = new Date().toISOString();
     const issue: Issue = {
       id: randomUUID(),
@@ -645,7 +650,7 @@ export function createApp(opts: AppOptions): Hono {
 
   api.post('/todos', async (c) => {
     const body = (await c.req.json()) as CreateTodoRequest;
-    if (!body.title || !body.title.trim()) throw badRequest('title is required');
+    if (!body.title?.trim()) throw badRequest('title is required');
     const branch = body.branch?.trim() || (await currentBranch(await knownRoot(body.root)));
     const now = new Date().toISOString();
     const todo: Todo = {

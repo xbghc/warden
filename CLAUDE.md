@@ -22,6 +22,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Comments are prose explaining why, placed above the branch they justify; the codebase leans on them. Keep that style and do not add comments that restate the code.
 - Language: code, comments, commit messages and README in English; user-visible UI strings in Chinese.
 - UI: the violet accent (`--accent`) is reserved for comment and agent-feedback affordances; navigation and selection use ink. Light theme only for now.
+- UI layout: the sidebar is the only navigation — its three tabs (`Panel`) each fill the left column with the controls for whatever the middle shows, so a new destination adds a tab there, never a control to the top bar. The commit and worktree panels portal their controls into `sideSlot` rather than lifting their state. The rail (comments / 待办 / Issue) is shut unless something put content in it; anything that does must go through `openRail` in the store, since the editor and cards only exist inside it. One figure only — review progress at the top of the sidebar — is set above `--t-ui`.
 - Tests: `makeFixtureRepo()` from `test/fixtures/make-repo.ts` builds an isolated temp repo (`{ root, git, write, cleanup }`); API tests call the Hono app directly with `app.request`.
 
 ## Git workflow

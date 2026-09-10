@@ -21,9 +21,9 @@ function Mark() {
 }
 
 /**
- * Brand, scope and tools — not the target. What is under review is picked where it is listed:
- * the sidebar's two blocks are the working tree, the Commits panel holds commits, ranges and
- * the branch view, and the sidebar names whichever of those is up and offers the way back.
+ * Which repository is under review, and how the code is read. Nothing else: navigation belongs to
+ * the sidebar, which is where each destination's own controls live, and what is under review is
+ * picked where it is listed. The bar used to carry both and read as a pile of unrelated controls.
  */
 export function TopBar() {
   const repo = useStore((s) => s.repo)!;
@@ -36,12 +36,12 @@ export function TopBar() {
   const lastRefreshAt = useStore((s) => s.lastRefreshAt);
   const viewMode = useStore((s) => s.prefs.viewMode);
   const setViewMode = useStore((s) => s.setViewMode);
-  const panel = useStore((s) => s.panel);
-  const setPanel = useStore((s) => s.setPanel);
-  const issues = useStore((s) => s.issues);
+  const railOpen = useStore((s) => s.prefs.railOpen);
+  const setRailOpen = useStore((s) => s.setRailOpen);
+  const commentCount = useStore((s) => s.comments.length);
+  const unexported = useStore((s) => s.comments.filter((c) => c.status === 'active').length);
 
   const target = useMemo(() => parseTargetKey(targetKey), [targetKey]);
-  const openIssues = issues.filter((i) => i.status === 'open').length;
   const otherWorktrees = repo.worktrees.filter((w) => w.path !== repo.root);
 
   // Another worktree is a different review altogether, so this is a full target change; the kind
@@ -61,7 +61,7 @@ export function TopBar() {
         <span className="repo-name">{repo.root.split('/').filter(Boolean).pop()}</span>
         <span className="branch">{repo.branch}</span>
         {otherWorktrees.length > 0 && (
-          <select value={target.worktree ?? ''} title="Worktree" onChange={(e) => pickWorktree(e.target.value)}>
+          <select value={target.worktree ?? ''} title="Worktree" aria-label="Worktree" onChange={(e) => pickWorktree(e.target.value)}>
             <option value="">主仓库 ({repo.branch})</option>
             {otherWorktrees.map((w) => (
               <option key={w.path} value={w.path}>
@@ -72,39 +72,29 @@ export function TopBar() {
         )}
       </div>
 
-      {/* One block, so a narrow window wraps tabs and tools together and keeps them on the right. */}
       <div className="topbar-right">
-        <nav className="tabs" aria-label="面板">
-          <button className={`tab ${panel === 'commits' ? 'active' : ''}`} onClick={() => setPanel(panel === 'commits' ? 'diff' : 'commits')} title="历史 commit">
-            Commits
-          </button>
-          <button className={`tab ${panel === 'issues' ? 'active' : ''}`} onClick={() => setPanel(panel === 'issues' ? 'diff' : 'issues')} title="本地 Issue">
-            Issues
-            {openIssues > 0 && <span className="tab-count">{openIssues}</span>}
-          </button>
-          <button className={`tab ${panel === 'worktrees' ? 'active' : ''}`} onClick={() => setPanel(panel === 'worktrees' ? 'diff' : 'worktrees')} title="新建、切换和删除 worktree">
-            Worktrees
-            {otherWorktrees.length > 0 && <span className="tab-count">{otherWorktrees.length}</span>}
-          </button>
-        </nav>
-        <div className="tools">
         <div className="seg" role="group" aria-label="diff 布局">
           <button className={viewMode === 'unified' ? 'active' : ''} aria-pressed={viewMode === 'unified'} onClick={() => setViewMode('unified')}>
-            Unified
+            统一
           </button>
           <button className={viewMode === 'split' ? 'active' : ''} aria-pressed={viewMode === 'split'} onClick={() => setViewMode('split')}>
-            Split
+            并排
           </button>
         </div>
         <NvimSelector />
-        <button onClick={() => void refresh()} disabled={filesLoading} title={lastRefreshAt ? `上次刷新 ${shortTime(lastRefreshAt)}（r）` : '刷新 (r)'}>
+        <button
+          className="quiet"
+          onClick={() => void refresh()}
+          disabled={filesLoading}
+          title={lastRefreshAt ? `上次刷新 ${shortTime(lastRefreshAt)}（r）` : '刷新 (r)'}
+        >
           {filesLoading ? '刷新中…' : '刷新'}
         </button>
         {/* A button rather than a checkbox, and no separate timestamp: the label and the
             time cost ~140px in a bar that already wraps, and the refresh button's title
             still carries the last refresh. */}
         <button
-          className="toggle"
+          className="toggle quiet"
           aria-pressed={autoRefresh}
           aria-label="自动刷新"
           onClick={() => setAutoRefresh(!autoRefresh)}
@@ -112,7 +102,17 @@ export function TopBar() {
         >
           自动
         </button>
-        </div>
+        {/* The rail's switch. It carries the count because that is the reason to open it — and
+            the unexported ones are the point of the whole tool, so they get the accent. */}
+        <button
+          className={`rail-switch ${railOpen ? 'active' : ''} ${unexported > 0 ? 'has-unexported' : ''}`}
+          aria-pressed={railOpen}
+          onClick={() => setRailOpen(!railOpen)}
+          title={railOpen ? '收起右栏 (Esc)' : '展开评论、待办和 Issue'}
+        >
+          评论
+          {commentCount > 0 && <span className="rail-switch-n">{commentCount}</span>}
+        </button>
       </div>
     </header>
   );

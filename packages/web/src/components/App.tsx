@@ -4,10 +4,9 @@ import { formatTargetKey, isLocalTarget, tryParseTargetKey } from '@warden/share
 import { useStore } from '../store';
 import { api } from '../api';
 import { TopBar } from './TopBar';
-import { FileTree } from './FileTree';
+import { Sidebar } from './Sidebar';
 import { DiffPanel } from './DiffPanel';
 import { CommitsPanel } from './CommitsPanel';
-import { IssuesDrawer } from './IssuesDrawer';
 import { WorktreesPanel } from './WorktreesPanel';
 import { Rail } from './Rail';
 import { Toast } from './Toast';
@@ -104,6 +103,7 @@ export function App() {
         else if (s.reattaching) s.setReattaching(null);
         else if (s.editor) s.setEditor(null);
         else if (s.focusedCommentId) void s.focusComment(null);
+        else if (s.prefs.railOpen) s.setRailOpen(false);
         else if (s.panel !== 'diff') s.setPanel('diff');
       }
     };
@@ -126,13 +126,13 @@ export function App() {
     <div className="app">
       <TopBar />
       <div className="body">
-        <FileTree />
+        <Sidebar />
         <main className="main">
           {commitsOpened && <CommitsPanel active={panel === 'commits'} />}
           {panel === 'worktrees' && <WorktreesPanel />}
           {panel !== 'commits' && panel !== 'worktrees' && <DiffPanel />}
         </main>
-        {panel === 'issues' ? <IssuesDrawer /> : panel === 'diff' ? <Rail /> : null}
+        <Rail />
       </div>
       <Toast />
     </div>

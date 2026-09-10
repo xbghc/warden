@@ -1,9 +1,12 @@
 import { useState } from 'react';
-import type { Comment, TargetKey } from '@warden/shared';
+import type { Comment, CommentStatus, TargetKey } from '@warden/shared';
 import { targetLabel, tryParseTargetKey } from '@warden/shared';
 import { useStore } from '../store';
 import { Markdown } from './Markdown';
 import { CommentEditor } from './CommentEditor';
+
+/** The stored status is a wire value; this is what it is called on the page. */
+export const STATUS_LABEL: Record<CommentStatus, string> = { active: '待导出', exported: '已导出', orphaned: '已失联' };
 
 function fmtTime(iso: string): string {
   const d = new Date(iso);
@@ -63,10 +66,12 @@ export function CommentCard({ comment, showSnippet = false, showFile = false }: 
         <label className="check" title="选中以创建 / 关联 Issue" onClick={(e) => e.stopPropagation()}>
           <input type="checkbox" checked={selected} onChange={() => toggleSelect(comment.id)} />
         </label>
-        <span className="mono">
-          {comment.side} {range}
+        {/* Which side of the diff the lines are on, said the way the diff says it. */}
+        <span className="mono" title={comment.side === 'old' ? '删除侧的行号' : '新增侧的行号'}>
+          {comment.side === 'old' ? '−' : '+'}
+          {range}
         </span>
-        <span className={`badge badge-${comment.status}`}>{comment.status}</span>
+        <span className={`badge badge-${comment.status}`}>{STATUS_LABEL[comment.status]}</span>
         {elsewhere && (
           <span className="badge" title={`这条评论现在位于 ${comment.targetKey}，点击卡片可跳转`}>
             {elsewhere}
@@ -120,6 +125,7 @@ export function CommentCard({ comment, showSnippet = false, showFile = false }: 
       {(showSnippet || comment.status === 'orphaned') && comment.codeSnippet.length > 0 && (
         <pre className="snippet">
           {comment.codeSnippet.map((l, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: snippet lines have no identity beyond their position
             <div key={i}>
               <span className="ln">{comment.startLine + i}</span>
               {l}
@@ -143,4 +149,3 @@ export function CommentCard({ comment, showSnippet = false, showFile = false }: 
     </div>
   );
 }
-

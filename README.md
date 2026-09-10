@@ -68,25 +68,29 @@ inside a removed worktree falls back to the working tree on the next load. The c
 flags kept under that worktree's key stay in the state file and come back if a worktree is created
 at the same path again.
 
-There is no target switcher in the UI: the sidebar's two blocks *are* the working tree, a commit is
-picked from the *Commits* panel, and the *Branch vs* and *Range* fields at the top of that panel open
-the other two. The sidebar names whatever is under review in its block header and puts a
+The sidebar is the navigation, and the only navigation: its three tabs — *变更*, *提交*, *Worktree* —
+each fill the left column with the controls for what the middle is showing, and the top bar carries
+none of it. There is no target switcher: the *变更* tab's two blocks *are* the working tree, a commit
+is picked from the *提交* list, and the *审阅整条分支* and *对比两个 ref* forms below that tab's filters
+open the other two. The sidebar names whatever is under review in its block header and puts a
 *返回工作区* link above it.
 
 `working`, `staged` and `all` are the three **local views** of one worktree. While any of them is
-selected the sidebar shows two blocks — Unstaged (`working`) and Staged (`staged`) — instead of a
+selected the sidebar shows two blocks — 未暂存 (`working`) and 已暂存 (`staged`) — instead of a
 single tree, and clicking a file switches to the view it belongs to. A file that is only partly
-staged appears in both. Switching between the three keeps your comments, the draft you are typing
-and the current selection; only the diff is reloaded. `all` has no control of its own (a saved
-`lastTarget` can still restore it; *Branch vs* `@` shows the same diff). Commit, range and `base`
-targets keep the single tree.
+staged appears in both. Above them sits the one figure in the app: how many of the files under review
+are fully staged, which is what "staged means reviewed" amounts to. Switching between the three keeps
+your comments, the draft you are typing and the current selection; only the diff is reloaded. `all`
+has no control of its own (a saved `lastTarget` can still restore it; *审阅整条分支* against `@` shows
+the same diff). Commit, range and `base` targets keep the single tree, and their figure counts 已读
+instead, since nothing can be staged there.
 
 `base:<ref>` is for a branch a coding agent has been working on, committing as it goes: one tree with
 everything since the branch forked off `<ref>` — the commits plus whatever is still uncommitted or
 untracked. The diff runs against the merge base, so commits that landed on `<ref>` after the fork are
-not listed as reverted (which is what a plain `git diff <ref>` would do). The *Branch vs* field in the
-Commits panel suggests the base for you — the main worktree's branch when a sibling worktree is under
-review, otherwise `main` or `master` — and takes any ref. Beside it the panel names the fork point (the
+not listed as reverted (which is what a plain `git diff <ref>` would do). The *相对于* field under
+*审阅整条分支* suggests the base for you — the main worktree's branch when a sibling worktree is under
+review, otherwise `main` or `master` — and takes any ref. Under it the form names the fork point (the
 merge base with that ref, `GET /api/fork-point`) with how many commits the branch is ahead of it and how
 many landed on the base since, and the list marks that commit with a *分叉自* chip and a rule above it:
 what sits above is the branch's own work. Unlike the three local views, `base` keeps its own
@@ -96,10 +100,10 @@ the fix and delete or re-attach it.
 
 ## Worktrees
 
-Agents do their best work each in a worktree of its own, and the *Worktrees* tab in the top bar is
+Agents do their best work each in a worktree of its own, and the sidebar's *Worktree* tab is
 where those are made and taken down without a trip to the terminal:
 
-- *新建 worktree* takes a branch and a base. A name that is not a branch yet becomes one from the
+- *新建 worktree*, the form in the sidebar, takes a branch and a base. A name that is not a branch yet becomes one from the
   base (`main` or `master` unless you say otherwise; any ref goes) — `git worktree add -b <branch>
   <path> <base>`; an existing branch is checked out as it is, unless another worktree already has it.
   The path is suggested as a sibling of the main worktree named `<repo>-<branch>` (slashes become
@@ -108,11 +112,12 @@ where those are made and taken down without a trip to the terminal:
 - Each row names the checkout, its branch, and whether it is clean or how many paths `git status`
   reports. *查看* switches the review to it (the kind of target carries over, as with the selector
   in the top bar), *复制路径* is for the agent's prompt.
-- *删除* runs `git worktree remove`, never with `--force` on its own: a worktree with uncommitted
-  changes is not removed until you confirm in the row, since those changes go with it, and whatever
-  else git refuses without `--force` is put to you the same way. With *一并删除已合并的分支* ticked
-  the branch goes too, by `git branch -d`: one that is not merged is kept and the toast says why. The
-  comments and viewed flags kept under the worktree's key stay in the state file, as before.
+- *删除* always asks first, in the row it would remove, and runs `git worktree remove` without
+  `--force`: a worktree with uncommitted changes is not removed until you confirm again, since those
+  changes go with it, and whatever else git refuses without `--force` is put to you the same way.
+  *一并删除分支* is offered in that same confirmation, ticked by default, and takes the branch by
+  `git branch -d`: one that is not merged is kept and the toast says why. The comments and viewed
+  flags kept under the worktree's key stay in the state file, as before.
 - A worktree whose directory was deleted behind git's back is listed struck through; *清理* drops that
   one entry (`git worktree remove` handles it; nothing is pruned wholesale).
 
@@ -125,7 +130,7 @@ where those are made and taken down without a trip to the terminal:
 | `n` / `p` | Next / previous hunk |
 | `s` | Stage (Unstaged view) or unstage (Staged view) the picked lines |
 | `Ctrl+Enter` | Save the comment being edited |
-| `Esc` | Drop the picked lines / cancel editing / close a panel / cancel re-attach mode |
+| `Esc` | Drop the picked lines / cancel editing / cancel re-attach mode / shut the rail / back to 变更 |
 
 ## Staging
 
@@ -156,12 +161,18 @@ Limits, each reported as a plain error rather than a half-applied patch:
 
 ## Comments and export
 
-Press the `+` that appears next to a line (drag to cover several lines) and write Markdown.
+Press the `+` that appears next to a line (drag to cover several lines) and write Markdown. What you
+write lands in the right-hand rail, which is shut until it has something to hold: it costs 360px of
+the code column, which is most of it once the diff is side by side on a laptop. Writing a comment,
+focusing one or re-attaching one opens it; so does the *评论* switch at the right of the top bar,
+which carries the count and turns violet while any comment is still waiting to go back to the agent.
+`Esc` shuts it again.
+
 Each comment belongs to the `old` or `new` side of the diff and has a status:
 
-- `active` — not yet exported
-- `exported` — copied at least once (excluded from "copy all" unless *含已导出* is checked)
-- `orphaned` — the code it referred to no longer exists in the current diff
+- `active` (待导出) — not yet exported
+- `exported` (已导出) — copied at least once (excluded from "copy all" unless *含已导出* is checked)
+- `orphaned` (已失联) — the code it referred to no longer exists in the current diff
 
 "复制评论" copies every active comment of the current target; each comment also has a "复制此条" button.
 The clipboard format is fixed so an agent can read it directly:
@@ -211,7 +222,7 @@ them deletes on a moved HEAD.
 Comment markers in the diff belong to one view; the rail's *全部* tab lists the whole pool and
 *此文件* lists every comment on the open file regardless of which view it currently sits in.
 
-"Viewed" is per view, so a half-staged file can be marked read on one side and not the other. It is
+*已读* is per view, so a half-staged file can be marked read on one side and not the other. It is
 bound to a hash of the file's diff; when the diff changes the flag is dropped and the file is marked
 *已变化*.
 
@@ -229,9 +240,9 @@ refreshes by hand.
 
 Notes attached to a branch rather than to a line of code, for the things you notice while reviewing
 that do not belong in a comment. They are not deleted when you commit. They sit in the right-hand
-rail next to the comments, under the *Todo* tab, as a task list that works the way Google Tasks does:
+rail next to the comments, under the *待办* tab, as a task list that works the way Google Tasks does:
 
-- *添加 Todo* opens an empty row at the top; type the title and press Enter, and the next row opens
+- *添加待办* opens an empty row at the top; type the title and press Enter, and the next row opens
   right under it. Esc or Backspace on an empty row drops it.
 - Titles and details are edited where they are: click into the text. Enter at the end of a title
   starts the next todo under it; Backspace on an emptied title deletes the todo. The details field
@@ -244,10 +255,10 @@ rail next to the comments, under the *Todo* tab, as a task list that works the w
 - The picker at the top is the list selector: the current branch, any other branch that has todos,
   or all of them with the branch on each row. A new todo goes to the branch being shown.
 
-Issues (the *Issues* tab in the top bar) are the same list: closing an issue is ticking it, a
+Issues (the rail's third tab) are the same list: closing an issue is ticking it, a
 *已关闭* section holds the closed ones, and the comments linked to an issue sit under its open row
 like subtasks, each with *跳转* and *解除关联*. Tick comments in the rail and the *创建 Issue* button
-opens the drawer with the add row ready and the comments attached on creation; for an existing
+switches to that tab with the add row ready and the comments attached on creation; for an existing
 issue, open its row and use *关联选中的评论*.
 
 Each row has its own *复制* button, and there is deliberately no "copy all": a todo is one task to

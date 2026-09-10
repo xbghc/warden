@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Comment, Issue } from '@warden/shared';
 import { useStore } from '../store';
+import { STATUS_LABEL } from './CommentThread';
 import { TaskList } from './TaskList';
 
 /** A comment linked to an issue: shown under the open row the way a subtask sits under its task. */
@@ -15,7 +16,7 @@ function LinkedComment({ comment, onUnlink }: { comment: Comment; onUnlink: () =
           <span className="mono" title={`${comment.filePath} (${comment.side})`}>
             {comment.filePath.split('/').pop()}:{range}
           </span>
-          <span className={`badge badge-${comment.status}`}>{comment.status}</span>
+          <span className={`badge badge-${comment.status}`}>{STATUS_LABEL[comment.status]}</span>
           <span className="task-actions">
             {comment.status !== 'orphaned' && (
               <button type="button" className="link" onClick={() => void jump(comment)}>
@@ -71,7 +72,8 @@ function IssueLinks({ issue, byId }: { issue: Issue; byId: Map<string, Comment> 
   );
 }
 
-export function IssuesDrawer() {
+/** Issues as a rail tab: the same task list as the todos, with the comments each one collects. */
+export function IssueRail() {
   const issues = useStore((s) => s.issues);
   const loadIssues = useStore((s) => s.loadIssues);
   const createIssue = useStore((s) => s.createIssue);
@@ -82,7 +84,6 @@ export function IssuesDrawer() {
   const exportIssue = useStore((s) => s.exportIssue);
   const selectedIds = useStore((s) => s.selectedCommentIds);
   const clearSelected = useStore((s) => s.clearSelectedComments);
-  const setPanel = useStore((s) => s.setPanel);
   const allComments = useStore((s) => s.allComments);
   const currentComments = useStore((s) => s.comments);
   const [adding, setAdding] = useState(false);
@@ -102,57 +103,46 @@ export function IssuesDrawer() {
     return m;
   }, [allComments, currentComments]);
   const items = useMemo(() => issues.map((i) => ({ ...i, done: i.status === 'closed' })), [issues]);
-  const openCount = items.filter((i) => !i.done).length;
 
   return (
-    <aside className="issues-drawer">
-      <div className="drawer-head">
-        <span className="drawer-title">Issues</span>
-        <span className="muted">{openCount} open</span>
-        <span className="spacer" />
-        <button className="icon" onClick={() => setPanel('diff')} title="关闭 (Esc)">
-          ✕
-        </button>
-      </div>
-      <div className="rail-list tasks">
-        <button type="button" className="task-add" onClick={() => setAdding(true)} title="添加一个 Issue（回车可以连着写）">
-          <span className="task-add-plus">+</span>
-          添加 Issue
-        </button>
-        <TaskList
-          items={items}
-          adding={adding}
-          onAddingChange={(v) => {
-            setAdding(v);
-            // Backing out of the add row lets go of the ticked comments too.
-            if (!v) clearSelected();
-          }}
-          addHint={selectedIds.length > 0 ? `将关联 ${selectedIds.length} 条选中的评论` : undefined}
-          titlePlaceholder="标题"
-          doneLabel="已关闭"
-          emptyText="还没有 Issue。在评论卡片上勾选几条，或点上面的“添加 Issue”。"
-          allDoneText="没有打开的 Issue"
-          onCreate={(title, after) => createIssue({ title, body: '', commentIds: selectedIds, after })}
-          onUpdate={(id, patch) => updateIssue(id, patch)}
-          onToggle={(id, done) => updateIssue(id, { status: done ? 'closed' : 'open' })}
-          onDelete={deleteIssue}
-          onMove={moveIssue}
-          onClearDone={() => deleteIssues(items.filter((i) => i.done).map((i) => i.id))}
-          meta={(i) =>
-            i.commentIds.length > 0 ? (
-              <span className="task-count" title="关联的评论数">
-                {i.commentIds.length} 评论
-              </span>
-            ) : null
-          }
-          actions={(i) => (
-            <button type="button" className="link" onClick={() => void exportIssue(i.id)} title="把 Issue 和它的评论复制为 agent 可读的提示词">
-              复制
-            </button>
-          )}
-          extra={(i) => <IssueLinks issue={i} byId={byId} />}
-        />
-      </div>
-    </aside>
+    <div className="rail-list tasks">
+      <button type="button" className="task-add" onClick={() => setAdding(true)} title="添加一个 Issue（回车可以连着写）">
+        <span className="task-add-plus">+</span>
+        添加 Issue
+      </button>
+      <TaskList
+        items={items}
+        adding={adding}
+        onAddingChange={(v) => {
+          setAdding(v);
+          // Backing out of the add row lets go of the ticked comments too.
+          if (!v) clearSelected();
+        }}
+        addHint={selectedIds.length > 0 ? `将关联 ${selectedIds.length} 条选中的评论` : undefined}
+        titlePlaceholder="标题"
+        doneLabel="已关闭"
+        emptyText="还没有 Issue。在评论卡片上勾选几条，或点上面的“添加 Issue”。"
+        allDoneText="没有打开的 Issue"
+        onCreate={(title, after) => createIssue({ title, body: '', commentIds: selectedIds, after })}
+        onUpdate={(id, patch) => updateIssue(id, patch)}
+        onToggle={(id, done) => updateIssue(id, { status: done ? 'closed' : 'open' })}
+        onDelete={deleteIssue}
+        onMove={moveIssue}
+        onClearDone={() => deleteIssues(items.filter((i) => i.done).map((i) => i.id))}
+        meta={(i) =>
+          i.commentIds.length > 0 ? (
+            <span className="task-count" title="关联的评论数">
+              {i.commentIds.length} 评论
+            </span>
+          ) : null
+        }
+        actions={(i) => (
+          <button type="button" className="link" onClick={() => void exportIssue(i.id)} title="把 Issue 和它的评论复制为 agent 可读的提示词">
+            复制
+          </button>
+        )}
+        extra={(i) => <IssueLinks issue={i} byId={byId} />}
+      />
+    </div>
   );
 }

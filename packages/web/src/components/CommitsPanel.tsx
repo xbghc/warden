@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { createPortal } from 'react-dom';
 import type { CommitInfo, CommitRef, ForkPointResponse } from '@warden/shared';
 import { formatTargetKey, parseTargetKey } from '@warden/shared';
 import { api, ApiError } from '../api';
@@ -87,6 +88,7 @@ export function CommitsPanel({ active }: { active: boolean }) {
   const targetKey = useStore((s) => s.targetKey);
   const setTarget = useStore((s) => s.setTarget);
   const showToast = useStore((s) => s.showToast);
+  const sideSlot = useStore((s) => s.sideSlot);
   const head = useStore((s) => s.repo?.worktrees.find((w) => w.path === s.root)?.head ?? s.repo?.head ?? '');
 
   const [commits, setCommits] = useState<CommitInfo[]>([]);
@@ -133,7 +135,8 @@ export function CommitsPanel({ active }: { active: boolean }) {
         if (id !== forkSeq.current) return;
         // A half-typed ref is not worth a message; anything else is said in place, never as a toast.
         if (e instanceof ApiError && e.code === 'unknown_ref') setFork(null);
-        else if (e instanceof ApiError && e.code === 'no_merge_base') setFork({ kind: 'error', base: effectiveBase, message: `与 ${effectiveBase} 没有共同历史` });
+        else if (e instanceof ApiError && e.code === 'no_merge_base')
+          setFork({ kind: 'error', base: effectiveBase, message: `与 ${effectiveBase} 没有共同历史` });
         else setFork({ kind: 'error', base: effectiveBase, message: e instanceof Error ? e.message : String(e) });
       }
     }, 300);
@@ -251,78 +254,79 @@ export function CommitsPanel({ active }: { active: boolean }) {
   const filtering = !!(filters.q || filters.author || filters.path || firstParent);
   const status = loading && commits.length === 0 ? '加载中…' : hasMore ? `已加载 ${commits.length} 条` : `共 ${commits.length} 条`;
 
-  return (
-    <div className="commits-panel" hidden={!active}>
-      <div className="commits-tools">
+  // The query goes in the sidebar, where a stacked form has room for labels and the two compare
+  // buttons can say what they each do. It is rendered from here so it keeps sharing this
+  // component's state; see the `sideSlot` note in the store.
+  const controls = (
+    <div className="side-form">
+      <label className="field">
+        搜索
         <input
-          className="search"
           value={draft.q}
           onChange={(e) => setDraft({ ...draft, q: e.target.value })}
           onKeyDown={onKeyDown}
-          placeholder="搜索 message 或 sha"
+          placeholder="message 或 sha"
           spellCheck={false}
-          aria-label="搜索 commit message 或 sha"
         />
-        <input
-          value={draft.author}
-          onChange={(e) => setDraft({ ...draft, author: e.target.value })}
-          onKeyDown={onKeyDown}
-          placeholder="作者"
-          spellCheck={false}
-          aria-label="按作者过滤"
-        />
-        <input
-          className="mono path"
-          value={draft.path}
-          onChange={(e) => setDraft({ ...draft, path: e.target.value })}
-          onKeyDown={onKeyDown}
-          placeholder="路径"
-          spellCheck={false}
-          aria-label="按路径过滤"
-        />
-        <button
-          className="toggle"
-          aria-pressed={firstParent}
-          onClick={() => setFirstParent(!firstParent)}
-          title="只沿第一父提交走（git log --first-parent）：合并进来的分支折叠成它们的 merge commit"
-        >
-          主线
-        </button>
-        <span className="muted commits-count">{status}</span>
-      </div>
-      <div className="commits-compare">
-        <form
-          className="inline-form"
-          title="分支自 base 分叉以来的全部改动，已提交和未提交都算（含未跟踪文件）"
-          onSubmit={(e) => {
-            e.preventDefault();
-            compareBranch();
-          }}
-        >
-          <span className="compare-label">Branch vs</span>
-          <input value={baseRef} onChange={(e) => setBaseRef(e.target.value)} placeholder={suggestedBase} spellCheck={false} aria-label="base 分支" />
-          <button type="submit">对比</button>
-          {forkShown && (
-            <ForkNote state={forkShown} shortSha={(sha) => commits.find((c) => c.sha === sha)?.shortSha ?? sha.slice(0, 7)} onPick={pickCommit} />
-          )}
-        </form>
-        <form
-          className="inline-form"
-          title="对比两个 ref"
-          onSubmit={(e) => {
-            e.preventDefault();
-            compareRange();
-          }}
-        >
-          <span className="compare-label">Range</span>
-          <input value={rangeBase} onChange={(e) => setRangeBase(e.target.value)} placeholder="base (@ = HEAD)" spellCheck={false} aria-label="range 的 base" />
+      </label>
+      <label className="field">
+        作者
+        <input value={draft.author} onChange={(e) => setDraft({ ...draft, author: e.target.value })} onKeyDown={onKeyDown} spellCheck={false} />
+      </label>
+      <label className="field">
+        路径
+        <input className="mono" value={draft.path} onChange={(e) => setDraft({ ...draft, path: e.target.value })} onKeyDown={onKeyDown} spellCheck={false} />
+      </label>
+      <button
+        className="toggle"
+        aria-pressed={firstParent}
+        onClick={() => setFirstParent(!firstParent)}
+        title="只沿第一父提交走（git log --first-parent）：合并进来的分支折叠成它们的 merge commit"
+      >
+        只看主线
+      </button>
+      <div className="side-form-status muted small">{status}</div>
+
+      <form
+        className="side-group"
+        title="分支自 base 分叉以来的全部改动，已提交和未提交都算（含未跟踪文件）"
+        onSubmit={(e) => {
+          e.preventDefault();
+          compareBranch();
+        }}
+      >
+        <div className="side-group-title">审阅整条分支</div>
+        <label className="field">
+          相对于
+          <input value={baseRef} onChange={(e) => setBaseRef(e.target.value)} placeholder={suggestedBase} spellCheck={false} />
+        </label>
+        {forkShown && <ForkNote state={forkShown} shortSha={(sha) => commits.find((c) => c.sha === sha)?.shortSha ?? sha.slice(0, 7)} onPick={pickCommit} />}
+        <button type="submit">审阅自分叉以来的改动</button>
+      </form>
+
+      <form
+        className="side-group"
+        onSubmit={(e) => {
+          e.preventDefault();
+          compareRange();
+        }}
+      >
+        <div className="side-group-title">对比两个 ref</div>
+        <div className="field-row">
+          <input value={rangeBase} onChange={(e) => setRangeBase(e.target.value)} placeholder="base" spellCheck={false} aria-label="range 的 base" />
           <span className="muted">..</span>
           <input value={rangeHead} onChange={(e) => setRangeHead(e.target.value)} placeholder="head" spellCheck={false} aria-label="range 的 head" />
-          <button type="submit" disabled={!rangeHead.trim()}>
-            对比
-          </button>
-        </form>
-      </div>
+        </div>
+        <button type="submit" disabled={!rangeHead.trim()}>
+          对比这两个 ref
+        </button>
+      </form>
+    </div>
+  );
+
+  return (
+    <div className="commits-panel" hidden={!active}>
+      {active && sideSlot && createPortal(controls, sideSlot)}
       <div className="commits-list" ref={listRef} onScroll={onScroll}>
         {rows.map((row) => {
           if (row.kind === 'day') {
