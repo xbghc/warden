@@ -8,6 +8,7 @@ import { badRequest } from './errors.js';
  * both forms.
  */
 export function quotePath(p: string): string {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: matching them is the point; git quotes exactly these
   if (!/[\s"\\\x00-\x1f\x7f]|[^\x00-\x7f]/.test(p)) return p;
   let out = '"';
   for (const byte of Buffer.from(p, 'utf8')) {
@@ -64,12 +65,13 @@ function pickedLines(diff: FileDiff, selection: HunkSelection[] | undefined): Ma
   const picked = new Map<number, Set<number>>();
   const changed = (h: Hunk): number[] => h.lines.map((l, i) => (l.type === 'context' ? -1 : i)).filter((i) => i >= 0);
   if (selection === undefined) {
-    diff.hunks.forEach((h, i) => picked.set(i, new Set(changed(h))));
+    for (const [i, h] of diff.hunks.entries()) picked.set(i, new Set(changed(h)));
     return picked;
   }
   if (!Array.isArray(selection)) throw badRequest('hunks must be an array', 'bad_selection');
   for (const sel of selection) {
-    if (!sel || !Number.isInteger(sel.index) || sel.index < 0 || sel.index >= diff.hunks.length) throw badRequest(`no such hunk: ${sel?.index}`, 'bad_selection');
+    if (!sel || !Number.isInteger(sel.index) || sel.index < 0 || sel.index >= diff.hunks.length)
+      throw badRequest(`no such hunk: ${sel?.index}`, 'bad_selection');
     const hunk = diff.hunks[sel.index]!;
     const set = picked.get(sel.index) ?? new Set<number>();
     picked.set(sel.index, set);

@@ -67,13 +67,11 @@ async function assertNewWorktreePath(ctx: RepoContext, worktrees: WorktreeInfo[]
   for (const w of worktrees) {
     if (target === w.path || target.startsWith(w.path + path.sep)) throw badRequest(`${target} is inside the worktree at ${w.path}`, 'invalid_path');
   }
-  let st;
-  try {
-    st = await stat(target);
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return target;
+  const st = await stat(target).catch((e: NodeJS.ErrnoException) => {
+    if (e.code === 'ENOENT') return undefined;
     throw e;
-  }
+  });
+  if (!st) return target;
   if (!st.isDirectory() || (await readdir(target)).length > 0) throw badRequest(`${target} already exists`, 'path_exists');
   return target;
 }

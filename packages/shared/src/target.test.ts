@@ -45,7 +45,15 @@ describe('target keys', () => {
     expect(() => parseTargetKey('')).toThrow(TargetKeyError);
   });
   it('round-trips', () => {
-    for (const key of ['working', 'commit:abc', 'range:a..b', 'base:main', 'worktree:/p/q:staged', 'worktree:/p/q:range:x..y', 'worktree:/p/q:base:origin/main']) {
+    for (const key of [
+      'working',
+      'commit:abc',
+      'range:a..b',
+      'base:main',
+      'worktree:/p/q:staged',
+      'worktree:/p/q:range:x..y',
+      'worktree:/p/q:base:origin/main',
+    ]) {
       expect(formatTargetKey(parseTargetKey(key))).toBe(key);
     }
   });

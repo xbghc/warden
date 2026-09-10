@@ -44,7 +44,7 @@ const LANG_BY_EXT: Record<string, string> = {
 
 export function langForPath(filePath: string): string {
   const m = /\.([A-Za-z0-9]+)$/.exec(filePath);
-  if (!m || !m[1]) return '';
+  if (!m?.[1]) return '';
   return LANG_BY_EXT[m[1].toLowerCase()] ?? m[1].toLowerCase();
 }
 
@@ -84,13 +84,7 @@ export interface IssueExportOptions {
 
 export function formatIssueExport({ repoRoot, issue, comments }: IssueExportOptions): string {
   const targets = [...new Set(comments.map((c) => c.targetKey))];
-  const head = [
-    `# Issue: ${issue.title}`,
-    `Status: ${issue.status}`,
-    `Target: ${targets.join(', ') || '-'}`,
-    `Repo: ${repoRoot}`,
-    `Count: ${comments.length}`,
-  ];
+  const head = [`# Issue: ${issue.title}`, `Status: ${issue.status}`, `Target: ${targets.join(', ') || '-'}`, `Repo: ${repoRoot}`, `Count: ${comments.length}`];
   const parts = [head.join('\n')];
   if (issue.body.trim()) parts.push(issue.body.trim());
   parts.push(...comments.map(formatCommentSection));

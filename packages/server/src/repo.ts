@@ -24,7 +24,7 @@ export async function resolveRepo(dir: string): Promise<RepoContext> {
   try {
     const r = await runGit(['rev-parse', '--show-toplevel'], { cwd: dir });
     top = r.stdout.trim();
-  } catch (e) {
+  } catch {
     throw new HttpError(400, `${dir} is not inside a git repository`, 'not_a_repo');
   }
   if (!top) throw new HttpError(400, `${dir} is not inside a git worktree (bare repository?)`, 'not_a_repo');
@@ -41,7 +41,7 @@ export async function listWorktreesAll(ctx: RepoContext): Promise<(WorktreeInfo 
   const out: (WorktreeInfo & { prunable: boolean })[] = [];
   let cur: (Partial<WorktreeInfo> & { prunable?: boolean }) | null = null;
   const flush = () => {
-    if (cur && cur.path) {
+    if (cur?.path) {
       out.push({
         path: cur.path,
         head: cur.head ?? '',
@@ -63,7 +63,6 @@ export async function listWorktreesAll(ctx: RepoContext): Promise<(WorktreeInfo 
       flush();
       cur = { path: line.slice('worktree '.length) };
     } else if (!cur) {
-      continue;
     } else if (line.startsWith('HEAD ')) cur.head = line.slice(5);
     else if (line.startsWith('branch ')) cur.branch = line.slice(7).replace(/^refs\/heads\//, '');
     else if (line === 'detached') cur.detached = true;

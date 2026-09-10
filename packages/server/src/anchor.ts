@@ -143,10 +143,7 @@ export function reanchorComment(comment: Comment, diff: FileDiff | undefined, no
   const res = anchorAt(lines, diff, idx, comment.anchor.lineHashes.length);
   const status: Comment['status'] = comment.exportedAt ? 'exported' : 'active';
   const unchanged =
-    comment.status === status &&
-    comment.startLine === res.startLine &&
-    comment.endLine === res.endLine &&
-    comment.anchor.hunkHash === res.anchor.hunkHash;
+    comment.status === status && comment.startLine === res.startLine && comment.endLine === res.endLine && comment.anchor.hunkHash === res.anchor.hunkHash;
   if (unchanged) return comment;
   return {
     ...comment,

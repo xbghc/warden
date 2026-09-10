@@ -3,7 +3,19 @@ import { existsSync } from 'node:fs';
 import { HttpError } from './errors.js';
 
 /** Sub-commands the server is allowed to run. Everything else is rejected before spawning. */
-const ALLOWED_SUBCOMMANDS = new Set(['rev-parse', 'diff', 'show', 'log', 'worktree', 'ls-files', 'status', 'merge-base', 'rev-list', 'for-each-ref', 'check-ref-format']);
+const ALLOWED_SUBCOMMANDS = new Set([
+  'rev-parse',
+  'diff',
+  'show',
+  'log',
+  'worktree',
+  'ls-files',
+  'status',
+  'merge-base',
+  'rev-list',
+  'for-each-ref',
+  'check-ref-format',
+]);
 
 /** Options that could make an otherwise read-only sub-command write somewhere. */
 const FORBIDDEN_OPTION_PREFIXES = ['--output', '--ext-diff', '--textconv', '-c', '--config-env', '--exec-path', '--git-dir', '--work-tree'];

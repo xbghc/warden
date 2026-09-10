@@ -43,7 +43,7 @@ function splitGitHeader(rest: string): { a: string; b: string } {
   if (rest.startsWith('"')) {
     // Quoted form: "a/..." "b/..."
     const m = /^("(?:[^"\\]|\\.)*")\s+("(?:[^"\\]|\\.)*")$/.exec(rest);
-    if (m && m[1] && m[2]) return { a: stripPrefix(m[1], 'a/'), b: stripPrefix(m[2], 'b/') };
+    if (m?.[1] && m[2]) return { a: stripPrefix(m[1], 'a/'), b: stripPrefix(m[2], 'b/') };
   }
   // Prefer an index where both halves are the same path (the common case, robust to spaces).
   for (let i = 0; i < rest.length; i++) {
@@ -236,7 +236,6 @@ export function parseUnifiedDiff(text: string): FileDiff[] {
     if (line.startsWith('Binary files ') || line === 'GIT binary patch') {
       c.binary = true;
       c.raw.push(line);
-      continue;
     }
     // similarity index / dissimilarity index / index abc..def -> ignore
   }

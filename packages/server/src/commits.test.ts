@@ -29,9 +29,16 @@ describe('parseDecorations', () => {
 
 describe('parseCommitLog', () => {
   it('reads one commit per line, merge parents included', () => {
-    const line = ['a'.repeat(40), 'aaaaaaa', 'Ann', 'ann@example.com', '2026-09-08T10:00:00+08:00', `${'b'.repeat(40)} ${'c'.repeat(40)}`, 'HEAD -> main', 'Merge topic (#12)'].join(
-      '\x1f',
-    );
+    const line = [
+      'a'.repeat(40),
+      'aaaaaaa',
+      'Ann',
+      'ann@example.com',
+      '2026-09-08T10:00:00+08:00',
+      `${'b'.repeat(40)} ${'c'.repeat(40)}`,
+      'HEAD -> main',
+      'Merge topic (#12)',
+    ].join('\x1f');
     expect(parseCommitLog(`${line}\n`)).toEqual([
       {
         sha: 'a'.repeat(40),

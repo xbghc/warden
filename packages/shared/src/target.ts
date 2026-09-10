@@ -58,7 +58,7 @@ export function parseTargetKey(key: TargetKey): Target {
   if (key.startsWith('worktree:')) {
     const rest = key.slice('worktree:'.length);
     const m = /^(.+):(working|staged|all|commit:.+|range:.+|base:.+)$/.exec(rest);
-    if (!m || !m[1] || !m[2]) throw new TargetKeyError(`invalid worktree target key: ${key}`);
+    if (!m?.[1] || !m[2]) throw new TargetKeyError(`invalid worktree target key: ${key}`);
     const worktree = m[1];
     if (!worktree.startsWith('/')) throw new TargetKeyError(`worktree path must be absolute: ${worktree}`);
     return { ...parseSuffix(m[2]), worktree };
@@ -163,9 +163,5 @@ export function stageModeFor(t: Target): StageMode | undefined {
 export function localViewKeys(key: TargetKey): TargetKey[] {
   const t = tryParseTargetKey(key);
   const wt = t?.worktree ? { worktree: t.worktree } : {};
-  return [
-    formatTargetKey({ kind: 'working', ...wt }),
-    formatTargetKey({ kind: 'staged', ...wt }),
-    formatTargetKey({ kind: 'all', ...wt }),
-  ];
+  return [formatTargetKey({ kind: 'working', ...wt }), formatTargetKey({ kind: 'staged', ...wt }), formatTargetKey({ kind: 'all', ...wt })];
 }

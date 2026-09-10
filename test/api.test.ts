@@ -315,11 +315,17 @@ describe('viewed, comments, export, issues', () => {
 
   it('reanchors after unrelated edits and orphans after edits to the commented line', async () => {
     // unrelated edit at top of file (same hunk, shifted)
-    await fx.write('src/a.ts', ['// header', 'export function a() {', '  return 3;', '}', '', 'export const extra = true;', 'export const more = 1;', ''].join('\n'));
+    await fx.write(
+      'src/a.ts',
+      ['// header', 'export function a() {', '  return 3;', '}', '', 'export const extra = true;', 'export const more = 1;', ''].join('\n'),
+    );
     let re = await json<ReanchorResponse>(await send('POST', `/api/targets/${k('working')}/comments/reanchor`, {}));
     expect(re.comments[0]).toMatchObject({ status: 'active', startLine: 3, endLine: 3 });
     // now change the commented line itself
-    await fx.write('src/a.ts', ['// header', 'export function a() {', '  return 4;', '}', '', 'export const extra = true;', 'export const more = 1;', ''].join('\n'));
+    await fx.write(
+      'src/a.ts',
+      ['// header', 'export function a() {', '  return 4;', '}', '', 'export const extra = true;', 'export const more = 1;', ''].join('\n'),
+    );
     re = await json<ReanchorResponse>(await send('POST', `/api/targets/${k('working')}/comments/reanchor`, {}));
     expect(re.comments[0]!.status).toBe('orphaned');
     expect(re.comments[0]!.codeSnippet).toEqual(['  return 3;']);
@@ -333,7 +339,9 @@ describe('viewed, comments, export, issues', () => {
   it('exports comments and marks them exported', async () => {
     const res = await json<ExportResponse>(await send('POST', '/api/comments/export', { commentIds: [comment.id, 'missing'] }));
     expect(res.count).toBe(1);
-    expect(res.text).toContain('# Review comments\nTarget: working\nRepo: ' + fx.root + '\nCount: 1\n\n## src/a.ts:3 (new)\n```ts\n3 |   return 4;\n```\n> why 3?');
+    expect(res.text).toContain(
+      '# Review comments\nTarget: working\nRepo: ' + fx.root + '\nCount: 1\n\n## src/a.ts:3 (new)\n```ts\n3 |   return 4;\n```\n> why 3?',
+    );
     const state = await json<ReviewState>(await get('/api/state'));
     const c = state.targets.local!.comments[0]!;
     expect(c.status).toBe('exported');
@@ -444,7 +452,9 @@ describe('staging', () => {
     expect(working.hunks).toHaveLength(3);
     expect(working.hunks[1]!.lines.filter((l) => l.type !== 'context').map((l) => l.content)).toEqual(['inserted after 15 (b)']);
     // Nothing in the working tree moved.
-    expect((await json<{ content: string }>(await get(`/api/targets/${k('working')}/file/full?path=${k(lib)}&side=new`))).content.split('\n').slice(15, 17)).toEqual(['inserted after 15', 'inserted after 15 (b)']);
+    expect(
+      (await json<{ content: string }>(await get(`/api/targets/${k('working')}/file/full?path=${k(lib)}&side=new`))).content.split('\n').slice(15, 17),
+    ).toEqual(['inserted after 15', 'inserted after 15 (b)']);
   });
 
   it('stages whole hunks, with later hunks placed by what earlier ones did', async () => {

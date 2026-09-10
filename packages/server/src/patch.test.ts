@@ -49,7 +49,9 @@ describe('buildStagePatch', () => {
   it('unstage: the mirror image — an unpicked addition stays, an unpicked deletion goes', () => {
     const diff = one(MODIFIED);
     const { patch } = buildStagePatch(diff, 'unstage', [{ index: 0, lines: [1] }]);
-    expect(body(patch)).toBe(['@@ -1,6 +1,5 @@ function foo() {', ' const a = 1;', '-const b = 2;', ' const b = 3;', ' const c = 4;', ' const d = 5;', ' ', ''].join('\n'));
+    expect(body(patch)).toBe(
+      ['@@ -1,6 +1,5 @@ function foo() {', ' const a = 1;', '-const b = 2;', ' const b = 3;', ' const c = 4;', ' const d = 5;', ' ', ''].join('\n'),
+    );
   });
 
   it('numbers later hunks by what the earlier ones in the same patch did', () => {
@@ -81,9 +83,13 @@ describe('buildStagePatch', () => {
   });
 
   it('a new file is created with the picked lines only; unstaging it whole removes it', () => {
-    const diff = one(['diff --git a/n.ts b/n.ts', 'new file mode 100755', '--- /dev/null', '+++ b/n.ts', '@@ -0,0 +1,3 @@', '+one', '+two', '+three', ''].join('\n'));
+    const diff = one(
+      ['diff --git a/n.ts b/n.ts', 'new file mode 100755', '--- /dev/null', '+++ b/n.ts', '@@ -0,0 +1,3 @@', '+one', '+two', '+three', ''].join('\n'),
+    );
     const part = buildStagePatch(diff, 'stage', [{ index: 0, lines: [0, 2] }]);
-    expect(part.patch).toBe(['diff --git a/n.ts b/n.ts', 'new file mode 100755', '--- /dev/null', '+++ b/n.ts', '@@ -0,0 +1,2 @@', '+one', '+three', ''].join('\n'));
+    expect(part.patch).toBe(
+      ['diff --git a/n.ts b/n.ts', 'new file mode 100755', '--- /dev/null', '+++ b/n.ts', '@@ -0,0 +1,2 @@', '+one', '+three', ''].join('\n'),
+    );
     const gone = buildStagePatch(diff, 'unstage');
     expect(gone.patch).toContain('new file mode 100755\n--- /dev/null\n+++ b/n.ts\n@@ -0,0 +1,3 @@');
     // Taking a few lines out of a staged new file leaves a shorter file in the index.
@@ -93,30 +99,77 @@ describe('buildStagePatch', () => {
 
   it('a deletion is staged whole or in part, but only unstaged whole', () => {
     const diff = one(['diff --git a/d.ts b/d.ts', 'deleted file mode 100644', '--- a/d.ts', '+++ /dev/null', '@@ -1,2 +0,0 @@', '-one', '-two', ''].join('\n'));
-    expect(buildStagePatch(diff, 'stage').patch).toBe(['diff --git a/d.ts b/d.ts', 'deleted file mode 100644', '--- a/d.ts', '+++ /dev/null', '@@ -1,2 +0,0 @@', '-one', '-two', ''].join('\n'));
+    expect(buildStagePatch(diff, 'stage').patch).toBe(
+      ['diff --git a/d.ts b/d.ts', 'deleted file mode 100644', '--- a/d.ts', '+++ /dev/null', '@@ -1,2 +0,0 @@', '-one', '-two', ''].join('\n'),
+    );
     // Same thing picked hunk by hunk: still a deletion, not an edit down to nothing.
     expect(buildStagePatch(diff, 'stage', [{ index: 0 }]).patch).toContain('deleted file mode');
-    expect(buildStagePatch(diff, 'stage', [{ index: 0, lines: [0] }]).patch).toBe(['diff --git a/d.ts b/d.ts', '--- a/d.ts', '+++ b/d.ts', '@@ -1,2 +1,1 @@', '-one', ' two', ''].join('\n'));
+    expect(buildStagePatch(diff, 'stage', [{ index: 0, lines: [0] }]).patch).toBe(
+      ['diff --git a/d.ts b/d.ts', '--- a/d.ts', '+++ b/d.ts', '@@ -1,2 +1,1 @@', '-one', ' two', ''].join('\n'),
+    );
     expect(buildStagePatch(diff, 'unstage').patch).toContain('deleted file mode');
     expect(() => buildStagePatch(diff, 'unstage', [{ index: 0, lines: [0] }])).toThrow(/as a whole/);
   });
 
   it('carries a rename and a mode change only for the whole file', () => {
     const diff = one(
-      ['diff --git a/old.sh b/new.sh', 'old mode 100644', 'new mode 100755', 'similarity index 90%', 'rename from old.sh', 'rename to new.sh', '--- a/old.sh', '+++ b/new.sh', '@@ -1,2 +1,2 @@', ' #!/bin/sh', '-echo a', '+echo b', ''].join('\n'),
+      [
+        'diff --git a/old.sh b/new.sh',
+        'old mode 100644',
+        'new mode 100755',
+        'similarity index 90%',
+        'rename from old.sh',
+        'rename to new.sh',
+        '--- a/old.sh',
+        '+++ b/new.sh',
+        '@@ -1,2 +1,2 @@',
+        ' #!/bin/sh',
+        '-echo a',
+        '+echo b',
+        '',
+      ].join('\n'),
     );
     expect(buildStagePatch(diff, 'stage').patch).toBe(
-      ['diff --git a/old.sh b/new.sh', 'old mode 100644', 'new mode 100755', 'rename from old.sh', 'rename to new.sh', '--- a/old.sh', '+++ b/new.sh', '@@ -1,2 +1,2 @@', ' #!/bin/sh', '-echo a', '+echo b', ''].join('\n'),
+      [
+        'diff --git a/old.sh b/new.sh',
+        'old mode 100644',
+        'new mode 100755',
+        'rename from old.sh',
+        'rename to new.sh',
+        '--- a/old.sh',
+        '+++ b/new.sh',
+        '@@ -1,2 +1,2 @@',
+        ' #!/bin/sh',
+        '-echo a',
+        '+echo b',
+        '',
+      ].join('\n'),
     );
     // Unstaging the added line alone leaves the deletion staged: the index ends up with the shebang only.
-    expect(buildStagePatch(diff, 'unstage', [{ index: 0, lines: [2] }]).patch).toBe(['diff --git a/new.sh b/new.sh', '--- a/new.sh', '+++ b/new.sh', '@@ -1,1 +1,2 @@', ' #!/bin/sh', '+echo b', ''].join('\n'));
+    expect(buildStagePatch(diff, 'unstage', [{ index: 0, lines: [2] }]).patch).toBe(
+      ['diff --git a/new.sh b/new.sh', '--- a/new.sh', '+++ b/new.sh', '@@ -1,1 +1,2 @@', ' #!/bin/sh', '+echo b', ''].join('\n'),
+    );
     const modeOnly = one(['diff --git a/x.sh b/x.sh', 'old mode 100644', 'new mode 100755', ''].join('\n'));
     expect(buildStagePatch(modeOnly, 'stage').patch).toBe('diff --git a/x.sh b/x.sh\nold mode 100644\nnew mode 100755\n');
     expect(() => buildStagePatch(modeOnly, 'stage', [])).toThrow(/no changed lines/);
   });
 
   it('keeps "no newline" markers on the last line of a side and refuses cuts that would move them', () => {
-    const diff = one(['diff --git a/e b/e', '--- a/e', '+++ b/e', '@@ -1,2 +1,3 @@', ' k', '-a', '\\ No newline at end of file', '+a', '+b', '\\ No newline at end of file', ''].join('\n'));
+    const diff = one(
+      [
+        'diff --git a/e b/e',
+        '--- a/e',
+        '+++ b/e',
+        '@@ -1,2 +1,3 @@',
+        ' k',
+        '-a',
+        '\\ No newline at end of file',
+        '+a',
+        '+b',
+        '\\ No newline at end of file',
+        '',
+      ].join('\n'),
+    );
     // Lines: 0 ctx k, 1 del a (nonl), 2 add a, 3 add b (nonl).
     expect(buildStagePatch(diff, 'stage').patch).toContain('-a\n\\ No newline at end of file\n+a\n+b\n\\ No newline at end of file\n');
     // Picking only the last addition would turn "a" into context with no newline, then add "b" after it.

@@ -42,6 +42,7 @@ function CodeLine({ content, tokens }: { content: string; tokens: Token[] | unde
   return (
     <span className="code-text">
       {tokens.map((t, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: a token has no identity of its own; the line re-renders whole
         <span key={i} style={t.color ? { color: t.color } : undefined}>
           {t.content}
         </span>
@@ -83,10 +84,7 @@ export function DiffView({ diff }: { diff: FileDiff }) {
   const allComments = useStore((s) => s.comments);
   // Comments are shared by the local views, but a marker only belongs on the view it currently
   // sits in — the same hunk staged and unstaged is two different sets of line numbers.
-  const comments = useMemo(
-    () => allComments.filter((c) => c.filePath === diff.path && c.targetKey === targetKey),
-    [allComments, diff.path, targetKey],
-  );
+  const comments = useMemo(() => allComments.filter((c) => c.filePath === diff.path && c.targetKey === targetKey), [allComments, diff.path, targetKey]);
   const updateComment = useStore((s) => s.updateComment);
   const setEditor = useStore((s) => s.setEditor);
   const focusComment = useStore((s) => s.focusComment);
@@ -243,7 +241,11 @@ export function DiffView({ diff }: { diff: FileDiff }) {
     const onKey = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       const t = e.target as HTMLElement | null;
-      if (t && ((t.tagName === 'INPUT' && (t as HTMLInputElement).type !== 'checkbox') || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+      if (
+        t &&
+        ((t.tagName === 'INPUT' && (t as HTMLInputElement).type !== 'checkbox') || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)
+      )
+        return;
       if (e.key !== 'n' && e.key !== 'p') return;
       const hunks = hunkRowIndices(rows);
       if (!hunks.length) return;
@@ -321,7 +323,11 @@ export function DiffView({ diff }: { diff: FileDiff }) {
     setPick(d.hunkIndex, d.anchor, pos);
   };
   const isPicked = (row: Extract<Row, { kind: 'line' | 'pair' }>): boolean =>
-    !!pick && row.hunkIndex === pick.hunkIndex && row.indices.length > 0 && row.pos >= Math.min(pick.anchor, pick.head) && row.pos <= Math.max(pick.anchor, pick.head);
+    !!pick &&
+    row.hunkIndex === pick.hunkIndex &&
+    row.indices.length > 0 &&
+    row.pos >= Math.min(pick.anchor, pick.head) &&
+    row.pos <= Math.max(pick.anchor, pick.head);
   const renderPickBox = (row: Extract<Row, { kind: 'line' | 'pair' }>, line: DiffLine | undefined, picked: boolean) => (
     <span className="stagec">
       {mode && !row.expanded && line && line.type !== 'context' && (
@@ -471,7 +477,11 @@ export function DiffView({ diff }: { diff: FileDiff }) {
         <span className="marker">{l.type === 'add' ? '+' : l.type === 'del' ? '-' : ' '}</span>
         <span className="code">
           <CodeLine content={l.content} tokens={tokens} />
-          {l.noNewline && <span className="nonl" title="No newline at end of file">⏎</span>}
+          {l.noNewline && (
+            <span className="nonl" title="No newline at end of file">
+              ⏎
+            </span>
+          )}
         </span>
         {renderMarker(side, no)}
       </div>
@@ -485,7 +495,10 @@ export function DiffView({ diff }: { diff: FileDiff }) {
     const type = l.type === 'context' ? 'context' : side === 'old' ? 'del' : 'add';
     const tokens = tokenCache.current.get(tokenKey(l, side));
     return (
-      <span className={`cell ${type} ${lineClasses(side, no)} ${picked ? 'picked' : ''}`} onMouseEnter={() => no !== undefined && extendSel(side, hunkIndex, no)}>
+      <span
+        className={`cell ${type} ${lineClasses(side, no)} ${picked ? 'picked' : ''}`}
+        onMouseEnter={() => no !== undefined && extendSel(side, hunkIndex, no)}
+      >
         {renderPickBox(row, l, picked)}
         <span className="gut" onClick={() => gutterClick(l, hunkIndex)} title="在 nvim 中打开此行">
           {no ?? ''}

@@ -102,7 +102,10 @@ describe('startServer().close()', () => {
     const res = await fetch(`${server.url}api/events`);
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('text/event-stream');
-    const drained = res.body!.getReader().read().catch(() => undefined);
+    const drained = res
+      .body!.getReader()
+      .read()
+      .catch(() => undefined);
 
     const closed = server.close().then(() => 'closed' as const);
     const timeout = new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), 2_000));

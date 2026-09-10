@@ -82,16 +82,14 @@ export const api = {
   files: (key: TargetKey) => req<FilesResponse>('GET', `/api/targets/${enc(key)}/files`),
   file: (key: TargetKey, path: string, hints: { oldPath?: string; untracked?: boolean } = {}) =>
     req<FileDiff>('GET', `/api/targets/${enc(key)}/file${q({ path, old: hints.oldPath, untracked: hints.untracked })}`),
-  fullFile: (key: TargetKey, path: string, side: CommentSide) =>
-    req<FullFileResponse>('GET', `/api/targets/${enc(key)}/file/full${q({ path, side })}`),
+  fullFile: (key: TargetKey, path: string, side: CommentSide) => req<FullFileResponse>('GET', `/api/targets/${enc(key)}/file/full${q({ path, side })}`),
   setViewed: (key: TargetKey, path: string, viewed: boolean, contentHash: string) =>
     req<{ viewed: Record<string, string> }>('PUT', `/api/targets/${enc(key)}/viewed`, { path, viewed, contentHash }),
 
   stage: (key: TargetKey, body: StageRequest) => req<StageResponse>('POST', `/api/targets/${enc(key)}/stage`, body),
 
   createComment: (key: TargetKey, body: CreateCommentRequest) => req<Comment>('POST', `/api/targets/${enc(key)}/comments`, body),
-  updateComment: (key: TargetKey, id: string, body: UpdateCommentRequest) =>
-    req<Comment>('PATCH', `/api/targets/${enc(key)}/comments/${enc(id)}`, body),
+  updateComment: (key: TargetKey, id: string, body: UpdateCommentRequest) => req<Comment>('PATCH', `/api/targets/${enc(key)}/comments/${enc(id)}`, body),
   deleteComment: (key: TargetKey, id: string) => req<{ ok: true }>('DELETE', `/api/targets/${enc(key)}/comments/${enc(id)}`),
   reanchor: (key: TargetKey, files?: FileDiff[]) => req<ReanchorResponse>('POST', `/api/targets/${enc(key)}/comments/reanchor`, { files }),
   exportComments: (commentIds: string[]) => req<ExportResponse>('POST', '/api/comments/export', { commentIds }),

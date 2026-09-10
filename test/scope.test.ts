@@ -131,8 +131,12 @@ describe('a base target survives the commits made while the branch is under revi
 
     const files = await json<FilesResponse>(await get(`/api/targets/${k(key)}/files`));
     expect(files.files.find((f) => f.path === FILE2)).toMatchObject({ status: 'added' });
-    alpha = await json<Comment>(await send('POST', `/api/targets/${k(key)}/comments`, { filePath: FILE2, side: 'new', startLine: 3, endLine: 3, body: 'alpha' }));
-    beta = await json<Comment>(await send('POST', `/api/targets/${k(key)}/comments`, { filePath: FILE2, side: 'new', startLine: 20, endLine: 20, body: 'beta' }));
+    alpha = await json<Comment>(
+      await send('POST', `/api/targets/${k(key)}/comments`, { filePath: FILE2, side: 'new', startLine: 3, endLine: 3, body: 'alpha' }),
+    );
+    beta = await json<Comment>(
+      await send('POST', `/api/targets/${k(key)}/comments`, { filePath: FILE2, side: 'new', startLine: 20, endLine: 20, body: 'beta' }),
+    );
     expect(alpha.targetKey).toBe(key);
 
     const state = await json<ReviewState>(await get('/api/state'));
