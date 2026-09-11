@@ -36,6 +36,8 @@
     "dev": "concurrently -n server,web -c blue,green \"pnpm dev:server\" \"pnpm dev:web\"",
     "dev:server": "tsx watch bin/cli.ts --port 4100 --no-open",
     "dev:web": "pnpm --filter @warden/web dev",
+    "storybook": "pnpm --filter @warden/web storybook",
+    "build:storybook": "pnpm --filter @warden/web build:storybook",
     "build": "rimraf dist && pnpm build:web && pnpm build:server",
     "build:web": "pnpm --filter @warden/web build",
     "build:server": "tsup",

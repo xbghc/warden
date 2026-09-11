@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { ActionIcon } from './ActionIcon';
 import { commentScopeKey, formatTargetKey, isLocalTarget, parseTargetKey, targetLabel, type Target } from '@warden/shared';
 import { branchOf, useStore } from '../store';
 import { NvimSelector } from './NvimSelector';
@@ -132,7 +133,7 @@ export function TopBar() {
             }}
           >
             <input value={sha} onChange={(e) => setSha(e.target.value)} placeholder="sha / ref" spellCheck={false} />
-            <button type="submit">查看</button>
+            <button type="submit"><ActionIcon name="search" label="查看" /></button>
           </form>
         )}
         {kind === 'range' && (
@@ -146,7 +147,7 @@ export function TopBar() {
             <input value={base} onChange={(e) => setBase(e.target.value)} placeholder="base (@ = HEAD)" spellCheck={false} />
             <span>..</span>
             <input value={head} onChange={(e) => setHead(e.target.value)} placeholder="head" spellCheck={false} />
-            <button type="submit">对比</button>
+            <button type="submit"><ActionIcon name="compare" label="对比" /></button>
           </form>
         )}
         {showTargetLabel && (
@@ -160,28 +161,28 @@ export function TopBar() {
 
       <div className="actions">
         <div className="seg">
-          <button className={panel === 'commits' ? 'active' : ''} onClick={() => setPanel(panel === 'commits' ? 'diff' : 'commits')} title="历史 commit">
-            Commits
+          <button className={panel === 'commits' ? 'active' : ''} aria-pressed={panel === 'commits'} onClick={() => setPanel(panel === 'commits' ? 'diff' : 'commits')} title="历史 commit">
+            <ActionIcon name="history" label="Commits" />
           </button>
-          <button className={panel === 'issues' ? 'active' : ''} onClick={() => setPanel(panel === 'issues' ? 'diff' : 'issues')} title="本地 Issue">
-            Issues{openIssues ? ` (${openIssues})` : ''}
+          <button className={panel === 'issues' ? 'active' : ''} aria-pressed={panel === 'issues'} onClick={() => setPanel(panel === 'issues' ? 'diff' : 'issues')} title="本地 Issue">
+            <ActionIcon name="issue" label={`Issues${openIssues ? ` (${openIssues})` : ''}`} count={openIssues} />
           </button>
-          <button className={panel === 'todos' ? 'active' : ''} onClick={() => setPanel(panel === 'todos' ? 'diff' : 'todos')} title={`${branch} 分支的 Todo`}>
-            Todos{openTodos ? ` (${openTodos})` : ''}
+          <button className={panel === 'todos' ? 'active' : ''} aria-pressed={panel === 'todos'} onClick={() => setPanel(panel === 'todos' ? 'diff' : 'todos')} title={`${branch} 分支的 Todo`}>
+            <ActionIcon name="todos" label={`Todos${openTodos ? ` (${openTodos})` : ''}`} count={openTodos} />
           </button>
         </div>
         <div className="seg">
-          <button className={viewMode === 'unified' ? 'active' : ''} onClick={() => setViewMode('unified')}>
-            Unified
+          <button className={viewMode === 'unified' ? 'active' : ''} aria-pressed={viewMode === 'unified'} onClick={() => setViewMode('unified')}>
+            <ActionIcon name="file" label="Unified" />
           </button>
-          <button className={viewMode === 'split' ? 'active' : ''} onClick={() => setViewMode('split')}>
-            Split
+          <button className={viewMode === 'split' ? 'active' : ''} aria-pressed={viewMode === 'split'} onClick={() => setViewMode('split')}>
+            <ActionIcon name="split" label="Split" />
           </button>
         </div>
         <NvimSelector />
         <div className="seg">
           <button onClick={() => void refresh()} disabled={filesLoading} title={lastRefreshAt ? `上次刷新 ${shortTime(lastRefreshAt)}（r）` : '刷新 (r)'}>
-            {filesLoading ? '刷新中…' : '刷新'}
+            <ActionIcon name={filesLoading ? 'loading' : 'refresh'} label={filesLoading ? '刷新中…' : '刷新'} />
           </button>
           {/* A button rather than a checkbox, and no separate timestamp: the label and the
               time cost ~140px in a bar that already wraps, and the refresh button's title
@@ -193,7 +194,7 @@ export function TopBar() {
             onClick={() => setAutoRefresh(!autoRefresh)}
             title={`仓库发生变化时自动刷新（当前${autoRefresh ? '开启' : '关闭'}）`}
           >
-            自动
+            <ActionIcon name="auto" label="自动刷新" />
           </button>
         </div>
       </div>

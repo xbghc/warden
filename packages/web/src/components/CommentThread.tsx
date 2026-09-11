@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { ActionIcon } from './ActionIcon';
 import type { Comment, TargetKey } from '@warden/shared';
 import { targetLabel, tryParseTargetKey } from '@warden/shared';
 import { useStore } from '../store';
@@ -34,39 +35,34 @@ export function CommentCard({ comment, showSnippet = false, showFile = false }: 
   const updateComment = useStore((s) => s.updateComment);
   const deleteComment = useStore((s) => s.deleteComment);
   const exportComments = useStore((s) => s.exportComments);
-  const selected = useStore((s) => s.selectedCommentIds.includes(comment.id));
-  const toggleSelect = useStore((s) => s.toggleSelectComment);
-  const setReattaching = useStore((s) => s.setReattaching);
-  const reattaching = useStore((s) => s.reattaching === comment.id);
   const focused = useStore((s) => s.focusedCommentId === comment.id);
   const focusComment = useStore((s) => s.focusComment);
   const targetKey = useStore((s) => s.targetKey);
   const [editing, setEditing] = useState(false);
 
-  const range = comment.startLine === comment.endLine ? `${comment.startLine}` : `${comment.startLine}-${comment.endLine}`;
+  const range = comment.startLine === comment.endLine ? `${comment.startLine}` : `${comment.startLine}–${comment.endLine}`;
+  const location = `${comment.filePath} · ${comment.side === 'old' ? '修改前' : '修改后'}第 ${range} 行`;
   // Staging a hunk carries its comments into the Staged view; say so, otherwise the missing
   // marker in the diff in front looks like the comment lost its anchor.
   const elsewhere = comment.status !== 'orphaned' && comment.targetKey !== targetKey ? viewLabel(comment.targetKey) : null;
   return (
     <div
-      className={`comment-card status-${comment.status} ${selected ? 'selected' : ''} ${focused ? 'focused' : ''} ${reattaching ? 'reattaching' : ''}`}
+      className={`comment-card ${focused ? 'focused' : ''}`}
       onClick={() => {
         if (!focused) void focusComment(comment.id);
       }}
     >
       <div className="comment-head">
-        {showFile && (
-          <span className="mono file" title={comment.filePath}>
-            {comment.filePath.split('/').pop()}
+        <span className="mono comment-location" title={location} aria-label={location}>
+          {showFile && <span className="file">{comment.filePath.split('/').pop()}</span>}
+          <span className="comment-line">{showFile ? ':' : '行 '}{range}</span>
+        </span>
+        {comment.side === 'old' && <span className="badge">修改前</span>}
+        {comment.status === 'exported' && (
+          <span className="badge badge-exported" title="这条评论已复制导出">
+            已复制
           </span>
         )}
-        <label className="check" title="选中以创建 / 关联 Issue" onClick={(e) => e.stopPropagation()}>
-          <input type="checkbox" checked={selected} onChange={() => toggleSelect(comment.id)} />
-        </label>
-        <span className="mono">
-          {comment.side} {range}
-        </span>
-        <span className={`badge badge-${comment.status}`}>{comment.status}</span>
         {elsewhere && (
           <span className="badge" title={`这条评论现在位于 ${comment.targetKey}，点击卡片可跳转`}>
             {elsewhere}
@@ -76,17 +72,6 @@ export function CommentCard({ comment, showSnippet = false, showFile = false }: 
           {shortTime(comment.updatedAt)}
         </span>
         <span className="card-actions">
-          {comment.status === 'orphaned' && (
-            <button
-              className={`link ${reattaching ? 'active' : ''}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                setReattaching(reattaching ? null : comment.id);
-              }}
-            >
-              {reattaching ? '取消重附着' : '重新附着'}
-            </button>
-          )}
           <button
             className="link"
             onClick={(e) => {
@@ -95,7 +80,7 @@ export function CommentCard({ comment, showSnippet = false, showFile = false }: 
             }}
             title="复制此条评论"
           >
-            复制
+            <ActionIcon name="copy" label="复制" />
           </button>
           <button
             className="link"
@@ -104,7 +89,7 @@ export function CommentCard({ comment, showSnippet = false, showFile = false }: 
               setEditing(true);
             }}
           >
-            编辑
+            <ActionIcon name="edit" label="编辑" />
           </button>
           <button
             className="link danger"
@@ -113,11 +98,11 @@ export function CommentCard({ comment, showSnippet = false, showFile = false }: 
               if (window.confirm('删除这条评论？')) void deleteComment(comment.id);
             }}
           >
-            删除
+            <ActionIcon name="delete" label="删除" />
           </button>
         </span>
       </div>
-      {(showSnippet || comment.status === 'orphaned') && comment.codeSnippet.length > 0 && (
+      {showSnippet && comment.codeSnippet.length > 0 && (
         <pre className="snippet">
           {comment.codeSnippet.map((l, i) => (
             <div key={i}>
@@ -143,4 +128,3 @@ export function CommentCard({ comment, showSnippet = false, showFile = false }: 
     </div>
   );
 }
-

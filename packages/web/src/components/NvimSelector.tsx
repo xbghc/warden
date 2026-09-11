@@ -1,6 +1,30 @@
+import { useEffect, useRef } from 'react';
 import { useStore } from '../store';
+import { ActionIcon } from './ActionIcon';
 
 export function NvimSelector() {
+  const containerRef = useRef<HTMLDetailsElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const positionPopover = () => {
+    const container = containerRef.current;
+    const popover = popoverRef.current;
+    if (!container?.open || !popover) return;
+    const anchor = container.getBoundingClientRect();
+    const width = popover.getBoundingClientRect().width;
+    const viewportWidth = container.ownerDocument.documentElement.clientWidth;
+    const left = Math.max(16, Math.min(anchor.right - width, viewportWidth - width - 16));
+    popover.style.left = `${left - anchor.left}px`;
+  };
+  useEffect(() => {
+    const observer = new ResizeObserver(positionPopover);
+    if (containerRef.current) observer.observe(containerRef.current);
+    if (popoverRef.current) observer.observe(popoverRef.current);
+    window.addEventListener('resize', positionPopover);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', positionPopover);
+    };
+  }, []);
   const nvim = useStore((s) => s.nvim);
   const scanning = useStore((s) => s.nvimScanning);
   const scan = useStore((s) => s.scanNvim);
@@ -9,13 +33,13 @@ export function NvimSelector() {
   const instances = nvim?.instances ?? [];
   let content: JSX.Element;
   if (!nvim) content = <span className="muted">nvim: 未扫描</span>;
-  else if (!nvim.nvimAvailable) content = <span className="muted" title="PATH 中找不到 nvim 可执行文件">nvim 不可用</span>;
+  else if (!nvim.nvimAvailable) content = <span className="muted">nvim 不可用：PATH 中找不到可执行文件</span>;
   else if (instances.length === 0) content = <span className="muted">未发现在此仓库打开的 nvim</span>;
   else if (instances.length === 1) {
     const i = instances[0]!;
     content = (
       <span className="nvim-one" title={`${i.socket}\ncwd: ${i.cwd}`}>
-        nvim{i.pid ? ` #${i.pid}` : ''}
+        nvim{i.pid ? ` #${i.pid}` : ''} — {i.cwd}
       </span>
     );
   } else {
@@ -31,11 +55,22 @@ export function NvimSelector() {
     );
   }
   return (
-    <div className="nvim">
+    <details ref={containerRef} className="nvim" onToggle={positionPopover} onBlur={(event) => {
+      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) event.currentTarget.open = false;
+    }} onKeyDown={(event) => {
+      if (event.key === 'Escape') {
+        event.stopPropagation();
+        event.currentTarget.open = false;
+        event.currentTarget.querySelector('summary')?.focus();
+      }
+    }}>
+      <summary aria-label="nvim 设置"><ActionIcon name="terminal" label="nvim 设置" /></summary>
+      <div ref={popoverRef} className="nvim-popover">
       {content}
       <button className="icon" onClick={() => void scan(true)} disabled={scanning} title="重新扫描 nvim 实例">
-        {scanning ? '…' : '⟳'}
+        <ActionIcon name={scanning ? 'loading' : 'refresh'} label="重新扫描 nvim 实例" />
       </button>
-    </div>
+      </div>
+    </details>
   );
 }

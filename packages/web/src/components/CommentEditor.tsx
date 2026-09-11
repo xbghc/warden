@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { ActionIcon } from './ActionIcon';
 
 interface Props {
   title: string;
@@ -46,9 +47,9 @@ export function CommentEditor({ title, initial = '', submitLabel = '保存评论
       />
       <div className="comment-editor-actions">
         <button className="primary" onClick={() => void submit()} disabled={!body.trim() || busy}>
-          {submitLabel}
+          <ActionIcon name={busy ? 'loading' : 'save'} label={submitLabel} />
         </button>
-        <button onClick={onCancel}>取消</button>
+        <button onClick={onCancel}><ActionIcon name="close" label="取消" /></button>
       </div>
     </div>
   );

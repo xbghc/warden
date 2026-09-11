@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActionIcon } from './ActionIcon';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { CommentSide, DiffLine, FileDiff, Hunk } from '@warden/shared';
 import { useStore } from '../store';
@@ -372,15 +373,15 @@ export function DiffView({ diff }: { diff: FileDiff }) {
       <div className="row gap-row">
         {!isFirst && (
           <button className="link" onClick={() => void expand(gap, 'top')} title="展开紧接上一个 hunk 之后的 20 行">
-            ↑ 展开上方 {EXPAND_STEP} 行
+            <ActionIcon name="up" label={`展开上方 ${EXPAND_STEP} 行`} />
           </button>
         )}
         <button className="link" onClick={() => void expand(gap, 'all')}>
-          展开全部{hidden !== null ? ` (${hidden} 行)` : ''}
+          <ActionIcon name="expand" label={`展开全部${hidden !== null ? ` (${hidden} 行)` : ''}`} count={hidden ?? undefined} />
         </button>
         {!isLast && (
           <button className="link" onClick={() => void expand(gap, 'bottom')} title="展开紧接下一个 hunk 之前的 20 行">
-            ↓ 展开下方 {EXPAND_STEP} 行
+            <ActionIcon name="down" label={`展开下方 ${EXPAND_STEP} 行`} />
           </button>
         )}
       </div>

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActionIcon } from './ActionIcon';
 import type { CommitInfo } from '@warden/shared';
 import { formatTargetKey, parseTargetKey } from '@warden/shared';
 import { api } from '../api';
@@ -73,7 +74,7 @@ export function CommitsPanel() {
           }}
         >
           <input value={pathInput} onChange={(e) => setPathInput(e.target.value)} placeholder="按路径过滤 (git log -- path)" spellCheck={false} />
-          <button type="submit">应用</button>
+          <button type="submit"><ActionIcon name="filter" label="应用" /></button>
           {pathFilter && (
             <button
               type="button"
@@ -82,7 +83,7 @@ export function CommitsPanel() {
                 setPathFilter('');
               }}
             >
-              清除
+              <ActionIcon name="close" label="清除" />
             </button>
           )}
         </form>

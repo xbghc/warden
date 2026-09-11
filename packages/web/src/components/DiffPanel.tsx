@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { ActionIcon } from './ActionIcon';
 import type { FileEntry } from '@warden/shared';
 import { useStore } from '../store';
 import { DiffView } from './DiffView';
@@ -33,11 +34,11 @@ function FileHeader({ entry }: { entry: FileEntry }) {
       {entry.changed && <span className="changed">文件已变化，viewed 已取消</span>}
       <span className="spacer" />
       <button className="link" disabled={!nvimReady} onClick={() => void openInNvim(entry.path, 1)} title="在 nvim 中打开">
-        在 nvim 中打开
+        <ActionIcon name="terminal" label="在 nvim 中打开" />
       </button>
       <label className="check">
         <input type="checkbox" checked={entry.viewed} onChange={() => void toggleViewed(entry.path)} />
-        Viewed
+        <ActionIcon name="checked" label="已查看" />
       </label>
     </div>
   );
@@ -80,7 +81,7 @@ export function DiffPanel() {
       <div className="placeholder error-box">
         {diffState.message}{' '}
         <button className="link" onClick={() => void openFile(activeFile, true)}>
-          重试
+          <ActionIcon name="refresh" label="重试" />
         </button>
       </div>
     );
@@ -96,7 +97,7 @@ export function DiffPanel() {
       <div className="placeholder">
         <p>该文件 diff 有 {lineCount} 行，默认不渲染。</p>
         <button className="primary" onClick={() => setForceBig(activeFile)}>
-          仍然渲染
+          <ActionIcon name="expand" label="仍然渲染" />
         </button>
       </div>
     );

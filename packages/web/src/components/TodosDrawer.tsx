@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { ActionIcon } from './ActionIcon';
 import type { Todo } from '@warden/shared';
 import { branchOf, useStore } from '../store';
 import { Markdown } from './Markdown';
@@ -12,7 +13,7 @@ function shortTime(iso: string): string {
   return sameDay ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : d.toLocaleDateString();
 }
 
-function TodoRow({ todo, showBranch }: { todo: Todo; showBranch: boolean }) {
+function TodoRow({ todo }: { todo: Todo }) {
   const updateTodo = useStore((s) => s.updateTodo);
   const deleteTodo = useStore((s) => s.deleteTodo);
   const [open, setOpen] = useState(false);
@@ -38,7 +39,6 @@ function TodoRow({ todo, showBranch }: { todo: Todo; showBranch: boolean }) {
           title={todo.status === 'done' ? '标记为未完成' : '标记为完成'}
         />
         <span className="title">{todo.title}</span>
-        {showBranch && <span className="badge">{todo.branch}</span>}
         <span className="spacer" />
         <span className="muted small" title={todo.updatedAt}>
           {shortTime(todo.updatedAt)}
@@ -58,9 +58,9 @@ function TodoRow({ todo, showBranch }: { todo: Todo; showBranch: boolean }) {
                   setEditing(false);
                 }}
               >
-                保存
+                <ActionIcon name="save" label="保存" />
               </button>
-              <button onClick={() => setEditing(false)}>取消</button>
+              <button onClick={() => setEditing(false)}><ActionIcon name="close" label="取消" /></button>
             </div>
           </div>
         ) : (
@@ -68,7 +68,7 @@ function TodoRow({ todo, showBranch }: { todo: Todo; showBranch: boolean }) {
             {todo.body ? <Markdown text={todo.body} /> : <p className="muted">（无描述）</p>}
             <div className="row-actions">
               <button className="link" onClick={startEditing}>
-                编辑
+                <ActionIcon name="edit" label="编辑" />
               </button>
               <button
                 className="link danger"
@@ -76,7 +76,7 @@ function TodoRow({ todo, showBranch }: { todo: Todo; showBranch: boolean }) {
                   if (window.confirm(`删除 Todo「${todo.title}」？`)) void deleteTodo(todo.id);
                 }}
               >
-                删除
+                <ActionIcon name="delete" label="删除" />
               </button>
             </div>
           </div>
@@ -89,30 +89,27 @@ export function TodosDrawer() {
   const todos = useStore((s) => s.todos);
   const loadTodos = useStore((s) => s.loadTodos);
   const createTodo = useStore((s) => s.createTodo);
-  const exportTodos = useStore((s) => s.exportTodos);
   const setPanel = useStore((s) => s.setPanel);
   const repo = useStore((s) => s.repo);
   const root = useStore((s) => s.root);
   const branch = branchOf(repo, root);
 
   const [filter, setFilter] = useState<Filter>('open');
-  const [allBranches, setAllBranches] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [includeDone, setIncludeDone] = useState(false);
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
 
   useEffect(() => {
     void loadTodos();
-  }, [loadTodos]);
+  }, [loadTodos, branch, root]);
 
   const shown = useMemo(
     () =>
       todos
-        .filter((t) => (allBranches || t.branch === branch) && (filter === 'all' || t.status === filter))
+        .filter((t) => t.branch === branch && (filter === 'all' || t.status === filter))
         .slice()
         .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0)),
-    [todos, allBranches, branch, filter],
+    [todos, branch, filter],
   );
 
   return (
@@ -124,29 +121,15 @@ export function TodosDrawer() {
         </span>
         <div className="seg">
           {(['open', 'done', 'all'] as Filter[]).map((f) => (
-            <button key={f} className={filter === f ? 'active' : ''} onClick={() => setFilter(f)}>
-              {f}
+            <button key={f} className={filter === f ? 'active' : ''} aria-pressed={filter === f} onClick={() => setFilter(f)}>
+              <ActionIcon name={f === 'open' ? 'open' : f === 'done' ? 'done' : 'files'} label={f === 'open' ? '未完成' : f === 'done' ? '已完成' : '全部'} />
             </button>
           ))}
         </div>
         <span className="spacer" />
-        <button onClick={() => setCreating(true)}>新建</button>
+        <button onClick={() => setCreating(true)}><ActionIcon name="add" label="新建" /></button>
         <button className="icon" onClick={() => setPanel('diff')} title="关闭 (Esc)">
-          ✕
-        </button>
-      </div>
-      <div className="drawer-tools">
-        <label className="check">
-          <input type="checkbox" checked={allBranches} onChange={(e) => setAllBranches(e.target.checked)} />
-          所有分支
-        </label>
-        <span className="spacer" />
-        <label className="check">
-          <input type="checkbox" checked={includeDone} onChange={(e) => setIncludeDone(e.target.checked)} />
-          含已完成
-        </label>
-        <button className="link" onClick={() => void exportTodos(includeDone)} title={`复制 ${branch} 的 Todo`}>
-          复制 Todo
+          <ActionIcon name="close" label="关闭面板" />
         </button>
       </div>
       {creating && (
@@ -167,7 +150,7 @@ export function TodosDrawer() {
                 }
               }}
             >
-              创建 Todo
+              <ActionIcon name="add" label="创建 Todo" />
             </button>
             <button
               onClick={() => {
@@ -176,7 +159,7 @@ export function TodosDrawer() {
                 setBody('');
               }}
             >
-              取消
+              <ActionIcon name="close" label="取消" />
             </button>
           </div>
         </div>
@@ -184,11 +167,11 @@ export function TodosDrawer() {
       <div className="todo-list">
         {shown.length === 0 && (
           <div className="muted empty">
-            {allBranches ? '还没有 Todo' : `分支 ${branch} 上没有 ${filter === 'all' ? '' : filter} Todo`}
+            {`分支 ${branch} 上没有 ${filter === 'all' ? '' : filter} Todo`}
           </div>
         )}
         {shown.map((t) => (
-          <TodoRow key={t.id} todo={t} showBranch={allBranches} />
+          <TodoRow key={t.id} todo={t} />
         ))}
       </div>
     </aside>

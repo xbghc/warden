@@ -12,7 +12,7 @@ with line comments you can copy back to the agent as a prompt.
 - Review state (viewed files, comments, local issues, todos, preferences) persists outside the repo and survives restarts.
 - Comments follow the code: they move with a hunk that gets staged, re-attach after the agent edits the file, and are cleaned up once the change is committed.
 - Auto-refresh — warden watches the repository and reloads itself when you edit, stage, commit or switch branches.
-- Local issues (title, Markdown body, open/closed) that link comments.
+- Local issues (title, Markdown body, open/closed).
 - Branch-scoped todos, exportable as a numbered checklist.
 - Commit history browser.
 - Click a line number to jump to that line in a running nvim instance (WSL2 friendly).
@@ -213,7 +213,30 @@ pnpm build        # dist/web (Vite) + dist/cli.js (tsup, zero runtime dependenci
 node dist/cli.js path/to/repo
 ```
 
-Layout:
+### Component development with Storybook
+
+```sh
+pnpm storybook        # http://127.0.0.1:6006 (no API server required)
+pnpm build:storybook  # static site in packages/web/storybook-static
+```
+
+Storybook also includes TopBar, CommentRail, IssuesDrawer and TodosDrawer under `Layout`, with
+repository/worktree targets, editor availability, comment drafts, orphaned comments, issue details
+and todo filters. Their shared fixtures in `packages/web/.storybook/demo-store.ts` keep edits in
+memory; export callbacks are recorded in Actions without writing to the clipboard or calling the API.
+
+Storybook uses the [React + Vite framework](https://storybook.js.org/docs/get-started/frameworks/react-vite)
+and the application's CSS. Markdown, CommentEditor, FileTree and Toast stories cover populated,
+empty, loading and error states where applicable. Controls edit component props; the Actions panel
+records mocked callbacks. CommentEditor and FileTree also include interaction checks in their stories.
+
+Add `*.stories.tsx` next to a component using `Meta` and `StoryObj` from `@storybook/react-vite`.
+Configuration lives in `packages/web/.storybook`. The preview resets Zustand before each story;
+FileTree replaces API-backed actions with in-memory mocks. Store-backed Docs examples use separate
+iframes so their state stays isolated. New store-backed stories must mock any API actions they use.
+Storybook configuration and stories are included in `pnpm typecheck`, and CI builds the static site.
+
+### Project layout
 
 ```
 bin/cli.ts           argument parsing, start server, open browser

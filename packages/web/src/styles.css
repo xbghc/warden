@@ -93,6 +93,60 @@ button.link.active {
 button.icon {
   padding: 2px 7px;
 }
+/* Shared icon actions: labels remain available to assistive technology. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+.action-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  vertical-align: middle;
+  line-height: 1;
+}
+.action-icon > svg { flex-shrink: 0; }
+.action-count {
+  font-size: 10px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+button:has(> .action-icon) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  min-height: 30px;
+  padding: 6px;
+}
+button.link:has(> .action-icon) {
+  color: var(--muted);
+  border-radius: 5px;
+}
+button.link:has(> .action-icon):hover:not(:disabled) {
+  color: var(--accent);
+  background: var(--accent-bg);
+  text-decoration: none;
+}
+button.link.danger:has(> .action-icon) { color: var(--del-fg); }
+button.link.danger:has(> .action-icon):hover:not(:disabled) { background: var(--del-bg); }
+.card-actions button:has(> .action-icon) { min-width: 26px; min-height: 26px; padding: 5px; }
+.seg.small button:has(> .action-icon) { height: 28px; min-height: 28px; padding: 5px 7px; }
+.check:has(> .action-icon) { min-height: 28px; gap: 6px; padding: 3px 5px; border-radius: 5px; }
+.check:has(> .action-icon):hover { background: var(--bg-2); }
+.nvim > span { display: inline-flex; align-items: center; padding: 4px; }
+.icon-spinning { animation: icon-spin 1s linear infinite; }
+@keyframes icon-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .icon-spinning { animation: none; } }
 input,
 select,
 textarea {
@@ -302,10 +356,43 @@ kbd {
   flex-wrap: wrap;
 }
 .nvim {
-  display: inline-flex;
+  position: relative;
+}
+.nvim summary {
+  display: flex;
   align-items: center;
-  gap: 4px;
-  max-width: 320px;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  list-style: none;
+}
+.nvim summary::-webkit-details-marker { display: none; }
+.nvim summary:hover { background: var(--bg-3); }
+.nvim summary:focus-visible { outline: 1px solid var(--accent); }
+.nvim[open] summary { background: var(--accent-bg); color: var(--accent); }
+.nvim-popover {
+  position: absolute;
+  z-index: 30;
+  left: 0;
+  top: calc(100% + 6px);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 320px;
+  max-width: calc(100vw - 32px);
+  padding: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px #1f23281a;
+}
+.nvim-popover > :first-child {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .nvim select {
   max-width: 260px;
@@ -318,8 +405,11 @@ kbd {
 
 /* ---- sidebar / tree ------------------------------------------------------------ */
 .sidebar {
-  width: 280px;
+  width: 320px;
   min-width: 200px;
+  flex-shrink: 0;
+  max-width: 100%;
+  container-type: inline-size;
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
@@ -329,18 +419,45 @@ kbd {
 }
 .tree-tools {
   display: inline-flex;
-  gap: 6px;
+  gap: 2px;
 }
+.tree-tools button {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+}
+.tree-icon {
+  flex: 0 0 16px;
+  color: var(--muted);
+}
+.tree-icon-folder {
+  color: #8c9aab;
+  fill: #8c9aab12;
+}
+.tree-file-icon {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+}
+.tree-file-icon svg { width: 100%; height: 100%; }
 .tree {
   flex: 1;
   overflow: auto;
-  padding: 4px 0;
+  padding: 6px;
 }
 .tree-row {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 2px 8px;
+  padding: 0 8px;
+  min-height: 32px;
+  border-radius: 5px;
   cursor: pointer;
   white-space: nowrap;
   user-select: none;
@@ -350,21 +467,63 @@ kbd {
   background: var(--bg-2);
 }
 .tree-row.active {
-  background: var(--accent-bg);
+  background: #eaf3ff;
+  box-shadow: inset 1px 0 var(--accent);
+}
+.tree-row.active .tree-file-open {
+  color: var(--accent);
+}
+.tree-row:focus-within {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+.tree-file-open {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1;
+  min-width: 0;
+  align-self: stretch;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+}
+.tree-file-open:hover:not(:disabled) {
+  background: transparent;
+}
+.tree-file-open:focus-visible {
+  outline: none;
 }
 .tree-row.viewed .name {
   color: var(--muted);
 }
 .tree-row .name {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .tree-row.dir .name {
-  font-weight: 600;
+  font-weight: 500;
+}
+.tree-row.dir {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  color: var(--muted);
+}
+.tree-row.dir:hover {
+  background: var(--bg-2);
 }
 .chev {
   display: inline-block;
   width: 12px;
+  flex: 0 0 12px;
+  font-size: 18px;
+  text-align: center;
   color: var(--muted);
   transition: transform 0.1s;
 }
@@ -376,13 +535,59 @@ kbd {
   font-family: var(--mono);
   font-size: 11px;
   display: inline-flex;
-  gap: 4px;
+  gap: 6px;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  min-width: 48px;
+  justify-content: flex-end;
 }
 .tree-row .count {
   font-size: 11px;
+  margin-left: auto;
+  padding: 0 4px;
 }
 .viewed-box {
   margin: 0;
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.tree-row .status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 14px;
+  height: 18px;
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+}
+.tree-changed {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 6px;
+  border-radius: 50%;
+  background: #bf8700;
+}
+.tree-binary {
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+}
+@container (max-width: 260px) {
+  .tree-row .counts { display: none; }
+  .tree-file-open { gap: 5px; }
+}
+.tree-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 10px;
+  color: var(--muted);
+  font-size: 12px;
 }
 .status {
   font-family: var(--mono);
@@ -660,9 +865,6 @@ kbd {
   border-radius: 6px;
   padding: 6px 10px;
 }
-.comment-card.status-orphaned {
-  border-color: var(--warn-fg);
-}
 .comment-card.selected {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-bg);
@@ -677,9 +879,7 @@ kbd {
 .comment-head .time {
   font-size: 11px;
 }
-/* Out of flow, so four text buttons stop pushing the metadata onto a second line in a
-   360px rail. `background: inherit` picks up whatever the card is painted with,
-   including the cream of an orphaned one, so the overlay reads as part of the card. */
+/* Keep actions out of flow so they do not wrap the card metadata. */
 .card-actions {
   position: absolute;
   right: 6px;
@@ -696,10 +896,7 @@ kbd {
 /* :focus-within is not optional here — keyboard users never hover, and the buttons stay
    in the tab order while transparent. */
 .comment-card:hover .card-actions,
-.comment-card:focus-within .card-actions,
-/* 重新附着 is a toggle; hiding it once the pointer leaves would leave no way back
-   except the rail banner. */
-.comment-card.reattaching .card-actions {
+.comment-card:focus-within .card-actions {
   opacity: 1;
 }
 .comment-editor {
@@ -713,7 +910,11 @@ kbd {
   font-family: var(--mono);
   font-size: 12px;
   color: var(--muted);
-  margin-bottom: 6px;
+  margin: -8px -10px 8px;
+  padding: 8px 19px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--border);
+  border-radius: 5px 5px 0 0;
 }
 .comment-editor-actions {
   display: flex;
@@ -908,9 +1109,6 @@ kbd {
   padding: 6px 8px;
   margin-bottom: 6px;
 }
-.linked-comment.status-orphaned {
-  border-color: var(--warn-fg);
-}
 .linked-head {
   display: flex;
   align-items: center;
@@ -959,7 +1157,8 @@ kbd {
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
-  height: 34px;
+  min-height: 42px;
+  flex-shrink: 0;
   border-bottom: 1px solid var(--border);
 }
 .seg.small button {
@@ -1009,8 +1208,14 @@ kbd {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-bg);
 }
-.rail .comment-card.status-orphaned {
-  background: #fffdf2;
+.comment-location {
+  display: inline-flex;
+  align-items: baseline;
+  min-width: 0;
+}
+.comment-line {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .comment-head .file {
   color: var(--muted);
@@ -1032,7 +1237,7 @@ kbd {
   /* Content-sized, shrinking proportionally, so an empty Staged block does not
      claim half the sidebar while Unstaged has twenty files in it. */
   flex: 0 1 auto;
-  min-height: 62px;
+  min-height: 112px;
   min-width: 0;
 }
 .tree-block + .tree-block {
@@ -1043,18 +1248,63 @@ kbd {
   min-height: 0;
 }
 .block-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 10px;
+  flex-shrink: 0;
+  padding: 9px 12px 10px;
   border-bottom: 1px solid var(--border);
-  background: var(--bg-2);
+  background: #f8fafc;
   font-size: 12px;
   white-space: nowrap;
 }
 .block-title {
   font-weight: 600;
 }
+.block-heading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 26px;
+}
+.block-indicator {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #bf8700;
+  flex-shrink: 0;
+}
+.block-indicator.is-staged { background: var(--add-fg); }
+.block-file-count {
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 17px;
+  font-variant-numeric: tabular-nums;
+}
+.block-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 5px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.block-diff-counts { display: flex; gap: 7px; font-family: var(--mono); }
+.block-progress {
+  flex: 1;
+  height: 3px;
+  border-radius: 3px;
+  background: var(--bg-3);
+  overflow: hidden;
+}
+.block-progress > span {
+  display: block;
+  height: 100%;
+  background: var(--add-fg);
+  border-radius: inherit;
+}
+.block-reviewed { display: flex; align-items: center; gap: 3px; color: var(--muted); }
+.block-reviewed .tree-icon { color: var(--add-fg); width: 12px; height: 12px; flex-basis: 12px; }
 
 /* ---- todos ---------------------------------------------------------------- */
 .drawer-tools {

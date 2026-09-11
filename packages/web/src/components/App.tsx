@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { ActionIcon } from './ActionIcon';
 import type { ChangeEvent, TargetKey } from '@warden/shared';
 import { formatTargetKey, isLocalTarget, tryParseTargetKey } from '@warden/shared';
 import { useStore } from '../store';
@@ -106,7 +107,7 @@ export function App() {
       <div className="fatal">
         <h1>warden</h1>
         <p>无法连接服务端：{initError}</p>
-        <button onClick={() => void init()}>重试</button>
+        <button onClick={() => void init()}><ActionIcon name="refresh" label="重试" /></button>
       </div>
     );
   }

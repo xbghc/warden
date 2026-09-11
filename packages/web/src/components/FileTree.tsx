@@ -1,10 +1,31 @@
 import { useEffect, useMemo, useState } from 'react';
+import { FileIcon } from '@react-symbols/icons/utils';
 import type { FileEntry, TargetKey } from '@warden/shared';
 import { commentScopeKey, formatTargetKey, isLocalTarget, tryParseTargetKey } from '@warden/shared';
 import { useStore } from '../store';
 import { allDirPaths, buildTree, type DirNode, type TreeNode } from '../lib/tree';
 
+const STATUS_LABEL: Record<FileEntry['status'], string> = { added: '新增', modified: '修改', deleted: '删除', renamed: '重命名' };
 const STATUS_LETTER: Record<FileEntry['status'], string> = { added: 'A', modified: 'M', deleted: 'D', renamed: 'R' };
+
+function FileStatusLabel({ status }: { status: FileEntry['status'] }) {
+  return (
+    <span className={`status status-${status}`} title={STATUS_LABEL[status]} role="img" aria-label={STATUS_LABEL[status]}>
+      {STATUS_LETTER[status]}
+    </span>
+  );
+}
+
+function TreeIcon({ kind }: { kind: 'folder' | 'expand' | 'collapse' | 'check' }) {
+  return (
+    <svg className={`tree-icon tree-icon-${kind}`} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {kind === 'folder' && <path d="M3 7V5a1 1 0 0 1 1-1h5l2 3h9a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7Z" />}
+      {kind === 'expand' && <path d="m8 8 4-4 4 4M12 4v6m-4 6 4 4 4-4m-4-2v6" />}
+      {kind === 'collapse' && <path d="m8 4 4 4 4-4M12 2v6m-4 12 4-4 4 4m-4-4v6" />}
+      {kind === 'check' && <path d="m5 12 4 4L19 6" />}
+    </svg>
+  );
+}
 
 function FileRow({ node, depth, view }: { node: Extract<TreeNode, { kind: 'file' }>; depth: number; view: TargetKey }) {
   // A file staged halfway appears in both blocks; only the one in the view in front is highlighted.
@@ -24,8 +45,7 @@ function FileRow({ node, depth, view }: { node: Extract<TreeNode, { kind: 'file'
   return (
     <div
       className={`tree-row file ${active ? 'active' : ''} ${e.viewed ? 'viewed' : ''}`}
-      style={{ paddingLeft: 8 + depth * 14 }}
-      onClick={() => void open()}
+      style={{ paddingLeft: 10 + depth * 14 }}
       title={e.oldPath ? `${e.oldPath} → ${e.path}` : e.path}
     >
       <input
@@ -35,14 +55,17 @@ function FileRow({ node, depth, view }: { node: Extract<TreeNode, { kind: 'file'
         onClick={(ev) => ev.stopPropagation()}
         onChange={() => void toggleViewed(node.path, view)}
         title="标记为已查看"
+        aria-label={`标记 ${node.path} 为已查看`}
       />
-      <span className={`status status-${e.status}`}>{STATUS_LETTER[e.status]}</span>
+      <button className="tree-file-open" onClick={() => void open()} aria-current={active ? 'true' : undefined} aria-label={`打开 ${node.path}`} title={`${node.path} · ${STATUS_LABEL[e.status]} · ${e.binary ? '二进制文件' : `+${e.additions} −${e.deletions}`}`}>
+      <span className="tree-file-icon" aria-hidden="true"><FileIcon fileName={node.name} autoAssign /></span>
       <span className="name">{node.name}</span>
-      {e.changed && <span className="changed" title="文件自上次标记已查看后发生变化">已变化</span>}
-      {commentCount > 0 && <span className="cc" title="评论数">{commentCount}</span>}
+      {e.changed && <span className="tree-changed" title="文件自上次标记已查看后发生变化" aria-label="文件有新变化" />}
+      {commentCount > 0 && <span className="cc" title={`${commentCount} 条评论`}>{commentCount}</span>}
+      <FileStatusLabel status={e.status} />
       <span className="counts">
         {e.binary ? (
-          <span className="muted">bin</span>
+          <span className="tree-binary">BIN</span>
         ) : (
           <>
             <span className="add">+{e.additions}</span>
@@ -50,6 +73,7 @@ function FileRow({ node, depth, view }: { node: Extract<TreeNode, { kind: 'file'
           </>
         )}
       </span>
+      </button>
     </div>
   );
 }
@@ -58,11 +82,12 @@ function DirRow({ node, depth, view, open, toggle }: { node: DirNode; depth: num
   const isOpen = open.has(node.path);
   return (
     <>
-      <div className="tree-row dir" style={{ paddingLeft: 8 + depth * 14 }} onClick={() => toggle(node.path)}>
-        <span className={`chev ${isOpen ? 'open' : ''}`}>▸</span>
+      <button className="tree-row dir" style={{ paddingLeft: 10 + depth * 14 }} onClick={() => toggle(node.path)} aria-expanded={isOpen} title={node.path}>
+        <span className={`chev ${isOpen ? 'open' : ''}`} aria-hidden="true">›</span>
+        <TreeIcon kind="folder" />
         <span className="name">{node.name}</span>
         <span className="muted count">{node.fileCount}</span>
-      </div>
+      </button>
       {isOpen &&
         node.children.map((c) =>
           c.kind === 'dir' ? (
@@ -104,31 +129,43 @@ function useTreeState(tree: DirNode, view: TargetKey) {
 function TreeBlock({ title, view, files, empty }: { title: string; view: TargetKey; files: FileEntry[]; empty: string }) {
   const tree = useMemo(() => buildTree(files), [files]);
   const { open, setOpen, toggle } = useTreeState(tree, view);
+  const directories = useMemo(() => allDirPaths(tree), [tree]);
+  const hasExpandedDirectory = tree.children.some((node) => node.kind === 'dir' && open.has(node.path));
+  const toggleLabel = hasExpandedDirectory ? '折叠全部目录' : '展开全部目录';
   const add = files.reduce((n, f) => n + f.additions, 0);
   const del = files.reduce((n, f) => n + f.deletions, 0);
   const viewed = files.filter((f) => f.viewed).length;
 
   return (
-    <section className="tree-block">
+    <section className="tree-block" aria-label={title}>
       <div className="block-head">
+        <div className="block-heading">
+        <span className={`block-indicator ${tryParseTargetKey(view)?.kind === 'staged' ? 'is-staged' : ''}`} aria-hidden="true" />
         <span className="block-title">{title}</span>
-        <span className="muted">{files.length}</span>
-        <span className="add">+{add}</span>
-        <span className="del">-{del}</span>
+        <span className="block-file-count" aria-label={`${files.length} 个文件`}>{files.length}</span>
         <span className="spacer" />
-        {files.length > 0 && <span className="muted">{viewed}/{files.length} viewed</span>}
         <span className="tree-tools">
-          <button className="link" onClick={() => setOpen(new Set(allDirPaths(tree)))} title="展开全部目录">
-            展开
-          </button>
-          <button className="link" onClick={() => setOpen(new Set())} title="折叠全部目录">
-            折叠
+          <button
+            onClick={() => setOpen(new Set(hasExpandedDirectory ? [] : directories))}
+            title={toggleLabel}
+            aria-label={toggleLabel}
+            disabled={directories.length === 0}
+          >
+            <TreeIcon kind={hasExpandedDirectory ? 'collapse' : 'expand'} />
           </button>
         </span>
+        </div>
+        {files.length > 0 && <div className="block-summary">
+          <span className="block-diff-counts"><span className="add">+{add}</span><span className="del">−{del}</span></span>
+          <span className="block-progress" role="progressbar" aria-label={`${title} 查看进度`} aria-valuemin={0} aria-valuemax={files.length} aria-valuenow={viewed}>
+            <span style={{ width: `${viewed / files.length * 100}%` }} />
+          </span>
+          <span className="block-reviewed" title={`已查看 ${viewed}/${files.length} 个文件`}>{viewed === files.length && <TreeIcon kind="check" />}{viewed}/{files.length}</span>
+        </div>}
       </div>
       <div className="tree">
         {files.length === 0 ? (
-          <div className="muted empty">{empty}</div>
+          <div className="tree-empty" role="status"><TreeIcon kind="folder" /><span>{empty}</span></div>
         ) : (
           tree.children.map((c) =>
             c.kind === 'dir' ? <DirRow key={c.path} node={c} depth={0} view={view} open={open} toggle={toggle} /> : <FileRow key={c.path} node={c} depth={0} view={view} />,
