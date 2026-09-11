@@ -43,7 +43,7 @@ function splitGitHeader(rest: string): { a: string; b: string } {
   if (rest.startsWith('"')) {
     // Quoted form: "a/..." "b/..."
     const m = /^("(?:[^"\\]|\\.)*")\s+("(?:[^"\\]|\\.)*")$/.exec(rest);
-    if (m && m[1] && m[2]) return { a: stripPrefix(m[1], 'a/'), b: stripPrefix(m[2], 'b/') };
+    if (m?.[1] && m[2]) return { a: stripPrefix(m[1], 'a/'), b: stripPrefix(m[2], 'b/') };
   }
   // Prefer an index where both halves are the same path (the common case, robust to spaces).
   for (let i = 0; i < rest.length; i++) {
@@ -186,12 +186,14 @@ export function parseUnifiedDiff(text: string): FileDiff[] {
       continue;
     }
 
+    // A name with a space in it gets a tab after it on these two lines (quoted or not), so a
+    // reader can tell where the name ends. A tab that is part of a name is quoted, never bare.
     if (line.startsWith('--- ')) {
-      c.fromMinus = stripPrefix(line.slice(4), 'a/');
+      c.fromMinus = stripPrefix(line.slice(4).replace(/\t$/, ''), 'a/');
       continue;
     }
     if (line.startsWith('+++ ')) {
-      c.fromPlus = stripPrefix(line.slice(4), 'b/');
+      c.fromPlus = stripPrefix(line.slice(4).replace(/\t$/, ''), 'b/');
       continue;
     }
     if (line.startsWith('new file mode ')) {
@@ -234,7 +236,6 @@ export function parseUnifiedDiff(text: string): FileDiff[] {
     if (line.startsWith('Binary files ') || line === 'GIT binary patch') {
       c.binary = true;
       c.raw.push(line);
-      continue;
     }
     // similarity index / dissimilarity index / index abc..def -> ignore
   }

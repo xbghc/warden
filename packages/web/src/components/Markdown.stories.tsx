@@ -4,7 +4,13 @@ import { Markdown } from './Markdown';
 const meta = {
   title: 'Review/Markdown',
   component: Markdown,
-  decorators: [(Story) => <div style={{ maxWidth: 760 }}><Story /></div>],
+  decorators: [
+    (Story) => (
+      <div style={{ maxWidth: 760 }}>
+        <Story />
+      </div>
+    ),
+  ],
 } satisfies Meta<typeof Markdown>;
 export default meta;
 type Story = StoryObj<typeof meta>;

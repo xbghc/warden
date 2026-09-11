@@ -6,3 +6,5 @@ coverage/
 storybook-static/
 *.log
 .DS_Store
+.claude/*
+!.claude/skills/

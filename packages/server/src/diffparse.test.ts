@@ -102,6 +102,28 @@ index 1..2 100644
     expect(files[0]!.hunks[0]!.lines[0]).toEqual({ type: 'add', newLineNo: 1, content: 'x' });
   });
 
+  it('drops the tab git appends after a name with a space, quoted or not', () => {
+    const text = `diff --git a/docs/my notes.md b/docs/my notes.md
+index 1..2 100644
+--- a/docs/my notes.md\t
++++ b/docs/my notes.md\t
+@@ -1 +1 @@
+-one
++two
+diff --git "a/sp \\"q.ts" "b/sp \\"q.ts"
+index 1..2 100644
+--- "a/sp \\"q.ts"\t
++++ "b/sp \\"q.ts"\t
+@@ -1 +1 @@
+-a
++b
+`;
+    expect(parseUnifiedDiff(text).map((f) => [f.path, f.oldPath, f.status])).toEqual([
+      ['docs/my notes.md', undefined, 'modified'],
+      ['sp "q.ts', undefined, 'modified'],
+    ]);
+  });
+
   it('decodes quoted paths', () => {
     expect(unquotePath('"a/caf\\303\\251.txt"')).toBe('a/café.txt');
     expect(unquotePath('"x\\ty\\"z"')).toBe('x\ty"z');

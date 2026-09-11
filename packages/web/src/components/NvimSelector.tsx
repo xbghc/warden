@@ -55,21 +55,29 @@ export function NvimSelector() {
     );
   }
   return (
-    <details ref={containerRef} className="nvim" onToggle={positionPopover} onBlur={(event) => {
-      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) event.currentTarget.open = false;
-    }} onKeyDown={(event) => {
-      if (event.key === 'Escape') {
-        event.stopPropagation();
-        event.currentTarget.open = false;
-        event.currentTarget.querySelector('summary')?.focus();
-      }
-    }}>
-      <summary aria-label="nvim 设置"><ActionIcon name="terminal" label="nvim 设置" /></summary>
+    <details
+      ref={containerRef}
+      className="nvim"
+      onToggle={positionPopover}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) event.currentTarget.open = false;
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') {
+          event.stopPropagation();
+          event.currentTarget.open = false;
+          event.currentTarget.querySelector('summary')?.focus();
+        }
+      }}
+    >
+      <summary aria-label="nvim 设置">
+        <ActionIcon name="terminal" label="nvim 设置" />
+      </summary>
       <div ref={popoverRef} className="nvim-popover">
-      {content}
-      <button className="icon" onClick={() => void scan(true)} disabled={scanning} title="重新扫描 nvim 实例">
-        <ActionIcon name={scanning ? 'loading' : 'refresh'} label="重新扫描 nvim 实例" />
-      </button>
+        {content}
+        <button className="icon" onClick={() => void scan(true)} disabled={scanning} title="重新扫描 nvim 实例">
+          <ActionIcon name={scanning ? 'loading' : 'refresh'} label="重新扫描 nvim 实例" />
+        </button>
       </div>
     </details>
   );

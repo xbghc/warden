@@ -116,7 +116,9 @@ export class RepoWatcher {
 
   private async snapshot(): Promise<{ signature: string; head: string; branch: string }> {
     const [statusRes, headRes, branch] = await Promise.all([
-      runGit(['status', '--porcelain', '-z'], { cwd: this.root }),
+      // Untracked files one by one: folded into their directory, an edit inside a directory the
+      // agent just created would leave the directory's own mtime and size untouched.
+      runGit(['status', '--porcelain', '-z', '--untracked-files=all'], { cwd: this.root }),
       runGit(['rev-parse', 'HEAD'], { cwd: this.root }).catch(() => ({ stdout: '' })),
       // The same label getRepoInfo reports, so the branch identity the client filters todos by
       // never flips between `HEAD` and a short sha depending on which of the two spoke last.

@@ -5,7 +5,13 @@ import { CommentEditor } from './CommentEditor';
 const meta = {
   title: 'Review/CommentEditor',
   component: CommentEditor,
-  decorators: [(Story) => <div style={{ maxWidth: 640 }}><Story /></div>],
+  decorators: [
+    (Story) => (
+      <div style={{ maxWidth: 640 }}>
+        <Story />
+      </div>
+    ),
+  ],
   args: { title: 'src/App.tsx · new 12–15', onSave: fn(), onCancel: fn() },
 } satisfies Meta<typeof CommentEditor>;
 export default meta;
@@ -33,5 +39,10 @@ export const Editing: Story = {
 };
 
 export const SlowSave: Story = {
-  args: { initial: '点击保存以查看等待状态。', onSave: fn(async () => { await new Promise((resolve) => setTimeout(resolve, 1500)); }) },
+  args: {
+    initial: '点击保存以查看等待状态。',
+    onSave: fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    }),
+  },
 };

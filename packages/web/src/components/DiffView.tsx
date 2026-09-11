@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActionIcon } from './ActionIcon';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { CommentSide, DiffLine, FileDiff, Hunk } from '@warden/shared';
-import { useStore } from '../store';
+import { useStageMode, useStore } from '../store';
 import { api } from '../api';
-import { buildRows, findRowIndex, hunkRowIndices, type Expansion, type Gap, type Row } from '../lib/rows';
+import { buildRows, findRowIndex, hunkRowIndices, pickedLineIndices, type Expansion, type Gap, type Row } from '../lib/rows';
 import { langForPath, tokenizeLines, type Token } from '../lib/highlight';
 
 interface Selection {
@@ -43,6 +43,7 @@ function CodeLine({ content, tokens }: { content: string; tokens: Token[] | unde
   return (
     <span className="code-text">
       {tokens.map((t, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: a token has no identity of its own; the line re-renders whole
         <span key={i} style={t.color ? { color: t.color } : undefined}>
           {t.content}
         </span>
@@ -84,10 +85,7 @@ export function DiffView({ diff }: { diff: FileDiff }) {
   const allComments = useStore((s) => s.comments);
   // Comments are shared by the local views, but a marker only belongs on the view it currently
   // sits in — the same hunk staged and unstaged is two different sets of line numbers.
-  const comments = useMemo(
-    () => allComments.filter((c) => c.filePath === diff.path && c.targetKey === targetKey),
-    [allComments, diff.path, targetKey],
-  );
+  const comments = useMemo(() => allComments.filter((c) => c.filePath === diff.path && c.targetKey === targetKey), [allComments, diff.path, targetKey]);
   const updateComment = useStore((s) => s.updateComment);
   const setEditor = useStore((s) => s.setEditor);
   const focusComment = useStore((s) => s.focusComment);
@@ -97,6 +95,11 @@ export function DiffView({ diff }: { diff: FileDiff }) {
   const showToast = useStore((s) => s.showToast);
   const reattaching = useStore((s) => s.reattaching);
   const jumpTo = useStore((s) => s.jumpTo);
+  const mode = useStageMode();
+  const pick = useStore((s) => (s.stageSel?.filePath === diff.path ? s.stageSel : null));
+  const setStageSel = useStore((s) => s.setStageSel);
+  const stageLines = useStore((s) => s.stageLines);
+  const staging = useStore((s) => s.staging);
 
   const [expansions, setExpansions] = useState<Record<number, Expansion>>({});
   const [fullLines, setFullLines] = useState<string[] | null>(null);
@@ -239,7 +242,11 @@ export function DiffView({ diff }: { diff: FileDiff }) {
     const onKey = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       const t = e.target as HTMLElement | null;
-      if (t && ((t.tagName === 'INPUT' && (t as HTMLInputElement).type !== 'checkbox') || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+      if (
+        t &&
+        ((t.tagName === 'INPUT' && (t as HTMLInputElement).type !== 'checkbox') || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)
+      )
+        return;
       if (e.key !== 'n' && e.key !== 'p') return;
       const hunks = hunkRowIndices(rows);
       if (!hunks.length) return;
@@ -282,6 +289,58 @@ export function DiffView({ diff }: { diff: FileDiff }) {
     window.addEventListener('mouseup', up);
     return () => window.removeEventListener('mouseup', up);
   }, [setSel, updateComment, setEditor, diff.path]);
+
+  // ---- picking rows to stage ------------------------------------------------------
+  // Like the comment selection, a drag inside one hunk; unlike it, the pick stays until it is
+  // staged or dismissed, and it goes by rows, so a replacement in split view is picked as one.
+  const pickDrag = useRef<{ hunkIndex: number; anchor: number } | null>(null);
+  const [picking, setPicking] = useState(false);
+  useEffect(() => {
+    const up = () => {
+      pickDrag.current = null;
+      setPicking(false);
+    };
+    window.addEventListener('mouseup', up);
+    return () => window.removeEventListener('mouseup', up);
+  }, []);
+  const setPick = (hunkIndex: number, anchor: number, head: number) =>
+    setStageSel({ filePath: diff.path, hunkIndex, anchor, head, lines: pickedLineIndices(rows, hunkIndex, anchor, head) });
+  const startPick = (e: React.MouseEvent, hunkIndex: number, pos: number) => {
+    if (e.button !== 0 || !mode) return;
+    e.preventDefault();
+    e.stopPropagation();
+    // The box of a lone picked row works as a checkbox: clicking it again unpicks.
+    if (pick && pick.hunkIndex === hunkIndex && pick.anchor === pos && pick.head === pos) {
+      setStageSel(null);
+      return;
+    }
+    pickDrag.current = { hunkIndex, anchor: pos };
+    setPicking(true);
+    setPick(hunkIndex, pos, pos);
+  };
+  const extendPick = (hunkIndex: number, pos: number) => {
+    const d = pickDrag.current;
+    if (!d || d.hunkIndex !== hunkIndex || pos < 0 || (pick && pick.head === pos)) return;
+    setPick(d.hunkIndex, d.anchor, pos);
+  };
+  const isPicked = (row: Extract<Row, { kind: 'line' | 'pair' }>): boolean =>
+    !!pick &&
+    row.hunkIndex === pick.hunkIndex &&
+    row.indices.length > 0 &&
+    row.pos >= Math.min(pick.anchor, pick.head) &&
+    row.pos <= Math.max(pick.anchor, pick.head);
+  const renderPickBox = (row: Extract<Row, { kind: 'line' | 'pair' }>, line: DiffLine | undefined, picked: boolean) => (
+    <span className="stagec">
+      {mode && !row.expanded && line && line.type !== 'context' && (
+        <button
+          className={`stage-box ${picked ? 'on' : ''}`}
+          onMouseDown={(e) => startPick(e, row.hunkIndex, row.pos)}
+          title={mode === 'stage' ? '选中要暂存的行（可拖选）' : '选中要取消暂存的行（可拖选）'}
+          aria-pressed={picked}
+        />
+      )}
+    </span>
+  );
 
   const startSel = (e: React.MouseEvent, side: CommentSide, hunkIndex: number, line: number) => {
     if (e.button !== 0) return;
@@ -393,8 +452,16 @@ export function DiffView({ diff }: { diff: FileDiff }) {
     const side: CommentSide = l.type === 'del' ? 'old' : 'new';
     const no = side === 'old' ? l.oldLineNo : l.newLineNo;
     const tokens = tokenCache.current.get(tokenKey(l, side));
+    const picked = isPicked(row);
     return (
-      <div className={`row line ${l.type} ${lineClasses(side, no)} ${row.expanded ? 'expanded' : ''}`} onMouseEnter={() => no !== undefined && extendSel(side, row.hunkIndex, no)}>
+      <div
+        className={`row line ${l.type} ${lineClasses(side, no)} ${row.expanded ? 'expanded' : ''} ${picked ? 'picked' : ''}`}
+        onMouseEnter={() => {
+          if (no !== undefined) extendSel(side, row.hunkIndex, no);
+          extendPick(row.hunkIndex, row.pos);
+        }}
+      >
+        {renderPickBox(row, l, picked)}
         <span className="gut" onClick={() => gutterClick(l, row.hunkIndex)} title="在 nvim 中打开此行">
           {l.oldLineNo ?? ''}
         </span>
@@ -411,20 +478,29 @@ export function DiffView({ diff }: { diff: FileDiff }) {
         <span className="marker">{l.type === 'add' ? '+' : l.type === 'del' ? '-' : ' '}</span>
         <span className="code">
           <CodeLine content={l.content} tokens={tokens} />
-          {l.noNewline && <span className="nonl" title="No newline at end of file">⏎</span>}
+          {l.noNewline && (
+            <span className="nonl" title="No newline at end of file">
+              ⏎
+            </span>
+          )}
         </span>
         {renderMarker(side, no)}
       </div>
     );
   };
 
-  const renderSplitCell = (l: DiffLine | undefined, side: CommentSide, hunkIndex: number, expanded: boolean) => {
+  const renderSplitCell = (row: Extract<Row, { kind: 'pair' }>, l: DiffLine | undefined, side: CommentSide, picked: boolean) => {
     if (!l) return <span className="cell empty" />;
+    const { hunkIndex, expanded } = row;
     const no = side === 'old' ? l.oldLineNo : l.newLineNo;
     const type = l.type === 'context' ? 'context' : side === 'old' ? 'del' : 'add';
     const tokens = tokenCache.current.get(tokenKey(l, side));
     return (
-      <span className={`cell ${type} ${lineClasses(side, no)}`} onMouseEnter={() => no !== undefined && extendSel(side, hunkIndex, no)}>
+      <span
+        className={`cell ${type} ${lineClasses(side, no)} ${picked ? 'picked' : ''}`}
+        onMouseEnter={() => no !== undefined && extendSel(side, hunkIndex, no)}
+      >
+        {renderPickBox(row, l, picked)}
         <span className="gut" onClick={() => gutterClick(l, hunkIndex)} title="在 nvim 中打开此行">
           {no ?? ''}
         </span>
@@ -450,24 +526,38 @@ export function DiffView({ diff }: { diff: FileDiff }) {
       case 'hunk':
         return (
           <div className="row hunk-head">
-            @@ -{row.hunk.oldStart},{row.hunk.oldLines} +{row.hunk.newStart},{row.hunk.newLines} @@ <span className="muted">{row.hunk.header}</span>
+            <span className="hunk-text">
+              @@ -{row.hunk.oldStart},{row.hunk.oldLines} +{row.hunk.newStart},{row.hunk.newLines} @@ <span className="muted">{row.hunk.header}</span>
+            </span>
+            {mode && (
+              <button
+                className="link hunk-stage"
+                disabled={staging}
+                onClick={() => void stageLines(diff.path, [{ index: row.hunkIndex }])}
+                title={mode === 'stage' ? '把这个 hunk 的全部改动放入暂存区' : '把这个 hunk 的全部改动移出暂存区'}
+              >
+                {mode === 'stage' ? '暂存此 hunk' : '取消暂存此 hunk'}
+              </button>
+            )}
           </div>
         );
       case 'line':
         return renderUnified(row);
-      case 'pair':
+      case 'pair': {
+        const picked = isPicked(row);
         return (
-          <div className={`row pair ${row.expanded ? 'expanded' : ''}`}>
-            {renderSplitCell(row.left, 'old', row.hunkIndex, row.expanded)}
-            {renderSplitCell(row.right, 'new', row.hunkIndex, row.expanded)}
+          <div className={`row pair ${row.expanded ? 'expanded' : ''} ${picked ? 'picked' : ''}`} onMouseEnter={() => extendPick(row.hunkIndex, row.pos)}>
+            {renderSplitCell(row, row.left, 'old', picked)}
+            {renderSplitCell(row, row.right, 'new', picked)}
           </div>
         );
+      }
     }
   };
 
   const items = virtualizer.getVirtualItems();
   return (
-    <div ref={parentRef} className={`diff-scroll ${sel ? 'selecting' : ''} ${reattaching ? 'reattaching' : ''}`}>
+    <div ref={parentRef} className={`diff-scroll ${sel ? 'selecting' : ''} ${picking ? 'picking' : ''} ${reattaching ? 'reattaching' : ''}`}>
       <div className={`diff-list ${viewMode}`} style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
         {items.map((vi) => (
           <div

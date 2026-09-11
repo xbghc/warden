@@ -11,5 +11,10 @@ export function lineHash(content: string): string {
 
 /** Hash of a hunk: all line contents (without +/-/space prefix), trailing whitespace stripped, joined and trimmed. */
 export function hunkHash(lineContents: string[]): string {
-  return sha1(lineContents.map((l) => l.trimEnd()).join('\n').trim());
+  return sha1(
+    lineContents
+      .map((l) => l.trimEnd())
+      .join('\n')
+      .trim(),
+  );
 }

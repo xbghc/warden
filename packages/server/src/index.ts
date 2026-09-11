@@ -14,10 +14,11 @@ export { StateStore, stateFilePath } from './state.js';
 export { NvimService } from './nvim.js';
 export { RepoWatcher, statusPaths, DEFAULT_POLL_INTERVAL_MS } from './watcher.js';
 export { HttpError } from './errors.js';
-export { runGit, GitError, assertAllowedGitArgs } from './git.js';
+export { runGit, GitError, assertAllowedGitArgs, applyToIndex } from './git.js';
+export { buildStagePatch, quotePath } from './patch.js';
 export { parseUnifiedDiff } from './diffparse.js';
 export { buildAnchor, reanchorComment } from './anchor.js';
-export { formatCommentsExport, formatIssueExport, formatTodosExport } from './export.js';
+export { formatCommentsExport, formatIssueExport } from './export.js';
 
 export const HOST = '127.0.0.1';
 export const DEFAULT_PORT_START = 4100;
@@ -78,6 +79,11 @@ export async function startServer(opts: StartOptions): Promise<RunningServer> {
   const stop = (s: ServerType): Promise<void> =>
     new Promise((resolve, reject) => {
       s.close((err) => (err ? reject(err) : resolve()));
+      // close() only stops accepting and then waits for every connection to drain. The
+      // /api/events SSE streams never drain while a page is open, so shutdown would hang
+      // until the last tab was closed. Destroying them fires their abort handlers, which
+      // release the watcher subscriptions.
+      if ('closeAllConnections' in s) s.closeAllConnections();
     });
 
   let port: number;

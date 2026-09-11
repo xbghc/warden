@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react';
 import { ActionIcon } from './ActionIcon';
-import { commentScopeKey, formatTargetKey, isLocalTarget, parseTargetKey, targetLabel, type Target } from '@warden/shared';
-import { branchOf, useStore } from '../store';
+import { useMemo } from 'react';
+import { formatTargetKey, parseTargetKey } from '@warden/shared';
+import { useStore } from '../store';
 import { NvimSelector } from './NvimSelector';
 
 function shortTime(iso: string | null): string {
@@ -10,97 +10,59 @@ function shortTime(iso: string | null): string {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
-type Kind = Target['kind'];
+/** A pin beside two lines of text — the comment marker, which is also the favicon. */
+function Mark() {
+  return (
+    <svg className="mark" viewBox="0 0 16 16" aria-hidden="true">
+      <rect width="16" height="16" rx="3" fill="#5b47d9" />
+      <rect x="3.5" y="4" width="2" height="8" rx="1" fill="#fff" />
+      <path d="M8 5.5h4.5M8 10.5h3" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
 
+/**
+ * Which repository is under review, and how the code is read. Nothing else: navigation belongs to
+ * the sidebar, which is where each destination's own controls live, and what is under review is
+ * picked where it is listed. The bar used to carry both and read as a pile of unrelated controls.
+ */
 export function TopBar() {
   const repo = useStore((s) => s.repo)!;
   const targetKey = useStore((s) => s.targetKey);
   const setTarget = useStore((s) => s.setTarget);
-  const switchView = useStore((s) => s.switchView);
   const refresh = useStore((s) => s.refresh);
   const filesLoading = useStore((s) => s.filesLoading);
   const autoRefresh = useStore((s) => s.prefs.autoRefresh);
   const setAutoRefresh = useStore((s) => s.setAutoRefresh);
   const lastRefreshAt = useStore((s) => s.lastRefreshAt);
-  const todos = useStore((s) => s.todos);
-  const root = useStore((s) => s.root);
   const viewMode = useStore((s) => s.prefs.viewMode);
   const setViewMode = useStore((s) => s.setViewMode);
-  const panel = useStore((s) => s.panel);
-  const setPanel = useStore((s) => s.setPanel);
-  const issues = useStore((s) => s.issues);
+  const railOpen = useStore((s) => s.prefs.railOpen);
+  const setRailOpen = useStore((s) => s.setRailOpen);
+  const commentCount = useStore((s) => s.comments.length);
+  const unexported = useStore((s) => s.comments.filter((c) => c.status === 'active').length);
 
   const target = useMemo(() => parseTargetKey(targetKey), [targetKey]);
-  const [kind, setKind] = useState<Kind>(target.kind);
-  const [worktree, setWorktree] = useState<string>(target.worktree ?? '');
-  const [sha, setSha] = useState(target.kind === 'commit' ? target.sha : '');
-  const [base, setBase] = useState(target.kind === 'range' ? target.base : '@');
-  const [head, setHead] = useState(target.kind === 'range' ? target.head : '');
-
-  // Keep the form in sync when the target changes from elsewhere (commit list, issue jump).
-  const [syncedKey, setSyncedKey] = useState(targetKey);
-  if (syncedKey !== targetKey) {
-    setSyncedKey(targetKey);
-    setKind(target.kind);
-    setWorktree(target.worktree ?? '');
-    if (target.kind === 'commit') setSha(target.sha);
-    if (target.kind === 'range') {
-      setBase(target.base);
-      setHead(target.head);
-    }
-  }
-
-  const apply = (next: Partial<{ kind: Kind; worktree: string; sha: string; base: string; head: string }> = {}) => {
-    const k = next.kind ?? kind;
-    const wt = next.worktree ?? worktree;
-    const wtField = wt ? { worktree: wt } : {};
-    let t: Target;
-    if (k === 'commit') {
-      const v = (next.sha ?? sha).trim();
-      if (!v) return;
-      t = { kind: 'commit', sha: v, ...wtField };
-    } else if (k === 'range') {
-      const b = (next.base ?? base).trim() || '@';
-      const h = (next.head ?? head).trim();
-      if (!h) return;
-      t = { kind: 'range', base: b, head: h, ...wtField };
-    } else {
-      t = { kind: k, ...wtField };
-    }
-    const key = formatTargetKey(t);
-    if (key === targetKey) return;
-    // Moving between the three local views keeps the comments, the draft and the selection;
-    // anything else (another worktree, a commit, a range) is a different review altogether.
-    if (isLocalTarget(t) && commentScopeKey(key) === commentScopeKey(targetKey)) void switchView(key);
-    else void setTarget(key);
-  };
-
-  // The select two elements over already says "工作区未提交" / "已 staged"; the label only
-  // adds something for a commit, a range, or a worktree (which it prefixes with the name).
-  const showTargetLabel = target.kind === 'commit' || target.kind === 'range' || !!target.worktree;
-  const branch = branchOf(repo, root);
-  const openIssues = issues.filter((i) => i.status === 'open').length;
-  const openTodos = todos.filter((t) => t.branch === branch && t.status === 'open').length;
   const otherWorktrees = repo.worktrees.filter((w) => w.path !== repo.root);
+
+  // Another worktree is a different review altogether, so this is a full target change; the kind
+  // of target carries over (the same commit exists in every worktree, a branch view keeps its base).
+  const pickWorktree = (wt: string) => {
+    const key = formatTargetKey({ ...target, worktree: wt || undefined });
+    if (key !== targetKey) void setTarget(key);
+  };
 
   return (
     <header className="topbar">
       <div className="brand" title={repo.root}>
-        <span className="logo">warden</span>
+        <Mark />
+        <span className="wordmark">warden</span>
+      </div>
+      <div className="scope">
         <span className="repo-name">{repo.root.split('/').filter(Boolean).pop()}</span>
         <span className="branch">{repo.branch}</span>
-      </div>
-
-      <div className="target-switcher">
         {otherWorktrees.length > 0 && (
-          <select
-            value={worktree}
-            title="Worktree"
-            onChange={(e) => {
-              setWorktree(e.target.value);
-              apply({ worktree: e.target.value });
-            }}
-          >
+          <select value={target.worktree ?? ''} title="Worktree" aria-label="Worktree" onChange={(e) => pickWorktree(e.target.value)}>
             <option value="">主仓库 ({repo.branch})</option>
             {otherWorktrees.map((w) => (
               <option key={w.path} value={w.path}>
@@ -109,69 +71,10 @@ export function TopBar() {
             ))}
           </select>
         )}
-        <select
-          value={kind}
-          title={targetKey}
-          onChange={(e) => {
-            const k = e.target.value as Kind;
-            setKind(k);
-            if (k === 'working' || k === 'staged' || k === 'all') apply({ kind: k });
-          }}
-        >
-          <option value="working">工作区未提交</option>
-          <option value="staged">已 staged</option>
-          <option value="all">工作区全部 (vs HEAD)</option>
-          <option value="commit">单个 commit</option>
-          <option value="range">两个 ref 对比</option>
-        </select>
-        {kind === 'commit' && (
-          <form
-            className="inline-form"
-            onSubmit={(e) => {
-              e.preventDefault();
-              apply();
-            }}
-          >
-            <input value={sha} onChange={(e) => setSha(e.target.value)} placeholder="sha / ref" spellCheck={false} />
-            <button type="submit"><ActionIcon name="search" label="查看" /></button>
-          </form>
-        )}
-        {kind === 'range' && (
-          <form
-            className="inline-form"
-            onSubmit={(e) => {
-              e.preventDefault();
-              apply();
-            }}
-          >
-            <input value={base} onChange={(e) => setBase(e.target.value)} placeholder="base (@ = HEAD)" spellCheck={false} />
-            <span>..</span>
-            <input value={head} onChange={(e) => setHead(e.target.value)} placeholder="head" spellCheck={false} />
-            <button type="submit"><ActionIcon name="compare" label="对比" /></button>
-          </form>
-        )}
-        {showTargetLabel && (
-          <span className="target-label" title={targetKey}>
-            {targetLabel(target)}
-          </span>
-        )}
       </div>
 
-      <div className="spacer" />
-
-      <div className="actions">
-        <div className="seg">
-          <button className={panel === 'commits' ? 'active' : ''} aria-pressed={panel === 'commits'} onClick={() => setPanel(panel === 'commits' ? 'diff' : 'commits')} title="历史 commit">
-            <ActionIcon name="history" label="Commits" />
-          </button>
-          <button className={panel === 'issues' ? 'active' : ''} aria-pressed={panel === 'issues'} onClick={() => setPanel(panel === 'issues' ? 'diff' : 'issues')} title="本地 Issue">
-            <ActionIcon name="issue" label={`Issues${openIssues ? ` (${openIssues})` : ''}`} count={openIssues} />
-          </button>
-          <button className={panel === 'todos' ? 'active' : ''} aria-pressed={panel === 'todos'} onClick={() => setPanel(panel === 'todos' ? 'diff' : 'todos')} title={`${branch} 分支的 Todo`}>
-            <ActionIcon name="todos" label={`Todos${openTodos ? ` (${openTodos})` : ''}`} count={openTodos} />
-          </button>
-        </div>
-        <div className="seg">
+      <div className="topbar-right">
+        <div className="seg" role="group" aria-label="diff 布局">
           <button className={viewMode === 'unified' ? 'active' : ''} aria-pressed={viewMode === 'unified'} onClick={() => setViewMode('unified')}>
             <ActionIcon name="file" label="Unified" />
           </button>
@@ -180,23 +83,37 @@ export function TopBar() {
           </button>
         </div>
         <NvimSelector />
-        <div className="seg">
-          <button onClick={() => void refresh()} disabled={filesLoading} title={lastRefreshAt ? `上次刷新 ${shortTime(lastRefreshAt)}（r）` : '刷新 (r)'}>
-            <ActionIcon name={filesLoading ? 'loading' : 'refresh'} label={filesLoading ? '刷新中…' : '刷新'} />
-          </button>
-          {/* A button rather than a checkbox, and no separate timestamp: the label and the
-              time cost ~140px in a bar that already wraps, and the refresh button's title
-              still carries the last refresh. */}
-          <button
-            className={autoRefresh ? 'active' : ''}
-            aria-pressed={autoRefresh}
-            aria-label="自动刷新"
-            onClick={() => setAutoRefresh(!autoRefresh)}
-            title={`仓库发生变化时自动刷新（当前${autoRefresh ? '开启' : '关闭'}）`}
-          >
-            <ActionIcon name="auto" label="自动刷新" />
-          </button>
-        </div>
+        <button
+          className="quiet"
+          onClick={() => void refresh()}
+          disabled={filesLoading}
+          title={lastRefreshAt ? `上次刷新 ${shortTime(lastRefreshAt)}（r）` : '刷新 (r)'}
+        >
+          <ActionIcon name={filesLoading ? 'loading' : 'refresh'} label="刷新" />
+        </button>
+        {/* A button rather than a checkbox, and no separate timestamp: the label and the
+            time cost ~140px in a bar that already wraps, and the refresh button's title
+            still carries the last refresh. */}
+        <button
+          className="toggle quiet"
+          aria-pressed={autoRefresh}
+          aria-label="自动刷新"
+          onClick={() => setAutoRefresh(!autoRefresh)}
+          title={`仓库发生变化时自动刷新（当前${autoRefresh ? '开启' : '关闭'}）`}
+        >
+          <ActionIcon name="auto" label="自动刷新" />
+        </button>
+        {/* The rail's switch. It carries the count because that is the reason to open it — and
+            the unexported ones are the point of the whole tool, so they get the accent. */}
+        <button
+          className={`rail-switch ${railOpen ? 'active' : ''} ${unexported > 0 ? 'has-unexported' : ''}`}
+          aria-pressed={railOpen}
+          onClick={() => setRailOpen(!railOpen)}
+          title={railOpen ? '收起右栏 (Esc)' : '展开评论、待办和 Issue'}
+        >
+          <ActionIcon name="comments" label="评论、待办和 Issue" />
+          {commentCount > 0 && <span className="rail-switch-n">{commentCount}</span>}
+        </button>
       </div>
     </header>
   );

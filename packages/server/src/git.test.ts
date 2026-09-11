@@ -21,6 +21,9 @@ describe('git whitelist', () => {
     }
     await expect(runGit(['commit', '-m', 'x'], { cwd: process.cwd() })).rejects.toMatchObject({ status: 400 });
   });
+  it('tells a working directory that is gone apart from a missing git', async () => {
+    await expect(runGit(['rev-parse', 'HEAD'], { cwd: '/definitely/not/a/directory' })).rejects.toMatchObject({ status: 400, code: 'unknown_worktree' });
+  });
   it('rejects options that could write to disk', () => {
     expect(() => assertAllowedGitArgs(['diff', '--output=/tmp/x'])).toThrow(GitError);
     expect(() => assertAllowedGitArgs(['log', '--output', '/tmp/x'])).toThrow(GitError);

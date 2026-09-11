@@ -49,7 +49,9 @@ export function CommentEditor({ title, initial = '', submitLabel = '保存评论
         <button className="primary" onClick={() => void submit()} disabled={!body.trim() || busy}>
           <ActionIcon name={busy ? 'loading' : 'save'} label={submitLabel} />
         </button>
-        <button onClick={onCancel}><ActionIcon name="close" label="取消" /></button>
+        <button onClick={onCancel}>
+          <ActionIcon name="close" label="取消" />
+        </button>
       </div>
     </div>
   );

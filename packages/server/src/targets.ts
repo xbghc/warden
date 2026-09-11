@@ -2,7 +2,7 @@ import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 import type { FileDiff, FileSummary, Target, TargetKey, WorktreeInfo, CommentSide } from '@warden/shared';
 import { parseTargetKey, TargetKeyError } from '@warden/shared';
-import { EMPTY_TREE_SHA, refExists, revParse, runGit } from './git.js';
+import { EMPTY_TREE_SHA, mergeBase, refExists, revParse, runGit } from './git.js';
 import { parseUnifiedDiff } from './diffparse.js';
 import { badRequest, HttpError } from './errors.js';
 import type { RepoContext } from './repo.js';
@@ -33,8 +33,29 @@ export function resolveTargetContext(repo: RepoContext, worktrees: WorktreeInfo[
   return { key, target, cwd };
 }
 
+/** Rejects anything that could reach outside the worktree; the rest is taken as one literal name. */
+function assertRepoPath(p: string): void {
+  if (!p || p.startsWith('/') || p.split('/').includes('..')) throw badRequest(`invalid path: ${p}`, 'invalid_path');
+}
+
+/** Pathspec for exactly this file: without the magic, a name starting with `:` is read as pathspec syntax. */
+const literal = (p: string): string => `:(literal)${p}`;
+
 async function hasHead(cwd: string): Promise<boolean> {
   return refExists(cwd, 'HEAD');
+}
+
+/**
+ * The commit a `base` target diffs against: where the branch forked off `ref`, so that commits
+ * which landed on `ref` afterwards do not show up as reversed changes (which is what a plain
+ * `git diff <ref>` would do). An unborn HEAD compares against the empty tree, like `all`.
+ */
+async function baseSha(ctx: TargetContext, ref: string): Promise<string> {
+  if (!(await refExists(ctx.cwd, ref))) throw badRequest(`unknown ref: ${ref}`, 'unknown_ref');
+  if (!(await hasHead(ctx.cwd))) return EMPTY_TREE_SHA;
+  const sha = await mergeBase(ctx.cwd, ref, 'HEAD');
+  if (!sha) throw badRequest(`${ref} and HEAD share no history`, 'no_merge_base');
+  return sha;
 }
 
 /** Build the git diff arguments (without pathspec) for a target. */
@@ -55,13 +76,17 @@ async function diffArgs(ctx: TargetContext): Promise<string[]> {
     case 'range': {
       if (!(await refExists(ctx.cwd, t.base))) throw badRequest(`unknown ref: ${t.base}`, 'unknown_ref');
       if (!(await refExists(ctx.cwd, t.head))) throw badRequest(`unknown ref: ${t.head}`, 'unknown_ref');
+      // `a...b` needs a merge base; git's "fatal: no merge base" is a request problem, like for `base`.
+      if (!(await mergeBase(ctx.cwd, t.base, t.head))) throw badRequest(`${t.base} and ${t.head} share no history`, 'no_merge_base');
       return [...DIFF_BASE_ARGS, `${t.base}...${t.head}`];
     }
+    case 'base':
+      return [...DIFF_BASE_ARGS, await baseSha(ctx, t.ref)];
   }
 }
 
 function includesUntracked(t: Target): boolean {
-  return t.kind === 'working' || t.kind === 'all';
+  return t.kind === 'working' || t.kind === 'all' || t.kind === 'base';
 }
 
 async function listUntracked(cwd: string): Promise<string[]> {
@@ -70,7 +95,7 @@ async function listUntracked(cwd: string): Promise<string[]> {
 }
 
 async function isUntracked(cwd: string, file: string): Promise<boolean> {
-  const r = await runGit(['ls-files', '--others', '--exclude-standard', '-z', '--', file], { cwd });
+  const r = await runGit(['ls-files', '--others', '--exclude-standard', '-z', '--', literal(file)], { cwd });
   return r.stdout.split('\0').filter(Boolean).includes(file);
 }
 
@@ -129,15 +154,14 @@ export interface FileDiffHints {
 
 /** Diff of a single file inside the target. Returns undefined when the file has no changes. */
 export async function getFileDiff(ctx: TargetContext, filePath: string, hints: FileDiffHints = {}): Promise<FileDiff | undefined> {
-  if (!filePath || filePath.startsWith('/') || filePath.split('/').includes('..')) {
-    throw badRequest(`invalid path: ${filePath}`, 'invalid_path');
-  }
+  assertRepoPath(filePath);
+  if (hints.oldPath) assertRepoPath(hints.oldPath);
   if (includesUntracked(ctx.target) && (hints.untracked || (await isUntracked(ctx.cwd, filePath)))) {
     return untrackedDiff(ctx.cwd, filePath);
   }
   const args = await diffArgs(ctx);
-  const pathspec = [filePath];
-  if (hints.oldPath && hints.oldPath !== filePath) pathspec.push(hints.oldPath);
+  const pathspec = [literal(filePath)];
+  if (hints.oldPath && hints.oldPath !== filePath) pathspec.push(literal(hints.oldPath));
   const r = await runGit([...args, '--', ...pathspec], { cwd: ctx.cwd });
   const files = parseUnifiedDiff(r.stdout);
   return files.find((f) => f.path === filePath) ?? files[0];
@@ -158,14 +182,14 @@ async function refForSide(ctx: TargetContext, side: CommentSide): Promise<string
       return (await revParse(ctx.cwd, `${t.sha}^`)) ?? EMPTY_TREE_SHA;
     case 'range':
       return side === 'new' ? t.head : t.base;
+    case 'base':
+      return side === 'new' ? undefined : baseSha(ctx, t.ref);
   }
 }
 
 /** Full content of a file on one side of the target; null when it does not exist there. */
 export async function getFullFile(ctx: TargetContext, filePath: string, side: CommentSide): Promise<string | null> {
-  if (!filePath || filePath.startsWith('/') || filePath.split('/').includes('..')) {
-    throw badRequest(`invalid path: ${filePath}`, 'invalid_path');
-  }
+  assertRepoPath(filePath);
   const ref = await refForSide(ctx, side);
   if (ref === undefined) {
     try {

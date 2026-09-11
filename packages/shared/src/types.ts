@@ -104,6 +104,11 @@ export interface Prefs {
   nvimSocketByRoot: Record<string, string>;
   /** Re-run the refresh cycle when the watcher reports a repository change. */
   autoRefresh: boolean;
+  /**
+   * Whether the right-hand rail is showing. It costs 360px of the code column — most of it on a
+   * laptop in split view — so it stays shut until there is something to put in it.
+   */
+  railOpen: boolean;
 }
 
 export interface TargetState {
@@ -154,6 +159,50 @@ export interface WorktreeInfo {
   bare: boolean;
 }
 
+/** A worktree as the management panel lists it: the review-time fields plus what removing it needs. */
+export interface WorktreeDetail extends WorktreeInfo {
+  /** Entries `git status` reports: modified, staged and untracked paths together. */
+  dirty: number;
+  /** git still lists it but its directory is gone; removing it drops the entry, nothing else. */
+  prunable: boolean;
+}
+
+export interface BranchInfo {
+  name: string;
+  sha: string;
+  /** Worktree the branch is checked out in, if any; a branch can be in only one at a time. */
+  worktree?: string;
+}
+
+export interface WorktreesResponse {
+  worktrees: WorktreeDetail[];
+  branches: BranchInfo[];
+  /** `<parent of the main worktree>/<repo>-`: a new worktree's path is suggested as this plus its branch. */
+  pathPrefix: string;
+}
+
+export interface CreateWorktreeRequest {
+  path: string;
+  branch: string;
+  /** Create `branch` from this ref; omitted = check out a branch that exists. */
+  base?: string;
+}
+
+export interface RemoveWorktreeRequest {
+  path: string;
+  /** `--force`: only ever sent after the reviewer confirmed a 409 (`worktree_dirty`, `needs_force`). */
+  force?: boolean;
+  /** Also `git branch -d` the worktree's branch; a branch that is not merged is kept and reported. */
+  deleteBranch?: boolean;
+}
+
+export interface RemoveWorktreeResponse {
+  ok: true;
+  branchDeleted: boolean;
+  /** Why the branch was kept, when deleting it was asked for. */
+  branchError?: string;
+}
+
 export interface RepoInfo {
   /** Root of the repository/worktree the server was started in. */
   root: string;
@@ -164,6 +213,8 @@ export interface RepoInfo {
   worktrees: WorktreeInfo[];
   /** Default target key (last used or `working`). */
   defaultTarget: TargetKey;
+  /** Trunk a `base` target is offered against by default: `main` or `master`, whichever exists. */
+  defaultBase?: string;
 }
 
 export interface FileEntry extends FileSummary {
@@ -187,6 +238,12 @@ export interface FullFileResponse {
   content: string | null;
 }
 
+/** A branch or tag that points at a commit, as `git log --decorate` lists them. */
+export interface CommitRef {
+  name: string;
+  kind: 'branch' | 'tag';
+}
+
 export interface CommitInfo {
   sha: string;
   shortSha: string;
@@ -195,11 +252,27 @@ export interface CommitInfo {
   date: string;
   subject: string;
   parents: string[];
+  /** Branches (local and remote) and tags on this commit; the branch HEAD sits on comes first. */
+  refs: CommitRef[];
+  /** HEAD of the worktree the log was taken in is this commit. */
+  head: boolean;
 }
 
 export interface CommitsResponse {
   commits: CommitInfo[];
   hasMore: boolean;
+}
+
+/** Where HEAD forked off a base ref: what the Commits panel reports beside its *Branch vs* field. */
+export interface ForkPointResponse {
+  /** The ref the fork point was computed against, as requested. */
+  base: string;
+  /** `merge-base(base, HEAD)`: the last commit the branch shares with `base`. */
+  sha: string;
+  /** Commits on HEAD that `base` does not have. */
+  ahead: number;
+  /** Commits that landed on `base` after the fork. */
+  behind: number;
 }
 
 export interface NvimInstance {
@@ -239,6 +312,28 @@ export interface UpdateCommentRequest {
   endLine?: number;
 }
 
+/** Lines of one hunk to stage or unstage; `lines` omitted means the whole hunk. */
+export interface HunkSelection {
+  /** Index of the hunk in the file diff. */
+  index: number;
+  /** Indices into `hunk.lines`; context lines are ignored. */
+  lines?: number[];
+}
+
+export interface StageRequest {
+  path: string;
+  /** `contentHash` of the diff the selection was made on; a different diff on the server is a 409. */
+  contentHash: string;
+  /** Omitted: the whole file, mode change included. */
+  hunks?: HunkSelection[];
+}
+
+export interface StageResponse {
+  ok: true;
+  /** Changed (add/del) lines the patch carried. */
+  lines: number;
+}
+
 export interface ReanchorRequest {
   files?: FileDiff[];
 }
@@ -255,6 +350,14 @@ export interface CreateIssueRequest {
   title: string;
   body?: string;
   commentIds?: string[];
+  status?: IssueStatus;
+  /** Put the new issue right after this one; omitted = at the top of the list. */
+  after?: string;
+}
+
+/** Reorder: put the item right before `before`, or last when null. */
+export interface MoveRequest {
+  before: string | null;
 }
 
 export interface UpdateIssueRequest {
@@ -276,6 +379,9 @@ export interface CreateTodoRequest {
   /** Defaults to the current branch of `root` (or of the repository root). */
   branch?: string;
   root?: string;
+  status?: TodoStatus;
+  /** Put the new todo right after this one; omitted = at the top of the list. */
+  after?: string;
 }
 
 export interface UpdateTodoRequest {
@@ -288,16 +394,6 @@ export interface TodosResponse {
   todos: Todo[];
   /** Branch the listing was filtered by, when one was requested. */
   branch?: string;
-}
-
-export interface ExportTodosRequest {
-  branch: string;
-  includeDone?: boolean;
-}
-
-export interface TodoExportResponse {
-  text: string;
-  count: number;
 }
 
 /** Payload of the `changed` SSE event emitted by the repository watcher. */

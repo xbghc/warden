@@ -1,6 +1,6 @@
 {
   "name": "@xbghc/warden",
-  "version": "0.2.0",
+  "version": "0.8.0",
   "description": "Local web UI to review git diffs (working tree, staged, commits, ranges, worktrees) with line comments exported as agent-ready prompts.",
   "type": "module",
   "license": "MIT",
@@ -41,12 +41,14 @@
     "build": "rimraf dist && pnpm build:web && pnpm build:server",
     "build:web": "pnpm --filter @warden/web build",
     "build:server": "tsup",
+    "lint": "biome check .",
     "typecheck": "tsc --noEmit -p tsconfig.json && pnpm --filter @warden/web typecheck",
     "test": "vitest run",
     "test:watch": "vitest",
     "prepublishOnly": "pnpm build && pnpm test"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.5.12",
     "@hono/node-server": "^1.19.17",
     "@types/node": "^22.20.1",
     "@warden/server": "workspace:*",

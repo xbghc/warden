@@ -60,7 +60,7 @@ async function openBrowser(url: string): Promise<boolean> {
   ];
   for (const [cmd, args] of candidates) {
     const ok = await new Promise<boolean>((resolve) => {
-      let child;
+      let child: ReturnType<typeof spawn>;
       try {
         child = spawn(cmd, args, { stdio: 'ignore', detached: true });
       } catch {
@@ -114,7 +114,7 @@ async function main(): Promise<void> {
     console.error('warning: built web assets not found (dist/web). Only the /api endpoints will be served.');
   }
 
-  let server;
+  let server: Awaited<ReturnType<typeof startServer>>;
   try {
     server = await startServer({ repoPath: args.repoPath, port: args.port, webDir });
   } catch (e) {

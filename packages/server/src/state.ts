@@ -7,7 +7,7 @@ import { sha1 } from './hash.js';
 
 export function dataDir(): string {
   const xdg = process.env.XDG_DATA_HOME;
-  const base = xdg && xdg.trim() ? xdg : path.join(os.homedir(), '.local', 'share');
+  const base = xdg?.trim() ? xdg : path.join(os.homedir(), '.local', 'share');
   return path.join(base, 'warden');
 }
 
@@ -20,7 +20,7 @@ export function stateFilePath(repoRoot: string, baseDir = dataDir()): string {
 }
 
 export function defaultPrefs(): Prefs {
-  return { viewMode: 'unified', nvimSocketByRoot: {}, autoRefresh: true };
+  return { viewMode: 'unified', nvimSocketByRoot: {}, autoRefresh: true, railOpen: false };
 }
 
 export function defaultState(repoRoot: string): ReviewState {
@@ -36,6 +36,10 @@ export function ensureTarget(state: ReviewState, key: string): TargetState {
   return t;
 }
 
+/** The fields the rest of the server dereferences without checking; anything else is a corrupt row. */
+const usable = (v: unknown): boolean => !!v && typeof v === 'object' && typeof (v as { id?: unknown }).id === 'string';
+const usableComment = (v: unknown): boolean => usable(v) && typeof (v as { anchor?: unknown }).anchor === 'object' && !!(v as { anchor?: unknown }).anchor;
+
 function normalise(raw: unknown, repoRoot: string): ReviewState {
   const base = defaultState(repoRoot);
   if (!raw || typeof raw !== 'object') return base;
@@ -46,7 +50,7 @@ function normalise(raw: unknown, repoRoot: string): ReviewState {
     if (!v || typeof v !== 'object') continue;
     targets[k] = {
       viewed: typeof v.viewed === 'object' && v.viewed ? v.viewed : {},
-      comments: Array.isArray(v.comments) ? v.comments : [],
+      comments: Array.isArray(v.comments) ? v.comments.filter(usableComment) : [],
       ...(typeof v.head === 'string' ? { head: v.head } : {}),
     };
   }
@@ -55,13 +59,14 @@ function normalise(raw: unknown, repoRoot: string): ReviewState {
     schemaVersion: 1,
     repoRoot: r.repoRoot ?? repoRoot,
     targets,
-    issues: Array.isArray(r.issues) ? r.issues : [],
-    todos: Array.isArray(r.todos) ? r.todos : [],
+    issues: Array.isArray(r.issues) ? r.issues.filter(usable) : [],
+    todos: Array.isArray(r.todos) ? r.todos.filter(usable) : [],
     prefs: {
       ...defaultPrefs(),
       ...(r.prefs ?? {}),
       nvimSocketByRoot: r.prefs?.nvimSocketByRoot ?? {},
       autoRefresh: typeof r.prefs?.autoRefresh === 'boolean' ? r.prefs.autoRefresh : true,
+      railOpen: typeof r.prefs?.railOpen === 'boolean' ? r.prefs.railOpen : false,
     },
   };
 }

@@ -1,27 +1,42 @@
 import { useMemo, useState } from 'react';
-import { ActionIcon } from './ActionIcon';
 import type { FileEntry } from '@warden/shared';
-import { useStore } from '../store';
+import { useStageMode, useStore } from '../store';
 import { DiffView } from './DiffView';
+import { STATUS_LETTER } from './FileTree';
 import { totalDiffLines } from '../lib/rows';
 
 const BIG_FILE_LINES = 5000;
+
+/** Directory in the quiet colour, basename in the strong one — the name is what you scan for. */
+function PathParts({ path }: { path: string }) {
+  const cut = path.lastIndexOf('/') + 1;
+  return (
+    <>
+      {cut > 0 && <span className="dir">{path.slice(0, cut)}</span>}
+      <span className="base">{path.slice(cut)}</span>
+    </>
+  );
+}
 
 function FileHeader({ entry }: { entry: FileEntry }) {
   const toggleViewed = useStore((s) => s.toggleViewed);
   const openInNvim = useStore((s) => s.openInNvim);
   const nvimReady = useStore((s) => !!s.nvim?.selected);
+  const stageLines = useStore((s) => s.stageLines);
+  const staging = useStore((s) => s.staging);
+  const mode = useStageMode();
   return (
     <div className="file-head">
-      <span className={`status status-${entry.status}`}>{entry.status}</span>
-      <span className="path mono">
-        {entry.oldPath ? (
+      <span className={`status status-${entry.status}`} title={entry.status}>
+        {STATUS_LETTER[entry.status]}
+      </span>
+      <span className="path">
+        {entry.oldPath && (
           <>
-            <span className="muted">{entry.oldPath}</span> → {entry.path}
+            <span className="dir">{entry.oldPath}</span> <span className="muted">→</span>{' '}
           </>
-        ) : (
-          entry.path
         )}
+        <PathParts path={entry.path} />
       </span>
       {entry.oldMode && entry.newMode && (
         <span className="muted mono">
@@ -31,15 +46,60 @@ function FileHeader({ entry }: { entry: FileEntry }) {
       <span className="counts">
         <span className="add">+{entry.additions}</span> <span className="del">-{entry.deletions}</span>
       </span>
-      {entry.changed && <span className="changed">文件已变化，viewed 已取消</span>}
+      {entry.changed && <span className="changed">文件已变化，“已读”标记已取消</span>}
       <span className="spacer" />
-      <button className="link" disabled={!nvimReady} onClick={() => void openInNvim(entry.path, 1)} title="在 nvim 中打开">
-        <ActionIcon name="terminal" label="在 nvim 中打开" />
-      </button>
+      {/* Only when there is an nvim to open it in: a permanently greyed-out button is a control
+          that never does anything, priced at full width in the busiest row of the panel. */}
+      {nvimReady && (
+        <button className="link" onClick={() => void openInNvim(entry.path, 1)} title="在 nvim 中打开这个文件">
+          在 nvim 中打开
+        </button>
+      )}
+      {mode && (
+        <button
+          disabled={staging || entry.binary}
+          onClick={() => void stageLines(entry.path)}
+          title={
+            entry.binary
+              ? '二进制文件无法从这里暂存，请用 git add / git restore --staged'
+              : mode === 'stage'
+                ? '把这个文件的全部改动放入暂存区（含模式变更）'
+                : '把这个文件的全部改动移出暂存区'
+          }
+        >
+          {mode === 'stage' ? '暂存文件' : '取消暂存文件'}
+        </button>
+      )}
       <label className="check">
         <input type="checkbox" checked={entry.viewed} onChange={() => void toggleViewed(entry.path)} />
-        <ActionIcon name="checked" label="已查看" />
+        已读
       </label>
+    </div>
+  );
+}
+
+/** Floats over the diff while rows are picked: what was picked, and the one thing to do with it. */
+function StageBar({ filePath }: { filePath: string }) {
+  const sel = useStore((s) => (s.stageSel?.filePath === filePath ? s.stageSel : null));
+  const staging = useStore((s) => s.staging);
+  const stageSelection = useStore((s) => s.stageSelection);
+  const setStageSel = useStore((s) => s.setStageSel);
+  const mode = useStageMode();
+  if (!sel || !mode) return null;
+  const n = sel.lines.length;
+  return (
+    <div className="stage-bar" role="toolbar" aria-label="暂存所选行">
+      <span className="stage-bar-count">
+        已选 <b>{n}</b> 行
+      </span>
+      <button className="primary" disabled={staging || n === 0} onClick={() => void stageSelection()} title="s">
+        {staging ? '处理中…' : mode === 'stage' ? '暂存所选' : '取消暂存所选'}
+        <kbd>s</kbd>
+      </button>
+      <button onClick={() => setStageSel(null)} title="Esc">
+        放弃
+        <kbd>Esc</kbd>
+      </button>
     </div>
   );
 }
@@ -81,7 +141,7 @@ export function DiffPanel() {
       <div className="placeholder error-box">
         {diffState.message}{' '}
         <button className="link" onClick={() => void openFile(activeFile, true)}>
-          <ActionIcon name="refresh" label="重试" />
+          重试
         </button>
       </div>
     );
@@ -89,7 +149,11 @@ export function DiffPanel() {
   else if (diffState.diff.hunks.length === 0)
     body = (
       <div className="placeholder">
-        {entry.oldMode && entry.newMode ? `仅文件模式变更：${entry.oldMode} → ${entry.newMode}` : entry.status === 'renamed' ? '仅重命名，内容无变化' : '空文件 / 无内容变化'}
+        {entry.oldMode && entry.newMode
+          ? `仅文件模式变更：${entry.oldMode} → ${entry.newMode}`
+          : entry.status === 'renamed'
+            ? '仅重命名，内容无变化'
+            : '空文件 / 无内容变化'}
       </div>
     );
   else if (lineCount > BIG_FILE_LINES && forceBig !== activeFile)
@@ -97,7 +161,7 @@ export function DiffPanel() {
       <div className="placeholder">
         <p>该文件 diff 有 {lineCount} 行，默认不渲染。</p>
         <button className="primary" onClick={() => setForceBig(activeFile)}>
-          <ActionIcon name="expand" label="仍然渲染" />
+          仍然渲染
         </button>
       </div>
     );
@@ -107,6 +171,7 @@ export function DiffPanel() {
     <div className="diff-panel">
       <FileHeader entry={entry} />
       {body}
+      <StageBar filePath={activeFile} />
     </div>
   );
 }

@@ -5,24 +5,30 @@ import type {
   CreateCommentRequest,
   CreateIssueRequest,
   CreateTodoRequest,
+  CreateWorktreeRequest,
   ExportResponse,
-  ExportTodosRequest,
   FileDiff,
   FilesResponse,
+  ForkPointResponse,
   FullFileResponse,
   Issue,
   NvimInstancesResponse,
   Prefs,
   ReanchorResponse,
+  RemoveWorktreeRequest,
+  RemoveWorktreeResponse,
   RepoInfo,
   ReviewState,
+  StageRequest,
+  StageResponse,
   TargetKey,
   Todo,
-  TodoExportResponse,
   TodosResponse,
   UpdateCommentRequest,
   UpdateIssueRequest,
   UpdateTodoRequest,
+  WorktreeInfo,
+  WorktreesResponse,
 } from '@warden/shared';
 
 export class ApiError extends Error {
@@ -76,14 +82,14 @@ export const api = {
   files: (key: TargetKey) => req<FilesResponse>('GET', `/api/targets/${enc(key)}/files`),
   file: (key: TargetKey, path: string, hints: { oldPath?: string; untracked?: boolean } = {}) =>
     req<FileDiff>('GET', `/api/targets/${enc(key)}/file${q({ path, old: hints.oldPath, untracked: hints.untracked })}`),
-  fullFile: (key: TargetKey, path: string, side: CommentSide) =>
-    req<FullFileResponse>('GET', `/api/targets/${enc(key)}/file/full${q({ path, side })}`),
+  fullFile: (key: TargetKey, path: string, side: CommentSide) => req<FullFileResponse>('GET', `/api/targets/${enc(key)}/file/full${q({ path, side })}`),
   setViewed: (key: TargetKey, path: string, viewed: boolean, contentHash: string) =>
     req<{ viewed: Record<string, string> }>('PUT', `/api/targets/${enc(key)}/viewed`, { path, viewed, contentHash }),
 
+  stage: (key: TargetKey, body: StageRequest) => req<StageResponse>('POST', `/api/targets/${enc(key)}/stage`, body),
+
   createComment: (key: TargetKey, body: CreateCommentRequest) => req<Comment>('POST', `/api/targets/${enc(key)}/comments`, body),
-  updateComment: (key: TargetKey, id: string, body: UpdateCommentRequest) =>
-    req<Comment>('PATCH', `/api/targets/${enc(key)}/comments/${enc(id)}`, body),
+  updateComment: (key: TargetKey, id: string, body: UpdateCommentRequest) => req<Comment>('PATCH', `/api/targets/${enc(key)}/comments/${enc(id)}`, body),
   deleteComment: (key: TargetKey, id: string) => req<{ ok: true }>('DELETE', `/api/targets/${enc(key)}/comments/${enc(id)}`),
   reanchor: (key: TargetKey, files?: FileDiff[]) => req<ReanchorResponse>('POST', `/api/targets/${enc(key)}/comments/reanchor`, { files }),
   exportComments: (commentIds: string[]) => req<ExportResponse>('POST', '/api/comments/export', { commentIds }),
@@ -92,19 +98,25 @@ export const api = {
   createIssue: (body: CreateIssueRequest) => req<Issue>('POST', '/api/issues', body),
   updateIssue: (id: string, body: UpdateIssueRequest) => req<Issue>('PATCH', `/api/issues/${enc(id)}`, body),
   deleteIssue: (id: string) => req<{ ok: true }>('DELETE', `/api/issues/${enc(id)}`),
+  moveIssue: (id: string, before: string | null) => req<{ issues: Issue[] }>('POST', `/api/issues/${enc(id)}/move`, { before }),
   exportIssue: (id: string) => req<ExportResponse>('POST', `/api/issues/${enc(id)}/export`),
 
   todos: (branch?: string) => req<TodosResponse>('GET', `/api/todos${q({ branch })}`),
   createTodo: (body: CreateTodoRequest) => req<Todo>('POST', '/api/todos', body),
   updateTodo: (id: string, body: UpdateTodoRequest) => req<Todo>('PATCH', `/api/todos/${enc(id)}`, body),
   deleteTodo: (id: string) => req<{ ok: true }>('DELETE', `/api/todos/${enc(id)}`),
-  exportTodos: (body: ExportTodosRequest) => req<TodoExportResponse>('POST', '/api/todos/export', body),
+  moveTodo: (id: string, before: string | null) => req<TodosResponse>('POST', `/api/todos/${enc(id)}/move`, { before }),
 
   /** Server-sent stream of repository changes for one worktree root. Caller owns `close()`. */
   events: (root: string) => new EventSource(`/api/events${q({ root })}`),
 
-  commits: (params: { path?: string; before?: string; limit?: number; root?: string; ref?: string }) =>
+  commits: (params: { path?: string; q?: string; author?: string; firstParent?: boolean; offset?: number; limit?: number; root?: string; ref?: string }) =>
     req<CommitsResponse>('GET', `/api/commits${q(params)}`),
+  forkPoint: (params: { root?: string; base: string }) => req<ForkPointResponse>('GET', `/api/fork-point${q(params)}`),
+
+  worktrees: () => req<WorktreesResponse>('GET', '/api/worktrees'),
+  createWorktree: (body: CreateWorktreeRequest) => req<WorktreeInfo>('POST', '/api/worktrees', body),
+  removeWorktree: (body: RemoveWorktreeRequest) => req<RemoveWorktreeResponse>('POST', '/api/worktrees/remove', body),
 
   nvimInstances: (root: string, rescan = false) => req<NvimInstancesResponse>('GET', `/api/nvim/instances${q({ root, rescan })}`),
   nvimSelect: (root: string, socket: string) => req<{ ok: true }>('POST', '/api/nvim/select', { root, socket }),

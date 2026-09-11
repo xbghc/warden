@@ -116,3 +116,45 @@ describe('comments follow the code across views', () => {
     expect(byId(re.comments, beta.id)!.codeSnippet).toEqual(['export const L20 = 2000; // beta']);
   });
 });
+
+describe('a base target survives the commits made while the branch is under review', () => {
+  const FILE2 = 'src/base.ts';
+  const key = 'base:main';
+  let alpha: Comment;
+  let beta: Comment;
+
+  it('lists the branch since its fork and files comments under its own key', async () => {
+    fx.git('checkout', '-q', '-b', 'topic');
+    await fx.write(FILE2, base);
+    fx.git('add', FILE2);
+    fx.git('commit', '-q', '-m', 'topic: add base fixture', '--', FILE2);
+
+    const files = await json<FilesResponse>(await get(`/api/targets/${k(key)}/files`));
+    expect(files.files.find((f) => f.path === FILE2)).toMatchObject({ status: 'added' });
+    alpha = await json<Comment>(
+      await send('POST', `/api/targets/${k(key)}/comments`, { filePath: FILE2, side: 'new', startLine: 3, endLine: 3, body: 'alpha' }),
+    );
+    beta = await json<Comment>(
+      await send('POST', `/api/targets/${k(key)}/comments`, { filePath: FILE2, side: 'new', startLine: 20, endLine: 20, body: 'beta' }),
+    );
+    expect(alpha.targetKey).toBe(key);
+
+    const state = await json<ReviewState>(await get('/api/state'));
+    expect(state.targets[key]?.comments.map((c) => c.id)).toEqual([alpha.id, beta.id]);
+    expect(state.targets.local?.comments.map((c) => c.id) ?? []).not.toContain(alpha.id);
+  });
+
+  it('orphans a comment whose line changed and keeps it once that change is committed', async () => {
+    await fx.write(FILE2, withAlpha);
+    let re = await reanchor(key);
+    expect(byId(re.comments, alpha.id)).toMatchObject({ status: 'orphaned', targetKey: key });
+    expect(byId(re.comments, beta.id)).toMatchObject({ status: 'active', targetKey: key, startLine: 20 });
+
+    // In a local view a moved HEAD deletes the orphans; here the review goes on, so they stay.
+    fx.git('commit', '-q', '-a', '-m', 'topic: alpha');
+    re = await reanchor(key);
+    expect(byId(re.comments, alpha.id)).toMatchObject({ status: 'orphaned', targetKey: key });
+    expect(byId(re.comments, alpha.id)!.codeSnippet).toEqual(['export const L3 = 3;']);
+    expect(byId(re.comments, beta.id)).toMatchObject({ status: 'active', startLine: 20 });
+  });
+});

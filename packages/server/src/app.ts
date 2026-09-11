@@ -5,46 +5,52 @@ import { streamSSE } from 'hono/streaming';
 import type {
   ChangeEvent,
   Comment,
-  CommitInfo,
   CommitsResponse,
   CreateCommentRequest,
   CreateIssueRequest,
   CreateTodoRequest,
+  CreateWorktreeRequest,
   ExportRequest,
   ExportResponse,
-  ExportTodosRequest,
+  ForkPointResponse,
   FileDiff,
   FileEntry,
   FilesResponse,
   FullFileResponse,
   Issue,
+  MoveRequest,
   NvimInstancesResponse,
   NvimOpenRequest,
   Prefs,
   ReanchorRequest,
   ReanchorResponse,
+  RemoveWorktreeRequest,
   RepoInfo,
   ReviewState,
+  StageRequest,
+  StageResponse,
   Todo,
-  TodoExportResponse,
   TodosResponse,
   UpdateCommentRequest,
   UpdateIssueRequest,
   UpdateTodoRequest,
   WorktreeInfo,
+  WorktreesResponse,
 } from '@warden/shared';
-import { commentScopeKey, isLocalTarget, isValidRef, localViewKeys } from '@warden/shared';
+import { commentScopeKey, insertAfter, isLocalTarget, isValidRef, localViewKeys, moveBefore, stageModeFor, tryParseTargetKey } from '@warden/shared';
 import { badRequest, HttpError, notFound } from './errors.js';
-import { revParse, runGit } from './git.js';
+import { COMMIT_FORMAT, parseCommitLog } from './commits.js';
+import { applyToIndex, mergeBase, refExists, revParse, runGit } from './git.js';
 import { currentBranch, getRepoInfo, listWorktrees, type RepoContext } from './repo.js';
 import { getFileDiff, getFullFile, listTargetDiffs, resolveTargetContext, toSummary, type TargetContext } from './targets.js';
 import { buildAnchor, reanchorComment } from './anchor.js';
-import { ensureTarget, StateStore } from './state.js';
-import { formatCommentsExport, formatIssueExport, formatTodosExport } from './export.js';
+import { buildStagePatch } from './patch.js';
+import { addWorktree, listBranches, listWorktreesDetailed, removeWorktree, worktreePathPrefix } from './worktrees.js';
+import { ensureTarget, type StateStore } from './state.js';
+import { formatCommentsExport, formatIssueExport } from './export.js';
 import { NvimService } from './nvim.js';
 import { RepoWatcher } from './watcher.js';
 import { serveStaticFile } from './static.js';
-
 
 export interface AppOptions {
   repo: RepoContext;
@@ -108,14 +114,6 @@ export function createApp(opts: AppOptions): Hono {
     }
   };
 
-  const decodeKey = (raw: string): string => {
-    try {
-      return decodeURIComponent(raw);
-    } catch {
-      throw badRequest('malformed target key', 'invalid_target');
-    }
-  };
-
   const fileDiffWithHints = async (ctx: TargetContext, filePath: string, explicit?: { oldPath?: string; untracked?: boolean }) => {
     const cached = listings.get(ctx.key);
     const hint = cached && Date.now() - cached.at < LISTING_HINT_TTL_MS ? cached.files.find((f) => f.path === filePath) : undefined;
@@ -143,13 +141,36 @@ export function createApp(opts: AppOptions): Hono {
 
   const api = new Hono();
 
+  // The server trusts the browser it was opened in; what it must not trust is a page from another
+  // origin driving that browser, which could stage lines or remove a worktree. Browsers label such
+  // requests, so they are refused before any route sees them. Reads stay open: a page from
+  // elsewhere cannot read the response anyway.
+  api.use('*', async (c, next) => {
+    if (c.req.method !== 'GET' && c.req.method !== 'HEAD' && c.req.header('sec-fetch-site') === 'cross-site') {
+      throw new HttpError(403, 'cross-site requests are refused', 'cross_site');
+    }
+    await next();
+  });
+
   // Cheap identity check: no git, no state file. See wsl.ts for who asks and why.
   api.get('/ping', (c) => c.text(opts.instanceToken ?? ''));
 
   api.get('/repo', async (c) => {
     const state = await store.load();
-    const info: RepoInfo = await getRepoInfo(repo, state.prefs.lastTarget ?? 'working');
+    const info: RepoInfo = await getRepoInfo(repo, 'working');
     worktreeCache = { at: Date.now(), list: info.worktrees };
+    // The remembered target is handed back only while it can still be opened. One inside a
+    // worktree that has since been removed would strand the page on an error: everything it
+    // could click next carries that worktree along, and the next load would land there again.
+    const last = state.prefs.lastTarget;
+    const target = last ? tryParseTargetKey(last) : undefined;
+    const usable = !!target && (!target.worktree || info.worktrees.some((w) => w.path === target.worktree));
+    if (last && usable) info.defaultTarget = last;
+    else if (last) {
+      await store.update((s) => {
+        s.prefs.lastTarget = 'working';
+      });
+    }
     return c.json(info);
   });
 
@@ -161,6 +182,7 @@ export function createApp(opts: AppOptions): Hono {
       if (body.viewMode === 'unified' || body.viewMode === 'split') s.prefs.viewMode = body.viewMode;
       if (typeof body.lastTarget === 'string') s.prefs.lastTarget = body.lastTarget;
       if (typeof body.autoRefresh === 'boolean') s.prefs.autoRefresh = body.autoRefresh;
+      if (typeof body.railOpen === 'boolean') s.prefs.railOpen = body.railOpen;
       if (body.nvimSocketByRoot && typeof body.nvimSocketByRoot === 'object') {
         s.prefs.nvimSocketByRoot = { ...s.prefs.nvimSocketByRoot, ...body.nvimSocketByRoot };
       }
@@ -172,7 +194,7 @@ export function createApp(opts: AppOptions): Hono {
   // ---- targets -----------------------------------------------------------
 
   api.get('/targets/:key/files', async (c) => {
-    const key = decodeKey(c.req.param('key'));
+    const key = c.req.param('key');
     const ctx = await targetCtx(key);
     const diffs = await listTargetDiffs(ctx);
     listings.set(key, { at: Date.now(), files: diffs });
@@ -210,7 +232,7 @@ export function createApp(opts: AppOptions): Hono {
   });
 
   api.get('/targets/:key/file', async (c) => {
-    const key = decodeKey(c.req.param('key'));
+    const key = c.req.param('key');
     const filePath = c.req.query('path');
     if (!filePath) throw badRequest('missing path');
     const ctx = await targetCtx(key);
@@ -222,7 +244,7 @@ export function createApp(opts: AppOptions): Hono {
   });
 
   api.get('/targets/:key/file/full', async (c) => {
-    const key = decodeKey(c.req.param('key'));
+    const key = c.req.param('key');
     const filePath = c.req.query('path');
     if (!filePath) throw badRequest('missing path');
     const side = c.req.query('side') === 'old' ? 'old' : 'new';
@@ -233,7 +255,7 @@ export function createApp(opts: AppOptions): Hono {
   });
 
   api.put('/targets/:key/viewed', async (c) => {
-    const key = decodeKey(c.req.param('key'));
+    const key = c.req.param('key');
     await targetCtx(key);
     const body = (await c.req.json()) as { path?: string; viewed?: boolean; contentHash?: string };
     if (!body.path) throw badRequest('missing path');
@@ -247,16 +269,44 @@ export function createApp(opts: AppOptions): Hono {
     return c.json({ viewed });
   });
 
+  // ---- staging -----------------------------------------------------------
+
+  // The only route that writes to the repository, and only to the index: the lines picked in the
+  // Unstaged view go in, the ones picked in the Staged view come back out. Staging is how a
+  // reviewer says "these lines are done", so it belongs next to reading them.
+  api.post('/targets/:key/stage', async (c) => {
+    const key = c.req.param('key');
+    const ctx = await targetCtx(key);
+    const mode = stageModeFor(ctx.target);
+    if (!mode) throw badRequest('only the working (stage) and staged (unstage) views can be staged from', 'not_stageable');
+    const body = (await c.req.json()) as StageRequest;
+    if (!body.path || typeof body.path !== 'string') throw badRequest('missing path');
+    if (!body.contentHash || typeof body.contentHash !== 'string') throw badRequest('contentHash is required');
+    if (body.hunks !== undefined && !Array.isArray(body.hunks)) throw badRequest('hunks must be an array', 'bad_selection');
+    const diff = await fileDiffWithHints(ctx, body.path);
+    if (!diff) throw badRequest(`file ${body.path} is not part of ${key}`, 'no_diff');
+    // The selection is a set of indices into a diff the client saw; against any other diff they
+    // would name the wrong lines. The agent may well have edited the file since.
+    if (diff.contentHash !== body.contentHash)
+      throw new HttpError(409, 'the diff changed since it was loaded; refresh and pick the lines again', 'diff_changed');
+    const { patch, lines } = buildStagePatch(diff, mode, body.hunks);
+    await applyToIndex(ctx.cwd, patch, { reverse: mode === 'unstage' });
+    // Tell every page on this worktree straight away rather than at the next poll.
+    void watchers.get(ctx.cwd)?.poll();
+    const res: StageResponse = { ok: true, lines };
+    return c.json(res);
+  });
+
   // ---- comments ----------------------------------------------------------
 
   api.get('/targets/:key/comments', async (c) => {
-    const key = decodeKey(c.req.param('key'));
+    const key = c.req.param('key');
     const state = await store.load();
     return c.json({ comments: state.targets[commentScopeKey(key)]?.comments ?? [] });
   });
 
   api.post('/targets/:key/comments', async (c) => {
-    const key = decodeKey(c.req.param('key'));
+    const key = c.req.param('key');
     const ctx = await targetCtx(key);
     const body = (await c.req.json()) as CreateCommentRequest;
     if (!body.filePath || typeof body.body !== 'string' || !body.body.trim()) throw badRequest('filePath and body are required');
@@ -290,7 +340,7 @@ export function createApp(opts: AppOptions): Hono {
   });
 
   api.patch('/targets/:key/comments/:id', async (c) => {
-    const key = decodeKey(c.req.param('key'));
+    const key = c.req.param('key');
     const id = c.req.param('id');
     const ctx = await targetCtx(key);
     const body = (await c.req.json()) as UpdateCommentRequest;
@@ -337,7 +387,7 @@ export function createApp(opts: AppOptions): Hono {
   });
 
   api.delete('/targets/:key/comments/:id', async (c) => {
-    const key = decodeKey(c.req.param('key'));
+    const key = c.req.param('key');
     const id = c.req.param('id');
     const removed = await store.update((s) => {
       const t = s.targets[commentScopeKey(key)];
@@ -352,7 +402,7 @@ export function createApp(opts: AppOptions): Hono {
   });
 
   api.post('/targets/:key/comments/reanchor', async (c) => {
-    const key = decodeKey(c.req.param('key'));
+    const key = c.req.param('key');
     const ctx = await targetCtx(key);
     const scope = commentScopeKey(key);
     const local = isLocalTarget(ctx.target);
@@ -495,21 +545,36 @@ export function createApp(opts: AppOptions): Hono {
 
   api.post('/issues', async (c) => {
     const body = (await c.req.json()) as CreateIssueRequest;
-    if (!body.title || !body.title.trim()) throw badRequest('title is required');
+    if (!body.title?.trim()) throw badRequest('title is required');
     const now = new Date().toISOString();
     const issue: Issue = {
       id: randomUUID(),
       title: body.title.trim(),
       body: typeof body.body === 'string' ? body.body : '',
-      status: 'open',
+      status: body.status === 'closed' ? 'closed' : 'open',
       commentIds: Array.isArray(body.commentIds) ? body.commentIds.filter((x): x is string => typeof x === 'string') : [],
       createdAt: now,
       updatedAt: now,
     };
+    // The list is in the reviewer's own order: a new issue goes on top, or under the one it was
+    // typed after (Enter at the end of a row), like a task list.
     await store.update((s) => {
-      s.issues.push(issue);
+      s.issues = insertAfter(s.issues, issue, typeof body.after === 'string' ? body.after : undefined);
     });
     return c.json(issue, 201);
+  });
+
+  api.post('/issues/:id/move', async (c) => {
+    const id = c.req.param('id');
+    const body = (await c.req.json()) as MoveRequest;
+    if (body.before !== null && typeof body.before !== 'string') throw badRequest('before must be an id or null');
+    const issues = await store.update((s) => {
+      const next = moveBefore(s.issues, id, body.before);
+      if (!next) throw notFound('issue not found');
+      s.issues = next;
+      return s.issues;
+    });
+    return c.json({ issues });
   });
 
   api.patch('/issues/:id', async (c) => {
@@ -585,7 +650,7 @@ export function createApp(opts: AppOptions): Hono {
 
   api.post('/todos', async (c) => {
     const body = (await c.req.json()) as CreateTodoRequest;
-    if (!body.title || !body.title.trim()) throw badRequest('title is required');
+    if (!body.title?.trim()) throw badRequest('title is required');
     const branch = body.branch?.trim() || (await currentBranch(await knownRoot(body.root)));
     const now = new Date().toISOString();
     const todo: Todo = {
@@ -593,23 +658,27 @@ export function createApp(opts: AppOptions): Hono {
       branch,
       title: body.title.trim(),
       body: typeof body.body === 'string' ? body.body : '',
-      status: 'open',
+      status: body.status === 'done' ? 'done' : 'open',
       createdAt: now,
       updatedAt: now,
     };
     await store.update((s) => {
-      s.todos.push(todo);
+      s.todos = insertAfter(s.todos, todo, typeof body.after === 'string' ? body.after : undefined);
     });
     return c.json(todo, 201);
   });
 
-  api.post('/todos/export', async (c) => {
-    const body = (await c.req.json()) as ExportTodosRequest;
-    const branch = typeof body.branch === 'string' ? body.branch.trim() : '';
-    if (!branch) throw badRequest('branch is required');
-    const s = await store.load();
-    const todos = s.todos.filter((t) => t.branch === branch && (body.includeDone === true || t.status === 'open'));
-    const res: TodoExportResponse = { text: formatTodosExport({ repoRoot: repo.root, branch, todos }), count: todos.length };
+  api.post('/todos/:id/move', async (c) => {
+    const id = c.req.param('id');
+    const body = (await c.req.json()) as MoveRequest;
+    if (body.before !== null && typeof body.before !== 'string') throw badRequest('before must be an id or null');
+    const todos = await store.update((s) => {
+      const next = moveBefore(s.todos, id, body.before);
+      if (!next) throw notFound('todo not found');
+      s.todos = next;
+      return s.todos;
+    });
+    const res: TodosResponse = { todos };
     return c.json(res);
   });
 
@@ -644,24 +713,34 @@ export function createApp(opts: AppOptions): Hono {
   api.get('/commits', async (c) => {
     const limitRaw = Number(c.req.query('limit') ?? 200);
     const limit = Math.min(Math.max(Number.isFinite(limitRaw) ? Math.floor(limitRaw) : 200, 1), 1000);
-    const before = c.req.query('before') || undefined;
+    // Pages are an offset into one walk from `ref`, not "everything before the last sha seen":
+    // resuming from a sha only reaches that sha's ancestors, which in a history with merges
+    // silently drops the other branch's commits at every page boundary.
+    const offsetRaw = Number(c.req.query('offset') ?? 0);
+    const offset = Number.isFinite(offsetRaw) && offsetRaw > 0 ? Math.floor(offsetRaw) : 0;
     const filePath = c.req.query('path') || undefined;
     const ref = c.req.query('ref') || undefined;
     const rootParam = c.req.query('root') || undefined;
+    const q = (c.req.query('q') ?? '').trim();
+    const author = (c.req.query('author') ?? '').trim();
+    const firstParent = c.req.query('firstParent') === '1';
     let cwd = repo.root;
     if (rootParam) {
       const wt = (await worktrees()).find((w) => w.path === rootParam);
       if (!wt && rootParam !== repo.root) throw badRequest('unknown root', 'unknown_worktree');
       cwd = rootParam;
     }
-    if (before && !isValidRef(before)) throw badRequest('invalid before ref');
     if (ref && !isValidRef(ref)) throw badRequest('invalid ref');
     if (filePath && (filePath.startsWith('/') || filePath.split('/').includes('..'))) throw badRequest('invalid path');
+    if (q.length > 200 || author.length > 200) throw badRequest('search text too long');
 
-    const SEP = '\x1f';
-    const args = ['log', `--max-count=${limit + 1}`, `--format=%H${SEP}%h${SEP}%an${SEP}%ae${SEP}%aI${SEP}%P${SEP}%s`];
-    if (before) args.push(before);
-    else if (ref) args.push(ref);
+    const args = ['log', `--max-count=${limit + 1}`, `--skip=${offset}`, `--format=${COMMIT_FORMAT}`];
+    if (firstParent) args.push('--first-parent');
+    // Both patterns are literal, case-insensitive substrings — what a search box promises.
+    if (q || author) args.push('--fixed-strings', '--regexp-ignore-case');
+    if (q) args.push(`--grep=${q}`);
+    if (author) args.push(`--author=${author}`);
+    if (ref) args.push(ref);
     if (filePath) args.push('--', filePath);
     let stdout = '';
     try {
@@ -670,16 +749,62 @@ export function createApp(opts: AppOptions): Hono {
       if (e instanceof HttpError && e.code === 'git_failed') stdout = '';
       else throw e;
     }
-    let commits: CommitInfo[] = stdout
-      .split('\n')
-      .filter(Boolean)
-      .map((line) => {
-        const [sha = '', shortSha = '', author = '', email = '', date = '', parents = '', ...rest] = line.split(SEP);
-        return { sha, shortSha, author, email, date, parents: parents.split(' ').filter(Boolean), subject: rest.join(SEP) };
-      });
-    if (before) commits = commits.filter((x) => x.sha !== before && !x.sha.startsWith(before));
-    const hasMore = commits.length > limit;
-    const res: CommitsResponse = { commits: commits.slice(0, limit), hasMore };
+    const rows = parseCommitLog(stdout);
+    const hasMore = rows.length > limit;
+    let commits = rows.slice(0, limit);
+    // A search term that looks like a sha also resolves as one, so pasting a sha from a terminal
+    // finds the commit even though the message does not mention it. Only on the first page: the
+    // pages after it carry the same `q`, and the hit would repeat at the top of every one.
+    if (q && offset === 0 && /^[0-9a-f]{4,40}$/i.test(q)) {
+      const sha = await revParse(cwd, `${q}^{commit}`);
+      if (sha && !commits.some((x) => x.sha === sha)) {
+        const hit = parseCommitLog((await runGit(['log', '--max-count=1', `--format=${COMMIT_FORMAT}`, sha], { cwd })).stdout)[0];
+        if (hit) commits = [hit, ...commits];
+      }
+    }
+    const res: CommitsResponse = { commits, hasMore };
+    return c.json(res);
+  });
+
+  // Where HEAD forked off a base: the commit a `base` target diffs against, with how far the two
+  // sides have moved since. Its own route, not a field of the log, so that editing the base in the
+  // Commits panel does not re-walk the history.
+  api.get('/fork-point', async (c) => {
+    const base = (c.req.query('base') ?? '').trim();
+    if (!isValidRef(base)) throw badRequest('invalid base ref');
+    const cwd = await knownRoot(c.req.query('root') || undefined);
+    if (!(await refExists(cwd, base))) throw badRequest(`unknown ref: ${base}`, 'unknown_ref');
+    // An unborn HEAD forked off nothing; the `base` target diffs it against the empty tree instead.
+    const sha = (await refExists(cwd, 'HEAD')) ? await mergeBase(cwd, base, 'HEAD') : undefined;
+    if (!sha) throw badRequest(`${base} and HEAD share no history`, 'no_merge_base');
+    // `<only on base>\t<only on HEAD>`. `base` cannot contain `..`, so the range is ours.
+    const counts = (await runGit(['rev-list', '--left-right', '--count', `${base}...HEAD`], { cwd })).stdout.trim().split(/\s+/);
+    const res: ForkPointResponse = { base, sha, ahead: Number(counts[1] ?? 0), behind: Number(counts[0] ?? 0) };
+    return c.json(res);
+  });
+
+  // ---- worktrees -----------------------------------------------------------
+
+  api.get('/worktrees', async (c) => {
+    const list = await listWorktreesDetailed(repo);
+    const res: WorktreesResponse = { worktrees: list, branches: await listBranches(repo, list), pathPrefix: worktreePathPrefix(repo) };
+    return c.json(res);
+  });
+
+  api.post('/worktrees', async (c) => {
+    const body = (await c.req.json()) as CreateWorktreeRequest;
+    if (typeof body.path !== 'string' || typeof body.branch !== 'string') throw badRequest('path and branch are required');
+    if (body.base !== undefined && typeof body.base !== 'string') throw badRequest('base must be a ref');
+    const made = await addWorktree(repo, body);
+    worktreeCache = null;
+    return c.json(made, 201);
+  });
+
+  api.post('/worktrees/remove', async (c) => {
+    const body = (await c.req.json()) as RemoveWorktreeRequest;
+    if (typeof body.path !== 'string') throw badRequest('path is required');
+    const res = await removeWorktree(repo, body);
+    worktreeCache = null;
     return c.json(res);
   });
 

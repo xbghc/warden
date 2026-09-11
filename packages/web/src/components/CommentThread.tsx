@@ -55,7 +55,10 @@ export function CommentCard({ comment, showSnippet = false, showFile = false }: 
       <div className="comment-head">
         <span className="mono comment-location" title={location} aria-label={location}>
           {showFile && <span className="file">{comment.filePath.split('/').pop()}</span>}
-          <span className="comment-line">{showFile ? ':' : '行 '}{range}</span>
+          <span className="comment-line">
+            {showFile ? ':' : '行 '}
+            {range}
+          </span>
         </span>
         {comment.side === 'old' && <span className="badge">修改前</span>}
         {comment.status === 'exported' && (
@@ -105,7 +108,8 @@ export function CommentCard({ comment, showSnippet = false, showFile = false }: 
       {showSnippet && comment.codeSnippet.length > 0 && (
         <pre className="snippet">
           {comment.codeSnippet.map((l, i) => (
-            <div key={i}>
+            // biome-ignore lint/suspicious/noArrayIndexKey: Snippet line numbers are fixed within this comment snapshot.
+            <div key={`${comment.id}:${comment.startLine + i}`}>
               <span className="ln">{comment.startLine + i}</span>
               {l}
             </div>

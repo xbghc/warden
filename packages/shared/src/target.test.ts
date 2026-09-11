@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatTargetKey, parseTargetKey, TargetKeyError } from './target.js';
+import { commentScopeKey, formatTargetKey, isLocalTarget, parseTargetKey, targetLabel, TargetKeyError } from './target.js';
 
 describe('target keys', () => {
   it('parses simple kinds', () => {
@@ -11,6 +11,20 @@ describe('target keys', () => {
     expect(parseTargetKey('commit:abc123')).toEqual({ kind: 'commit', sha: 'abc123' });
     expect(parseTargetKey('range:main..HEAD~3')).toEqual({ kind: 'range', base: 'main', head: 'HEAD~3' });
     expect(parseTargetKey('range:@..feature/x')).toEqual({ kind: 'range', base: '@', head: 'feature/x' });
+  });
+  it('parses base', () => {
+    expect(parseTargetKey('base:main')).toEqual({ kind: 'base', ref: 'main' });
+    expect(parseTargetKey('base:origin/main')).toEqual({ kind: 'base', ref: 'origin/main' });
+    expect(parseTargetKey('worktree:/home/u/a:b/wt:base:main')).toEqual({ kind: 'base', ref: 'main', worktree: '/home/u/a:b/wt' });
+    expect(() => parseTargetKey('base:')).toThrow(TargetKeyError);
+    expect(() => parseTargetKey('base:-x')).toThrow(TargetKeyError);
+    expect(() => parseTargetKey('base:a..b')).toThrow(TargetKeyError);
+  });
+  it('keeps a base target out of the local comment pool', () => {
+    expect(isLocalTarget(parseTargetKey('base:main'))).toBe(false);
+    expect(commentScopeKey('base:main')).toBe('base:main');
+    expect(commentScopeKey('worktree:/p/q:base:main')).toBe('worktree:/p/q:base:main');
+    expect(targetLabel(parseTargetKey('worktree:/p/wt:base:main'))).toBe('[wt] Branch vs main');
   });
   it('parses worktree variants including paths with colons', () => {
     expect(parseTargetKey('worktree:/home/u/wt:working')).toEqual({ kind: 'working', worktree: '/home/u/wt' });
@@ -31,7 +45,15 @@ describe('target keys', () => {
     expect(() => parseTargetKey('')).toThrow(TargetKeyError);
   });
   it('round-trips', () => {
-    for (const key of ['working', 'commit:abc', 'range:a..b', 'worktree:/p/q:staged', 'worktree:/p/q:range:x..y']) {
+    for (const key of [
+      'working',
+      'commit:abc',
+      'range:a..b',
+      'base:main',
+      'worktree:/p/q:staged',
+      'worktree:/p/q:range:x..y',
+      'worktree:/p/q:base:origin/main',
+    ]) {
       expect(formatTargetKey(parseTargetKey(key))).toBe(key);
     }
   });

@@ -1,16 +1,14 @@
-import { useEffect } from 'react';
-import { ActionIcon } from './ActionIcon';
+import { useEffect, useState } from 'react';
 import type { ChangeEvent, TargetKey } from '@warden/shared';
 import { formatTargetKey, isLocalTarget, tryParseTargetKey } from '@warden/shared';
 import { useStore } from '../store';
 import { api } from '../api';
 import { TopBar } from './TopBar';
-import { FileTree } from './FileTree';
+import { Sidebar } from './Sidebar';
 import { DiffPanel } from './DiffPanel';
 import { CommitsPanel } from './CommitsPanel';
-import { IssuesDrawer } from './IssuesDrawer';
-import { TodosDrawer } from './TodosDrawer';
-import { CommentRail } from './CommentRail';
+import { WorktreesPanel } from './WorktreesPanel';
+import { Rail } from './Rail';
 import { Toast } from './Toast';
 
 function isEditable(el: EventTarget | null): boolean {
@@ -36,6 +34,11 @@ export function App() {
   const repo = useStore((s) => s.repo);
   const panel = useStore((s) => s.panel);
   const root = useStore((s) => s.root);
+
+  // Once opened, the commit list stays mounted behind the diff: picking a commit switches to its
+  // diff, and coming back should land on the same page and scroll position, not at the top.
+  const [commitsOpened, setCommitsOpened] = useState(panel === 'commits');
+  if (panel === 'commits' && !commitsOpened) setCommitsOpened(true);
 
   useEffect(() => {
     void init();
@@ -76,6 +79,10 @@ export function App() {
       if (e.key === 'r') {
         e.preventDefault();
         void s.refresh();
+      } else if (e.key === 's') {
+        if (s.panel !== 'diff' || !s.stageSel || s.staging) return;
+        e.preventDefault();
+        void s.stageSelection();
       } else if (e.key === 'j' || e.key === 'k') {
         if (s.panel !== 'diff') return;
         const seq = navigableFiles(s);
@@ -92,9 +99,11 @@ export function App() {
           await s.openFile(item.path);
         })();
       } else if (e.key === 'Escape') {
-        if (s.reattaching) s.setReattaching(null);
+        if (s.stageSel) s.setStageSel(null);
+        else if (s.reattaching) s.setReattaching(null);
         else if (s.editor) s.setEditor(null);
         else if (s.focusedCommentId) void s.focusComment(null);
+        else if (s.prefs.railOpen) s.setRailOpen(false);
         else if (s.panel !== 'diff') s.setPanel('diff');
       }
     };
@@ -107,7 +116,7 @@ export function App() {
       <div className="fatal">
         <h1>warden</h1>
         <p>无法连接服务端：{initError}</p>
-        <button onClick={() => void init()}><ActionIcon name="refresh" label="重试" /></button>
+        <button onClick={() => void init()}>重试</button>
       </div>
     );
   }
@@ -117,9 +126,13 @@ export function App() {
     <div className="app">
       <TopBar />
       <div className="body">
-        <FileTree />
-        <main className="main">{panel === 'commits' ? <CommitsPanel /> : <DiffPanel />}</main>
-        {panel === 'issues' ? <IssuesDrawer /> : panel === 'todos' ? <TodosDrawer /> : panel === 'diff' ? <CommentRail /> : null}
+        <Sidebar />
+        <main className="main">
+          {commitsOpened && <CommitsPanel active={panel === 'commits'} />}
+          {panel === 'worktrees' && <WorktreesPanel />}
+          {panel !== 'commits' && panel !== 'worktrees' && <DiffPanel />}
+        </main>
+        <Rail />
       </div>
       <Toast />
     </div>

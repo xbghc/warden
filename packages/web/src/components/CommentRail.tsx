@@ -76,9 +76,8 @@ export function CommentRail() {
   );
 
   return (
-    <aside className="rail">
-      <div className="rail-head">
-        <strong><ActionIcon name="comments" label={`评论 ${counts.all}`} count={counts.all} /></strong>
+    <>
+      <div className="rail-tools">
         <div className="seg small">
           {filters.map(([key, label, n]) => (
             <button key={key} className={filter === key ? 'active' : ''} aria-pressed={filter === key} onClick={() => setFilter(key)}>
@@ -115,6 +114,6 @@ export function CommentRail() {
           </label>
         </div>
       </div>
-    </aside>
+    </>
   );
 }

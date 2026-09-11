@@ -1,4 +1,4 @@
-import type { Comment, Issue, Todo } from '@warden/shared';
+import type { Comment, Issue } from '@warden/shared';
 
 const LANG_BY_EXT: Record<string, string> = {
   ts: 'ts',
@@ -44,7 +44,7 @@ const LANG_BY_EXT: Record<string, string> = {
 
 export function langForPath(filePath: string): string {
   const m = /\.([A-Za-z0-9]+)$/.exec(filePath);
-  if (!m || !m[1]) return '';
+  if (!m?.[1]) return '';
   return LANG_BY_EXT[m[1].toLowerCase()] ?? m[1].toLowerCase();
 }
 
@@ -84,32 +84,9 @@ export interface IssueExportOptions {
 
 export function formatIssueExport({ repoRoot, issue, comments }: IssueExportOptions): string {
   const targets = [...new Set(comments.map((c) => c.targetKey))];
-  const head = [
-    `# Issue: ${issue.title}`,
-    `Status: ${issue.status}`,
-    `Target: ${targets.join(', ') || '-'}`,
-    `Repo: ${repoRoot}`,
-    `Count: ${comments.length}`,
-  ];
+  const head = [`# Issue: ${issue.title}`, `Status: ${issue.status}`, `Target: ${targets.join(', ') || '-'}`, `Repo: ${repoRoot}`, `Count: ${comments.length}`];
   const parts = [head.join('\n')];
   if (issue.body.trim()) parts.push(issue.body.trim());
   parts.push(...comments.map(formatCommentSection));
   return parts.join('\n\n') + '\n';
-}
-
-export interface TodoExportOptions {
-  repoRoot: string;
-  branch: string;
-  todos: Todo[];
-}
-
-/** Numbered checklist of a branch's todos, ready to paste at an agent. */
-export function formatTodosExport({ repoRoot, branch, todos }: TodoExportOptions): string {
-  const head = ['# TODO', `Branch: ${branch}`, `Repo: ${repoRoot}`, `Count: ${todos.length}`];
-  const sections = todos.map((t, i) => {
-    const title = `## ${i + 1}. ${t.title}${t.status === 'done' ? ' (done)' : ''}`;
-    const body = t.body.replace(/\r\n/g, '\n').trim();
-    return body ? `${title}\n${body}` : title;
-  });
-  return [head.join('\n'), ...sections].join('\n\n') + '\n';
 }

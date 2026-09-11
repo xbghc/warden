@@ -28,8 +28,39 @@ describe('StateStore', () => {
       targets: {},
       issues: [],
       todos: [],
-      prefs: { viewMode: 'unified', nvimSocketByRoot: {}, autoRefresh: true },
+      prefs: { viewMode: 'unified', nvimSocketByRoot: {}, autoRefresh: true, railOpen: false },
     });
+  });
+
+  it('drops rows that are missing the fields the server dereferences', async () => {
+    const file = path.join(dir, 'state.json');
+    const ok = {
+      id: 'ok',
+      targetKey: 'local',
+      filePath: 'a.ts',
+      side: 'new',
+      startLine: 1,
+      endLine: 1,
+      codeSnippet: [],
+      body: '',
+      status: 'active',
+      anchor: { hunkHash: 'h' },
+    };
+    await writeFile(
+      file,
+      JSON.stringify({
+        schemaVersion: 1,
+        repoRoot: '/repo',
+        targets: { local: { viewed: {}, comments: [null, 'junk', { id: 'no-anchor' }, ok] } },
+        issues: [null, { title: 'no id' }, { id: 'i1', title: 't', body: '', status: 'open', commentIds: [] }],
+        todos: [{ title: 'no id' }, { id: 't1', branch: 'main', title: 'x', body: '', status: 'open', createdAt: '', updatedAt: '' }],
+        prefs: {},
+      }),
+    );
+    const s = await new StateStore(file, '/repo').load();
+    expect(s.targets.local!.comments.map((c) => c.id)).toEqual(['ok']);
+    expect(s.issues.map((i) => i.id)).toEqual(['i1']);
+    expect(s.todos.map((t) => t.id)).toEqual(['t1']);
   });
 
   it('persists mutations atomically and reloads them', async () => {

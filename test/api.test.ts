@@ -1,9 +1,25 @@
 import os from 'node:os';
 import path from 'node:path';
-import { mkdtemp, rm, unlink } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdtemp, realpath, rm, unlink, writeFile } from 'node:fs/promises';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Hono } from 'hono';
-import type { Comment, CommitsResponse, ExportResponse, FileDiff, FilesResponse, ReanchorResponse, RepoInfo, ReviewState } from '@warden/shared';
+import type {
+  Comment,
+  CommitsResponse,
+  ExportResponse,
+  FileDiff,
+  FilesResponse,
+  ForkPointResponse,
+  ReanchorResponse,
+  RemoveWorktreeRequest,
+  RemoveWorktreeResponse,
+  RepoInfo,
+  ReviewState,
+  StageResponse,
+  WorktreeInfo,
+  WorktreesResponse,
+} from '@warden/shared';
 import { createApp, resolveRepo, StateStore, NvimService } from '@warden/server';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
@@ -105,7 +121,7 @@ describe('repo & targets', () => {
     expect(range.files.map((f) => f.path)).toEqual(['src/a.ts', 'src/util/c.ts']);
     const page = await json<CommitsResponse>(await get(`/api/commits?limit=1`));
     expect(page.hasMore).toBe(true);
-    const next = await json<CommitsResponse>(await get(`/api/commits?limit=5&before=${c2}`));
+    const next = await json<CommitsResponse>(await get(`/api/commits?limit=5&offset=1`));
     expect(next.commits.map((c) => c.sha)).toEqual([c1]);
     const byPath = await json<CommitsResponse>(await get(`/api/commits?path=${k('src/util/c.ts')}`));
     expect(byPath.commits.map((c) => c.sha)).toEqual([c2]);
@@ -117,13 +133,68 @@ describe('repo & targets', () => {
     expect((await get(`/api/targets/${k('range:-x..HEAD')}/files`)).status).toBe(400);
     expect((await get(`/api/targets/${k('bogus')}/files`)).status).toBe(400);
     expect((await get(`/api/targets/${k('worktree:/nope:working')}/files`)).status).toBe(400);
-    expect((await get(`/api/commits?before=--output=x`)).status).toBe(400);
+    expect((await get(`/api/commits?ref=--output=x`)).status).toBe(400);
     expect((await get(`/api/targets/${k('working')}/file?path=${k('../etc/passwd')}`)).status).toBe(400);
+    expect((await get(`/api/targets/${k('working')}/file?path=${k('src/b.ts')}&old=${k('../x')}`)).status).toBe(400);
+    expect((await get(`/api/targets/${k('working')}/file?path=${k('src/b.ts')}&old=${k('/etc/hostname')}`)).status).toBe(400);
+  });
+
+  it('a range whose ends share no history is a 400, like base', async () => {
+    // An orphan root, made without touching the index or the working tree.
+    const sha = fx.git('commit-tree', '4b825dc642cb6eb9a060e54bf8d69288fbee4904', '-m', 'island').trim();
+    fx.git('branch', 'island', sha);
+    try {
+      const res = await get(`/api/targets/${k('range:main..island')}/files`);
+      expect(res.status).toBe(400);
+      expect((await json<{ code: string }>(res)).code).toBe('no_merge_base');
+    } finally {
+      fx.git('branch', '-D', 'island');
+    }
+  });
+
+  it('decodes a target key exactly once', async () => {
+    fx.git('branch', 'feat/a%b');
+    try {
+      expect((await get(`/api/targets/${k('range:main..feat/a%b')}/files`)).status).toBe(200);
+    } finally {
+      fx.git('branch', '-D', 'feat/a%b');
+    }
+  });
+
+  it('keeps names with spaces, quotes and a leading colon intact end to end', async () => {
+    const names = ['docs/my notes.md', 'sp "q.ts', ':colon.ts'];
+    const spec = (p: string) => `:(literal)${p}`;
+    for (const p of names) await fx.write(p, 'one\n');
+    fx.git('add', '--', ...names.map(spec));
+    for (const p of names) await fx.write(p, 'two\n');
+    await fx.write(':untracked.ts', 'new\n');
+    try {
+      const staged = await json<FilesResponse>(await get(`/api/targets/${k('staged')}/files`));
+      const added = staged.files.filter((f) => names.includes(f.path));
+      expect(added.map((f) => f.path).sort()).toEqual([...names].sort());
+      expect(added.every((f) => f.status === 'added')).toBe(true);
+      const working = await json<FilesResponse>(await get(`/api/targets/${k('working')}/files`));
+      expect(working.files.map((f) => f.path)).toEqual(expect.arrayContaining([...names, ':untracked.ts']));
+      for (const p of [...names, ':untracked.ts']) {
+        const diff = await json<FileDiff>(await get(`/api/targets/${k('working')}/file?path=${k(p)}`));
+        expect(diff.path).toBe(p);
+        expect(diff.hunks[0]!.lines.some((l) => l.type === 'add')).toBe(true);
+      }
+      for (const p of names) {
+        const full = await json<{ content: string | null }>(await get(`/api/targets/${k('working')}/file/full?path=${k(p)}&side=old`));
+        expect(full.content).toBe('one\n');
+      }
+    } finally {
+      fx.git('rm', '-q', '-f', '--cached', '--', ...names.map(spec));
+      for (const p of [...names, ':untracked.ts']) await rm(path.join(fx.root, p), { force: true });
+      await rm(path.join(fx.root, 'docs'), { recursive: true, force: true });
+    }
   });
 
   it('worktree targets', async () => {
     const wtPath = path.join(os.tmpdir(), `warden-wt-${process.pid}-${Date.now()}`);
-    fx.git('worktree', 'add', '-q', '-b', 'feature', wtPath, 'HEAD');
+    // Forked one commit back, so main is already ahead of the branch: what a `base` target has to ignore.
+    fx.git('worktree', 'add', '-q', '-b', 'feature', wtPath, 'HEAD~1');
     try {
       const info = await json<RepoInfo>(await get('/api/repo'));
       const wt = info.worktrees.find((w) => !w.isMain)!;
@@ -137,8 +208,63 @@ describe('repo & targets', () => {
       const rangeKey = `worktree:${wt.path}:range:main..feature`;
       const range = await json<FilesResponse>(await get(`/api/targets/${k(rangeKey)}/files`));
       expect(range.files).toEqual([]);
+
+      // `base`: everything since the branch forked off main, committed or not. c2 landed on main
+      // after the fork, so its files stay out — a plain `git diff main` would list them as reverted.
+      fx.git('-C', wt.path, 'commit', '-q', '-a', '-m', 'feature: change a');
+      await writeFile(path.join(wt.path, 'src/b.ts'), 'changed, not committed\n');
+      await writeFile(path.join(wt.path, 'src/fresh.ts'), 'untracked\n');
+      const baseKey = `worktree:${wt.path}:base:main`;
+      const base = await json<FilesResponse>(await get(`/api/targets/${k(baseKey)}/files`));
+      expect(base.root).toBe(wt.path);
+      expect(base.files.map((f) => [f.path, f.status, f.untracked ?? false])).toEqual([
+        ['src/a.ts', 'modified', false],
+        ['src/b.ts', 'modified', false],
+        ['src/fresh.ts', 'added', true],
+      ]);
+      const oldSide = await json<{ content: string | null }>(await get(`/api/targets/${k(baseKey)}/file/full?path=${k('src/a.ts')}&side=old`));
+      expect(oldSide.content).toBe(['export function a() {', '  return 1;', '}', ''].join('\n'));
+      const newSide = await json<{ content: string | null }>(await get(`/api/targets/${k(baseKey)}/file/full?path=${k('src/b.ts')}&side=new`));
+      expect(newSide.content).toBe('changed, not committed\n');
+      // The range only sees the commit and the local views only the rest.
+      const committed = await json<FilesResponse>(await get(`/api/targets/${k(rangeKey)}/files`));
+      expect(committed.files.map((f) => f.path)).toEqual(['src/a.ts']);
+      const local = await json<FilesResponse>(await get(`/api/targets/${k(`worktree:${wt.path}:all`)}/files`));
+      expect(local.files.map((f) => f.path)).toEqual(['src/b.ts', 'src/fresh.ts']);
+      expect((await get(`/api/targets/${k(`worktree:${wt.path}:base:nope`)}/files`)).status).toBe(400);
+      // The fork point that `base` diffs against, seen from inside the worktree: one commit each side since.
+      const fork = await json<ForkPointResponse>(await get(`/api/fork-point?root=${k(wt.path)}&base=main`));
+      expect(fork).toEqual({ base: 'main', sha: fx.git('rev-parse', 'HEAD~1').trim(), ahead: 1, behind: 1 });
     } finally {
       fx.git('worktree', 'remove', '--force', wtPath);
+    }
+  });
+
+  it('forgets a remembered target whose worktree is gone', async () => {
+    const wtPath = path.join(os.tmpdir(), `warden-wt-gone-${process.pid}-${Date.now()}`);
+    fx.git('worktree', 'add', '-q', '--detach', wtPath);
+    try {
+      const wt = (await json<RepoInfo>(await get('/api/repo'))).worktrees.find((w) => !w.isMain)!;
+      const key = `worktree:${wt.path}:working`;
+      await send('PATCH', '/api/prefs', { lastTarget: key });
+      expect((await json<RepoInfo>(await get('/api/repo'))).defaultTarget).toBe(key);
+
+      // Deleted behind git's back: `git worktree list` still names it, as prunable.
+      await rm(wtPath, { recursive: true, force: true });
+      const info = await json<RepoInfo>(await get('/api/repo'));
+      expect(info.worktrees.map((w) => w.isMain)).toEqual([true]);
+      expect(info.defaultTarget).toBe('working');
+      expect((await json<ReviewState>(await get('/api/state'))).prefs.lastTarget).toBe('working');
+      const res = await get(`/api/targets/${k(key)}/files`);
+      expect(res.status).toBe(400);
+      expect((await json<{ code: string }>(res)).code).toBe('unknown_worktree');
+      expect((await send('POST', '/api/todos', { title: 'nowhere', root: wt.path })).status).toBe(400);
+
+      // A key that does not parse at all is not handed back either.
+      await send('PATCH', '/api/prefs', { lastTarget: 'bogus' });
+      expect((await json<RepoInfo>(await get('/api/repo'))).defaultTarget).toBe('working');
+    } finally {
+      fx.git('worktree', 'prune');
     }
   });
 });
@@ -189,11 +315,17 @@ describe('viewed, comments, export, issues', () => {
 
   it('reanchors after unrelated edits and orphans after edits to the commented line', async () => {
     // unrelated edit at top of file (same hunk, shifted)
-    await fx.write('src/a.ts', ['// header', 'export function a() {', '  return 3;', '}', '', 'export const extra = true;', 'export const more = 1;', ''].join('\n'));
+    await fx.write(
+      'src/a.ts',
+      ['// header', 'export function a() {', '  return 3;', '}', '', 'export const extra = true;', 'export const more = 1;', ''].join('\n'),
+    );
     let re = await json<ReanchorResponse>(await send('POST', `/api/targets/${k('working')}/comments/reanchor`, {}));
     expect(re.comments[0]).toMatchObject({ status: 'active', startLine: 3, endLine: 3 });
     // now change the commented line itself
-    await fx.write('src/a.ts', ['// header', 'export function a() {', '  return 4;', '}', '', 'export const extra = true;', 'export const more = 1;', ''].join('\n'));
+    await fx.write(
+      'src/a.ts',
+      ['// header', 'export function a() {', '  return 4;', '}', '', 'export const extra = true;', 'export const more = 1;', ''].join('\n'),
+    );
     re = await json<ReanchorResponse>(await send('POST', `/api/targets/${k('working')}/comments/reanchor`, {}));
     expect(re.comments[0]!.status).toBe('orphaned');
     expect(re.comments[0]!.codeSnippet).toEqual(['  return 3;']);
@@ -207,7 +339,9 @@ describe('viewed, comments, export, issues', () => {
   it('exports comments and marks them exported', async () => {
     const res = await json<ExportResponse>(await send('POST', '/api/comments/export', { commentIds: [comment.id, 'missing'] }));
     expect(res.count).toBe(1);
-    expect(res.text).toContain('# Review comments\nTarget: working\nRepo: ' + fx.root + '\nCount: 1\n\n## src/a.ts:3 (new)\n```ts\n3 |   return 4;\n```\n> why 3?');
+    expect(res.text).toContain(
+      '# Review comments\nTarget: working\nRepo: ' + fx.root + '\nCount: 1\n\n## src/a.ts:3 (new)\n```ts\n3 |   return 4;\n```\n> why 3?',
+    );
     const state = await json<ReviewState>(await get('/api/state'));
     const c = state.targets.local!.comments[0]!;
     expect(c.status).toBe('exported');
@@ -240,6 +374,20 @@ describe('viewed, comments, export, issues', () => {
     expect((await send('DELETE', `/api/issues/${created.id}`)).status).toBe(404);
   });
 
+  it('issues keep their own order: new on top, moved by drag', async () => {
+    const ids = async () => (await json<{ issues: { id: string }[] }>(await get('/api/issues'))).issues.map((i) => i.id);
+    const one = await json<{ id: string }>(await send('POST', '/api/issues', { title: 'one' }));
+    const two = await json<{ id: string }>(await send('POST', '/api/issues', { title: 'two' }));
+    const under = await json<{ id: string }>(await send('POST', '/api/issues', { title: 'under two', after: two.id }));
+    expect(await ids()).toEqual([two.id, under.id, one.id]);
+    const moved = await json<{ issues: { id: string }[] }>(await send('POST', `/api/issues/${one.id}/move`, { before: under.id }));
+    expect(moved.issues.map((i) => i.id)).toEqual([two.id, one.id, under.id]);
+    expect((await send('POST', `/api/issues/${one.id}/move`, { before: 'nope' })).status).toBe(404);
+    const closed = await json<{ status: string }>(await send('POST', '/api/issues', { title: 'closed on arrival', status: 'closed' }));
+    expect(closed.status).toBe('closed');
+    for (const id of await ids()) await send('DELETE', `/api/issues/${id}`);
+  });
+
   it('prefs are persisted', async () => {
     await send('PATCH', '/api/prefs', { viewMode: 'split', lastTarget: 'staged' });
     const info = await json<RepoInfo>(await get('/api/repo'));
@@ -254,6 +402,375 @@ describe('viewed, comments, export, issues', () => {
     expect(res.selected).toBeUndefined();
     const open = await send('POST', '/api/nvim/open', { socket: '/nope.sock', absPath: '/x', line: 1 });
     expect(open.status).toBe(400);
+  });
+});
+
+describe('staging', () => {
+  const stage = (key: string, body: unknown) => send('POST', `/api/targets/${k(key)}/stage`, body);
+  const fileDiff = async (key: string, p: string) => json<FileDiff>(await get(`/api/targets/${k(key)}/file?path=${k(p)}`));
+  const indexOf = (p: string) => fx.git('show', `:${p}`);
+  const L = (n: number) => `line ${n}`;
+  const lib = 'stage/lib.ts';
+  const base = Array.from({ length: 30 }, (_, i) => L(i + 1));
+
+  beforeAll(async () => {
+    // A 30-line file in the index, edited in three places in the working tree: three hunks.
+    await fx.write(lib, base.join('\n') + '\n');
+    fx.git('add', lib);
+    const edited = [...base];
+    edited[2] = 'line 3 changed';
+    edited.splice(15, 0, 'inserted after 15', 'inserted after 15 (b)');
+    edited.splice(edited.length - 2, 1);
+    await fx.write(lib, edited.join('\n') + '\n');
+  });
+
+  afterAll(async () => {
+    fx.git('rm', '-q', '-f', '--cached', '--', lib);
+    await rm(path.join(fx.root, 'stage'), { recursive: true, force: true });
+  });
+
+  it('stages a few lines of one hunk and leaves the rest unstaged', async () => {
+    const diff = await fileDiff('working', lib);
+    expect(diff.hunks).toHaveLength(3);
+    const h1 = diff.hunks[1]!;
+    const adds = h1.lines.map((l, i) => (l.type === 'add' ? i : -1)).filter((i) => i >= 0);
+    expect(adds).toHaveLength(2);
+    const res = await stage('working', { path: lib, contentHash: diff.contentHash, hunks: [{ index: 1, lines: [adds[0]] }] });
+    expect(res.status).toBe(200);
+    expect(await json<StageResponse>(res)).toEqual({ ok: true, lines: 1 });
+    const indexed = indexOf(lib).split('\n');
+    expect(indexed.slice(14, 17)).toEqual([L(15), 'inserted after 15', L(16)]);
+    expect(indexed[2]).toBe(L(3));
+    // The other addition is still there to stage, the first one moved to the staged view.
+    // (HEAD does not have the file, so the staged view shows all of the index as one addition.)
+    const staged = await fileDiff('staged', lib);
+    expect(staged.status).toBe('added');
+    const stagedLines = staged.hunks[0]!.lines.map((l) => l.content);
+    expect(stagedLines).toContain('inserted after 15');
+    expect(stagedLines).not.toContain('inserted after 15 (b)');
+    const working = await fileDiff('working', lib);
+    expect(working.hunks).toHaveLength(3);
+    expect(working.hunks[1]!.lines.filter((l) => l.type !== 'context').map((l) => l.content)).toEqual(['inserted after 15 (b)']);
+    // Nothing in the working tree moved.
+    expect(
+      (await json<{ content: string }>(await get(`/api/targets/${k('working')}/file/full?path=${k(lib)}&side=new`))).content.split('\n').slice(15, 17),
+    ).toEqual(['inserted after 15', 'inserted after 15 (b)']);
+  });
+
+  it('stages whole hunks, with later hunks placed by what earlier ones did', async () => {
+    const diff = await fileDiff('working', lib);
+    const res = await stage('working', { path: lib, contentHash: diff.contentHash, hunks: [{ index: 0 }, { index: 2 }] });
+    expect(res.status).toBe(200);
+    const indexed = indexOf(lib).split('\n').filter(Boolean);
+    expect(indexed[2]).toBe('line 3 changed');
+    expect(indexed).toHaveLength(30);
+    expect(indexed[indexed.length - 1]).toBe(L(30));
+    expect(indexed[indexed.length - 2]).toBe(L(28));
+    const working = await fileDiff('working', lib);
+    expect(working.hunks.flatMap((h) => h.lines.filter((l) => l.type !== 'context').map((l) => l.content))).toEqual(['inserted after 15 (b)']);
+  });
+
+  it('unstages a line from the staged view', async () => {
+    const staged = await fileDiff('staged', lib);
+    const hunk = staged.hunks.findIndex((h) => h.lines.some((l) => l.content === 'line 3 changed'));
+    const line = staged.hunks[hunk]!.lines.findIndex((l) => l.content === 'line 3 changed');
+    const res = await stage('staged', { path: lib, contentHash: staged.contentHash, hunks: [{ index: hunk, lines: [line] }] });
+    expect(res.status).toBe(200);
+    const indexed = indexOf(lib).split('\n');
+    // Only the addition came out: the deletion of the old line 3 is still staged.
+    expect(indexed.slice(0, 4)).toEqual([L(1), L(2), L(4), L(5)]);
+    const working = await fileDiff('working', lib);
+    expect(working.hunks[0]!.lines.filter((l) => l.type === 'add').map((l) => l.content)).toEqual(['line 3 changed']);
+  });
+
+  it('refuses a stale selection, a view that cannot be staged from and a file outside the view', async () => {
+    const diff = await fileDiff('working', lib);
+    const stale = await stage('working', { path: lib, contentHash: 'nope', hunks: [{ index: 0 }] });
+    expect(stale.status).toBe(409);
+    expect((await json<{ code: string }>(stale)).code).toBe('diff_changed');
+    for (const key of ['all', 'base:main', `commit:${fx.git('rev-parse', 'HEAD').trim()}`]) {
+      const res = await stage(key, { path: lib, contentHash: diff.contentHash });
+      expect(res.status).toBe(400);
+      expect((await json<{ code: string }>(res)).code).toBe('not_stageable');
+    }
+    expect((await stage('working', { path: 'README.md', contentHash: 'x' })).status).toBe(400);
+    expect((await stage('working', { path: lib, contentHash: diff.contentHash, hunks: [{ index: 9 }] })).status).toBe(400);
+    expect((await stage('working', { path: lib, contentHash: diff.contentHash, hunks: 'all' })).status).toBe(400);
+    expect((await stage('working', { path: '../x', contentHash: 'x' })).status).toBe(400);
+    // The index is exactly as the last successful call left it.
+    expect(indexOf(lib).split('\n').slice(0, 4)).toEqual([L(1), L(2), L(4), L(5)]);
+  });
+
+  it('stages part of an untracked file, then the rest of it, then takes it all back out', async () => {
+    const p = 'stage/docs/my notes 文档.md';
+    await fx.write(p, ['# title', '', 'first', 'second', ''].join('\n'));
+    let diff = await fileDiff('working', p);
+    expect(diff.untracked).toBe(true);
+    const res = await stage('working', { path: p, contentHash: diff.contentHash, hunks: [{ index: 0, lines: [0, 2] }] });
+    expect(res.status).toBe(200);
+    expect(indexOf(p)).toBe('# title\nfirst\n');
+    // Now tracked: the rest of it is an ordinary edit against the index.
+    diff = await fileDiff('working', p);
+    expect(diff.untracked).toBeUndefined();
+    expect(diff.status).toBe('modified');
+    expect((await stage('working', { path: p, contentHash: diff.contentHash })).status).toBe(200);
+    expect(indexOf(p)).toBe('# title\n\nfirst\nsecond\n');
+    expect((await fileDiff('staged', p)).status).toBe('added');
+    // Whole-file unstage of a new file removes it from the index; the working tree keeps it.
+    const staged = await fileDiff('staged', p);
+    expect((await stage('staged', { path: p, contentHash: staged.contentHash })).status).toBe(200);
+    expect(fx.git('ls-files', '--', p)).toBe('');
+    expect((await fileDiff('working', p)).untracked).toBe(true);
+  });
+
+  it('a staged deletion comes back whole, never in part', async () => {
+    const p = 'stage/gone.ts';
+    await fx.write(p, 'a\nb\nc\n');
+    fx.git('add', p);
+    await rm(path.join(fx.root, p));
+    let diff = await fileDiff('working', p);
+    expect(diff.status).toBe('deleted');
+    // Half the deletion: the index keeps the other half.
+    expect((await stage('working', { path: p, contentHash: diff.contentHash, hunks: [{ index: 0, lines: [0] }] })).status).toBe(200);
+    expect(indexOf(p)).toBe('b\nc\n');
+    diff = await fileDiff('working', p);
+    expect((await stage('working', { path: p, contentHash: diff.contentHash })).status).toBe(200);
+    expect(fx.git('ls-files', '--', p)).toBe('');
+    // That file was never committed, so once its deletion is staged there is nothing left to show.
+    // A committed file's staged deletion is the case that can be taken back: whole, not by line.
+    const a = 'src/a.ts';
+    fx.git('checkout', '--', a);
+    await rm(path.join(fx.root, a));
+    diff = await fileDiff('working', a);
+    expect((await stage('working', { path: a, contentHash: diff.contentHash })).status).toBe(200);
+    const staged = await fileDiff('staged', a);
+    expect(staged.status).toBe('deleted');
+    expect(staged.hunks[0]!.lines.length).toBeGreaterThan(1);
+    const part = await stage('staged', { path: a, contentHash: staged.contentHash, hunks: [{ index: 0, lines: [0] }] });
+    expect(part.status).toBe(400);
+    expect((await json<{ code: string }>(part)).code).toBe('whole_file_only');
+    expect((await stage('staged', { path: a, contentHash: staged.contentHash })).status).toBe(200);
+    expect(indexOf(a)).toBe(fx.git('show', `HEAD:${a}`));
+    fx.git('checkout', '--', a);
+  });
+
+  it('refuses to split a missing newline at the end of the file', async () => {
+    const p = 'stage/nonl.txt';
+    await fx.write(p, 'k\na');
+    fx.git('add', p);
+    await fx.write(p, 'k\na\nb');
+    const diff = await fileDiff('working', p);
+    // Lines: ctx k, -a (no newline), +a, +b (no newline).
+    const bad = await stage('working', { path: p, contentHash: diff.contentHash, hunks: [{ index: 0, lines: [3] }] });
+    expect(bad.status).toBe(400);
+    expect((await json<{ code: string }>(bad)).code).toBe('newline_split');
+    expect((await stage('working', { path: p, contentHash: diff.contentHash, hunks: [{ index: 0, lines: [1, 2] }] })).status).toBe(200);
+    expect(indexOf(p)).toBe('k\na\n');
+    fx.git('rm', '-q', '-f', '--cached', '--', p);
+    await rm(path.join(fx.root, p));
+  });
+
+  it('leaves no lock behind', async () => {
+    await expect(unlink(path.join(fx.root, '.git', 'index.lock'))).rejects.toThrow();
+  });
+});
+
+describe('commit log', () => {
+  const log = async (query: string) => json<CommitsResponse>(await get(`/api/commits?${query}`));
+  const subjects = (r: CommitsResponse) => r.commits.map((c) => c.subject.slice(0, 2)).sort();
+
+  beforeAll(async () => {
+    // Settle whatever the earlier tests left in the working tree, then merge a topic branch, so the
+    // history has a tag, a side branch and a merge commit: c5 (merge) → c4 (topic) + c3 (tag) → c2 → c1.
+    fx.git('add', '-A');
+    fx.git('commit', '-q', '-m', 'c3: settle the tree');
+    fx.git('tag', 'v1.0');
+    fx.git('checkout', '-q', '-b', 'topic');
+    await fx.write('topic.txt', 'topic\n');
+    fx.git('add', 'topic.txt');
+    fx.git('commit', '-q', '-m', 'c4: topic work');
+    fx.git('checkout', '-q', 'main');
+    fx.git('merge', '-q', '--no-ff', '-m', 'c5: merge topic', 'topic');
+  });
+
+  it('decorates commits with HEAD, branches and tags', async () => {
+    const { commits, hasMore } = await log('limit=10');
+    expect(commits).toHaveLength(5);
+    expect(hasMore).toBe(false);
+    const by = (prefix: string) => commits.find((c) => c.subject.startsWith(prefix))!;
+    expect(commits[0]!.sha).toBe(by('c5').sha);
+    expect(by('c5')).toMatchObject({ head: true, refs: [{ name: 'main', kind: 'branch' }] });
+    expect(by('c5').parents).toHaveLength(2);
+    expect(by('c4')).toMatchObject({ head: false, refs: [{ name: 'topic', kind: 'branch' }] });
+    expect(by('c3').refs).toEqual([{ name: 'v1.0', kind: 'tag' }]);
+    expect(by('c1').refs).toEqual([]);
+  });
+
+  it('pages through a merged history without losing or repeating a commit', async () => {
+    const seen: string[] = [];
+    let pages = 0;
+    for (;;) {
+      const page = await log(`limit=2&offset=${seen.length}`);
+      pages++;
+      seen.push(...page.commits.map((c) => c.sha));
+      if (!page.hasMore) break;
+      if (pages > 10) throw new Error('paging never ends');
+    }
+    expect(pages).toBe(3);
+    expect(seen).toHaveLength(5);
+    expect(new Set(seen).size).toBe(5);
+  });
+
+  it('searches message, author, sha and path on the server', async () => {
+    expect(subjects(await log('q=TOPIC'))).toEqual(['c4', 'c5']);
+    expect(subjects(await log('q=topic&firstParent=1'))).toEqual(['c5']);
+    expect(subjects(await log('firstParent=1'))).toEqual(['c1', 'c2', 'c3', 'c5']);
+    expect(subjects(await log('author=fixture'))).toHaveLength(5);
+    expect(subjects(await log('author=nobody'))).toEqual([]);
+    expect(subjects(await log(`q=topic&path=${k('topic.txt')}`))).toEqual(['c4']);
+
+    const all = (await log('limit=10')).commits;
+    const c1 = all.find((c) => c.subject.startsWith('c1'))!;
+    const c5 = all[0]!;
+    // A sha (or a prefix of one) finds the commit itself, ahead of any message matches.
+    expect((await log(`q=${c1.sha.slice(0, 7)}`)).commits[0]!.sha).toBe(c1.sha);
+    expect((await log(`q=${c1.sha}`)).commits.map((c) => c.sha)).toEqual([c1.sha]);
+    // ...but only on the first page, or it would head every page of the same search.
+    expect((await log(`q=${c1.sha}&offset=1`)).commits).toEqual([]);
+    // Pages walk from the given ref, so the list is stable while HEAD moves on.
+    expect((await log(`ref=${c5.parents[0]}&limit=10`)).commits.map((c) => c.sha)).not.toContain(c5.sha);
+    // Search text is never an option to git.
+    expect((await get('/api/commits?q=--output=x&author=--exec-path')).status).toBe(200);
+  });
+
+  it('reports where HEAD forked off a base', async () => {
+    const fork = (query: string) => get(`/api/fork-point?${query}`);
+    const all = (await log('limit=10')).commits;
+    const by = (prefix: string) => all.find((c) => c.subject.startsWith(prefix))!;
+    // topic is merged in, so the fork point is its tip and main is the merge commit ahead of it.
+    expect(await json(await fork('base=topic'))).toEqual({ base: 'topic', sha: by('c4').sha, ahead: 1, behind: 0 });
+    expect(await json(await fork('base=v1.0'))).toMatchObject({ sha: by('c3').sha, ahead: 2, behind: 0 });
+    expect(await json(await fork('base=main'))).toMatchObject({ sha: by('c5').sha, ahead: 0, behind: 0 });
+    expect(await json(await fork(`base=${by('c1').sha}`))).toMatchObject({ sha: by('c1').sha, ahead: 4, behind: 0 });
+    expect(await json<{ code: string }>(await fork('base=nope'))).toMatchObject({ code: 'unknown_ref' });
+    expect((await fork('')).status).toBe(400);
+    expect((await fork('base=--output=x')).status).toBe(400);
+    expect((await fork('base=main&root=/nowhere')).status).toBe(400);
+    // An orphan root shares nothing with HEAD, like for a `base` target.
+    const island = fx.git('commit-tree', '4b825dc642cb6eb9a060e54bf8d69288fbee4904', '-m', 'island').trim();
+    fx.git('branch', 'island', island);
+    try {
+      expect(await json<{ code: string }>(await fork('base=island'))).toMatchObject({ code: 'no_merge_base' });
+    } finally {
+      fx.git('branch', '-D', 'island');
+    }
+  });
+});
+
+describe('worktree management', () => {
+  // Beside the fixture, where the server suggests them: `<repo>-<name>`.
+  const wtDir = (name: string) => path.join(path.dirname(fx.root), `${path.basename(fx.root)}-${name}`);
+  const list = async () => json<WorktreesResponse>(await get('/api/worktrees'));
+  const create = (body: unknown) => send('POST', '/api/worktrees', body);
+  const remove = (body: RemoveWorktreeRequest) => send('POST', '/api/worktrees/remove', body);
+  const code = async (res: Response) => (await json<{ code: string }>(res)).code;
+
+  afterAll(async () => {
+    // Whatever a failing test left beside the fixture.
+    for (const name of ['one', 'two', 'gone']) {
+      try {
+        fx.git('worktree', 'remove', '--force', wtDir(name));
+      } catch {
+        /* not there */
+      }
+      await rm(wtDir(name), { recursive: true, force: true });
+    }
+    fx.git('worktree', 'prune');
+  });
+
+  it('lists the checkouts, the local branches and where a new one would go', async () => {
+    const res = await list();
+    expect(res.worktrees.map((w) => [w.isMain, w.branch, w.prunable])).toEqual([[true, 'main', false]]);
+    expect(res.branches.find((b) => b.name === 'main')).toMatchObject({ worktree: fx.root });
+    expect(res.branches.find((b) => b.name === 'topic')?.worktree).toBeUndefined();
+    expect(res.pathPrefix).toBe(wtDir(''));
+  });
+
+  it('makes a worktree on a new branch, counts its changes, and removes it only when forced', async () => {
+    const res = await create({ path: wtDir('one'), branch: 'agent/one', base: 'main' });
+    expect(res.status).toBe(201);
+    const made = await json<WorktreeInfo>(res);
+    expect(made).toMatchObject({ path: await realpath(wtDir('one')), branch: 'agent/one', isMain: false });
+    expect((await json<RepoInfo>(await get('/api/repo'))).worktrees.map((w) => w.branch)).toEqual(['main', 'agent/one']);
+    // The branch is taken now: neither a second checkout of it nor a second `-b` goes through.
+    expect(await code(await create({ path: wtDir('two'), branch: 'agent/one' }))).toBe('branch_in_use');
+    expect(await code(await create({ path: wtDir('two'), branch: 'agent/one', base: 'main' }))).toBe('branch_exists');
+
+    await writeFile(path.join(made.path, 'scratch.txt'), 'wip\n');
+    expect((await list()).worktrees.find((w) => w.path === made.path)).toMatchObject({ dirty: 1, prunable: false });
+    const dirty = await remove({ path: made.path });
+    expect(dirty.status).toBe(409);
+    expect(await code(dirty)).toBe('worktree_dirty');
+    expect(existsSync(made.path)).toBe(true);
+    // Forced, and the branch goes with it: nothing was committed on it, so `-d` agrees.
+    expect(await json<RemoveWorktreeResponse>(await remove({ path: made.path, force: true, deleteBranch: true }))).toEqual({ ok: true, branchDeleted: true });
+    expect((await list()).branches.map((b) => b.name)).not.toContain('agent/one');
+    expect(existsSync(made.path)).toBe(false);
+  });
+
+  it('checks out an existing branch, and keeps the branch on removal when it is not merged', async () => {
+    const made = await json<WorktreeInfo>(await create({ path: wtDir('two'), branch: 'topic' }));
+    expect(made.branch).toBe('topic');
+    await writeFile(path.join(made.path, 'more.txt'), 'more\n');
+    fx.git('-C', made.path, 'add', 'more.txt');
+    fx.git('-C', made.path, 'commit', '-q', '-m', 'topic: more');
+    const res = await json<RemoveWorktreeResponse>(await remove({ path: made.path, deleteBranch: true }));
+    expect(res.ok).toBe(true);
+    expect(res.branchDeleted).toBe(false);
+    expect(res.branchError).toMatch(/not fully merged/);
+    expect((await list()).branches.map((b) => b.name)).toContain('topic');
+    expect(existsSync(made.path)).toBe(false);
+  });
+
+  it('refuses a path outside the parent directory or inside a worktree, and bad names', async () => {
+    expect(await code(await create({ path: 'relative/dir', branch: 'x', base: 'main' }))).toBe('invalid_path');
+    expect(await code(await create({ path: '/nowhere/x', branch: 'x', base: 'main' }))).toBe('invalid_path');
+    expect(await code(await create({ path: path.join(fx.root, 'inside'), branch: 'x', base: 'main' }))).toBe('invalid_path');
+    expect(await code(await create({ path: fx.root, branch: 'x', base: 'main' }))).toBe('invalid_path');
+    expect(await code(await create({ path: path.dirname(fx.root), branch: 'x', base: 'main' }))).toBe('invalid_path');
+    expect(await code(await create({ path: wtDir('one'), branch: 'x', base: 'nope' }))).toBe('unknown_ref');
+    expect(await code(await create({ path: wtDir('one'), branch: 'nope' }))).toBe('unknown_ref');
+    for (const branch of ['-b', 'bad..name', 'a b', 'x@{-1}', 'refs/heads/x', 'x.lock', '']) {
+      expect(await code(await create({ path: wtDir('one'), branch, base: 'main' }))).toBe('invalid_branch');
+    }
+    expect(await code(await create({ path: wtDir('one'), branch: 'x', base: '--output=x' }))).toBe('invalid_ref');
+    expect((await create({ branch: 'x' })).status).toBe(400);
+    expect(await code(await remove({ path: fx.root }))).toBe('main_worktree');
+    expect(await code(await remove({ path: '/nowhere' }))).toBe('unknown_worktree');
+    expect(existsSync(wtDir('one'))).toBe(false);
+  });
+
+  it('drops the entry of a worktree whose directory is gone, branch included', async () => {
+    const made = await json<WorktreeInfo>(await create({ path: wtDir('gone'), branch: 'agent/gone', base: 'main' }));
+    await rm(made.path, { recursive: true, force: true });
+    // Not offered for review any more, but still listed here, and its branch is still taken.
+    expect((await json<RepoInfo>(await get('/api/repo'))).worktrees.map((w) => w.path)).not.toContain(made.path);
+    const res = await list();
+    expect(res.worktrees.find((w) => w.path === made.path)).toMatchObject({ prunable: true, dirty: 0 });
+    expect(res.branches.find((b) => b.name === 'agent/gone')?.worktree).toBe(made.path);
+    expect(await json<RemoveWorktreeResponse>(await remove({ path: made.path, deleteBranch: true }))).toEqual({ ok: true, branchDeleted: true });
+    const after = await list();
+    expect(after.worktrees.map((w) => w.path)).not.toContain(made.path);
+    expect(after.branches.map((b) => b.name)).not.toContain('agent/gone');
+  });
+
+  it('refuses a mutating request the browser marks as cross-site', async () => {
+    const headers = { 'content-type': 'application/json', 'sec-fetch-site': 'cross-site' };
+    const res = await app.request('/api/worktrees/remove', { method: 'POST', headers, body: JSON.stringify({ path: fx.root }) });
+    expect(res.status).toBe(403);
+    expect(await code(res)).toBe('cross_site');
+    expect((await app.request('/api/worktrees', { headers: { 'sec-fetch-site': 'cross-site' } })).status).toBe(200);
+    expect((await app.request('/api/worktrees', { headers: { 'sec-fetch-site': 'same-origin' } })).status).toBe(200);
   });
 });
 
