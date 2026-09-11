@@ -49,6 +49,7 @@ import { addWorktree, listBranches, listWorktreesDetailed, removeWorktree, workt
 import { ensureTarget, type StateStore } from './state.js';
 import { formatCommentsExport, formatIssueExport } from './export.js';
 import { NvimService } from './nvim.js';
+import { TmuxService } from './tmux.js';
 import { RepoWatcher } from './watcher.js';
 import { serveStaticFile } from './static.js';
 
@@ -56,6 +57,7 @@ export interface AppOptions {
   repo: RepoContext;
   store: StateStore;
   nvim?: NvimService;
+  tmux?: TmuxService;
   /** Directory of the built web app; when omitted only /api is served. */
   webDir?: string;
   /** Poll interval of the repository watchers; tests use a short one. */
@@ -784,6 +786,16 @@ export function createApp(opts: AppOptions): Hono {
   });
 
   // ---- worktrees -----------------------------------------------------------
+
+  const tmux = opts.tmux ?? new TmuxService();
+  api.get('/tmux/sessions', async (c) => c.json({ sessions: await tmux.sessions(repo.commonRoot) }));
+  api.post('/tmux/windows', async (c) => {
+    const body = await c.req.json();
+    if (!body || typeof body.path !== 'string' || typeof body.sessionId !== 'string') throw badRequest('path and sessionId are required');
+    const wt = (await worktrees(true)).find((w) => w.path === body.path && !w.bare);
+    if (!wt) throw badRequest('unknown worktree', 'unknown_worktree');
+    return c.json(await tmux.open(repo.commonRoot, wt.path, body.sessionId), 201);
+  });
 
   api.get('/worktrees', async (c) => {
     const list = await listWorktreesDetailed(repo);

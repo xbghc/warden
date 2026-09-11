@@ -520,37 +520,13 @@ kbd {
 }
 /* The three destinations, and the only navigation in the app. */
 .side-nav {
-  display: flex;
-  align-items: stretch;
-  gap: 2px;
-  padding: 0 6px;
-  min-height: 32px;
+  padding: 8px 12px;
+  flex-shrink: 0;
 }
-.side-tab {
-  height: auto;
-  background: none;
-  border: none;
-  border-radius: 0;
-  padding: 0 8px;
-  color: var(--muted);
-  position: relative;
-}
-.side-tab:hover:not(:disabled) {
-  background: none;
-  color: var(--ink);
-}
-.side-tab.active {
-  color: var(--ink);
-  font-weight: 600;
-}
-.side-tab.active::after {
-  content: "";
-  position: absolute;
-  left: 8px;
-  right: 8px;
-  bottom: 0;
-  height: 2px;
-  background: var(--ink);
+.side-view-select {
+  width: 100%;
+  min-height: 30px;
+  font-weight: 500;
 }
 /* Where the commit and worktree panels portal their own controls. */
 .side-slot,
@@ -1572,8 +1548,8 @@ kbd {
 .wt-row {
   display: flex;
   align-items: flex-start;
-  gap: 12px;
-  padding: 10px 12px;
+  gap: 8px;
+  padding: 8px 10px;
   border: 1px solid var(--line);
   border-radius: var(--r-card);
   background: var(--surface);
@@ -1601,6 +1577,7 @@ kbd {
 }
 .wt-name {
   font-weight: 500;
+  overflow-wrap: anywhere;
 }
 .wt-path {
   font-size: 12px;
@@ -1613,6 +1590,78 @@ kbd {
   align-items: center;
   gap: 2px;
   flex: 0 0 auto;
+}
+.wt-comparison {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+.wt-commit-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-variant-numeric: tabular-nums;
+}
+.wt-extras {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+.wt-extras > .row-actions {
+  margin: 0;
+  gap: 2px;
+}
+.wt-expanded {
+  flex-basis: 100%;
+  min-width: 0;
+  margin-top: 4px;
+  padding: 12px;
+  background: var(--surface-2);
+  border-radius: var(--r-card);
+  overflow-wrap: anywhere;
+}
+.wt-commit {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 0;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  text-align: left;
+  white-space: normal;
+}
+.wt-commit > span {
+  flex: 1;
+  min-width: 0;
+}
+.wt-commit small {
+  color: var(--muted);
+}
+.wt-todo {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+.wt-todo summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.wt-todo.done summary > span:last-child {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+.wt-tmux > * + * {
+  margin-top: 8px;
+}
+@media (max-width: 650px) {
+  .wt-commit {
+    flex-wrap: wrap;
+  }
 }
 .wt-confirm {
   display: flex;

@@ -5,6 +5,8 @@ import { formatTargetKey, parseTargetKey } from '@warden/shared';
 import { api, ApiError } from '../api';
 import { copyText } from '../lib/clipboard';
 import { useStore } from '../store';
+import { WorktreeExtras } from './WorktreeExtras';
+import { ActionIcon } from './ActionIcon';
 
 /** `feature/x` as a directory name. */
 const slug = (branch: string) => branch.trim().replace(/\//g, '-');
@@ -184,21 +186,18 @@ export function WorktreesPanel() {
             <div key={wt.path} className={`wt-row ${isCurrent ? 'active' : ''} ${wt.prunable ? 'gone' : ''}`}>
               <div className="wt-main">
                 <div className="wt-head">
-                  <span className="wt-name">{dirName(wt.path)}</span>
+                  <span className="wt-name mono" title={wt.path}>
+                    {wt.branch ?? `detached ${wt.head.slice(0, 7)}`}
+                  </span>
                   {wt.isMain && <span className="badge">主仓库</span>}
-                  {wt.branch ? <span className="ref ref-branch">{wt.branch}</span> : <span className="ref">detached {wt.head.slice(0, 7)}</span>}
                   {wt.prunable ? (
                     <span className="badge badge-orphaned">目录已不存在</span>
                   ) : wt.dirty > 0 ? (
                     <span className="badge">{wt.dirty} 处未提交改动</span>
-                  ) : (
-                    <span className="muted small">干净</span>
-                  )}
+                  ) : null}
                   {isCurrent && <span className="badge badge-open">当前</span>}
                 </div>
-                <div className="wt-path mono muted" title={wt.path}>
-                  {wt.path}
-                </div>
+                <WorktreeExtras wt={wt} />
                 {confirming?.path === wt.path && (
                   <div className="wt-confirm">
                     <span>
@@ -227,11 +226,11 @@ export function WorktreesPanel() {
               <div className="wt-actions">
                 {!wt.prunable && !isCurrent && (
                   <button className="link" onClick={() => open(wt)} title="把 review 切换到这个 worktree">
-                    查看
+                    <ActionIcon name="forward" label="查看 worktree" />
                   </button>
                 )}
                 <button className="link" onClick={() => void copy(wt.path)} title="复制路径，贴给 agent">
-                  复制路径
+                  <ActionIcon name="copy" label="复制路径" />
                 </button>
                 {!wt.isMain && (
                   <button
@@ -239,7 +238,7 @@ export function WorktreesPanel() {
                     disabled={busy === wt.path || confirming?.path === wt.path}
                     onClick={() => setConfirming({ path: wt.path, forced: null, message: '' })}
                   >
-                    {wt.prunable ? '清理' : '删除'}
+                    <ActionIcon name="delete" label={wt.prunable ? '清理' : '删除'} />
                   </button>
                 )}
               </div>

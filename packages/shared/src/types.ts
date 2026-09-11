@@ -165,6 +165,21 @@ export interface WorktreeDetail extends WorktreeInfo {
   dirty: number;
   /** git still lists it but its directory is gone; removing it drops the entry, nothing else. */
   prunable: boolean;
+  comparison?: { base: string; ahead: number; behind: number; merged: boolean };
+  comparisonError?: string;
+}
+
+export interface TmuxSession {
+  id: string;
+  name: string;
+  path: string;
+}
+export interface TmuxSessionsResponse {
+  sessions: TmuxSession[];
+}
+export interface TmuxWindowResponse {
+  session: string;
+  window: string;
 }
 
 export interface BranchInfo {

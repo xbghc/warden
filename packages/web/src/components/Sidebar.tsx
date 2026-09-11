@@ -48,16 +48,19 @@ export function Sidebar() {
   return (
     <aside className="sidebar" style={{ width }} ref={asideRef}>
       <nav className="side-nav" aria-label="导航">
-        <button className={`side-tab ${panel === 'diff' ? 'active' : ''}`} aria-pressed={panel === 'diff'} onClick={() => setPanel('diff')}>
-          变更
-        </button>
-        <button className={`side-tab ${panel === 'commits' ? 'active' : ''}`} aria-pressed={panel === 'commits'} onClick={() => setPanel('commits')}>
-          提交
-        </button>
-        <button className={`side-tab ${panel === 'worktrees' ? 'active' : ''}`} aria-pressed={panel === 'worktrees'} onClick={() => setPanel('worktrees')}>
-          Worktree
-          {worktreeCount > 1 && <span className="tab-count">{worktreeCount}</span>}
-        </button>
+        <select
+          className="side-view-select"
+          aria-label="切换视图"
+          value={panel}
+          onChange={(event) => {
+            const value = event.target.value;
+            if (value === 'diff' || value === 'commits' || value === 'worktrees') setPanel(value);
+          }}
+        >
+          <option value="diff">变更</option>
+          <option value="commits">提交</option>
+          <option value="worktrees">Worktree{worktreeCount > 1 ? ` (${worktreeCount})` : ''}</option>
+        </select>
       </nav>
       {panel === 'diff' ? <FileTree /> : <div className="side-slot" ref={setSideSlot} />}
       <div className="side-grip" onPointerDown={onGrip} role="separator" aria-label="调整侧栏宽度" />

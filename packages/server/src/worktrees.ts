@@ -26,7 +26,22 @@ async function dirtyCount(cwd: string): Promise<number> {
 
 export async function listWorktreesDetailed(ctx: RepoContext): Promise<WorktreeDetail[]> {
   const all = await listWorktreesAll(ctx);
-  return Promise.all(all.map(async (w) => ({ ...w, dirty: w.prunable || w.bare ? 0 : await dirtyCount(w.path) })));
+  const main = all.find((w) => w.isMain);
+  return Promise.all(
+    all.map(async (w) => {
+      const detail: WorktreeDetail = { ...w, dirty: w.prunable || w.bare ? 0 : await dirtyCount(w.path) };
+      if (w.isMain) return detail;
+      if (!main?.head || !w.head || /^0+$/.test(main.head) || /^0+$/.test(w.head)) return { ...detail, comparisonError: '分支尚无提交' };
+      try {
+        const result = await runGit(['rev-list', '--left-right', '--count', `${main.head}...${w.head}`, '--'], { cwd: ctx.commonRoot });
+        const [behind, ahead] = result.stdout.trim().split(/\s+/).map(Number);
+        detail.comparison = { base: main.branch ?? `HEAD ${main.head.slice(0, 7)}`, ahead: ahead!, behind: behind!, merged: ahead === 0 };
+      } catch {
+        detail.comparisonError = '无法比较提交历史';
+      }
+      return detail;
+    }),
+  );
 }
 
 /** Local branches, each with the worktree that has it checked out (a prunable one still counts). */

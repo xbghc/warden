@@ -29,6 +29,8 @@ import type {
   UpdateTodoRequest,
   WorktreeInfo,
   WorktreesResponse,
+  TmuxSessionsResponse,
+  TmuxWindowResponse,
 } from '@warden/shared';
 
 export class ApiError extends Error {
@@ -115,6 +117,8 @@ export const api = {
   forkPoint: (params: { root?: string; base: string }) => req<ForkPointResponse>('GET', `/api/fork-point${q(params)}`),
 
   worktrees: () => req<WorktreesResponse>('GET', '/api/worktrees'),
+  tmuxSessions: () => req<TmuxSessionsResponse>('GET', '/api/tmux/sessions'),
+  openTmuxWindow: (body: { path: string; sessionId: string }) => req<TmuxWindowResponse>('POST', '/api/tmux/windows', body),
   createWorktree: (body: CreateWorktreeRequest) => req<WorktreeInfo>('POST', '/api/worktrees', body),
   removeWorktree: (body: RemoveWorktreeRequest) => req<RemoveWorktreeResponse>('POST', '/api/worktrees/remove', body),
 

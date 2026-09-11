@@ -366,3 +366,13 @@ MIT
 ## Storybook
 
 Run `pnpm storybook` for isolated review and layout components at http://127.0.0.1:6006. Stories use in-memory fixtures and include interaction checks. Run `pnpm build:storybook` to build the static preview.
+
+### Worktree details and tmux
+
+Each checkout reports commits ahead/behind the branch currently checked out in the main repository. “Merged” means its HEAD is reachable from the main checkout HEAD; squash merges and cherry-picks do not imply this. Expand a row to browse its paginated commit history (including shared commits) or view that branch’s todos.
+
+The optional tmux integration discovers sessions whose `session_path` resolves to the main repository directory. Click tmux to create a window immediately when exactly one session matches. With multiple matches, choose a session first. The new window starts in the worktree directory. It uses `tmux new-window -d -c` without sending a shell command; existing windows stay selected. No session is created automatically. Run warden alongside tmux in Linux, macOS, or WSL, using the same user/server environment. See the [tmux manual](https://man.openbsd.org/tmux.1).
+
+`GET /api/tmux/sessions` lists matching sessions. `POST /api/tmux/windows` accepts a registered worktree `path` and a matching `sessionId`; the server revalidates both before creating a window. This optional action creates a terminal window but does not modify repository files.
+
+The sidebar uses a view selector for Changes, Commits, and Worktrees. The `Layout/Sidebar` stories demonstrate the selector together with each view’s real sidebar controls and content.
