@@ -365,6 +365,8 @@ MIT
 
 ## Storybook
 
+[Browse the hosted Storybook](https://xbghc.github.io/warden/). Every push to `main` builds and deploys it through `.github/workflows/storybook-pages.yml`; the workflow can also be run manually. Repository Settings → Pages must use **GitHub Actions** as the publishing source.
+
 Run `pnpm storybook` for isolated review and layout components at http://127.0.0.1:6006. Stories use in-memory fixtures and include interaction checks. Run `pnpm build:storybook` to build the static preview.
 
 ### Worktree details and tmux

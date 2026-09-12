@@ -9,6 +9,8 @@ const config: StorybookConfig = {
   viteFinal(config) {
     return {
       ...config,
+      // Relative assets work both locally and under a GitHub Pages repository path.
+      base: './',
       server: { ...config.server, proxy: {} },
       build: { ...config.build, outDir: 'storybook-static' },
     };
