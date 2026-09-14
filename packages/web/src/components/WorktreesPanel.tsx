@@ -13,8 +13,11 @@ const slug = (branch: string) => branch.trim().replace(/\//g, '-');
 const dirName = (p: string) => p.split('/').filter(Boolean).pop() ?? p;
 
 /**
- * New worktree: a branch that does not exist yet is made from the base; one that does is checked
- * out as it is. The path follows the branch until it is edited by hand.
+ * New worktree: a branch that exists is checked out as it is, one only a remote has is checked out
+ * tracking the remote, and any other name becomes a branch from the base. Which of these a name is,
+ * the server decides when the request arrives — this list may predate a fetch — so the base goes out
+ * only when it was typed, never the suggestion shown in its place. The path follows the branch until
+ * it is edited by hand.
  */
 function AddForm({ data, onDone }: { data: WorktreesResponse; onDone: (path: string) => void }) {
   const repo = useStore((s) => s.repo);
@@ -24,8 +27,30 @@ function AddForm({ data, onDone }: { data: WorktreesResponse; onDone: (path: str
   const [path, setPath] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const name = branch.trim();
-  const existing = useMemo(() => data.branches.find((b) => b.name === name), [data.branches, name]);
-  const suggestedBase = repo?.defaultBase ?? 'HEAD';
+  const local = useMemo(() => data.branches.some((b) => b.name === name), [data.branches, name]);
+  // Remote branches do not come with the list — a remote can carry thousands — so the name typed is
+  // looked up on its own once typing pauses, to tell a remote branch from a new name before submitting.
+  const [lookup, setLookup] = useState<{ name: string; remotes: string[] } | null>(null);
+  useEffect(() => {
+    if (!name || local) return;
+    let alive = true;
+    const timer = setTimeout(() => {
+      api
+        .remoteBranches(name)
+        .then((res) => {
+          if (alive) setLookup({ name, remotes: res.remotes });
+        })
+        // A name git would refuse is on no remote either; submitting it says what is wrong with it.
+        .catch(() => {});
+    }, 250);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [name, local]);
+  const remotes = !local && lookup?.name === name ? lookup.remotes : [];
+  // Nothing is left to choose for a local branch, nor for a remote one when only one remote has it.
+  const baseFixed = local || remotes.length === 1;
   const shownPath = path ?? (name ? data.pathPrefix + slug(name) : '');
   // Only a branch nobody has checked out can be offered: git keeps one worktree per branch.
   const free = data.branches.filter((b) => !b.worktree);
@@ -36,7 +61,8 @@ function AddForm({ data, onDone }: { data: WorktreesResponse; onDone: (path: str
     if (!name || !target || busy) return;
     setBusy(true);
     try {
-      const made = await api.createWorktree({ path: target, branch: name, ...(existing ? {} : { base: base.trim() || suggestedBase }) });
+      const typed = base.trim();
+      const made = await api.createWorktree({ path: target, branch: name, ...(typed && !baseFixed ? { base: typed } : {}) });
       onDone(made.path);
     } catch (err) {
       showToast(err instanceof Error ? err.message : String(err), 'error');
@@ -65,9 +91,27 @@ function AddForm({ data, onDone }: { data: WorktreesResponse; onDone: (path: str
           ))}
         </datalist>
       </label>
-      <label className="field" title={existing ? '现有分支直接检出，不需要 base' : '新分支从这个 ref 创建'}>
+      <label
+        className="field"
+        title={
+          local
+            ? '现有分支直接检出，不需要 base'
+            : remotes.length === 1
+              ? `从 ${remotes[0]} 检出，本地分支跟踪它`
+              : remotes.length
+                ? '多个 remote 都有这个分支，填写要跟踪的那一个'
+                : '新分支从这个 ref 创建'
+        }
+      >
         基于
-        <input value={base} onChange={(e) => setBase(e.target.value)} placeholder={suggestedBase} disabled={!!existing} spellCheck={false} aria-label="base" />
+        <input
+          value={baseFixed ? '' : base}
+          onChange={(e) => setBase(e.target.value)}
+          placeholder={local ? '直接检出现有分支' : remotes.length ? remotes.join(' 或 ') : (repo?.defaultBase ?? 'HEAD')}
+          disabled={baseFixed}
+          spellCheck={false}
+          aria-label="base"
+        />
       </label>
       <label className="field">
         路径
@@ -81,7 +125,7 @@ function AddForm({ data, onDone }: { data: WorktreesResponse; onDone: (path: str
         />
       </label>
       <button type="submit" disabled={busy || !name || !shownPath.trim()}>
-        {busy ? '创建中…' : existing ? '检出到新 worktree' : '新建分支和 worktree'}
+        {busy ? '创建中…' : local ? '检出到新 worktree' : remotes.length ? '检出远程分支到新 worktree' : '新建分支和 worktree'}
       </button>
     </form>
   );

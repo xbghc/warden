@@ -208,6 +208,7 @@ export interface BranchInfo {
 
 export interface WorktreesResponse {
   worktrees: WorktreeDetail[];
+  /** Local branches only: a remote can carry thousands, so `GET /api/worktrees/remotes` asks about one name. */
   branches: BranchInfo[];
   /** `<parent of the main worktree>/<repo>-`: a new worktree's path is suggested as this plus its branch. */
   pathPrefix: string;
@@ -216,8 +217,17 @@ export interface WorktreesResponse {
 export interface CreateWorktreeRequest {
   path: string;
   branch: string;
-  /** Create `branch` from this ref; omitted = check out a branch that exists. */
+  /**
+   * Where a new `branch` starts. Omitted, a local branch is checked out, one only a remote has is
+   * checked out tracking it, and any other name starts from main/master. For a name that already
+   * exists it is refused, except as the remote branch to track when several remotes have the name.
+   */
   base?: string;
+}
+
+/** `GET /api/worktrees/remotes?branch=`: `<remote>/<branch>` for each remote that has the branch. */
+export interface RemoteBranchesResponse {
+  remotes: string[];
 }
 
 export interface RemoveWorktreeRequest {

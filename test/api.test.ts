@@ -677,7 +677,7 @@ describe('worktree management', () => {
 
   afterAll(async () => {
     // Whatever a failing test left beside the fixture.
-    for (const name of ['one', 'two', 'gone']) {
+    for (const name of ['one', 'two', 'gone', 'fresh', 'remote', 'both']) {
       try {
         fx.git('worktree', 'remove', '--force', wtDir(name));
       } catch {
@@ -732,6 +732,59 @@ describe('worktree management', () => {
     expect(existsSync(made.path)).toBe(false);
   });
 
+  it('starts a name no branch has from main when the request gives no base', async () => {
+    const made = await json<WorktreeInfo>(await create({ path: wtDir('fresh'), branch: 'agent/fresh' }));
+    expect(made).toMatchObject({ branch: 'agent/fresh', head: fx.git('rev-parse', 'main').trim() });
+    expect(await json<RemoveWorktreeResponse>(await remove({ path: made.path, deleteBranch: true }))).toEqual({ ok: true, branchDeleted: true });
+  });
+
+  it('checks out a branch only a remote has as a local branch tracking it, never from main', async () => {
+    const tip = fx.git('rev-parse', 'topic').trim();
+    fx.git('remote', 'add', 'origin', 'https://example.invalid/origin.git');
+    fx.git('remote', 'add', 'upstream', 'https://example.invalid/upstream.git');
+    for (const ref of ['origin/agent/remote', 'origin/agent/both', 'upstream/agent/both']) fx.git('update-ref', `refs/remotes/${ref}`, tip);
+    // `refname:short` would list the branch as `heads/topic` once a tag has its name.
+    fx.git('tag', 'topic', 'main');
+    try {
+      // The list stays local, however many branches the remotes carry; one name is looked up at a time.
+      const branches = (await list()).branches;
+      expect(branches.map((b) => b.name)).not.toContain('agent/remote');
+      expect(branches.filter((b) => b.name.endsWith('topic')).map((b) => b.name)).toEqual(['topic']);
+      const remotes = async (branch: string) => json<{ remotes: string[] }>(await get(`/api/worktrees/remotes?branch=${k(branch)}`));
+      expect(await remotes('agent/remote')).toEqual({ remotes: ['origin/agent/remote'] });
+      expect(await remotes('agent/both')).toEqual({ remotes: ['origin/agent/both', 'upstream/agent/both'] });
+      expect(await remotes('agent/none')).toEqual({ remotes: [] });
+      // A pattern would list every remote branch there is.
+      expect(await code(await get(`/api/worktrees/remotes?branch=${k('agent/*')}`))).toBe('invalid_branch');
+
+      // Either would put a second history under the name: a base of its own, or the remote's name as a new branch.
+      expect(await code(await create({ path: wtDir('remote'), branch: 'agent/remote', base: 'main' }))).toBe('branch_exists');
+      expect(await code(await create({ path: wtDir('remote'), branch: 'origin/agent/remote' }))).toBe('branch_exists');
+      const made = await json<WorktreeInfo>(await create({ path: wtDir('remote'), branch: 'agent/remote' }));
+      expect(made).toMatchObject({ branch: 'agent/remote', head: tip });
+      expect(fx.git('-C', made.path, 'rev-parse', '--abbrev-ref', '@{upstream}').trim()).toBe('origin/agent/remote');
+
+      // Two remotes have it: the base says which, and nothing else will do.
+      expect(await code(await create({ path: wtDir('both'), branch: 'agent/both' }))).toBe('ambiguous_branch');
+      expect(await code(await create({ path: wtDir('both'), branch: 'agent/both', base: 'main' }))).toBe('ambiguous_branch');
+      const both = await json<WorktreeInfo>(await create({ path: wtDir('both'), branch: 'agent/both', base: 'upstream/agent/both' }));
+      expect(both).toMatchObject({ branch: 'agent/both', head: tip });
+      expect(fx.git('-C', both.path, 'rev-parse', '--abbrev-ref', '@{upstream}').trim()).toBe('upstream/agent/both');
+    } finally {
+      for (const name of ['remote', 'both']) {
+        try {
+          fx.git('worktree', 'remove', '--force', wtDir(name));
+          fx.git('branch', '-D', `agent/${name}`);
+        } catch {
+          /* not made */
+        }
+      }
+      fx.git('tag', '-d', 'topic');
+      fx.git('remote', 'remove', 'origin');
+      fx.git('remote', 'remove', 'upstream');
+    }
+  });
+
   it('refuses a path outside the parent directory or inside a worktree, and bad names', async () => {
     expect(await code(await create({ path: 'relative/dir', branch: 'x', base: 'main' }))).toBe('invalid_path');
     expect(await code(await create({ path: '/nowhere/x', branch: 'x', base: 'main' }))).toBe('invalid_path');
@@ -739,7 +792,6 @@ describe('worktree management', () => {
     expect(await code(await create({ path: fx.root, branch: 'x', base: 'main' }))).toBe('invalid_path');
     expect(await code(await create({ path: path.dirname(fx.root), branch: 'x', base: 'main' }))).toBe('invalid_path');
     expect(await code(await create({ path: wtDir('one'), branch: 'x', base: 'nope' }))).toBe('unknown_ref');
-    expect(await code(await create({ path: wtDir('one'), branch: 'nope' }))).toBe('unknown_ref');
     for (const branch of ['-b', 'bad..name', 'a b', 'x@{-1}', 'refs/heads/x', 'x.lock', '']) {
       expect(await code(await create({ path: wtDir('one'), branch, base: 'main' }))).toBe('invalid_branch');
     }

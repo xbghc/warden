@@ -98,7 +98,7 @@ export async function currentBranch(cwd: string): Promise<string> {
 }
 
 /** The trunk a feature branch is most likely reviewed against: `main`, else `master`. */
-async function detectDefaultBase(cwd: string): Promise<string | undefined> {
+export async function detectDefaultBase(cwd: string): Promise<string | undefined> {
   for (const ref of ['main', 'master']) if (await refExists(cwd, ref)) return ref;
   return undefined;
 }

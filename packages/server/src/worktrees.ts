@@ -4,7 +4,7 @@ import type { BranchInfo, CreateWorktreeRequest, RemoveWorktreeRequest, RemoveWo
 import { isValidRef } from '@warden/shared';
 import { badRequest, HttpError } from './errors.js';
 import { GitError, refExists, runGit, runGitWrite } from './git.js';
-import { listWorktrees, listWorktreesAll, type RepoContext } from './repo.js';
+import { detectDefaultBase, listWorktrees, listWorktreesAll, type RepoContext } from './repo.js';
 
 /**
  * Where a new worktree goes unless the request says otherwise: beside the main worktree, named
@@ -85,9 +85,14 @@ export async function listWorktreesDetailed(ctx: RepoContext): Promise<WorktreeD
   );
 }
 
-/** Local branches, each with the worktree that has it checked out (a prunable one still counts). */
+/**
+ * Local branches, each with the worktree that has it checked out (a prunable one still counts).
+ * `lstrip=2` rather than `short`, which turns a branch that shares its name with a tag into
+ * `heads/<name>`. Remote branches are left out: a remote can carry thousands of them, so the form asks
+ * about the one name typed instead (`lookupRemoteBranches`).
+ */
 export async function listBranches(ctx: RepoContext, worktrees: WorktreeInfo[]): Promise<BranchInfo[]> {
-  const r = await runGit(['for-each-ref', '--format=%(refname:short)%09%(objectname:short)', 'refs/heads'], { cwd: ctx.commonRoot });
+  const r = await runGit(['for-each-ref', '--format=%(refname:lstrip=2)%09%(objectname:short)', 'refs/heads'], { cwd: ctx.commonRoot });
   const at = new Map<string, string>();
   for (const w of worktrees) if (w.branch) at.set(w.branch, w.path);
   return r.stdout
@@ -98,6 +103,17 @@ export async function listBranches(ctx: RepoContext, worktrees: WorktreeInfo[]):
       const worktree = at.get(name);
       return { name, sha, ...(worktree ? { worktree } : {}) };
     });
+}
+
+/**
+ * `<remote>/<branch>` for each remote that has the branch named in the form, so the form can say it
+ * will be checked out tracking one rather than started from the base.
+ */
+export async function lookupRemoteBranches(ctx: RepoContext, name: string): Promise<string[]> {
+  const branch = name.trim();
+  // The name becomes a `for-each-ref` pattern, where a `*` would match every remote branch there is.
+  await assertBranchName(ctx, branch);
+  return remoteBranches(ctx.commonRoot, branch);
 }
 
 /** A branch name git would accept, and one that is only ever a name: no `@{-1}`-style expansion. */
@@ -132,9 +148,20 @@ async function assertNewWorktreePath(ctx: RepoContext, worktrees: WorktreeInfo[]
   return target;
 }
 
+/** `<remote>/<branch>` for each remote that has the branch; `*` spans one path segment, the remote's name. */
+async function remoteBranches(cwd: string, branch: string): Promise<string[]> {
+  const r = await runGit(['for-each-ref', '--format=%(refname:lstrip=2)', `refs/remotes/*/${branch}`], { cwd });
+  return r.stdout.split('\n').filter(Boolean);
+}
+
 /**
- * `git worktree add`: with `base`, a new branch is made from it (`-b`); without, an existing branch
- * is checked out, which git allows in one worktree at a time.
+ * `git worktree add`, deciding what the branch name refers to when the request arrives rather than
+ * trusting the page's list, which may predate a fetch or a branch an agent just made. A local branch
+ * is checked out as it is, which git allows in one worktree at a time. A branch only a remote has
+ * becomes a local one tracking it (`--track -b`), as `git worktree add <path> <branch>` guesses:
+ * starting it from the default base would give the name a second history without the remote's
+ * commits, so a base is refused unless it says which remote — the one choice left when several have
+ * the branch. Any other name is a new branch from `base`, or from `main`/`master` when there is none.
  */
 export async function addWorktree(ctx: RepoContext, req: CreateWorktreeRequest): Promise<WorktreeInfo> {
   const branch = req.branch.trim();
@@ -143,18 +170,30 @@ export async function addWorktree(ctx: RepoContext, req: CreateWorktreeRequest):
   const existing = await listWorktreesAll(ctx);
   const target = await assertNewWorktreePath(ctx, existing, req.path.trim());
   const cwd = ctx.commonRoot;
-  const branchExists = await refExists(cwd, `refs/heads/${branch}`);
-  let args: string[];
   if (base) {
     if (!isValidRef(base)) throw badRequest(`invalid base ref: ${base}`, 'invalid_ref');
     if (!(await refExists(cwd, base))) throw badRequest(`unknown ref: ${base}`, 'unknown_ref');
-    if (branchExists) throw new HttpError(409, `branch ${branch} already exists`, 'branch_exists');
-    args = ['worktree', 'add', '-b', branch, target, base];
-  } else {
-    if (!branchExists) throw badRequest(`unknown branch: ${branch}`, 'unknown_ref');
+  }
+  let args: string[];
+  if (await refExists(cwd, `refs/heads/${branch}`)) {
+    if (base) throw new HttpError(409, `branch ${branch} already exists`, 'branch_exists');
     const holder = existing.find((w) => w.branch === branch);
     if (holder) throw new HttpError(409, `${branch} is already checked out at ${holder.path}`, 'branch_in_use');
     args = ['worktree', 'add', target, branch];
+  } else if (await refExists(cwd, `refs/remotes/${branch}`)) {
+    // A local `origin/x` would leave every later `origin/x` ambiguous, and it is never what was meant.
+    throw new HttpError(409, `${branch} is a remote branch; enter ${branch.slice(branch.indexOf('/') + 1)} to check it out`, 'branch_exists');
+  } else {
+    const remote = await remoteBranches(cwd, branch);
+    if (remote.length > 1 && !remote.includes(base ?? '')) {
+      throw new HttpError(409, `branch ${branch} exists on several remotes; enter ${remote.join(' or ')} as the base`, 'ambiguous_branch');
+    }
+    if (remote.length === 1 && base && base !== remote[0]) {
+      throw new HttpError(409, `branch ${branch} already exists as ${remote[0]}; leave the base empty to check it out`, 'branch_exists');
+    }
+    args = remote.length
+      ? ['worktree', 'add', '--track', '-b', branch, target, base || remote[0]!]
+      : ['worktree', 'add', '-b', branch, target, base || (await detectDefaultBase(cwd)) || 'HEAD'];
   }
   try {
     await runGitWrite(args, { cwd });

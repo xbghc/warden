@@ -24,6 +24,7 @@ import type {
   Prefs,
   ReanchorRequest,
   ReanchorResponse,
+  RemoteBranchesResponse,
   RemoveWorktreeRequest,
   RepoInfo,
   ReviewState,
@@ -45,7 +46,7 @@ import { currentBranch, getRepoInfo, listWorktrees, type RepoContext } from './r
 import { getFileDiff, getFullFile, listTargetDiffs, resolveTargetContext, toSummary, type TargetContext } from './targets.js';
 import { buildAnchor, reanchorComment } from './anchor.js';
 import { buildStagePatch } from './patch.js';
-import { addWorktree, listBranches, listWorktreesDetailed, removeWorktree, worktreePathPrefix } from './worktrees.js';
+import { addWorktree, listBranches, listWorktreesDetailed, lookupRemoteBranches, removeWorktree, worktreePathPrefix } from './worktrees.js';
 import { ensureTarget, type StateStore } from './state.js';
 import { formatCommentsExport, formatIssueExport } from './export.js';
 import { NvimService } from './nvim.js';
@@ -800,6 +801,12 @@ export function createApp(opts: AppOptions): Hono {
   api.get('/worktrees', async (c) => {
     const list = await listWorktreesDetailed(repo);
     const res: WorktreesResponse = { worktrees: list, branches: await listBranches(repo, list), pathPrefix: worktreePathPrefix(repo) };
+    return c.json(res);
+  });
+
+  // One name at a time: the list above leaves remote branches out, since a remote can carry thousands.
+  api.get('/worktrees/remotes', async (c) => {
+    const res: RemoteBranchesResponse = { remotes: await lookupRemoteBranches(repo, c.req.query('branch') ?? '') };
     return c.json(res);
   });
 

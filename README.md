@@ -103,9 +103,16 @@ the fix and delete or re-attach it.
 Agents do their best work each in a worktree of its own, and the sidebar's *Worktree* tab is
 where those are made and taken down without a trip to the terminal:
 
-- *新建 worktree*, the form in the sidebar, takes a branch and a base. A name that is not a branch yet becomes one from the
-  base (`main` or `master` unless you say otherwise; any ref goes) — `git worktree add -b <branch>
-  <path> <base>`; an existing branch is checked out as it is, unless another worktree already has it.
+- *新建 worktree*, the form in the sidebar, takes a branch and a base. An existing branch is checked
+  out as it is, unless another worktree already has it. A branch only a remote has is checked out
+  tracking the remote one — `git worktree add --track -b <branch> <path> <remote>/<branch>`, what
+  `git worktree add` itself guesses — rather than started afresh; when several remotes have it, the
+  base says which. The branch list offers local branches only, since a remote can carry thousands:
+  the name typed is looked up on its own (`GET /api/worktrees/remotes`), so the form says it is a
+  remote branch before you submit. Any other name becomes a branch from the base (`main`
+  or `master` unless you say otherwise; any ref goes) — `git worktree add -b <branch> <path> <base>`.
+  The server looks the name up when the request arrives, so a branch fetched or made after the page
+  loaded its list is still found, and a base typed for a name that already exists is refused.
   The path is suggested as a sibling of the main worktree named `<repo>-<branch>` (slashes become
   dashes) and can be edited, within limits: it has to sit under the main worktree's parent directory,
   outside every existing worktree, and be new or an empty directory.
@@ -322,8 +329,9 @@ taken from the request, only the line indices are, and they are checked against 
 first. `POST /api/worktrees` and `POST /api/worktrees/remove` run `git worktree add`, `git worktree
 remove` and `git branch -d` with a branch name git has validated, a ref that resolves, and a
 path confined to the main worktree's parent directory. Nothing writes to the working tree or HEAD of
-an existing checkout; refs change only when a worktree is made (its new branch) or removed (its merged
-branch, on request), and the review state lives outside the repository. A mutating request the
+an existing checkout; refs change only when a worktree is made (its new branch, plus the branch's
+upstream setting when it comes from a remote) or removed (its merged branch, on request), and the
+review state lives outside the repository. A mutating request the
 browser labels as coming from another site (`Sec-Fetch-Site: cross-site`) is refused with 403, so a
 page from elsewhere cannot drive the server through the browser it is open in.
 

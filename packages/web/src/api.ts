@@ -15,6 +15,7 @@ import type {
   NvimInstancesResponse,
   Prefs,
   ReanchorResponse,
+  RemoteBranchesResponse,
   RemoveWorktreeRequest,
   RemoveWorktreeResponse,
   RepoInfo,
@@ -117,6 +118,7 @@ export const api = {
   forkPoint: (params: { root?: string; base: string }) => req<ForkPointResponse>('GET', `/api/fork-point${q(params)}`),
 
   worktrees: () => req<WorktreesResponse>('GET', '/api/worktrees'),
+  remoteBranches: (branch: string) => req<RemoteBranchesResponse>('GET', `/api/worktrees/remotes${q({ branch })}`),
   tmuxSessions: () => req<TmuxSessionsResponse>('GET', '/api/tmux/sessions'),
   openTmuxWindow: (body: { path: string; sessionId: string }) => req<TmuxWindowResponse>('POST', '/api/tmux/windows', body),
   createWorktree: (body: CreateWorktreeRequest) => req<WorktreeInfo>('POST', '/api/worktrees', body),
