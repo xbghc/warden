@@ -180,6 +180,14 @@ export interface WorktreeDetail extends WorktreeInfo {
   dirty: number;
   /** git still lists it but its directory is gone; removing it drops the entry, nothing else. */
   prunable: boolean;
+  /**
+   * Its number when the checkout is one of warden's slots — `<repo>-<n>` beside the main worktree,
+   * the directories that outlive their branch and get checked out into again. A worktree made
+   * anywhere else has none.
+   */
+  slot?: number;
+  /** A slot with nothing on it, detached and clean, that the next checkout may take over. */
+  free: boolean;
   comparison?: WorktreeComparison;
   /** The upstream the branch is set to track when that ref no longer exists, as in `[origin/topic: gone]`. */
   upstreamGone?: string;
@@ -206,16 +214,21 @@ export interface BranchInfo {
   worktree?: string;
 }
 
+/** A slot by number, with the directory that is, or would be, its checkout. */
+export interface WorktreeSlot {
+  slot: number;
+  path: string;
+}
+
 export interface WorktreesResponse {
   worktrees: WorktreeDetail[];
   /** Local branches only: a remote can carry thousands, so `GET /api/worktrees/remotes` asks about one name. */
   branches: BranchInfo[];
-  /** `<parent of the main worktree>/<repo>-`: a new worktree's path is suggested as this plus its branch. */
-  pathPrefix: string;
+  /** The slot a checkout makes when it takes no free one: the lowest number with no directory yet. */
+  newSlot: WorktreeSlot;
 }
 
 export interface CreateWorktreeRequest {
-  path: string;
   branch: string;
   /**
    * Where a new `branch` starts. Omitted, a local branch is checked out, one only a remote has is
@@ -223,12 +236,35 @@ export interface CreateWorktreeRequest {
    * exists it is refused, except as the remote branch to track when several remotes have the name.
    */
   base?: string;
+  /**
+   * The slot to check out into: a free one, or a number no slot has yet, which is made. Omitted,
+   * the lowest free slot, else a new one. Never a path — the server composes those.
+   */
+  slot?: number;
 }
 
 /** `GET /api/worktrees/remotes?branch=`: `<remote>/<branch>` for each remote that has the branch. */
 export interface RemoteBranchesResponse {
   remotes: string[];
 }
+
+export interface CreateWorktreeResponse {
+  worktree: WorktreeInfo;
+  slot: number;
+  /** The slot was there and was switched to the branch: its directory, dependencies included, is as it was. */
+  reused: boolean;
+}
+
+export interface ReleaseWorktreeRequest {
+  path: string;
+  /** Discard the uncommitted changes; only ever sent after the reviewer confirmed a 409 (`worktree_dirty`). */
+  force?: boolean;
+  /** Also `git branch -d` the branch it held; one that is not merged is kept and reported. */
+  deleteBranch?: boolean;
+}
+
+/** What became of the branch, as after a removal. */
+export type ReleaseWorktreeResponse = RemoveWorktreeResponse;
 
 export interface RemoveWorktreeRequest {
   path: string;

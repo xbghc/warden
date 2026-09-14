@@ -7,6 +7,8 @@ with line comments you can copy back to the agent as a prompt.
 - Diff sources: working tree, staged, working tree vs HEAD, a branch since it forked off its base (commits and
   uncommitted work together), any commit, any two refs, and git worktrees.
 - Worktrees are made and taken down from the page, one per agent branch, with the path ready to paste.
+  Their directories are numbered slots beside the repository that get reused rather than remade:
+  releasing one keeps the directory, installed dependencies included, for the next branch.
 - Side-by-side **Unstaged** and **Staged** file lists: staged means reviewed. Stage from the UI by dragging
   over the lines you have read (or a hunk, or a file), and unstage the same way from the Staged view.
 - GitHub-style unified / side-by-side diff with syntax highlighting, collapsed file tree, lazy per-file loading, context expansion, virtual scrolling.
@@ -23,8 +25,10 @@ with line comments you can copy back to the agent as a prompt.
   path (each a `git log` on the server, not a filter over the rows already loaded), and a
   first-parent view that folds merged branches into their merge commits.
 - Click a line number to jump to that line in a running nvim instance (WSL2 friendly).
-- Git is touched through whitelisted read sub-commands plus exactly one write, `git apply --cached`, which is
-  what the stage / unstage controls run. The working tree and HEAD are never written.
+- Git is touched through whitelisted read sub-commands plus a few writes the server composes itself:
+  `git apply --cached`, which is what the stage / unstage controls run, and the worktree slot
+  operations (`worktree add` / `remove`, `branch`, `switch`). Reviewing and staging never write the
+  working tree or HEAD; only checking a branch out into a free slot, or releasing one, does.
 
 ## Install / run
 
@@ -65,8 +69,8 @@ Worktrees are discovered with `git worktree list` (and made in the *Worktrees* t
 share the review state of the main repository.
 One whose directory is gone (git lists it as *prunable*) is not offered, and a remembered target
 inside a removed worktree falls back to the working tree on the next load. The comments and viewed
-flags kept under that worktree's key stay in the state file and come back if a worktree is created
-at the same path again.
+flags kept under a worktree's key stay in the state file until a branch is checked out into that
+slot again, which drops them: they were about another branch.
 
 The sidebar is the navigation, and the only navigation: its three tabs — *变更*, *提交*, *Worktree* —
 each fill the left column with the controls for what the middle is showing, and the top bar carries
@@ -101,32 +105,50 @@ the fix and delete or re-attach it.
 ## Worktrees
 
 Agents do their best work each in a worktree of its own, and the sidebar's *Worktree* tab is
-where those are made and taken down without a trip to the terminal:
+where those are made and taken down without a trip to the terminal. The directories are numbered
+**slots** beside the main worktree — `<repo>-1`, `<repo>-2`, … (工位 in the UI) — rather than one
+directory per branch: a directory is where the dependencies get installed, and a fresh one for every
+branch meant installing them for every branch. A slot outlives its branch. Releasing it leaves the
+directory behind, `node_modules` and all, and the next branch is checked out into it.
 
-- *新建 worktree*, the form in the sidebar, takes a branch and a base. An existing branch is checked
-  out as it is, unless another worktree already has it. A branch only a remote has is checked out
-  tracking the remote one — `git worktree add --track -b <branch> <path> <remote>/<branch>`, what
-  `git worktree add` itself guesses — rather than started afresh; when several remotes have it, the
-  base says which. The branch list offers local branches only, since a remote can carry thousands:
-  the name typed is looked up on its own (`GET /api/worktrees/remotes`), so the form says it is a
-  remote branch before you submit. Any other name becomes a branch from the base (`main`
-  or `master` unless you say otherwise; any ref goes) — `git worktree add -b <branch> <path> <base>`.
-  The server looks the name up when the request arrives, so a branch fetched or made after the page
+- *检出分支*, the form in the sidebar, takes a branch, a base and a slot. An existing branch is
+  checked out as it is, unless another worktree already has it. A branch only a remote has is
+  checked out tracking the remote one (what `git worktree add` itself guesses) rather than started
+  afresh; when several remotes have it, the base says which. The branch list offers local branches
+  only, since a remote can carry thousands: the name typed is looked up on its own
+  (`GET /api/worktrees/remotes`), so the form says it is a remote branch before you submit. Any
+  other name becomes a branch from the base (`main` or `master` unless you say otherwise; any ref
+  goes). The server looks the name up when the request arrives, so a branch fetched or made after the page
   loaded its list is still found, and a base typed for a name that already exists is refused.
-  The path is suggested as a sibling of the main worktree named `<repo>-<branch>` (slashes become
-  dashes) and can be edited, within limits: it has to sit under the main worktree's parent directory,
-  outside every existing worktree, and be new or an empty directory.
-- Each row names the checkout, its branch, and whether it is clean or how many paths `git status`
-  reports. *查看* switches the review to it (the kind of target carries over, as with the selector
-  in the top bar), *复制路径* is for the agent's prompt.
-- *删除* always asks first, in the row it would remove, and runs `git worktree remove` without
-  `--force`: a worktree with uncommitted changes is not removed until you confirm again, since those
-  changes go with it, and whatever else git refuses without `--force` is put to you the same way.
-  *一并删除分支* is offered in that same confirmation, ticked by default, and takes the branch by
-  `git branch -d`: one that is not merged is kept and the toast says why. The comments and viewed
-  flags kept under the worktree's key stay in the state file, as before.
+- The slot picker lists the free slots, lowest first, then *新目录*: the next number, which is made
+  with `git worktree add [--track] [-b <branch>] <repo>-<n> [<base>]`. Into a free slot the checkout
+  is `git branch [--track] <branch> <base>` in the main worktree — so a base such as `HEAD` means what
+  it would to `worktree add` — followed by `git switch <branch>` in the slot, which rewrites the
+  tracked files and leaves the ignored ones alone; the toast says which of the two happened. Nothing
+  in the request names a directory: the server composes the path from the number, so a checkout
+  cannot land anywhere but beside the main worktree. Whatever review state was kept under the slot's
+  key (comments, viewed flags, its `base` pool included) is dropped: it was about another branch.
+- Each row names the branch, its directory, and whether it is clean or how many paths `git status`
+  reports. *查看* switches the review to it (the kind of target carries over), *复制路径* is for the
+  agent's prompt. A free slot is a row of its own, marked *空闲*, and its *检出到这里* points the form
+  at it.
+- *释放* is what a slot's row offers, and it always asks first, in the row: `git switch --detach` in
+  the slot leaves the last commit checked out with no branch on it and touches no file, and the slot
+  is free for the next checkout. A slot with uncommitted changes is not released until you confirm
+  again, since those changes go: only that second request discards them — `git reset --hard`, then
+  `git clean -fd` for the untracked files, never `-x`, so the ignored ones, the installed
+  dependencies above all, stay. *一并删除分支* is offered in the same confirmation,
+  ticked by default, and takes the branch by `git branch -d`: one that is not merged is kept and the
+  toast says why. *连目录一起删除* turns the release into a removal.
+- *删除* is for a worktree that is not a slot (one made by hand, wherever it is) and for a free slot
+  whose directory you no longer want; a slot on a branch gets it through *连目录一起删除*. It runs
+  `git worktree remove` without `--force`: uncommitted changes are put to you first, as with a
+  release, and so is whatever else git refuses without `--force`.
 - A worktree whose directory was deleted behind git's back is listed struck through; *清理* drops that
-  one entry (`git worktree remove` handles it; nothing is pruned wholesale).
+  one entry (`git worktree remove` handles it; nothing is pruned wholesale). A slot in that state
+  cannot be released or checked out into, and its number is skipped until the entry is gone.
+
+`git switch` needs git 2.23 or newer.
 
 ## Keyboard
 
@@ -326,12 +348,17 @@ flag; requests that would need anything else get HTTP 400. The writes are few an
 own arguments. `POST /api/targets/:key/stage` runs `git apply --cached` (with `--reverse` for the
 Staged view) on a patch the server itself builds from the diff it just produced — the patch is never
 taken from the request, only the line indices are, and they are checked against the diff's hash
-first. `POST /api/worktrees` and `POST /api/worktrees/remove` run `git worktree add`, `git worktree
-remove` and `git branch -d` with a branch name git has validated, a ref that resolves, and a
-path confined to the main worktree's parent directory. Nothing writes to the working tree or HEAD of
-an existing checkout; refs change only when a worktree is made (its new branch, plus the branch's
-upstream setting when it comes from a remote) or removed (its merged branch, on request), and the
-review state lives outside the repository. A mutating request the
+first. `POST /api/worktrees`, `POST /api/worktrees/release` and `POST /api/worktrees/remove` run
+`git worktree add`, `git branch`, `git switch`, `git worktree remove` and `git branch -d` with a
+branch name git has validated, a ref that resolves, and a slot path the server composes from a
+number — `<repo>-<n>` beside the main worktree; no request names a directory. The working tree and
+HEAD of an existing checkout are written only inside such a slot: `git switch <branch>` into a free
+one (detached, clean) when a branch is checked out there, `git switch --detach` when it is released,
+and `git reset --hard` plus `git clean -fd` only on the forced release the reviewer confirmed after
+a 409. Refs change only when a branch is made for a checkout (plus its upstream setting when it comes
+from a remote) — undone with `branch -D` should the switch into the slot then fail — or deleted on
+request after a release or removal (`-d`, so only a merged one), and the review state lives outside
+the repository. A mutating request the
 browser labels as coming from another site (`Sec-Fetch-Site: cross-site`) is refused with 403, so a
 page from elsewhere cannot drive the server through the browser it is open in.
 

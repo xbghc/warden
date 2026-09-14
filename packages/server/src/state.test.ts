@@ -2,7 +2,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { StateStore, ensureTarget, repoHash, stateFilePath } from './state.js';
+import type { Comment } from '@warden/shared';
+import { StateStore, defaultState, ensureTarget, forgetWorktreeTargets, repoHash, stateFilePath } from './state.js';
 
 let dir: string;
 beforeEach(async () => {
@@ -155,5 +156,40 @@ describe('StateStore', () => {
     const s = await new StateStore(file, '/repo').load();
     expect(s.schemaVersion).toBe(1);
     expect(s.targets).toEqual({});
+  });
+});
+
+describe('forgetWorktreeTargets', () => {
+  const comment = (id: string, targetKey: string): Comment => ({
+    id,
+    targetKey,
+    filePath: 'a.ts',
+    side: 'new',
+    startLine: 1,
+    endLine: 1,
+    codeSnippet: ['x'],
+    body: 'b',
+    status: 'active',
+    anchor: { hunkHash: 'h', lineHashes: [], contextBefore: [], contextAfter: [], hunkLineOffset: 0 },
+    createdAt: '',
+    updatedAt: '',
+  });
+
+  it('drops every target under the worktree path, and no other, and unlinks their comments from issues', () => {
+    const slot = '/x/repo-1';
+    const s = defaultState('/x/repo');
+    s.targets = {
+      [`worktree:${slot}:local`]: { viewed: {}, comments: [comment('c1', `worktree:${slot}:working`)], head: 'abc' },
+      [`worktree:${slot}:working`]: { viewed: { 'a.ts': 'h1' }, comments: [] },
+      [`worktree:${slot}:base:main`]: { viewed: {}, comments: [comment('c2', `worktree:${slot}:base:main`)] },
+      // `/x/repo-1` is a prefix of `/x/repo-10`; the colon after the path keeps them apart.
+      'worktree:/x/repo-10:local': { viewed: {}, comments: [comment('c3', 'worktree:/x/repo-10:working')] },
+      local: { viewed: {}, comments: [comment('c4', 'working')] },
+      'base:main': { viewed: { 'a.ts': 'h2' }, comments: [] },
+    };
+    s.issues = [{ id: 'i1', title: 't', body: '', status: 'open', commentIds: ['c1', 'c2', 'c3', 'c4'], createdAt: '', updatedAt: '' }];
+    forgetWorktreeTargets(s, slot);
+    expect(Object.keys(s.targets).sort()).toEqual(['base:main', 'local', 'worktree:/x/repo-10:local']);
+    expect(s.issues[0]!.commentIds).toEqual(['c3', 'c4']);
   });
 });

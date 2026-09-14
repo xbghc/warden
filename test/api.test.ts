@@ -1,23 +1,25 @@
 import os from 'node:os';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
-import { mkdtemp, realpath, rm, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, unlink, writeFile } from 'node:fs/promises';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Hono } from 'hono';
 import type {
   Comment,
   CommitsResponse,
+  CreateWorktreeResponse,
   ExportResponse,
   FileDiff,
   FilesResponse,
   ForkPointResponse,
   ReanchorResponse,
+  ReleaseWorktreeRequest,
+  ReleaseWorktreeResponse,
   RemoveWorktreeRequest,
   RemoveWorktreeResponse,
   RepoInfo,
   ReviewState,
   StageResponse,
-  WorktreeInfo,
   WorktreesResponse,
 } from '@warden/shared';
 import { createApp, resolveRepo, StateStore, NvimService } from '@warden/server';
@@ -668,74 +670,133 @@ describe('commit log', () => {
 });
 
 describe('worktree management', () => {
-  // Beside the fixture, where the server suggests them: `<repo>-<name>`.
-  const wtDir = (name: string) => path.join(path.dirname(fx.root), `${path.basename(fx.root)}-${name}`);
+  // Beside the fixture, where the server puts its slots: `<repo>-<n>`.
+  const slotDir = (n: number) => path.join(path.dirname(fx.root), `${path.basename(fx.root)}-${n}`);
+  const byHand = () => path.join(path.dirname(fx.root), `${path.basename(fx.root)}-feature`);
   const list = async () => json<WorktreesResponse>(await get('/api/worktrees'));
+  const slot = async (n: number) => (await list()).worktrees.find((w) => w.slot === n);
   const create = (body: unknown) => send('POST', '/api/worktrees', body);
+  const release = (body: ReleaseWorktreeRequest) => send('POST', '/api/worktrees/release', body);
   const remove = (body: RemoveWorktreeRequest) => send('POST', '/api/worktrees/remove', body);
   const code = async (res: Response) => (await json<{ code: string }>(res)).code;
 
   afterAll(async () => {
     // Whatever a failing test left beside the fixture.
-    for (const name of ['one', 'two', 'gone', 'fresh', 'remote', 'both']) {
+    for (const dir of [slotDir(1), slotDir(2), slotDir(3), byHand()]) {
       try {
-        fx.git('worktree', 'remove', '--force', wtDir(name));
+        fx.git('worktree', 'remove', '--force', dir);
       } catch {
         /* not there */
       }
-      await rm(wtDir(name), { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true });
     }
     fx.git('worktree', 'prune');
   });
 
-  it('lists the checkouts, the local branches and where a new one would go', async () => {
+  it('lists the checkouts, the local branches and the slot a checkout would make', async () => {
     const res = await list();
-    expect(res.worktrees.map((w) => [w.isMain, w.branch, w.prunable])).toEqual([[true, 'main', false]]);
+    expect(res.worktrees.map((w) => [w.isMain, w.branch, w.prunable, w.slot, w.free])).toEqual([[true, 'main', false, undefined, false]]);
     expect(res.branches.find((b) => b.name === 'main')).toMatchObject({ worktree: fx.root });
     expect(res.branches.find((b) => b.name === 'topic')?.worktree).toBeUndefined();
-    expect(res.pathPrefix).toBe(wtDir(''));
+    expect(res.newSlot).toEqual({ slot: 1, path: slotDir(1) });
   });
 
-  it('makes a worktree on a new branch, counts its changes, and removes it only when forced', async () => {
-    const res = await create({ path: wtDir('one'), branch: 'agent/one', base: 'main' });
+  it('makes slot 1 for a new branch, counts its changes, and releases it only when forced, keeping the directory', async () => {
+    const res = await create({ branch: 'agent/one', base: 'main' });
     expect(res.status).toBe(201);
-    const made = await json<WorktreeInfo>(res);
-    expect(made).toMatchObject({ path: await realpath(wtDir('one')), branch: 'agent/one', isMain: false });
+    const made = await json<CreateWorktreeResponse>(res);
+    expect(made).toMatchObject({ slot: 1, reused: false, worktree: { path: await realpath(slotDir(1)), branch: 'agent/one', isMain: false } });
     expect((await json<RepoInfo>(await get('/api/repo'))).worktrees.map((w) => w.branch)).toEqual(['main', 'agent/one']);
+    expect(await slot(1)).toMatchObject({ slot: 1, free: false, dirty: 0 });
     // The branch is taken now: neither a second checkout of it nor a second `-b` goes through.
-    expect(await code(await create({ path: wtDir('two'), branch: 'agent/one' }))).toBe('branch_in_use');
-    expect(await code(await create({ path: wtDir('two'), branch: 'agent/one', base: 'main' }))).toBe('branch_exists');
+    expect(await code(await create({ branch: 'agent/one' }))).toBe('branch_in_use');
+    expect(await code(await create({ branch: 'agent/one', base: 'main' }))).toBe('branch_exists');
+    // Nor is the slot free for another branch; the next one is the number after it.
+    expect(await code(await create({ branch: 'agent/two', slot: 1 }))).toBe('slot_in_use');
+    expect((await list()).newSlot).toEqual({ slot: 2, path: slotDir(2) });
 
-    await writeFile(path.join(made.path, 'scratch.txt'), 'wip\n');
-    expect((await list()).worktrees.find((w) => w.path === made.path)).toMatchObject({ dirty: 1, prunable: false });
-    const dirty = await remove({ path: made.path });
+    // What an install leaves behind is ignored: neither counted as dirty nor cleaned away.
+    await writeFile(path.join(fx.root, '.git', 'info', 'exclude'), 'node_modules/\n');
+    await mkdir(path.join(slotDir(1), 'node_modules'), { recursive: true });
+    await writeFile(path.join(slotDir(1), 'node_modules', 'keep'), 'installed\n');
+    await writeFile(path.join(slotDir(1), 'scratch.txt'), 'wip\n');
+    await writeFile(path.join(slotDir(1), 'src', 'a.ts'), 'edited\n');
+    expect(await slot(1)).toMatchObject({ dirty: 2, free: false });
+    const dirty = await release({ path: made.worktree.path });
     expect(dirty.status).toBe(409);
     expect(await code(dirty)).toBe('worktree_dirty');
-    expect(existsSync(made.path)).toBe(true);
-    // Forced, and the branch goes with it: nothing was committed on it, so `-d` agrees.
-    expect(await json<RemoveWorktreeResponse>(await remove({ path: made.path, force: true, deleteBranch: true }))).toEqual({ ok: true, branchDeleted: true });
+    expect(fx.git('-C', slotDir(1), 'rev-parse', '--abbrev-ref', 'HEAD').trim()).toBe('agent/one');
+    // Forced: the changes go, the directory and what is ignored in it stay, and the branch is
+    // deleted with them — nothing was committed on it, so `-d` agrees.
+    expect(await json<ReleaseWorktreeResponse>(await release({ path: made.worktree.path, force: true, deleteBranch: true }))).toEqual({
+      ok: true,
+      branchDeleted: true,
+    });
     expect((await list()).branches.map((b) => b.name)).not.toContain('agent/one');
-    expect(existsSync(made.path)).toBe(false);
+    expect(await slot(1)).toMatchObject({ slot: 1, free: true, detached: true, dirty: 0 });
+    expect(existsSync(path.join(slotDir(1), 'scratch.txt'))).toBe(false);
+    expect(existsSync(path.join(slotDir(1), 'node_modules', 'keep'))).toBe(true);
+    expect((await list()).newSlot).toEqual({ slot: 2, path: slotDir(2) });
   });
 
-  it('checks out an existing branch, and keeps the branch on removal when it is not merged', async () => {
-    const made = await json<WorktreeInfo>(await create({ path: wtDir('two'), branch: 'topic' }));
-    expect(made.branch).toBe('topic');
-    await writeFile(path.join(made.path, 'more.txt'), 'more\n');
-    fx.git('-C', made.path, 'add', 'more.txt');
-    fx.git('-C', made.path, 'commit', '-q', '-m', 'topic: more');
-    const res = await json<RemoveWorktreeResponse>(await remove({ path: made.path, deleteBranch: true }));
+  it('reuses the free slot for an existing branch, and keeps the branch on release when it is not merged', async () => {
+    const made = await json<CreateWorktreeResponse>(await create({ branch: 'topic' }));
+    expect(made).toMatchObject({ slot: 1, reused: true, worktree: { path: await realpath(slotDir(1)), branch: 'topic' } });
+    // The install survived the switch.
+    expect(existsSync(path.join(slotDir(1), 'node_modules', 'keep'))).toBe(true);
+    await writeFile(path.join(slotDir(1), 'more.txt'), 'more\n');
+    fx.git('-C', slotDir(1), 'add', 'more.txt');
+    fx.git('-C', slotDir(1), 'commit', '-q', '-m', 'topic: more');
+    const res = await json<ReleaseWorktreeResponse>(await release({ path: made.worktree.path, deleteBranch: true }));
     expect(res.ok).toBe(true);
     expect(res.branchDeleted).toBe(false);
     expect(res.branchError).toMatch(/not fully merged/);
     expect((await list()).branches.map((b) => b.name)).toContain('topic');
-    expect(existsSync(made.path)).toBe(false);
+    // Released where it was: the branch's last commit stays checked out, with nothing to lose.
+    expect(await slot(1)).toMatchObject({ free: true, detached: true, head: fx.git('rev-parse', 'topic').trim() });
+    expect(existsSync(path.join(slotDir(1), 'more.txt'))).toBe(true);
+  });
+
+  it('takes the slot asked for: a free one is switched, a new number is made, and a base is read in the main worktree', async () => {
+    // Slot 2 does not exist yet: made, and the free slot 1 stays free.
+    const two = await json<CreateWorktreeResponse>(await create({ branch: 'agent/two', base: 'main', slot: 2 }));
+    expect(two).toMatchObject({ slot: 2, reused: false, worktree: { path: await realpath(slotDir(2)), branch: 'agent/two' } });
+    expect(await slot(1)).toMatchObject({ free: true });
+    expect((await list()).newSlot).toEqual({ slot: 3, path: slotDir(3) });
+    // Slot 1 sits at topic's tip; a branch from `HEAD` still starts where the main worktree is.
+    const one = await json<CreateWorktreeResponse>(await create({ branch: 'agent/three', base: 'HEAD', slot: 1 }));
+    expect(one).toMatchObject({ slot: 1, reused: true, worktree: { branch: 'agent/three', head: fx.git('rev-parse', 'main').trim() } });
+    expect(await slot(1)).toMatchObject({ free: false, dirty: 0 });
+    expect(await code(await create({ branch: 'agent/four', slot: 1 }))).toBe('slot_in_use');
+    for (const bad of [0, -1, 1.5, '1']) expect(await code(await create({ branch: 'agent/four', slot: bad }))).toBe('invalid_slot');
+    for (const made of [one, two]) {
+      expect(await json<ReleaseWorktreeResponse>(await release({ path: made.worktree.path, deleteBranch: true }))).toEqual({ ok: true, branchDeleted: true });
+    }
+    // Unasked, the lowest free slot is taken.
+    const five = await json<CreateWorktreeResponse>(await create({ branch: 'agent/five', base: 'main' }));
+    expect(five).toMatchObject({ slot: 1, reused: true });
+    expect(await json<ReleaseWorktreeResponse>(await release({ path: five.worktree.path, deleteBranch: true }))).toEqual({ ok: true, branchDeleted: true });
+  });
+
+  it('forgets the review state kept under a slot when a branch is checked out into it', async () => {
+    const slotPath = (await slot(1))!.path;
+    const state = await json<ReviewState>(await get('/api/state'));
+    state.targets[`worktree:${slotPath}:base:main`] = { viewed: { 'src/a.ts': 'h' }, comments: [] };
+    state.targets[`worktree:${slotPath}:local`] = { viewed: {}, comments: [], head: 'abc' };
+    state.targets['base:main'] = { viewed: { 'src/a.ts': 'h' }, comments: [] };
+    await writeFile(stateFile, JSON.stringify(state));
+    const made = await json<CreateWorktreeResponse>(await create({ branch: 'agent/state', base: 'main', slot: 1 }));
+    expect(made.reused).toBe(true);
+    const keys = Object.keys((await json<ReviewState>(await get('/api/state'))).targets);
+    expect(keys.filter((k) => k.startsWith(`worktree:${slotPath}:`))).toEqual([]);
+    expect(keys).toContain('base:main');
+    expect(await json<ReleaseWorktreeResponse>(await release({ path: made.worktree.path, deleteBranch: true }))).toEqual({ ok: true, branchDeleted: true });
   });
 
   it('starts a name no branch has from main when the request gives no base', async () => {
-    const made = await json<WorktreeInfo>(await create({ path: wtDir('fresh'), branch: 'agent/fresh' }));
-    expect(made).toMatchObject({ branch: 'agent/fresh', head: fx.git('rev-parse', 'main').trim() });
-    expect(await json<RemoveWorktreeResponse>(await remove({ path: made.path, deleteBranch: true }))).toEqual({ ok: true, branchDeleted: true });
+    const made = await json<CreateWorktreeResponse>(await create({ branch: 'agent/fresh' }));
+    expect(made.worktree).toMatchObject({ branch: 'agent/fresh', head: fx.git('rev-parse', 'main').trim() });
+    expect(await json<ReleaseWorktreeResponse>(await release({ path: made.worktree.path, deleteBranch: true }))).toEqual({ ok: true, branchDeleted: true });
   });
 
   it('checks out a branch only a remote has as a local branch tracking it, never from main', async () => {
@@ -758,23 +819,29 @@ describe('worktree management', () => {
       expect(await code(await get(`/api/worktrees/remotes?branch=${k('agent/*')}`))).toBe('invalid_branch');
 
       // Either would put a second history under the name: a base of its own, or the remote's name as a new branch.
-      expect(await code(await create({ path: wtDir('remote'), branch: 'agent/remote', base: 'main' }))).toBe('branch_exists');
-      expect(await code(await create({ path: wtDir('remote'), branch: 'origin/agent/remote' }))).toBe('branch_exists');
-      const made = await json<WorktreeInfo>(await create({ path: wtDir('remote'), branch: 'agent/remote' }));
-      expect(made).toMatchObject({ branch: 'agent/remote', head: tip });
-      expect(fx.git('-C', made.path, 'rev-parse', '--abbrev-ref', '@{upstream}').trim()).toBe('origin/agent/remote');
+      expect(await code(await create({ branch: 'agent/remote', base: 'main' }))).toBe('branch_exists');
+      expect(await code(await create({ branch: 'origin/agent/remote' }))).toBe('branch_exists');
+      // Into a free slot the branch is made by `git branch --track`, before the switch.
+      const made = await json<CreateWorktreeResponse>(await create({ branch: 'agent/remote' }));
+      expect(made).toMatchObject({ slot: 1, reused: true, worktree: { branch: 'agent/remote', head: tip } });
+      expect(fx.git('-C', made.worktree.path, 'rev-parse', '--abbrev-ref', '@{upstream}').trim()).toBe('origin/agent/remote');
 
-      // Two remotes have it: the base says which, and nothing else will do.
-      expect(await code(await create({ path: wtDir('both'), branch: 'agent/both' }))).toBe('ambiguous_branch');
-      expect(await code(await create({ path: wtDir('both'), branch: 'agent/both', base: 'main' }))).toBe('ambiguous_branch');
-      const both = await json<WorktreeInfo>(await create({ path: wtDir('both'), branch: 'agent/both', base: 'upstream/agent/both' }));
-      expect(both).toMatchObject({ branch: 'agent/both', head: tip });
-      expect(fx.git('-C', both.path, 'rev-parse', '--abbrev-ref', '@{upstream}').trim()).toBe('upstream/agent/both');
+      // Two remotes have it: the base says which, and nothing else will do. Into a new slot, it is
+      // `worktree add --track`.
+      expect(await code(await create({ branch: 'agent/both', slot: 3 }))).toBe('ambiguous_branch');
+      expect(await code(await create({ branch: 'agent/both', base: 'main', slot: 3 }))).toBe('ambiguous_branch');
+      const both = await json<CreateWorktreeResponse>(await create({ branch: 'agent/both', base: 'upstream/agent/both', slot: 3 }));
+      expect(both).toMatchObject({ slot: 3, reused: false, worktree: { branch: 'agent/both', head: tip } });
+      expect(fx.git('-C', both.worktree.path, 'rev-parse', '--abbrev-ref', '@{upstream}').trim()).toBe('upstream/agent/both');
     } finally {
-      for (const name of ['remote', 'both']) {
+      for (const step of [
+        () => fx.git('-C', slotDir(1), 'switch', '-q', '--detach'),
+        () => fx.git('worktree', 'remove', '--force', slotDir(3)),
+        () => fx.git('branch', '-D', 'agent/remote'),
+        () => fx.git('branch', '-D', 'agent/both'),
+      ]) {
         try {
-          fx.git('worktree', 'remove', '--force', wtDir(name));
-          fx.git('branch', '-D', `agent/${name}`);
+          step();
         } catch {
           /* not made */
         }
@@ -785,35 +852,54 @@ describe('worktree management', () => {
     }
   });
 
-  it('refuses a path outside the parent directory or inside a worktree, and bad names', async () => {
-    expect(await code(await create({ path: 'relative/dir', branch: 'x', base: 'main' }))).toBe('invalid_path');
-    expect(await code(await create({ path: '/nowhere/x', branch: 'x', base: 'main' }))).toBe('invalid_path');
-    expect(await code(await create({ path: path.join(fx.root, 'inside'), branch: 'x', base: 'main' }))).toBe('invalid_path');
-    expect(await code(await create({ path: fx.root, branch: 'x', base: 'main' }))).toBe('invalid_path');
-    expect(await code(await create({ path: path.dirname(fx.root), branch: 'x', base: 'main' }))).toBe('invalid_path');
-    expect(await code(await create({ path: wtDir('one'), branch: 'x', base: 'nope' }))).toBe('unknown_ref');
+  it('refuses bad names and refs, and releases nothing but a slot', async () => {
+    expect(await code(await create({ branch: 'x', base: 'nope' }))).toBe('unknown_ref');
     for (const branch of ['-b', 'bad..name', 'a b', 'x@{-1}', 'refs/heads/x', 'x.lock', '']) {
-      expect(await code(await create({ path: wtDir('one'), branch, base: 'main' }))).toBe('invalid_branch');
+      expect(await code(await create({ branch, base: 'main' }))).toBe('invalid_branch');
     }
-    expect(await code(await create({ path: wtDir('one'), branch: 'x', base: '--output=x' }))).toBe('invalid_ref');
-    expect((await create({ branch: 'x' })).status).toBe(400);
+    expect(await code(await create({ branch: 'x', base: '--output=x' }))).toBe('invalid_ref');
+    expect((await create({ base: 'main' })).status).toBe(400);
     expect(await code(await remove({ path: fx.root }))).toBe('main_worktree');
+    expect(await code(await release({ path: fx.root }))).toBe('main_worktree');
     expect(await code(await remove({ path: '/nowhere' }))).toBe('unknown_worktree');
-    expect(existsSync(wtDir('one'))).toBe(false);
+    expect(await code(await release({ path: '/nowhere' }))).toBe('unknown_worktree');
+    // A checkout made by hand beside the repository is not a slot: detached and clean, it is still
+    // not free, no number is skipped for it, and it goes by removal, never release.
+    fx.git('worktree', 'add', '-q', '--detach', byHand());
+    const hand = (await list()).worktrees.find((w) => path.basename(w.path) === path.basename(byHand()))!;
+    expect(hand).toMatchObject({ free: false, detached: true, dirty: 0 });
+    expect(hand.slot).toBeUndefined();
+    expect((await list()).newSlot).toEqual({ slot: 3, path: slotDir(3) });
+    expect(await code(await release({ path: hand.path }))).toBe('not_a_slot');
+    expect(await json<RemoveWorktreeResponse>(await remove({ path: hand.path }))).toEqual({ ok: true, branchDeleted: false });
+    expect(existsSync(byHand())).toBe(false);
   });
 
-  it('drops the entry of a worktree whose directory is gone, branch included', async () => {
-    const made = await json<WorktreeInfo>(await create({ path: wtDir('gone'), branch: 'agent/gone', base: 'main' }));
-    await rm(made.path, { recursive: true, force: true });
+  it('drops the entry of a slot whose directory is gone, branch included, and skips its number meanwhile', async () => {
+    const made = await json<CreateWorktreeResponse>(await create({ branch: 'agent/gone', base: 'main', slot: 3 }));
+    await rm(made.worktree.path, { recursive: true, force: true });
     // Not offered for review any more, but still listed here, and its branch is still taken.
-    expect((await json<RepoInfo>(await get('/api/repo'))).worktrees.map((w) => w.path)).not.toContain(made.path);
+    expect((await json<RepoInfo>(await get('/api/repo'))).worktrees.map((w) => w.path)).not.toContain(made.worktree.path);
     const res = await list();
-    expect(res.worktrees.find((w) => w.path === made.path)).toMatchObject({ prunable: true, dirty: 0 });
-    expect(res.branches.find((b) => b.name === 'agent/gone')?.worktree).toBe(made.path);
-    expect(await json<RemoveWorktreeResponse>(await remove({ path: made.path, deleteBranch: true }))).toEqual({ ok: true, branchDeleted: true });
+    expect(res.worktrees.find((w) => w.path === made.worktree.path)).toMatchObject({ prunable: true, dirty: 0, slot: 3, free: false });
+    expect(res.branches.find((b) => b.name === 'agent/gone')?.worktree).toBe(made.worktree.path);
+    expect(res.newSlot).toEqual({ slot: 4, path: slotDir(4) });
+    // Neither free nor makeable until the entry is cleared, and there is no directory to keep.
+    expect(await code(await create({ branch: 'agent/again', slot: 3 }))).toBe('slot_gone');
+    expect(await code(await release({ path: made.worktree.path }))).toBe('worktree_gone');
+    expect(await json<RemoveWorktreeResponse>(await remove({ path: made.worktree.path, deleteBranch: true }))).toEqual({ ok: true, branchDeleted: true });
     const after = await list();
-    expect(after.worktrees.map((w) => w.path)).not.toContain(made.path);
+    expect(after.worktrees.map((w) => w.path)).not.toContain(made.worktree.path);
     expect(after.branches.map((b) => b.name)).not.toContain('agent/gone');
+    expect(after.newSlot).toEqual({ slot: 3, path: slotDir(3) });
+  });
+
+  it('removes a free slot outright when asked, directory and all', async () => {
+    const two = (await slot(2))!;
+    expect(two).toMatchObject({ free: true });
+    expect(await json<RemoveWorktreeResponse>(await remove({ path: two.path }))).toEqual({ ok: true, branchDeleted: false });
+    expect(existsSync(slotDir(2))).toBe(false);
+    expect((await list()).newSlot).toEqual({ slot: 2, path: slotDir(2) });
   });
 
   it('refuses a mutating request the browser marks as cross-site', async () => {

@@ -193,3 +193,21 @@ export class StateStore {
     }
   }
 }
+
+/**
+ * Drops everything kept under one worktree path: the scope its local views share, their viewed
+ * flags, and the comment pools of its commit, range and `base` targets. A slot is checked out again
+ * for the next branch, and what was said about the previous one — `base` comments above all, which
+ * no commit ever deletes — would otherwise come back orphaned over code they were never about.
+ * Issues let go of the comments that went with it.
+ */
+export function forgetWorktreeTargets(state: ReviewState, worktreePath: string): void {
+  const prefix = `worktree:${worktreePath}:`;
+  const gone = new Set<string>();
+  for (const key of Object.keys(state.targets)) {
+    if (!key.startsWith(prefix)) continue;
+    for (const c of state.targets[key]!.comments) gone.add(c.id);
+    delete state.targets[key];
+  }
+  if (gone.size) for (const issue of state.issues) issue.commentIds = issue.commentIds.filter((id) => !gone.has(id));
+}

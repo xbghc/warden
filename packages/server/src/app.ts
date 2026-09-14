@@ -24,6 +24,7 @@ import type {
   Prefs,
   ReanchorRequest,
   ReanchorResponse,
+  ReleaseWorktreeRequest,
   RemoteBranchesResponse,
   RemoveWorktreeRequest,
   RepoInfo,
@@ -46,8 +47,8 @@ import { currentBranch, getRepoInfo, listWorktrees, type RepoContext } from './r
 import { getFileDiff, getFullFile, listTargetDiffs, resolveTargetContext, toSummary, type TargetContext } from './targets.js';
 import { buildAnchor, reanchorComment } from './anchor.js';
 import { buildStagePatch } from './patch.js';
-import { addWorktree, listBranches, listWorktreesDetailed, lookupRemoteBranches, removeWorktree, worktreePathPrefix } from './worktrees.js';
-import { ensureTarget, type StateStore } from './state.js';
+import { checkoutWorktree, listBranches, listWorktreesDetailed, lookupRemoteBranches, nextSlot, releaseWorktree, removeWorktree } from './worktrees.js';
+import { ensureTarget, forgetWorktreeTargets, type StateStore } from './state.js';
 import { formatCommentsExport, formatIssueExport } from './export.js';
 import { NvimService } from './nvim.js';
 import { TmuxService } from './tmux.js';
@@ -800,7 +801,8 @@ export function createApp(opts: AppOptions): Hono {
 
   api.get('/worktrees', async (c) => {
     const list = await listWorktreesDetailed(repo);
-    const res: WorktreesResponse = { worktrees: list, branches: await listBranches(repo, list), pathPrefix: worktreePathPrefix(repo) };
+    const [branches, newSlot] = await Promise.all([listBranches(repo, list), nextSlot(repo, list)]);
+    const res: WorktreesResponse = { worktrees: list, branches, newSlot };
     return c.json(res);
   });
 
@@ -812,11 +814,22 @@ export function createApp(opts: AppOptions): Hono {
 
   api.post('/worktrees', async (c) => {
     const body = (await c.req.json()) as CreateWorktreeRequest;
-    if (typeof body.path !== 'string' || typeof body.branch !== 'string') throw badRequest('path and branch are required');
+    if (typeof body.branch !== 'string') throw badRequest('branch is required');
     if (body.base !== undefined && typeof body.base !== 'string') throw badRequest('base must be a ref');
-    const made = await addWorktree(repo, body);
+    if (body.slot !== undefined && (!Number.isInteger(body.slot) || body.slot < 1)) throw badRequest('slot must be a positive integer', 'invalid_slot');
+    const res = await checkoutWorktree(repo, body);
     worktreeCache = null;
-    return c.json(made, 201);
+    // Whatever was reviewed in this slot before was another branch; its state does not carry over.
+    await store.update((s) => forgetWorktreeTargets(s, res.worktree.path));
+    return c.json(res, 201);
+  });
+
+  api.post('/worktrees/release', async (c) => {
+    const body = (await c.req.json()) as ReleaseWorktreeRequest;
+    if (typeof body.path !== 'string') throw badRequest('path is required');
+    const res = await releaseWorktree(repo, body);
+    worktreeCache = null;
+    return c.json(res);
   });
 
   api.post('/worktrees/remove', async (c) => {

@@ -1562,6 +1562,14 @@ kbd {
   color: var(--muted);
   text-decoration: line-through;
 }
+/* A free slot is an empty desk: the directory is there, nothing sits at it yet. */
+.wt-row.free {
+  border-style: dashed;
+  background: var(--surface-2);
+}
+.wt-row.free .wt-name {
+  color: var(--ink-2);
+}
 .wt-main {
   flex: 1;
   min-width: 0;

@@ -1,17 +1,39 @@
 import path from 'node:path';
 import { readdir, realpath, stat } from 'node:fs/promises';
-import type { BranchInfo, CreateWorktreeRequest, RemoveWorktreeRequest, RemoveWorktreeResponse, WorktreeDetail, WorktreeInfo } from '@warden/shared';
+import type {
+  BranchInfo,
+  CreateWorktreeRequest,
+  CreateWorktreeResponse,
+  ReleaseWorktreeRequest,
+  RemoveWorktreeRequest,
+  RemoveWorktreeResponse,
+  WorktreeDetail,
+  WorktreeInfo,
+  WorktreeSlot,
+} from '@warden/shared';
 import { isValidRef } from '@warden/shared';
 import { badRequest, HttpError } from './errors.js';
 import { GitError, refExists, runGit, runGitWrite } from './git.js';
 import { detectDefaultBase, listWorktrees, listWorktreesAll, type RepoContext } from './repo.js';
 
 /**
- * Where a new worktree goes unless the request says otherwise: beside the main worktree, named
- * `<repo>-<branch>`. The client appends the branch (slashes as dashes) and lets the path be edited.
+ * The directories warden makes are numbered slots beside the main worktree — `<repo>-1`,
+ * `<repo>-2`, … — not one directory per branch. A directory is where the dependencies get
+ * installed, and a fresh one for every branch meant installing them for every branch. A slot
+ * outlives its branch: released, it stays behind, node_modules and all, for the next branch to be
+ * checked out into.
  */
-export function worktreePathPrefix(ctx: RepoContext): string {
-  return path.join(path.dirname(ctx.commonRoot), `${path.basename(ctx.commonRoot)}-`);
+export function slotPath(ctx: RepoContext, slot: number): string {
+  return path.join(path.dirname(ctx.commonRoot), `${path.basename(ctx.commonRoot)}-${slot}`);
+}
+
+/** The number of the slot at `p`; undefined for a worktree made anywhere else, or named otherwise. */
+export function slotOf(ctx: RepoContext, p: string): number | undefined {
+  if (path.dirname(p) !== path.dirname(ctx.commonRoot)) return undefined;
+  const prefix = `${path.basename(ctx.commonRoot)}-`;
+  const name = path.basename(p);
+  const n = name.startsWith(prefix) ? name.slice(prefix.length) : '';
+  return /^[1-9]\d*$/.test(n) ? Number(n) : undefined;
 }
 
 /** Entries `git status` reports, renames counted once: what a worktree would lose if removed. */
@@ -60,7 +82,17 @@ export async function listWorktreesDetailed(ctx: RepoContext): Promise<WorktreeD
   const main = all.find((w) => w.isMain);
   return Promise.all(
     all.map(async (w) => {
-      const detail: WorktreeDetail = { ...w, dirty: w.prunable || w.bare ? 0 : await dirtyCount(w.path) };
+      const slot = w.isMain || w.bare ? undefined : slotOf(ctx, w.path);
+      const dirty = w.prunable || w.bare ? 0 : await dirtyCount(w.path);
+      const detail: WorktreeDetail = {
+        ...w,
+        dirty,
+        ...(slot === undefined ? {} : { slot }),
+        // Free is what the next checkout may take over: a detached HEAD and nothing that would be lost.
+        free: slot !== undefined && !w.prunable && w.detached && dirty === 0,
+      };
+      // A free slot holds no branch: there is nothing to compare.
+      if (detail.free) return detail;
       // A branch that has an upstream is counted against it, the main worktree's included: what is
       // not pushed or not pulled yet says more about it than its distance from whatever the main
       // worktree has checked out. The upstream is also the ref `git branch -d` checks before deleting.
@@ -126,26 +158,49 @@ async function assertBranchName(ctx: RepoContext, name: string): Promise<void> {
   }
 }
 
-/**
- * Where a worktree may be created: under the main worktree's parent directory and outside every
- * existing worktree, so a request cannot drop a checkout into the repository itself or anywhere else
- * on the disk. The directory must be new, or empty.
- */
-async function assertNewWorktreePath(ctx: RepoContext, worktrees: WorktreeInfo[], p: string): Promise<string> {
-  if (!p || !path.isAbsolute(p)) throw badRequest('worktree path must be absolute', 'invalid_path');
-  const target = path.resolve(p);
-  const parent = path.dirname(ctx.commonRoot);
-  if (target === parent || !target.startsWith(parent + path.sep)) throw badRequest(`worktree path must be under ${parent}`, 'invalid_path');
-  for (const w of worktrees) {
-    if (target === w.path || target.startsWith(w.path + path.sep)) throw badRequest(`${target} is inside the worktree at ${w.path}`, 'invalid_path');
-  }
-  const st = await stat(target).catch((e: NodeJS.ErrnoException) => {
+/** A directory git may make a worktree at: nothing there yet, or an empty one. */
+async function dirUsable(p: string): Promise<boolean> {
+  const st = await stat(p).catch((e: NodeJS.ErrnoException) => {
     if (e.code === 'ENOENT') return undefined;
     throw e;
   });
-  if (!st) return target;
-  if (!st.isDirectory() || (await readdir(target)).length > 0) throw badRequest(`${target} already exists`, 'path_exists');
-  return target;
+  return !st || (st.isDirectory() && (await readdir(p)).length === 0);
+}
+
+/**
+ * The slot a checkout makes when it takes no free one: the lowest number with no directory of its
+ * own. A number git lists is taken even with its directory gone — `worktree add` refuses the path
+ * until the entry is removed.
+ */
+export async function nextSlot(ctx: RepoContext, worktrees: WorktreeInfo[]): Promise<WorktreeSlot> {
+  const listed = new Set(worktrees.map((w) => w.path));
+  for (let slot = 1; ; slot++) {
+    const p = slotPath(ctx, slot);
+    if (!listed.has(p) && (await dirUsable(p))) return { slot, path: p };
+  }
+}
+
+/**
+ * Where the branch goes. Unasked, the lowest free slot, else a new one at the next number. Asked
+ * for by number, a slot that exists has to be free — one holding a branch is never switched from
+ * under whoever is working in it, and one whose directory is gone has to be cleared first — and a
+ * number no slot has yet is made. Either way the path is composed here: nothing in a request names
+ * a directory, so a checkout cannot land anywhere but beside the main worktree.
+ */
+async function pickSlot(ctx: RepoContext, worktrees: WorktreeDetail[], wanted: number | undefined): Promise<WorktreeSlot & { reuse: boolean }> {
+  const slots = worktrees.filter((w) => w.slot !== undefined);
+  if (wanted === undefined) {
+    const free = slots.filter((w) => w.free).sort((a, b) => a.slot! - b.slot!)[0];
+    if (free) return { slot: free.slot!, path: free.path, reuse: true };
+    return { ...(await nextSlot(ctx, worktrees)), reuse: false };
+  }
+  const have = slots.find((w) => w.slot === wanted);
+  if (have?.prunable) throw new HttpError(409, `the directory of slot ${wanted} is gone; remove its entry first`, 'slot_gone');
+  if (have && !have.free) throw new HttpError(409, `slot ${wanted} is in use${have.branch ? ` by ${have.branch}` : ''}`, 'slot_in_use');
+  if (have) return { slot: wanted, path: have.path, reuse: true };
+  const p = slotPath(ctx, wanted);
+  if (!(await dirUsable(p))) throw badRequest(`${p} already exists`, 'path_exists');
+  return { slot: wanted, path: p, reuse: false };
 }
 
 /** `<remote>/<branch>` for each remote that has the branch; `*` spans one path segment, the remote's name. */
@@ -155,31 +210,36 @@ async function remoteBranches(cwd: string, branch: string): Promise<string[]> {
 }
 
 /**
- * `git worktree add`, deciding what the branch name refers to when the request arrives rather than
- * trusting the page's list, which may predate a fetch or a branch an agent just made. A local branch
- * is checked out as it is, which git allows in one worktree at a time. A branch only a remote has
- * becomes a local one tracking it (`--track -b`), as `git worktree add <path> <branch>` guesses:
- * starting it from the default base would give the name a second history without the remote's
- * commits, so a base is refused unless it says which remote — the one choice left when several have
- * the branch. Any other name is a new branch from `base`, or from `main`/`master` when there is none.
+ * Checks a branch out into a slot, deciding what the branch name refers to when the request arrives
+ * rather than trusting the page's list, which may predate a fetch or a branch an agent just made. A
+ * local branch is checked out as it is, which git allows in one worktree at a time. A branch only a
+ * remote has becomes a local one tracking it (`--track`), as `git worktree add <path> <branch>`
+ * guesses: starting it from the default base would give the name a second history without the
+ * remote's commits, so a base is refused unless it says which remote — the one choice left when
+ * several have the branch. Any other name is a new branch from `base`, or from `main`/`master` when
+ * there is none.
+ *
+ * Into a free slot that is `git branch` in the main worktree — where a base such as `HEAD` means what
+ * it would to `worktree add` — followed by `git switch` in the slot, which rewrites the files there as
+ * any checkout does and leaves the ignored ones alone. Into a new slot it is `git worktree add`, with
+ * the same choices as options.
  */
-export async function addWorktree(ctx: RepoContext, req: CreateWorktreeRequest): Promise<WorktreeInfo> {
+export async function checkoutWorktree(ctx: RepoContext, req: CreateWorktreeRequest): Promise<CreateWorktreeResponse> {
   const branch = req.branch.trim();
   const base = req.base?.trim();
   await assertBranchName(ctx, branch);
-  const existing = await listWorktreesAll(ctx);
-  const target = await assertNewWorktreePath(ctx, existing, req.path.trim());
   const cwd = ctx.commonRoot;
   if (base) {
     if (!isValidRef(base)) throw badRequest(`invalid base ref: ${base}`, 'invalid_ref');
     if (!(await refExists(cwd, base))) throw badRequest(`unknown ref: ${base}`, 'unknown_ref');
   }
-  let args: string[];
+  const existing = await listWorktreesDetailed(ctx);
+  /** Unset for a branch that exists; otherwise where the new one starts, and whether it tracks that. */
+  let create: { start: string; track: boolean } | undefined;
   if (await refExists(cwd, `refs/heads/${branch}`)) {
     if (base) throw new HttpError(409, `branch ${branch} already exists`, 'branch_exists');
     const holder = existing.find((w) => w.branch === branch);
     if (holder) throw new HttpError(409, `${branch} is already checked out at ${holder.path}`, 'branch_in_use');
-    args = ['worktree', 'add', target, branch];
   } else if (await refExists(cwd, `refs/remotes/${branch}`)) {
     // A local `origin/x` would leave every later `origin/x` ambiguous, and it is never what was meant.
     throw new HttpError(409, `${branch} is a remote branch; enter ${branch.slice(branch.indexOf('/') + 1)} to check it out`, 'branch_exists');
@@ -191,20 +251,75 @@ export async function addWorktree(ctx: RepoContext, req: CreateWorktreeRequest):
     if (remote.length === 1 && base && base !== remote[0]) {
       throw new HttpError(409, `branch ${branch} already exists as ${remote[0]}; leave the base empty to check it out`, 'branch_exists');
     }
-    args = remote.length
-      ? ['worktree', 'add', '--track', '-b', branch, target, base || remote[0]!]
-      : ['worktree', 'add', '-b', branch, target, base || (await detectDefaultBase(cwd)) || 'HEAD'];
+    create = remote.length ? { start: base || remote[0]!, track: true } : { start: base || (await detectDefaultBase(cwd)) || 'HEAD', track: false };
   }
+  const target = await pickSlot(ctx, existing, req.slot);
+  // A branch made for a slot that then refuses the switch would stay behind, taken; `-D` undoes
+  // it, and only it — the branch has nothing of its own yet.
+  let made = false;
   try {
-    await runGitWrite(args, { cwd });
+    if (target.reuse) {
+      if (create) {
+        await runGitWrite(['branch', ...(create.track ? ['--track'] : []), branch, create.start], { cwd });
+        made = true;
+      }
+      await runGitWrite(['switch', '--no-guess', branch], { cwd: target.path });
+    } else if (create) {
+      await runGitWrite(['worktree', 'add', ...(create.track ? ['--track'] : []), '-b', branch, target.path, create.start], { cwd });
+    } else {
+      await runGitWrite(['worktree', 'add', target.path, branch], { cwd });
+    }
   } catch (e) {
+    if (made) await runGitWrite(['branch', '-D', branch], { cwd }).catch(() => undefined);
     if (e instanceof GitError && /already (checked out|used by worktree)/.test(e.stderr)) throw new HttpError(409, e.message, 'branch_in_use');
     throw e;
   }
-  const real = await realpath(target).catch(() => target);
-  const made = (await listWorktrees(ctx)).find((w) => w.path === real);
-  if (!made) throw new HttpError(500, `git created ${target} but does not list it`, 'git_failed');
-  return made;
+  const real = await realpath(target.path).catch(() => target.path);
+  const worktree = (await listWorktrees(ctx)).find((w) => w.path === real);
+  if (!worktree) throw new HttpError(500, `git checked ${branch} out at ${target.path} but does not list it`, 'git_failed');
+  return { worktree, slot: target.slot, reused: target.reuse };
+}
+
+/** `git branch -d` on request. A branch that is not merged is kept, and the response says why. */
+async function dropBranch(ctx: RepoContext, wt: WorktreeInfo, asked: boolean | undefined): Promise<RemoveWorktreeResponse> {
+  const res: RemoveWorktreeResponse = { ok: true, branchDeleted: false };
+  if (asked && wt.branch) {
+    try {
+      await runGitWrite(['branch', '-d', wt.branch], { cwd: ctx.commonRoot });
+      res.branchDeleted = true;
+    } catch (e) {
+      res.branchError = e instanceof Error ? e.message : String(e);
+    }
+  }
+  return res;
+}
+
+/**
+ * Lets a slot go of its branch and keeps the directory: `git switch --detach` in it leaves HEAD's
+ * commit checked out with no branch on it and touches no file. Uncommitted changes are refused as
+ * 409 `worktree_dirty`, and only the request that carries `force` after that — the reviewer's
+ * confirmation — discards them: `reset --hard` for the tracked files, `clean -fd` for the untracked
+ * ones, never `-x`, so what is ignored (the installed dependencies, above all) stays. The branch
+ * goes as it does on removal: on request, by `-d`, kept and reported when it is not merged. A
+ * worktree that is not a slot is not released, since nothing would reuse it, and one whose
+ * directory is gone has nothing to keep; both are for removal.
+ */
+export async function releaseWorktree(ctx: RepoContext, req: ReleaseWorktreeRequest): Promise<RemoveWorktreeResponse> {
+  const p = req.path.trim();
+  const wt = (await listWorktreesAll(ctx)).find((w) => w.path === p || (p && w.path === path.resolve(p)));
+  if (!wt) throw badRequest(`unknown worktree: ${p}`, 'unknown_worktree');
+  if (wt.isMain) throw badRequest('the main worktree cannot be released', 'main_worktree');
+  if (wt.bare || slotOf(ctx, wt.path) === undefined) throw badRequest(`${wt.path} is not a slot; remove it instead`, 'not_a_slot');
+  if (wt.prunable) throw badRequest(`the directory of ${wt.path} is gone; remove its entry instead`, 'worktree_gone');
+  const dirty = await dirtyCount(wt.path);
+  if (dirty > 0 && !req.force) throw new HttpError(409, `${wt.path} has uncommitted changes`, 'worktree_dirty');
+  if (dirty > 0) {
+    // Not `switch --discard-changes`: with no start point it leaves a modified file alone.
+    await runGitWrite(['reset', '-q', '--hard'], { cwd: wt.path });
+    await runGitWrite(['clean', '-fdq'], { cwd: wt.path });
+  }
+  if (!wt.detached) await runGitWrite(['switch', '--detach'], { cwd: wt.path });
+  return dropBranch(ctx, wt, req.deleteBranch);
 }
 
 /**
@@ -221,12 +336,11 @@ export async function removeWorktree(ctx: RepoContext, req: RemoveWorktreeReques
   const wt = (await listWorktreesAll(ctx)).find((w) => w.path === p || (p && w.path === path.resolve(p)));
   if (!wt) throw badRequest(`unknown worktree: ${p}`, 'unknown_worktree');
   if (wt.isMain) throw badRequest('the main worktree cannot be removed', 'main_worktree');
-  const cwd = ctx.commonRoot;
   const args = ['worktree', 'remove'];
   if (req.force) args.push('--force');
   args.push(wt.path);
   try {
-    await runGitWrite(args, { cwd });
+    await runGitWrite(args, { cwd: ctx.commonRoot });
   } catch (e) {
     if (e instanceof GitError && /contains modified or untracked files/.test(e.stderr)) {
       throw new HttpError(409, `${wt.path} has uncommitted changes`, 'worktree_dirty');
@@ -236,14 +350,5 @@ export async function removeWorktree(ctx: RepoContext, req: RemoveWorktreeReques
     }
     throw e;
   }
-  const res: RemoveWorktreeResponse = { ok: true, branchDeleted: false };
-  if (req.deleteBranch && wt.branch) {
-    try {
-      await runGitWrite(['branch', '-d', wt.branch], { cwd });
-      res.branchDeleted = true;
-    } catch (e) {
-      res.branchError = e instanceof Error ? e.message : String(e);
-    }
-  }
-  return res;
+  return dropBranch(ctx, wt, req.deleteBranch);
 }

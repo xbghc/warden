@@ -65,10 +65,10 @@ export const SwitchView: Story = {
     await expect(await canvas.findByText('审阅整条分支')).toBeVisible();
     await expect(await canvas.findByText('补充评论导出')).toBeVisible();
     await userEvent.selectOptions(picker, 'worktrees');
-    await expect(await canvas.findByText('新建 worktree')).toBeVisible();
+    await expect(await canvas.findByText('检出分支')).toBeVisible();
     await expect(await canvas.findByText('feature/review')).toBeVisible();
     await userEvent.selectOptions(picker, 'diff');
     await expect(await canvas.findByText('README.md')).toBeVisible();
-    await expect(canvas.queryByText('新建 worktree')).not.toBeInTheDocument();
+    await expect(canvas.queryByText('检出分支')).not.toBeInTheDocument();
   },
 };

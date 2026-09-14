@@ -198,10 +198,12 @@ async function applyOnce(cwd: string, patch: string, opts: { reverse?: boolean; 
 
 /**
  * Runs a git command that writes to the repository, without the read whitelist. Only worktrees.ts
- * calls it — `worktree add`, `worktree remove`, `branch -d` — each with an
- * argument list it composes itself from a branch name, a ref and a path that were validated first,
- * so nothing from a request reaches git as an option. A failure carries git's first stderr line,
- * and `stderr` whole, so the caller can tell a refusal (dirty worktree, branch in use) from a crash.
+ * calls it — `worktree add`, `worktree remove`, `branch` (with `-d`, or `-D` to undo a branch it
+ * made moments before), and in a slot it owns `switch`, `reset --hard` and `clean -fd` — each with an argument
+ * list it composes itself from a branch name and a ref that were validated first and a slot path
+ * of its own making, so nothing from a request reaches git as an option. A failure carries git's
+ * first stderr line, and `stderr` whole, so the caller can tell a refusal (dirty worktree, branch
+ * in use) from a crash.
  */
 export async function runGitWrite(args: readonly string[], opts: { cwd: string; timeoutMs?: number }): Promise<GitResult> {
   for (const arg of args) if (arg.includes('\0')) throw new GitError('NUL byte in git argument', null, '', 400, 'git_bad_argument');

@@ -13,7 +13,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Git access in the server
 
 - Reads go through `runGit` in `packages/server/src/git.ts`, which enforces a sub-command whitelist (`worktree` only as `worktree list`) and refuses write-capable options. A new read sub-command is added to `ALLOWED_SUBCOMMANDS` and to the list in README's *Security model*.
-- Writes bypass the whitelist through exactly two functions: `applyToIndex` (`git apply --cached`, staging) and `runGitWrite` (worktree add/remove, `branch -d`; called only from `worktrees.ts`). A new write goes through `runGitWrite` with arguments the server composes from validated values, never a request string, and gets a line in README's *Security model*. Nothing writes to the working tree or HEAD of an existing checkout.
+- Writes bypass the whitelist through exactly two functions: `applyToIndex` (`git apply --cached`, staging) and `runGitWrite` (`worktree add`/`remove`, `branch` with `-d` or `-D`, `switch`, `reset --hard`, `clean -fd`; called only from `worktrees.ts`). A new write goes through `runGitWrite` with arguments the server composes from validated values, never a request string, and gets a line in README's *Security model*. The working tree and HEAD of an existing checkout are written only inside a slot — `<repo>-<n>` beside the main worktree, see `slotOf` — and only by `switch` into a free one, `switch --detach` to release it, and `reset --hard` plus `clean -fd` on a forced release the reviewer confirmed.
+- Worktree directories are numbered slots, never named after the branch: the point is that a released slot is checked out into again with its installed dependencies. A checkout request carries a slot number, never a path.
 
 ## Conventions
 
