@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { CommitInfo, TmuxSession, Todo, WorktreeDetail } from '@warden/shared';
+import type { CommitInfo, TmuxSession, Todo, WorktreeComparison, WorktreeDetail } from '@warden/shared';
 import { formatTargetKey } from '@warden/shared';
 import { api } from '../api';
 import { useStore } from '../store';
@@ -175,6 +175,31 @@ function TmuxWindow({ wt, initialSessions, initialError }: { wt: WorktreeDetail;
   );
 }
 
+/**
+ * Ahead and behind, with what they are counted against named beside them, since the two read
+ * differently: against the branch's upstream they are what is not pushed and not pulled yet; against
+ * what the main worktree has checked out, nothing ahead means merged.
+ */
+function Comparison({ comparison: c }: { comparison: WorktreeComparison }) {
+  const upstream = c.kind === 'upstream';
+  return (
+    <div className="wt-comparison">
+      <span className="ref" title={upstream ? `与上游 ${c.base} 比较` : `与主仓库当前检出的 ${c.base} 比较`}>
+        {c.base}
+      </span>
+      <span className="wt-commit-count" title={upstream ? `${c.ahead} 个提交未推送到 ${c.base}` : `领先 ${c.base} ${c.ahead} 个提交`}>
+        <ActionIcon name="up" label={upstream ? '未推送提交数' : '领先提交数'} />
+        {c.ahead}
+      </span>
+      <span className="wt-commit-count" title={upstream ? `${c.base} 有 ${c.behind} 个提交未拉取` : `落后 ${c.base} ${c.behind} 个提交`}>
+        <ActionIcon name="down" label={upstream ? '未拉取提交数' : '落后提交数'} />
+        {c.behind}
+      </span>
+      {!upstream && <span title="按提交可达性判断；squash/cherry-pick 不算历史合并">{c.ahead === 0 ? '已合并' : '未合并'}</span>}
+    </div>
+  );
+}
+
 export function WorktreeExtras({ wt }: { wt: WorktreeDetail }) {
   const [tab, setTab] = useState<'commits' | 'todos' | 'tmux' | null>(null);
   const [tmuxBusy, setTmuxBusy] = useState(false);
@@ -211,18 +236,11 @@ export function WorktreeExtras({ wt }: { wt: WorktreeDetail }) {
   };
   return (
     <div className="wt-extras">
-      {wt.comparison && (
-        <div className="wt-comparison">
-          <span className="wt-commit-count" title={`领先 ${wt.comparison.ahead} 个提交`}>
-            <ActionIcon name="up" label="领先提交数" />
-            {wt.comparison.ahead}
-          </span>
-          <span className="wt-commit-count" title={`落后 ${wt.comparison.behind} 个提交`}>
-            <ActionIcon name="down" label="落后提交数" />
-            {wt.comparison.behind}
-          </span>
-          <span title="按提交可达性判断；squash/cherry-pick 不算历史合并">{wt.comparison.merged ? '已合并' : '未合并'}</span>
-        </div>
+      {wt.comparison && <Comparison comparison={wt.comparison} />}
+      {wt.upstreamGone && (
+        <span className="muted" title="通常是远端分支合并后被删除了">
+          上游 {wt.upstreamGone} 已不存在
+        </span>
       )}
       {wt.comparisonError && <span className="muted">{wt.comparisonError}</span>}
       <div className="row-actions">

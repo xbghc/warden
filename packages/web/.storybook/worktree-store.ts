@@ -5,7 +5,17 @@ import { api } from '../src/api';
 const root = '/workspace/warden';
 const topic = '/workspace/warden-review';
 const worktrees: WorktreeDetail[] = [
-  { path: root, branch: 'main', head: 'abc1234', isMain: true, detached: false, bare: false, prunable: false, dirty: 0 },
+  {
+    path: root,
+    branch: 'main',
+    head: 'abc1234',
+    isMain: true,
+    detached: false,
+    bare: false,
+    prunable: false,
+    dirty: 0,
+    comparison: { kind: 'upstream', base: 'origin/main', ahead: 0, behind: 2 },
+  },
   {
     path: topic,
     branch: 'feature/review',
@@ -15,7 +25,7 @@ const worktrees: WorktreeDetail[] = [
     bare: false,
     prunable: false,
     dirty: 2,
-    comparison: { base: 'main', ahead: 2, behind: 1, merged: false },
+    comparison: { kind: 'upstream', base: 'origin/feature/review', ahead: 2, behind: 0 },
   },
   {
     path: '/workspace/warden-done',
@@ -26,7 +36,8 @@ const worktrees: WorktreeDetail[] = [
     bare: false,
     prunable: false,
     dirty: 0,
-    comparison: { base: 'main', ahead: 0, behind: 3, merged: true },
+    comparison: { kind: 'base', base: 'main', ahead: 0, behind: 3 },
+    upstreamGone: 'origin/fix/empty',
   },
 ];
 

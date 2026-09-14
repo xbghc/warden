@@ -24,18 +24,59 @@ async function dirtyCount(cwd: string): Promise<number> {
   }
 }
 
+/** A local branch's upstream, as `git branch -vv` shows it. */
+interface Upstream {
+  /** `origin/topic`, or `main` for a branch set to track a local one. */
+  name: string;
+  /** The ref it tracks no longer exists: typically deleted on the remote once merged, then pruned by a fetch. */
+  gone: boolean;
+  ahead: number;
+  behind: number;
+}
+
+/**
+ * The upstream of every local branch that has one, keyed by branch name, counts included: one
+ * `for-each-ref` for all of them. runGit's `LC_ALL=C` keeps `%(upstream:track)` in the English form
+ * parsed here — `[ahead 1, behind 2]`, `[gone]`, or empty when the two are level.
+ */
+async function listUpstreams(ctx: RepoContext): Promise<Map<string, Upstream>> {
+  const r = await runGit(['for-each-ref', '--format=%(refname)%09%(upstream:short)%09%(upstream:track)', 'refs/heads'], { cwd: ctx.commonRoot });
+  const out = new Map<string, Upstream>();
+  for (const line of r.stdout.split('\n')) {
+    const [ref = '', name = '', track = ''] = line.split('\t');
+    if (!name) continue;
+    out.set(ref.replace(/^refs\/heads\//, ''), {
+      name,
+      gone: track === '[gone]',
+      ahead: Number(/ahead (\d+)/.exec(track)?.[1] ?? 0),
+      behind: Number(/behind (\d+)/.exec(track)?.[1] ?? 0),
+    });
+  }
+  return out;
+}
+
 export async function listWorktreesDetailed(ctx: RepoContext): Promise<WorktreeDetail[]> {
-  const all = await listWorktreesAll(ctx);
+  const [all, upstreams] = await Promise.all([listWorktreesAll(ctx), listUpstreams(ctx)]);
   const main = all.find((w) => w.isMain);
   return Promise.all(
     all.map(async (w) => {
       const detail: WorktreeDetail = { ...w, dirty: w.prunable || w.bare ? 0 : await dirtyCount(w.path) };
+      // A branch that has an upstream is counted against it, the main worktree's included: what is
+      // not pushed or not pulled yet says more about it than its distance from whatever the main
+      // worktree has checked out. The upstream is also the ref `git branch -d` checks before deleting.
+      const upstream = w.branch ? upstreams.get(w.branch) : undefined;
+      if (upstream && !upstream.gone) {
+        detail.comparison = { kind: 'upstream', base: upstream.name, ahead: upstream.ahead, behind: upstream.behind };
+        return detail;
+      }
+      // Once the upstream is gone `git branch -d` checks HEAD instead, and the count follows it there.
+      if (upstream) detail.upstreamGone = upstream.name;
       if (w.isMain) return detail;
       if (!main?.head || !w.head || /^0+$/.test(main.head) || /^0+$/.test(w.head)) return { ...detail, comparisonError: '分支尚无提交' };
       try {
         const result = await runGit(['rev-list', '--left-right', '--count', `${main.head}...${w.head}`, '--'], { cwd: ctx.commonRoot });
         const [behind, ahead] = result.stdout.trim().split(/\s+/).map(Number);
-        detail.comparison = { base: main.branch ?? `HEAD ${main.head.slice(0, 7)}`, ahead: ahead!, behind: behind!, merged: ahead === 0 };
+        detail.comparison = { kind: 'base', base: main.branch ?? `HEAD ${main.head.slice(0, 7)}`, ahead: ahead!, behind: behind! };
       } catch {
         detail.comparisonError = '无法比较提交历史';
       }

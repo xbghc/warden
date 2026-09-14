@@ -159,13 +159,30 @@ export interface WorktreeInfo {
   bare: boolean;
 }
 
+/**
+ * Commits a worktree's HEAD has that `base` lacks (`ahead`), and the other way round (`behind`).
+ * `upstream`: `base` is the branch's upstream, so the two are what is not pushed and what is not
+ * pulled yet. `base`: the checkout has no upstream, or one that is gone, and `base` is the branch
+ * the main worktree has checked out right now — the base a sibling worktree is reviewed against,
+ * which need not be `main`; nothing ahead there means merged.
+ */
+export interface WorktreeComparison {
+  kind: 'upstream' | 'base';
+  /** As git abbreviates it (`origin/topic`, `develop`), or `HEAD abc1234` for a detached main worktree. */
+  base: string;
+  ahead: number;
+  behind: number;
+}
+
 /** A worktree as the management panel lists it: the review-time fields plus what removing it needs. */
 export interface WorktreeDetail extends WorktreeInfo {
   /** Entries `git status` reports: modified, staged and untracked paths together. */
   dirty: number;
   /** git still lists it but its directory is gone; removing it drops the entry, nothing else. */
   prunable: boolean;
-  comparison?: { base: string; ahead: number; behind: number; merged: boolean };
+  comparison?: WorktreeComparison;
+  /** The upstream the branch is set to track when that ref no longer exists, as in `[origin/topic: gone]`. */
+  upstreamGone?: string;
   comparisonError?: string;
 }
 
