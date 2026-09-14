@@ -490,7 +490,7 @@ export function DiffView({ diff }: { diff: FileDiff }) {
   };
 
   const renderSplitCell = (row: Extract<Row, { kind: 'pair' }>, l: DiffLine | undefined, side: CommentSide, picked: boolean) => {
-    if (!l) return <span className="cell empty" />;
+    if (!l) return <span className="cell blank" />;
     const { hunkIndex, expanded } = row;
     const no = side === 'old' ? l.oldLineNo : l.newLineNo;
     const type = l.type === 'context' ? 'context' : side === 'old' ? 'del' : 'add';
