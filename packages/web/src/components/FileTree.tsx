@@ -120,15 +120,27 @@ function FileRow({ node, depth, view }: { node: Extract<TreeNode, { kind: 'file'
 
 function DirRow({ node, depth, view, open, toggle }: { node: DirNode; depth: number; view: TargetKey; open: Set<string>; toggle: (p: string) => void }) {
   const isOpen = open.has(node.path);
+  // Nothing below is left to review. The row has to say so itself: collapsed, it is the only sign,
+  // and a directory that still hides an unread file looks exactly the same otherwise.
+  const done = node.viewedCount === node.fileCount;
   return (
     <>
-      <button className="tree-row dir" style={{ paddingLeft: 10 + depth * 14 }} onClick={() => toggle(node.path)} aria-expanded={isOpen} title={node.path}>
+      <button
+        className={`tree-row dir ${done ? 'viewed' : ''}`}
+        style={{ paddingLeft: 10 + depth * 14 }}
+        onClick={() => toggle(node.path)}
+        aria-expanded={isOpen}
+        title={done ? `${node.path}（${node.fileCount} 个文件均已查看）` : node.path}
+      >
         <span className={`chev ${isOpen ? 'open' : ''}`} aria-hidden="true">
           ›
         </span>
         <TreeIcon kind="folder" />
         <span className="name">{node.name}</span>
-        <span className="muted count">{node.fileCount}</span>
+        <span className="muted count">
+          {done && <TreeIcon kind="check" />}
+          {node.fileCount}
+        </span>
       </button>
       {isOpen &&
         node.children.map((c) =>

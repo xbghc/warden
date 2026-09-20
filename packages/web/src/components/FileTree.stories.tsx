@@ -109,6 +109,18 @@ export const CommitChanges: Story = {
     useStore.setState({ targetKey: 'commit:abc1234' });
   },
 };
+export const ReviewedDirectories: Story = {
+  beforeEach: () => {
+    const files = [
+      file('src/features/order/OrderList.tsx', 'modified', { viewed: true }),
+      file('src/features/order/hooks/useOrder.ts', 'modified', { viewed: true }),
+      file('src/utils/a.ts', 'modified', { viewed: true }),
+      file('src/utils/b.ts', 'modified'),
+      file('docs/guide.md', 'modified', { viewed: true }),
+    ];
+    useStore.setState({ unstaged: files, files, staged: [] });
+  },
+};
 export const MarkViewed: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);

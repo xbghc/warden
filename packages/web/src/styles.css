@@ -2363,6 +2363,30 @@ button.link.danger:has(> .action-icon):hover:not(:disabled) {
   background: var(--surface-2);
 }
 
+/* Every file below is marked viewed: the directory recedes the way a viewed file does, and the check
+   — the one the block head earns at n/n — says so without leaning on the colour alone. */
+.tree-row.dir.viewed .name {
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.tree-row.dir.viewed .tree-icon-folder {
+  opacity: 0.55;
+}
+
+.tree-row.dir.viewed .count {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.tree-row.dir.viewed .count .tree-icon {
+  color: var(--add-fg);
+  width: 12px;
+  height: 12px;
+  flex-basis: 12px;
+}
+
 .tree-row .counts {
   margin-left: auto;
   font-family: var(--mono);
