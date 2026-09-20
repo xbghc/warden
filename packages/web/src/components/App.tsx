@@ -3,6 +3,7 @@ import type { ChangeEvent, TargetKey } from '@warden/shared';
 import { formatTargetKey, isLocalTarget, tryParseTargetKey } from '@warden/shared';
 import { useStore } from '../store';
 import { api } from '../api';
+import { dirName } from '../lib/paths';
 import { TopBar } from './TopBar';
 import { Sidebar } from './Sidebar';
 import { DiffPanel } from './DiffPanel';
@@ -43,6 +44,14 @@ export function App() {
   useEffect(() => {
     void init();
   }, [init]);
+
+  // One warden runs per project and they all sit side by side in the tab strip. The name leads
+  // because a narrow tab keeps only the first few characters: a shared "warden" prefix would leave
+  // every tab reading the same.
+  const repoRoot = repo?.root;
+  useEffect(() => {
+    if (repoRoot) document.title = `${dirName(repoRoot)} · warden`;
+  }, [repoRoot]);
 
   // Live repository changes. Reconnects are handled by EventSource itself; a successful reconnect
   // catches up on whatever was missed while the stream was down.

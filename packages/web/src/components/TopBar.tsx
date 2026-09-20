@@ -2,6 +2,7 @@ import { ActionIcon } from './ActionIcon';
 import { useMemo } from 'react';
 import { formatTargetKey, parseTargetKey } from '@warden/shared';
 import { useStore } from '../store';
+import { dirName } from '../lib/paths';
 import { NvimSelector } from './NvimSelector';
 
 function shortTime(iso: string | null): string {
@@ -59,14 +60,14 @@ export function TopBar() {
         <span className="wordmark">warden</span>
       </div>
       <div className="scope">
-        <span className="repo-name">{repo.root.split('/').filter(Boolean).pop()}</span>
+        <span className="repo-name">{dirName(repo.root)}</span>
         <span className="branch">{repo.branch}</span>
         {otherWorktrees.length > 0 && (
           <select value={target.worktree ?? ''} title="Worktree" aria-label="Worktree" onChange={(e) => pickWorktree(e.target.value)}>
             <option value="">主仓库 ({repo.branch})</option>
             {otherWorktrees.map((w) => (
               <option key={w.path} value={w.path}>
-                worktree: {w.path.split('/').filter(Boolean).pop()} ({w.branch ?? w.head.slice(0, 7)})
+                worktree: {dirName(w.path)} ({w.branch ?? w.head.slice(0, 7)})
               </option>
             ))}
           </select>
