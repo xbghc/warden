@@ -43,12 +43,19 @@ or install globally:
 
 ```sh
 npm i -g @xbghc/warden
-warden [repoPath] [--port <n>] [--no-open]
+warden [repoPath] [--port <n>] [--no-open] [--no-update-check]
 ```
 
 The server picks the first free port from 4100 (or `--port`), prints the URL and tries to open a
 browser via `wslview`, `explorer.exe`, then `xdg-open`. If none of those exist it only prints the URL.
 Several instances on the same repository can run at the same time.
+
+On start warden asks the npm registry whether a newer release exists, at most once a day (the answer
+is cached in `~/.local/share/warden/update-check.json`). When there is one, a line in the terminal
+and a chip beside the wordmark say so; clicking the chip copies the command — `npx @xbghc/warden@latest`
+for an npx run, whose cache otherwise keeps serving the old copy, `npm i -g @xbghc/warden@latest`
+for a global install. The check never delays startup and fails silently. `--no-update-check`,
+`WARDEN_NO_UPDATE_CHECK=1`, `NO_UPDATE_NOTIFIER=1` or `CI` turn it off.
 
 ## Targets (what is being reviewed)
 
@@ -361,6 +368,11 @@ request after a release or removal (`-d`, so only a merged one), and the review 
 the repository. A mutating request the
 browser labels as coming from another site (`Sec-Fetch-Site: cross-site`) is refused with 403, so a
 page from elsewhere cannot drive the server through the browser it is open in.
+
+The only request warden makes off the machine is the update check: a `GET` of
+`https://registry.npmjs.org/@xbghc%2fwarden/latest`, no more than once a day, carrying nothing about
+the repository or the review. `--no-update-check` (or the environment switches under *Install / run*)
+removes it.
 
 ## Development
 

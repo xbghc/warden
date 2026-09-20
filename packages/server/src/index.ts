@@ -1,6 +1,7 @@
 import net from 'node:net';
 import { randomUUID } from 'node:crypto';
 import { serve, type ServerType } from '@hono/node-server';
+import type { UpdateNotice } from '@warden/shared';
 import { createApp } from './app.js';
 import { resolveRepo, type RepoContext } from './repo.js';
 import { StateStore, stateFilePath } from './state.js';
@@ -12,6 +13,7 @@ export { isWsl, reachableFromWindows } from './wsl.js';
 export { resolveRepo } from './repo.js';
 export { StateStore, stateFilePath } from './state.js';
 export { NvimService } from './nvim.js';
+export { checkForUpdate, updateCheckEnabled } from './update.js';
 export { RepoWatcher, statusPaths, DEFAULT_POLL_INTERVAL_MS } from './watcher.js';
 export { HttpError } from './errors.js';
 export { runGit, GitError, assertAllowedGitArgs, applyToIndex } from './git.js';
@@ -50,6 +52,8 @@ export interface StartOptions {
   stateFile?: string;
   /** Overrides the Windows-side reachability probe; tests inject one instead of shelling out. */
   probeWindows?: (port: number, token: string) => Promise<boolean | undefined>;
+  /** Handed to the page through GET /api/update; the CLI starts the check, the server only relays it. */
+  update?: Promise<UpdateNotice | null>;
 }
 
 export interface RunningServer {
@@ -69,7 +73,7 @@ export async function startServer(opts: StartOptions): Promise<RunningServer> {
   const stateFile = opts.stateFile ?? stateFilePath(repo.commonRoot);
   const store = new StateStore(stateFile, repo.commonRoot);
   const instanceToken = randomUUID();
-  const app = createApp({ repo, store, nvim: new NvimService(), webDir: opts.webDir, instanceToken });
+  const app = createApp({ repo, store, nvim: new NvimService(), webDir: opts.webDir, instanceToken, update: opts.update });
 
   const listen = (p: number): Promise<ServerType> =>
     new Promise((resolve, reject) => {

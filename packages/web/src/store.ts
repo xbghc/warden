@@ -17,6 +17,7 @@ import type {
   Todo,
   UpdateCommentRequest,
   UpdateIssueRequest,
+  UpdateNotice,
   UpdateTodoRequest,
   ViewMode,
 } from '@warden/shared';
@@ -90,6 +91,8 @@ export interface JumpTarget {
 
 export interface AppStore {
   repo: RepoInfo | null;
+  /** A newer warden on npm, once the server's check has come back with one. */
+  update: UpdateNotice | null;
   initError: string | null;
   prefs: Prefs;
   targetKey: TargetKey;
@@ -148,6 +151,7 @@ export interface AppStore {
   setTarget(key: TargetKey): Promise<void>;
   /** Re-reads /api/repo after a worktree was made or removed; the target is left alone. */
   reloadRepo(): Promise<void>;
+  copyUpdateCommand(): Promise<void>;
   /** Move between the local views without dropping comments, selection or the editor draft. */
   switchView(key: TargetKey, nextActiveFile?: string | null): Promise<void>;
   loadFiles(): Promise<void>;
@@ -273,6 +277,7 @@ export const useStore = create<AppStore>((set, get) => {
 
   return {
     repo: null,
+    update: null,
     initError: null,
     prefs: { viewMode: 'unified', nvimSocketByRoot: {}, autoRefresh: true, railOpen: false },
     targetKey: 'working',
@@ -312,6 +317,12 @@ export const useStore = create<AppStore>((set, get) => {
     sideSlot: null,
 
     async init() {
+      // Nothing waits on this: the server holds the answer until its registry request settles, and a
+      // page that never hears back is simply one without the notice.
+      void api.update().then(
+        (update) => set({ update }),
+        () => {},
+      );
       try {
         const [repo, state] = await Promise.all([api.repo(), api.state()]);
         set({ repo, prefs: state.prefs, issues: state.issues, todos: state.todos, root: repo.root });
@@ -324,6 +335,17 @@ export const useStore = create<AppStore>((set, get) => {
     async reloadRepo() {
       try {
         set({ repo: await api.repo() });
+      } catch (e) {
+        fail(e);
+      }
+    },
+
+    async copyUpdateCommand() {
+      const update = get().update;
+      if (!update) return;
+      try {
+        await copyText(update.command);
+        get().showToast('已复制更新命令，更新后重启 warden 生效');
       } catch (e) {
         fail(e);
       }

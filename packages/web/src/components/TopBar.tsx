@@ -29,6 +29,8 @@ function Mark() {
  */
 export function TopBar() {
   const repo = useStore((s) => s.repo)!;
+  const update = useStore((s) => s.update);
+  const copyUpdateCommand = useStore((s) => s.copyUpdateCommand);
   const targetKey = useStore((s) => s.targetKey);
   const setTarget = useStore((s) => s.setTarget);
   const refresh = useStore((s) => s.refresh);
@@ -58,6 +60,11 @@ export function TopBar() {
       <div className="brand" title={repo.root}>
         <Mark />
         <span className="wordmark">warden</span>
+        {update && (
+          <button className="update-chip" title={`当前 ${update.current}。点击复制更新命令：${update.command}`} onClick={() => void copyUpdateCommand()}>
+            {update.latest} 可用
+          </button>
+        )}
       </div>
       <div className="scope">
         <span className="repo-name">{dirName(repo.root)}</span>

@@ -295,6 +295,14 @@ export interface RepoInfo {
   defaultBase?: string;
 }
 
+/** A release newer than the running one; `GET /api/update` answers `null` when there is none. */
+export interface UpdateNotice {
+  current: string;
+  latest: string;
+  /** Command that installs it, matched to how this copy was started (npx, or a global install). */
+  command: string;
+}
+
 export interface FileEntry extends FileSummary {
   viewed: boolean;
   /** The file changed since it was marked as viewed (viewed flag was dropped). */

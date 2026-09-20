@@ -35,6 +35,7 @@ import type {
   TodosResponse,
   UpdateCommentRequest,
   UpdateIssueRequest,
+  UpdateNotice,
   UpdateTodoRequest,
   WorktreeInfo,
   WorktreesResponse,
@@ -66,6 +67,8 @@ export interface AppOptions {
   watchIntervalMs?: number;
   /** Echoed by GET /api/ping, so a caller can tell this process apart from whatever else answers. */
   instanceToken?: string;
+  /** The CLI's update check, still in flight when the first page loads; it never rejects. */
+  update?: Promise<UpdateNotice | null>;
 }
 
 const SSE_HEARTBEAT_MS = 15_000;
@@ -179,6 +182,10 @@ export function createApp(opts: AppOptions): Hono {
   });
 
   api.get('/state', async (c) => c.json(await store.load()));
+
+  // Waits for the check rather than answering "nothing yet": the request behind it gives up after a
+  // few seconds, and the page asks once, off to the side of everything it needs to draw.
+  api.get('/update', async (c) => c.json((await opts.update) ?? null));
 
   api.patch('/prefs', async (c) => {
     const body = (await c.req.json()) as Partial<Prefs>;

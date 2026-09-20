@@ -19,6 +19,11 @@ export const Refreshing: Story = {
     useStore.setState({ filesLoading: true, nvimScanning: true });
   },
 };
+export const UpdateAvailable: Story = {
+  beforeEach: () => {
+    useStore.setState({ update: { current: '0.11.1', latest: '0.12.0', command: 'npm i -g @xbghc/warden@latest' } });
+  },
+};
 export const Commit: Story = {
   beforeEach: () => {
     useStore.setState({ targetKey: 'commit:abc1234' });

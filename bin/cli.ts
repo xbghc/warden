@@ -2,7 +2,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { startServer } from '@warden/server';
+import { checkForUpdate, startServer, updateCheckEnabled } from '@warden/server';
 
 declare const __WARDEN_VERSION__: string | undefined;
 const VERSION = typeof __WARDEN_VERSION__ !== 'undefined' ? __WARDEN_VERSION__ : 'dev';
@@ -11,16 +11,18 @@ interface CliArgs {
   repoPath: string;
   port?: number;
   open: boolean;
+  updateCheck: boolean;
   help: boolean;
   version: boolean;
 }
 
 function parseArgs(argv: string[]): CliArgs {
-  const args: CliArgs = { repoPath: process.cwd(), open: true, help: false, version: false };
+  const args: CliArgs = { repoPath: process.cwd(), open: true, updateCheck: true, help: false, version: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
     if (a === '--no-open') args.open = false;
     else if (a === '--open') args.open = true;
+    else if (a === '--no-update-check') args.updateCheck = false;
     else if (a === '--port' || a === '-p') {
       const v = argv[++i];
       if (!v || !/^\d+$/.test(v)) throw new Error('--port requires a number');
@@ -46,6 +48,8 @@ Options:
   --port <n>, -p <n>   Listen on a fixed port (default: first free port from 4100, and under WSL
                        the first one the Windows side can reach)
   --no-open            Do not try to open the browser
+  --no-update-check    Do not ask the npm registry whether a newer warden exists
+                       (also: WARDEN_NO_UPDATE_CHECK=1, NO_UPDATE_NOTIFIER=1, CI)
   -h, --help           Show this help
   -v, --version        Print version
 `;
@@ -114,9 +118,17 @@ async function main(): Promise<void> {
     console.error('warning: built web assets not found (dist/web). Only the /api endpoints will be served.');
   }
 
+  // Started before the server so the two overlap, and never awaited on the way to a usable page:
+  // the answer is printed whenever it lands, and the page asks for it on its own. A dev run has no
+  // version to compare. npx unpacks into a `_npx` cache directory, which is how that case is told
+  // from a global install and given the command that actually refreshes it.
+  const viaNpx = fileURLToPath(import.meta.url).includes(`${path.sep}_npx${path.sep}`);
+  const checking = args.updateCheck && VERSION !== 'dev' && updateCheckEnabled();
+  const update = checking ? checkForUpdate({ current: VERSION, npx: viaNpx }) : Promise.resolve(null);
+
   let server: Awaited<ReturnType<typeof startServer>>;
   try {
-    server = await startServer({ repoPath: args.repoPath, port: args.port, webDir });
+    server = await startServer({ repoPath: args.repoPath, port: args.port, webDir, update });
   } catch (e) {
     console.error(`warden: ${(e as Error).message}`);
     process.exit(1);
@@ -138,6 +150,9 @@ async function main(): Promise<void> {
     const opened = await openBrowser(server.url);
     if (!opened) console.log('  (could not open a browser automatically; open the URL manually)');
   }
+  void update.then((u) => {
+    if (u) console.log(`  update: ${u.latest} is available (running ${u.current}) — ${u.command}`);
+  });
 
   const shutdown = () => {
     server.close().finally(() => process.exit(0));

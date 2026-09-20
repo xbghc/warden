@@ -434,6 +434,21 @@ kbd {
   align-items: center;
   gap: 8px;
 }
+/* A newer release exists. Kept as quiet as the branch chip: it is news about the tool, not about
+   the review, and it stays for as long as the page is open. */
+.update-chip {
+  height: auto;
+  padding: 1px 6px;
+  border: none;
+  font-family: var(--mono);
+  font-size: var(--t-meta);
+  color: var(--ink-2);
+  background: var(--surface-3);
+}
+.update-chip:hover:not(:disabled) {
+  color: var(--ink);
+  background: var(--line);
+}
 .repo-name {
   font-weight: 500;
 }

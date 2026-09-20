@@ -20,6 +20,7 @@ import type {
   RepoInfo,
   ReviewState,
   StageResponse,
+  UpdateNotice,
   WorktreesResponse,
 } from '@warden/shared';
 import { createApp, resolveRepo, StateStore, NvimService } from '@warden/server';
@@ -909,6 +910,21 @@ describe('worktree management', () => {
     expect(await code(res)).toBe('cross_site');
     expect((await app.request('/api/worktrees', { headers: { 'sec-fetch-site': 'cross-site' } })).status).toBe(200);
     expect((await app.request('/api/worktrees', { headers: { 'sec-fetch-site': 'same-origin' } })).status).toBe(200);
+  });
+});
+
+describe('update notice', () => {
+  it('answers null when no check was handed over', async () => {
+    const res = await get('/api/update');
+    expect(res.status).toBe(200);
+    expect(await json<UpdateNotice | null>(res)).toBeNull();
+  });
+
+  it('relays what the check came back with', async () => {
+    const repo = await resolveRepo(fx.root);
+    const notice: UpdateNotice = { current: '0.11.1', latest: '0.12.0', command: 'npm i -g @xbghc/warden@latest' };
+    const withUpdate = createApp({ repo, store: new StateStore(stateFile, repo.commonRoot), update: Promise.resolve(notice) });
+    expect(await json<UpdateNotice | null>(await withUpdate.request('/api/update'))).toEqual(notice);
   });
 });
 

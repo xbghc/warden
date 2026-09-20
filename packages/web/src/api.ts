@@ -30,6 +30,7 @@ import type {
   TodosResponse,
   UpdateCommentRequest,
   UpdateIssueRequest,
+  UpdateNotice,
   UpdateTodoRequest,
   WorktreesResponse,
   TmuxSessionsResponse,
@@ -82,6 +83,7 @@ const q = (params: Record<string, string | number | boolean | undefined>): strin
 export const api = {
   repo: () => req<RepoInfo>('GET', '/api/repo'),
   state: () => req<ReviewState>('GET', '/api/state'),
+  update: () => req<UpdateNotice | null>('GET', '/api/update'),
   patchPrefs: (prefs: Partial<Prefs>) => req<Prefs>('PATCH', '/api/prefs', prefs),
 
   files: (key: TargetKey) => req<FilesResponse>('GET', `/api/targets/${enc(key)}/files`),
