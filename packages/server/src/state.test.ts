@@ -68,12 +68,12 @@ describe('StateStore', () => {
     const file = path.join(dir, 'nested', 'state.json');
     const store = new StateStore(file, '/repo');
     await store.update((s) => {
-      ensureTarget(s, 'working').viewed['a.ts'] = 'hash1';
+      ensureTarget(s, 'base:main').viewed['a.ts'] = 'hash1';
       s.prefs.viewMode = 'split';
     });
     const again = new StateStore(file, '/repo');
     const s = await again.load();
-    expect(s.targets.working?.viewed).toEqual({ 'a.ts': 'hash1' });
+    expect(s.targets['base:main']?.viewed).toEqual({ 'a.ts': 'hash1' });
     expect(s.prefs.viewMode).toBe('split');
     // no temp files or lock files left behind
     const files = await readdir(path.dirname(file));
@@ -87,17 +87,17 @@ describe('StateStore', () => {
     const b = new StateStore(file, '/repo');
     await Promise.all([
       a.update((s) => {
-        ensureTarget(s, 'working').viewed['a.ts'] = '1';
+        ensureTarget(s, 'base:main').viewed['a.ts'] = '1';
       }),
       b.update((s) => {
-        ensureTarget(s, 'working').viewed['b.ts'] = '2';
+        ensureTarget(s, 'base:main').viewed['b.ts'] = '2';
       }),
       a.update((s) => {
         s.issues.push({ id: 'i1', title: 't', body: '', status: 'open', commentIds: [], createdAt: '', updatedAt: '' });
       }),
     ]);
     const s = await a.load();
-    expect(s.targets.working?.viewed).toEqual({ 'a.ts': '1', 'b.ts': '2' });
+    expect(s.targets['base:main']?.viewed).toEqual({ 'a.ts': '1', 'b.ts': '2' });
     expect(s.issues).toHaveLength(1);
   });
 
@@ -111,7 +111,7 @@ describe('StateStore', () => {
     expect(files.some((f) => f.startsWith('state.json.corrupt-'))).toBe(true);
   });
 
-  it('migrates comments from the local views into the shared scope', async () => {
+  it('moves comments from the local views into the shared scope and drops what is left of those views', async () => {
     const file = path.join(dir, 'state.json');
     const comment = (id: string, targetKey: string) => ({
       id,
@@ -134,7 +134,7 @@ describe('StateStore', () => {
         targets: {
           working: { viewed: { 'a.ts': 'h' }, comments: [comment('c1', 'working')] },
           staged: { viewed: {}, comments: [comment('c2', 'staged')] },
-          'commit:abc': { viewed: {}, comments: [comment('c3', 'commit:abc')] },
+          'commit:abc': { viewed: { 'a.ts': 'h' }, comments: [comment('c3', 'commit:abc')] },
         },
         issues: [],
       }),
@@ -142,11 +142,11 @@ describe('StateStore', () => {
     const s = await new StateStore(file, '/repo').load();
     // Sorted key order: staged before working.
     expect(s.targets.local!.comments.map((c) => c.id)).toEqual(['c2', 'c1']);
-    expect(s.targets.working!.comments).toEqual([]);
-    expect(s.targets.staged!.comments).toEqual([]);
-    // `viewed` is per view and stays where it was; commit targets keep their own comments.
-    expect(s.targets.working!.viewed).toEqual({ 'a.ts': 'h' });
+    // The local views keep no viewed mark, so nothing is left to hold under their keys.
+    expect(Object.keys(s.targets).sort()).toEqual(['commit:abc', 'local']);
+    // A commit target keeps its own comments and its marks.
     expect(s.targets['commit:abc']!.comments.map((c) => c.id)).toEqual(['c3']);
+    expect(s.targets['commit:abc']!.viewed).toEqual({ 'a.ts': 'h' });
     expect(s.todos).toEqual([]);
   });
 

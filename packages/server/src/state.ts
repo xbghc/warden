@@ -54,7 +54,7 @@ function normalise(raw: unknown, repoRoot: string): ReviewState {
       ...(typeof v.head === 'string' ? { head: v.head } : {}),
     };
   }
-  migrateLocalComments(targets);
+  migrateLocalViews(targets);
   return {
     schemaVersion: 1,
     repoRoot: r.repoRoot ?? repoRoot,
@@ -72,16 +72,18 @@ function normalise(raw: unknown, repoRoot: string): ReviewState {
 }
 
 /**
- * Comments used to live under the view they were written in (`working` / `staged` / `all`). They
- * now share one scope per worktree so they can follow the code across `git add`. Moves them in
- * place; `viewed` stays on the view key, which is still where it belongs.
+ * Nothing is kept under a local view key (`working` / `staged` / `all`) any more. Comments used to
+ * live under the view they were written in; they now share one scope per worktree so they can
+ * follow the code across `git add`, and are moved there. The 已读 marks of those views go with the
+ * entry: a file there is reviewed once it is staged (see `tracksViewed`).
  */
-function migrateLocalComments(targets: ReviewState['targets']): void {
+function migrateLocalViews(targets: ReviewState['targets']): void {
   // Sorted so a state file with several stale views migrates in a stable order.
   for (const key of Object.keys(targets).sort()) {
     const scope = commentScopeKey(key);
     if (scope === key) continue;
     const src = targets[key]!;
+    delete targets[key];
     if (src.comments.length === 0) continue;
     let dst = targets[scope];
     if (!dst) {
@@ -89,7 +91,6 @@ function migrateLocalComments(targets: ReviewState['targets']): void {
       targets[scope] = dst;
     }
     dst.comments.push(...src.comments);
-    src.comments = [];
   }
 }
 
@@ -195,8 +196,8 @@ export class StateStore {
 }
 
 /**
- * Drops everything kept under one worktree path: the scope its local views share, their viewed
- * flags, and the comment pools of its commit, range and `base` targets. A slot is checked out again
+ * Drops everything kept under one worktree path: the scope its local views share, and the viewed
+ * flags and comment pools of its commit, range and `base` targets. A slot is checked out again
  * for the next branch, and what was said about the previous one — `base` comments above all, which
  * no commit ever deletes — would otherwise come back orphaned over code they were never about.
  * Issues let go of the comments that went with it.

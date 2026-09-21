@@ -275,25 +275,39 @@ describe('repo & targets', () => {
 describe('viewed, comments, export, issues', () => {
   let comment: Comment;
 
+  // `base:main` on main is HEAD against the working tree: a target that tracks the mark and whose
+  // diff an edit can still change.
   it('viewed state is bound to the content hash', async () => {
-    const files = await json<FilesResponse>(await get(`/api/targets/${k('working')}/files`));
+    const files = await json<FilesResponse>(await get(`/api/targets/${k('base:main')}/files`));
     const b = files.files.find((f) => f.path === 'src/b.ts')!;
     expect(b.viewed).toBe(false);
-    await send('PUT', `/api/targets/${k('working')}/viewed`, { path: 'src/b.ts', viewed: true, contentHash: b.contentHash });
-    let again = await json<FilesResponse>(await get(`/api/targets/${k('working')}/files`));
+    await send('PUT', `/api/targets/${k('base:main')}/viewed`, { path: 'src/b.ts', viewed: true, contentHash: b.contentHash });
+    let again = await json<FilesResponse>(await get(`/api/targets/${k('base:main')}/files`));
     expect(again.files.find((f) => f.path === 'src/b.ts')!.viewed).toBe(true);
     // change the file -> viewed dropped, changed notice shown
     await fx.write('src/b.ts', 'export const b = 22;\n');
-    again = await json<FilesResponse>(await get(`/api/targets/${k('working')}/files`));
+    again = await json<FilesResponse>(await get(`/api/targets/${k('base:main')}/files`));
     const b2 = again.files.find((f) => f.path === 'src/b.ts')!;
     expect(b2.viewed).toBe(false);
     expect(b2.changed).toBe(true);
     const state = await json<ReviewState>(await get('/api/state'));
-    expect(state.targets.working?.viewed['src/b.ts']).toBeUndefined();
+    expect(state.targets['base:main']?.viewed['src/b.ts']).toBeUndefined();
     // re-view clears the notice
-    await send('PUT', `/api/targets/${k('working')}/viewed`, { path: 'src/b.ts', viewed: true, contentHash: b2.contentHash });
-    again = await json<FilesResponse>(await get(`/api/targets/${k('working')}/files`));
+    await send('PUT', `/api/targets/${k('base:main')}/viewed`, { path: 'src/b.ts', viewed: true, contentHash: b2.contentHash });
+    again = await json<FilesResponse>(await get(`/api/targets/${k('base:main')}/files`));
     expect(again.files.find((f) => f.path === 'src/b.ts')).toMatchObject({ viewed: true, changed: false });
+  });
+
+  it('keeps no viewed mark in the local views, where staged is what reviewed means', async () => {
+    for (const key of ['working', 'staged', 'all']) {
+      const res = await send('PUT', `/api/targets/${k(key)}/viewed`, { path: 'src/b.ts', viewed: true, contentHash: 'x' });
+      expect(res.status).toBe(400);
+      expect((await json<{ code: string }>(res)).code).toBe('viewed_not_tracked');
+    }
+    const state = await json<ReviewState>(await get('/api/state'));
+    expect(state.targets.working).toBeUndefined();
+    const listed = await json<FilesResponse>(await get(`/api/targets/${k('working')}/files`));
+    expect(listed.files.some((f) => f.viewed || f.changed)).toBe(false);
   });
 
   it('creates a comment with anchor + snippet', async () => {

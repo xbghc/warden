@@ -21,7 +21,7 @@ import type {
   UpdateTodoRequest,
   ViewMode,
 } from '@warden/shared';
-import { insertAfter, isLocalTarget, localViewKeys, moveBefore, stageModeFor, tryParseTargetKey, type StageMode } from '@warden/shared';
+import { insertAfter, isLocalTarget, localViewKeys, moveBefore, stageModeFor, tracksViewed, tryParseTargetKey, type StageMode } from '@warden/shared';
 import { api, ApiError } from './api';
 import { copyText } from './lib/clipboard';
 import { todoText } from './lib/todos';
@@ -79,6 +79,14 @@ export function useStageMode(): StageMode | undefined {
   return useStore((s) => {
     const t = tryParseTargetKey(s.targetKey);
     return t ? stageModeFor(t) : undefined;
+  });
+}
+
+/** Whether the target in front keeps the 已读 mark; the local views leave that to staging. */
+export function useTracksViewed(): boolean {
+  return useStore((s) => {
+    const t = tryParseTargetKey(s.targetKey);
+    return !!t && tracksViewed(t);
   });
 }
 
@@ -163,7 +171,7 @@ export interface AppStore {
   setActiveFile(path: string | null): void;
   setViewMode(mode: ViewMode): void;
   /** `view` defaults to the current one; the two sidebar blocks pass their own. */
-  toggleViewed(path: string, view?: TargetKey): Promise<void>;
+  toggleViewed(path: string): Promise<void>;
   createComment(body: CreateCommentRequest): Promise<Comment | undefined>;
   updateComment(id: string, body: UpdateCommentRequest): Promise<Comment | undefined>;
   deleteComment(id: string): Promise<void>;
@@ -244,19 +252,6 @@ export const useStore = create<AppStore>((set, get) => {
     const t = tryParseTargetKey(view);
     if (!t || !isLocalTarget(t)) return [];
     return t.kind === 'working' ? s.unstaged : t.kind === 'staged' ? s.staged : s.allFiles;
-  };
-
-  /** Patch one entry in the list behind `view`, and in `files` when that view is in front. */
-  const patchEntry = (view: TargetKey, path: string, patch: Partial<FileEntry>) => {
-    const t = tryParseTargetKey(view);
-    const kind = t && isLocalTarget(t) ? t.kind : null;
-    const apply = (list: FileEntry[]) => list.map((f) => (f.path === path ? { ...f, ...patch } : f));
-    set((s) => ({
-      ...(kind === 'working' ? { unstaged: apply(s.unstaged) } : {}),
-      ...(kind === 'staged' ? { staged: apply(s.staged) } : {}),
-      ...(kind === 'all' ? { allFiles: apply(s.allFiles) } : {}),
-      ...(view === s.targetKey ? { files: apply(s.files) } : {}),
-    }));
   };
 
   const loadDiff = async (path: string): Promise<FileDiff | undefined> => {
@@ -509,18 +504,20 @@ export const useStore = create<AppStore>((set, get) => {
       api.patchPrefs({ viewMode: mode }).catch(fail);
     },
 
-    async toggleViewed(path, view) {
-      // `viewed` is per view, so a file staged halfway can be marked read in one block and not the other.
-      const key = view ?? get().targetKey;
-      const entry = entriesOf(key).find((f) => f.path === path);
+    async toggleViewed(path) {
+      // Only a target with a single tree keeps the mark (`tracksViewed`), so the listing in front is
+      // the one the entry is in — unless the target was switched while the request was out.
+      const key = get().targetKey;
+      const entry = get().files.find((f) => f.path === path);
       if (!entry) return;
+      const patch = (p: Partial<FileEntry>) => set((s) => (s.targetKey === key ? { files: s.files.map((f) => (f.path === path ? { ...f, ...p } : f)) } : {}));
       const next = !entry.viewed;
-      patchEntry(key, path, { viewed: next, changed: false });
+      patch({ viewed: next, changed: false });
       try {
         await api.setViewed(key, path, next, entry.contentHash);
       } catch (e) {
         fail(e);
-        patchEntry(key, path, { viewed: !next });
+        patch({ viewed: !next });
       }
     },
 

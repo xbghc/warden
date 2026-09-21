@@ -13,9 +13,15 @@ const unstaged = [
   file('src/components/Empty.tsx', 'added', { untracked: true, deletions: 0 }),
   file('src/legacy.ts', 'deleted', { additions: 0 }),
   file('assets/logo.png', 'modified', { binary: true }),
+  file('README.md', 'modified'),
+];
+const staged = [file('src/App.tsx', 'modified'), file('src/utils/total.ts', 'renamed', { oldPath: 'src/total.ts' })];
+// 已读 and the 已变化 dot exist only off the local views, where nothing can be staged.
+const commitFiles = [
+  file('src/App.tsx', 'modified'),
+  file('src/components/Empty.tsx', 'added', { deletions: 0, viewed: true }),
   file('README.md', 'modified', { changed: true }),
 ];
-const staged = [file('src/App.tsx', 'modified', { viewed: true }), file('src/utils/total.ts', 'renamed', { oldPath: 'src/total.ts' })];
 
 const meta = {
   title: 'Review/FileTree',
@@ -40,10 +46,9 @@ const meta = {
       switchView: fn(async (targetKey: string, activeFile?: string | null) => {
         useStore.setState({ targetKey, activeFile, files: targetKey === 'staged' ? useStore.getState().staged : useStore.getState().unstaged });
       }),
-      toggleViewed: fn(async (path: string, view = useStore.getState().targetKey) => {
-        const key = view === 'staged' ? 'staged' : 'unstaged';
-        const files = useStore.getState()[key].map((entry) => (entry.path === path ? { ...entry, viewed: !entry.viewed, changed: false } : entry));
-        useStore.setState({ [key]: files, ...(view === useStore.getState().targetKey ? { files } : {}) });
+      toggleViewed: fn(async (path: string) => {
+        const files = useStore.getState().files.map((entry) => (entry.path === path ? { ...entry, viewed: !entry.viewed, changed: false } : entry));
+        useStore.setState({ files });
       }),
     });
   },
@@ -106,7 +111,7 @@ export const ErrorState: Story = {
 };
 export const CommitChanges: Story = {
   beforeEach: () => {
-    useStore.setState({ targetKey: 'commit:abc1234' });
+    useStore.setState({ targetKey: 'commit:abc1234', files: commitFiles });
   },
 };
 export const ReviewedDirectories: Story = {
@@ -118,10 +123,13 @@ export const ReviewedDirectories: Story = {
       file('src/utils/b.ts', 'modified'),
       file('docs/guide.md', 'modified', { viewed: true }),
     ];
-    useStore.setState({ unstaged: files, files, staged: [] });
+    useStore.setState({ targetKey: 'commit:abc1234', files });
   },
 };
 export const MarkViewed: Story = {
+  beforeEach: () => {
+    useStore.setState({ targetKey: 'commit:abc1234', files: commitFiles });
+  },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     const checkboxes = canvas.getAllByRole('checkbox');

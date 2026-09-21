@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { commentScopeKey, formatTargetKey, isLocalTarget, parseTargetKey, targetLabel, TargetKeyError } from './target.js';
+import { commentScopeKey, formatTargetKey, isLocalTarget, parseTargetKey, targetLabel, TargetKeyError, tracksViewed } from './target.js';
 
 describe('target keys', () => {
   it('parses simple kinds', () => {
@@ -25,6 +25,10 @@ describe('target keys', () => {
     expect(commentScopeKey('base:main')).toBe('base:main');
     expect(commentScopeKey('worktree:/p/q:base:main')).toBe('worktree:/p/q:base:main');
     expect(targetLabel(parseTargetKey('worktree:/p/wt:base:main'))).toBe('[wt] Branch vs main');
+  });
+  it('keeps the viewed mark off the local views, where staging is the mark', () => {
+    for (const key of ['working', 'staged', 'all', 'worktree:/p/wt:staged']) expect(tracksViewed(parseTargetKey(key))).toBe(false);
+    for (const key of ['base:main', 'commit:abc1234', 'range:a..b', 'worktree:/p/wt:base:main']) expect(tracksViewed(parseTargetKey(key))).toBe(true);
   });
   it('parses worktree variants including paths with colons', () => {
     expect(parseTargetKey('worktree:/home/u/wt:working')).toEqual({ kind: 'working', worktree: '/home/u/wt' });

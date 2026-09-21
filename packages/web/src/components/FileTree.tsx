@@ -2,7 +2,7 @@ import { ActionIcon } from './ActionIcon';
 import { useEffect, useMemo, useState } from 'react';
 import { FileIcon } from '@react-symbols/icons/utils';
 import type { FileEntry, TargetKey } from '@warden/shared';
-import { formatTargetKey, targetLabel, stageModeFor, commentScopeKey, isLocalTarget, tryParseTargetKey } from '@warden/shared';
+import { formatTargetKey, targetLabel, stageModeFor, commentScopeKey, isLocalTarget, tracksViewed, tryParseTargetKey } from '@warden/shared';
 import { useStore } from '../store';
 import { allDirPaths, buildTree, type DirNode, type TreeNode } from '../lib/tree';
 
@@ -39,7 +39,18 @@ function TreeIcon({ kind }: { kind: 'folder' | 'expand' | 'collapse' | 'check' }
   );
 }
 
-function FileRow({ node, depth, view }: { node: Extract<TreeNode, { kind: 'file' }>; depth: number; view: TargetKey }) {
+/**
+ * `marks` is whether the block's target keeps the 已读 mark (`tracksViewed`). Where it does not — the
+ * 未暂存 / 已暂存 blocks — a row has no box to tick and never recedes: which block it sits in is the
+ * whole of its review state, and the way to move it is to stage it.
+ */
+interface RowProps {
+  depth: number;
+  view: TargetKey;
+  marks: boolean;
+}
+
+function FileRow({ node, depth, view, marks }: RowProps & { node: Extract<TreeNode, { kind: 'file' }> }) {
   // A file staged halfway appears in both blocks; only the one in the view in front is highlighted.
   const active = useStore((s) => s.activeFile === node.path && s.targetKey === view);
   const inView = useStore((s) => s.targetKey === view);
@@ -60,19 +71,21 @@ function FileRow({ node, depth, view }: { node: Extract<TreeNode, { kind: 'file'
 
   return (
     <div
-      className={`tree-row file ${active ? 'active' : ''} ${e.viewed ? 'viewed' : ''}`}
+      className={`tree-row file ${active ? 'active' : ''} ${marks && e.viewed ? 'viewed' : ''}`}
       style={{ paddingLeft: 10 + depth * 14 }}
       title={e.oldPath ? `${e.oldPath} → ${e.path}` : e.path}
     >
-      <input
-        type="checkbox"
-        className="viewed-box"
-        checked={e.viewed}
-        onClick={(ev) => ev.stopPropagation()}
-        onChange={() => void toggleViewed(node.path, view)}
-        title="标记为已查看"
-        aria-label={`标记 ${node.path} 为已查看`}
-      />
+      {marks && (
+        <input
+          type="checkbox"
+          className="viewed-box"
+          checked={e.viewed}
+          onClick={(ev) => ev.stopPropagation()}
+          onChange={() => void toggleViewed(node.path)}
+          title="标记为已读"
+          aria-label={`标记 ${node.path} 为已读`}
+        />
+      )}
       <button
         className="tree-file-open"
         onClick={() => void open()}
@@ -84,7 +97,7 @@ function FileRow({ node, depth, view }: { node: Extract<TreeNode, { kind: 'file'
           <FileIcon fileName={node.name} autoAssign />
         </span>
         <span className="name">{node.name}</span>
-        {e.changed && <span className="tree-changed" title="文件自上次标记已查看后发生变化" aria-label="文件有新变化" />}
+        {marks && e.changed && <span className="tree-changed" title="文件自上次标记已读后发生变化" aria-label="文件有新变化" />}
         {commentCount > 0 && (
           <span className="cc" title={`${commentCount} 条评论`}>
             {commentCount}
@@ -118,11 +131,11 @@ function FileRow({ node, depth, view }: { node: Extract<TreeNode, { kind: 'file'
   );
 }
 
-function DirRow({ node, depth, view, open, toggle }: { node: DirNode; depth: number; view: TargetKey; open: Set<string>; toggle: (p: string) => void }) {
+function DirRow({ node, depth, view, marks, open, toggle }: RowProps & { node: DirNode; open: Set<string>; toggle: (p: string) => void }) {
   const isOpen = open.has(node.path);
   // Nothing below is left to review. The row has to say so itself: collapsed, it is the only sign,
   // and a directory that still hides an unread file looks exactly the same otherwise.
-  const done = node.viewedCount === node.fileCount;
+  const done = marks && node.viewedCount === node.fileCount;
   return (
     <>
       <button
@@ -130,7 +143,7 @@ function DirRow({ node, depth, view, open, toggle }: { node: DirNode; depth: num
         style={{ paddingLeft: 10 + depth * 14 }}
         onClick={() => toggle(node.path)}
         aria-expanded={isOpen}
-        title={done ? `${node.path}（${node.fileCount} 个文件均已查看）` : node.path}
+        title={done ? `${node.path}（${node.fileCount} 个文件均已读）` : node.path}
       >
         <span className={`chev ${isOpen ? 'open' : ''}`} aria-hidden="true">
           ›
@@ -145,9 +158,9 @@ function DirRow({ node, depth, view, open, toggle }: { node: DirNode; depth: num
       {isOpen &&
         node.children.map((c) =>
           c.kind === 'dir' ? (
-            <DirRow key={c.path} node={c} depth={depth + 1} view={view} open={open} toggle={toggle} />
+            <DirRow key={c.path} node={c} depth={depth + 1} view={view} marks={marks} open={open} toggle={toggle} />
           ) : (
-            <FileRow key={c.path} node={c} depth={depth + 1} view={view} />
+            <FileRow key={c.path} node={c} depth={depth + 1} view={view} marks={marks} />
           ),
         )}
     </>
@@ -188,13 +201,14 @@ function TreeBlock({ title, view, files, empty }: { title: string; view: TargetK
   const toggleLabel = hasExpandedDirectory ? '折叠全部目录' : '展开全部目录';
   const add = files.reduce((n, f) => n + f.additions, 0);
   const del = files.reduce((n, f) => n + f.deletions, 0);
-  const viewed = files.filter((f) => f.viewed).length;
+  const target = tryParseTargetKey(view);
+  const marks = !!target && tracksViewed(target);
 
   return (
     <section className="tree-block" aria-label={title}>
       <div className="block-head">
         <div className="block-heading">
-          <span className={`block-indicator ${tryParseTargetKey(view)?.kind === 'staged' ? 'is-staged' : ''}`} aria-hidden="true" />
+          <span className={`block-indicator ${target?.kind === 'staged' ? 'is-staged' : ''}`} aria-hidden="true" />
           <span className="block-title">{title}</span>
           <span className="block-file-count" aria-label={`${files.length} 个文件`}>
             {files.length}
@@ -217,20 +231,6 @@ function TreeBlock({ title, view, files, empty }: { title: string; view: TargetK
               <span className="add">+{add}</span>
               <span className="del">−{del}</span>
             </span>
-            <span
-              className="block-progress"
-              role="progressbar"
-              aria-label={`${title} 查看进度`}
-              aria-valuemin={0}
-              aria-valuemax={files.length}
-              aria-valuenow={viewed}
-            >
-              <span style={{ width: `${(viewed / files.length) * 100}%` }} />
-            </span>
-            <span className="block-reviewed" title={`已查看 ${viewed}/${files.length} 个文件`}>
-              {viewed === files.length && <TreeIcon kind="check" />}
-              {viewed}/{files.length}
-            </span>
           </div>
         )}
       </div>
@@ -243,9 +243,9 @@ function TreeBlock({ title, view, files, empty }: { title: string; view: TargetK
         ) : (
           tree.children.map((c) =>
             c.kind === 'dir' ? (
-              <DirRow key={c.path} node={c} depth={0} view={view} open={open} toggle={toggle} />
+              <DirRow key={c.path} node={c} depth={0} view={view} marks={marks} open={open} toggle={toggle} />
             ) : (
-              <FileRow key={c.path} node={c} depth={0} view={view} />
+              <FileRow key={c.path} node={c} depth={0} view={view} marks={marks} />
             ),
           )
         )}
@@ -326,7 +326,7 @@ export function FileTree() {
     const done = staged.filter((f) => !left.has(f.path)).length;
     return (
       <>
-        <ReviewProgress done={done} total={total} label="个文件已审" hint="暂存即视为已审：一个文件的改动全部进了暂存区，就算读完了" />
+        <ReviewProgress done={done} total={total} label="个文件已审" hint="暂存即已审：一个文件的改动全部进了暂存区，就算审完了" />
         <div className="tree-blocks">
           <TreeBlock
             key={`${scope}:unstaged`}

@@ -24,6 +24,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Language: code, comments, commit messages and README in English; user-visible UI strings in Chinese.
 - UI: the violet accent (`--accent`) is reserved for comment and agent-feedback affordances; navigation and selection use ink. Light theme only for now.
 - UI layout: the sidebar is the only navigation — its three tabs (`Panel`) each fill the left column with the controls for whatever the middle shows, so a new destination adds a tab there, never a control to the top bar. The commit and worktree panels portal their controls into `sideSlot` rather than lifting their state. The rail (comments / 待办 / Issue) is shut unless something put content in it; anything that does must go through `openRail` in the store, since the editor and cards only exist inside it. One figure only — review progress at the top of the sidebar — is set above `--t-ui`.
+- "Done" has one mark per kind of target, never two: staging in the local views (`working` / `staged` / `all`), the 已读 mark everywhere else. `tracksViewed` in `packages/shared/src/target.ts` is the switch; the server refuses the mark on a local view (`viewed_not_tracked`). Do not add a viewed / 已读 affordance, count or greyed-out state to the 未暂存 / 已暂存 blocks — the two disagreed whenever both were shown.
 - Tests: `makeFixtureRepo()` from `test/fixtures/make-repo.ts` builds an isolated temp repo (`{ root, git, write, cleanup }`); API tests call the Hono app directly with `app.request`.
 
 ## Git workflow

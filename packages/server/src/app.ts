@@ -40,7 +40,17 @@ import type {
   WorktreeInfo,
   WorktreesResponse,
 } from '@warden/shared';
-import { commentScopeKey, insertAfter, isLocalTarget, isValidRef, localViewKeys, moveBefore, stageModeFor, tryParseTargetKey } from '@warden/shared';
+import {
+  commentScopeKey,
+  insertAfter,
+  isLocalTarget,
+  isValidRef,
+  localViewKeys,
+  moveBefore,
+  stageModeFor,
+  tracksViewed,
+  tryParseTargetKey,
+} from '@warden/shared';
 import { badRequest, HttpError, notFound } from './errors.js';
 import { COMMIT_FORMAT, parseCommitLog } from './commits.js';
 import { applyToIndex, mergeBase, refExists, revParse, runGit } from './git.js';
@@ -214,8 +224,9 @@ export function createApp(opts: AppOptions): Hono {
 
     const stale: string[] = [];
     const state = await store.load();
-    const t = state.targets[key];
-    const viewed = t?.viewed ?? {};
+    // The local views keep no 已读 mark (see `tracksViewed`), so there is nothing to check or to
+    // report as changed; whatever an older version left under their keys is dropped on load.
+    const viewed = tracksViewed(ctx.target) ? (state.targets[key]?.viewed ?? {}) : {};
     for (const [p, h] of Object.entries(viewed)) {
       const f = diffs.find((d) => d.path === p);
       if (!f || f.contentHash !== h) stale.push(p);
@@ -267,7 +278,8 @@ export function createApp(opts: AppOptions): Hono {
 
   api.put('/targets/:key/viewed', async (c) => {
     const key = c.req.param('key');
-    await targetCtx(key);
+    const ctx = await targetCtx(key);
+    if (!tracksViewed(ctx.target)) throw badRequest(`${key} keeps no viewed mark: a file there is reviewed once it is staged`, 'viewed_not_tracked');
     const body = (await c.req.json()) as { path?: string; viewed?: boolean; contentHash?: string };
     if (!body.path) throw badRequest('missing path');
     const viewed = await store.update((s) => {

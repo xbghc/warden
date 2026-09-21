@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { FileEntry } from '@warden/shared';
-import { useStageMode, useStore } from '../store';
+import { useStageMode, useStore, useTracksViewed } from '../store';
 import { DiffView } from './DiffView';
 import { STATUS_LETTER } from './FileTree';
 import { totalDiffLines } from '../lib/rows';
@@ -25,6 +25,7 @@ function FileHeader({ entry }: { entry: FileEntry }) {
   const stageLines = useStore((s) => s.stageLines);
   const staging = useStore((s) => s.staging);
   const mode = useStageMode();
+  const marks = useTracksViewed();
   return (
     <div className="file-head">
       <span className={`status status-${entry.status}`} title={entry.status}>
@@ -46,7 +47,7 @@ function FileHeader({ entry }: { entry: FileEntry }) {
       <span className="counts">
         <span className="add">+{entry.additions}</span> <span className="del">-{entry.deletions}</span>
       </span>
-      {entry.changed && <span className="changed">文件已变化，“已读”标记已取消</span>}
+      {marks && entry.changed && <span className="changed">文件已变化，“已读”标记已取消</span>}
       <span className="spacer" />
       {/* Only when there is an nvim to open it in: a permanently greyed-out button is a control
           that never does anything, priced at full width in the busiest row of the panel. */}
@@ -70,10 +71,14 @@ function FileHeader({ entry }: { entry: FileEntry }) {
           {mode === 'stage' ? '暂存文件' : '取消暂存文件'}
         </button>
       )}
-      <label className="check">
-        <input type="checkbox" checked={entry.viewed} onChange={() => void toggleViewed(entry.path)} />
-        已读
-      </label>
+      {/* Where a file can be staged that is how it is marked done, by the button above; a second
+          tick beside it only ever disagreed with the first. */}
+      {marks && (
+        <label className="check">
+          <input type="checkbox" checked={entry.viewed} onChange={() => void toggleViewed(entry.path)} />
+          已读
+        </label>
+      )}
     </div>
   );
 }

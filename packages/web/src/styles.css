@@ -2364,7 +2364,7 @@ button.link.danger:has(> .action-icon):hover:not(:disabled) {
 }
 
 /* Every file below is marked viewed: the directory recedes the way a viewed file does, and the check
-   — the one the block head earns at n/n — says so without leaning on the colour alone. */
+   says so without leaning on the colour alone. */
 .tree-row.dir.viewed .name {
   font-weight: 400;
   color: var(--muted);
@@ -2444,21 +2444,6 @@ button.link.danger:has(> .action-icon):hover:not(:disabled) {
   font-variant-numeric: tabular-nums;
 }
 
-.block-progress {
-  flex: 1;
-  height: 3px;
-  border-radius: 3px;
-  background: var(--surface-3);
-  overflow: hidden;
-}
-
-.block-progress > span {
-  display: block;
-  height: 100%;
-  background: var(--add-fg);
-  border-radius: inherit;
-}
-
 .tree-tools {
   display: inline-flex;
   gap: 2px;
@@ -2519,20 +2504,6 @@ button.link.danger:has(> .action-icon):hover:not(:disabled) {
   display: flex;
   gap: 7px;
   font-family: var(--mono);
-}
-
-.block-reviewed {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  color: var(--muted);
-}
-
-.block-reviewed .tree-icon {
-  color: var(--add-fg);
-  width: 12px;
-  height: 12px;
-  flex-basis: 12px;
 }
 
 .action-count {

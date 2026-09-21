@@ -96,6 +96,10 @@ has no control of its own (a saved `lastTarget` can still restore it; *审阅整
 the same diff). Commit, range and `base` targets keep the single tree, and their figure counts 已读
 instead, since nothing can be staged there.
 
+So there is one mark of "done" per kind of target, never two. In the local views it is staging and
+nothing else: a row has no 已读 box, and which block a file sits in is the whole of its review state.
+Everywhere else it is the [已读 mark](#viewed-files).
+
 `base:<ref>` is for a branch a coding agent has been working on, committing as it goes: one tree with
 everything since the branch forked off `<ref>` — the commits plus whatever is still uncommitted or
 untracked. The diff runs against the merge base, so commits that landed on `<ref>` after the fork are
@@ -182,8 +186,7 @@ A partial pick is turned into the patch `git add -p`'s edit mode would want — 
 stay as context and the unpicked additions are left out (the mirror image when unstaging) — and applied
 with `git apply --cached`. It never touches the working tree, so what you did not pick is still
 there to stage next. Comments on the lines you staged follow them into the Staged view (see
-[Re-anchoring](#re-anchoring)); the file's *viewed* flag is dropped because its diff changed. Every
-page open on the worktree reloads at once.
+[Re-anchoring](#re-anchoring)). Every page open on the worktree reloads at once.
 
 Limits, each reported as a plain error rather than a half-applied patch:
 
@@ -258,9 +261,13 @@ them deletes on a moved HEAD.
 Comment markers in the diff belong to one view; the rail's *全部* tab lists the whole pool and
 *此文件* lists every comment on the open file regardless of which view it currently sits in.
 
-*已读* is per view, so a half-staged file can be marked read on one side and not the other. It is
-bound to a hash of the file's diff; when the diff changes the flag is dropped and the file is marked
-*已变化*.
+## Viewed files
+
+Commit, range and `base` targets cannot be staged from, so a file there is ticked *已读* instead — the
+box beside it in the sidebar, or the one in the file header. A directory whose files are all read
+recedes with a check. The mark is bound to a hash of the file's diff: when the diff changes (a `base`
+target reads the working tree, so the agent's next edit does that) the mark is dropped and the file
+is flagged *已变化*. The local views keep no such mark — see [Targets](#targets-what-is-being-reviewed).
 
 ## Auto-refresh
 
@@ -332,9 +339,10 @@ can share it. Delete the directory to reset.
 
 `targets` is keyed by target key, plus one *comment scope* per worktree — `local`, or
 `worktree:<path>:local` — holding the comments the three local views share and the HEAD sha the last
-re-anchor saw. `viewed` stays on the individual view keys. Issues and todos are top level. State
-written by an older version is migrated on load: comments filed under `working` / `staged` / `all`
-move into the matching scope the first time the file is read.
+re-anchor saw. `viewed` sits on the key of the commit, range or `base` target it was ticked in; the
+local view keys hold nothing. Issues and todos are top level. State written by an older version is
+migrated on load: comments filed under `working` / `staged` / `all` move into the matching scope the
+first time the file is read, and the 已读 marks those views used to keep are dropped.
 
 ## WSL2 notes
 

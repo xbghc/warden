@@ -159,6 +159,16 @@ export function stageModeFor(t: Target): StageMode | undefined {
   return undefined;
 }
 
+/**
+ * Whether files in a target carry the 已读 mark. The local views do not: there a file is reviewed
+ * once it is staged, and a second "done" kept beside that one only ever disagreed with it — the
+ * reviewed pile listed as unread, a read file left out of the count. Everywhere else nothing can be
+ * staged, so the mark is the only record of progress there is.
+ */
+export function tracksViewed(t: Target): boolean {
+  return !isLocalTarget(t);
+}
+
 /** The local view keys of the same worktree as `key`, in reanchor-candidate order. */
 export function localViewKeys(key: TargetKey): TargetKey[] {
   const t = tryParseTargetKey(key);
