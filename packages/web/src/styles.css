@@ -713,7 +713,7 @@ kbd {
   background: var(--ink);
   transition: width 0.25s;
 }
-/* Above a commit, range or branch tree only: the local views are home and need no way back. */
+/* Only above a worktree target that failed to list; the view picker names every other target. */
 .sidebar-target {
   flex: none;
   display: flex;

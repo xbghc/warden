@@ -286,33 +286,24 @@ export function FileTree() {
   // directories across a plain view switch — which is not supposed to reset anything.
   const scope = commentScopeKey(targetKey);
 
-  // A commit, a range or a branch view is entered from the Commits panel, so the sidebar says which
-  // one is up and holds the only way back to the working tree — even when the listing failed (a
-  // bad ref, say). A worktree target that failed to list is the one case where the way back must
-  // leave the worktree: it may itself be what is wrong (removed while the page was open), and every
-  // other control on the page would carry it along. Otherwise the worktree is already named in the
-  // top bar's selector, so the label leaves it out.
-  const stranded = !!error && !!target?.worktree;
-  const back = (!local || stranded) && (
-    <div className="sidebar-target">
-      <span className="sidebar-target-name" title={targetKey}>
-        {!target ? targetKey : stranded ? targetLabel(target) : targetLabel({ ...target, worktree: undefined })}
-      </span>
-      <span className="spacer" />
-      <button
-        className="link"
-        onClick={() => void setTarget(formatTargetKey(stranded ? { kind: 'working' } : { kind: 'working', ...worktree }))}
-        title={stranded ? '回到主仓库的工作区' : '回到工作区的 Unstaged / Staged 视图'}
-      >
-        {stranded ? '← 回到主仓库' : '← 返回工作区'}
-      </button>
-    </div>
-  );
-
   if (error) {
+    // The view picker names any other target and its 工作区 is the way back, even when the listing
+    // failed (a bad ref, say). A worktree target that failed to list is the one case where the way
+    // back must leave the worktree: it may itself be what is wrong (removed while the page was
+    // open), and every other control on the page, 工作区 included, would carry it along.
     return (
       <>
-        {back}
+        {target?.worktree && (
+          <div className="sidebar-target">
+            <span className="sidebar-target-name" title={targetKey}>
+              {targetLabel(target)}
+            </span>
+            <span className="spacer" />
+            <button className="link" onClick={() => void setTarget(formatTargetKey({ kind: 'working' }))} title="回到主仓库的工作区">
+              ← 回到主仓库
+            </button>
+          </div>
+        )}
         <div className="error-box">{error}</div>
       </>
     );
@@ -349,7 +340,6 @@ export function FileTree() {
 
   return (
     <>
-      {back}
       <ReviewProgress done={files.filter((f) => f.viewed).length} total={files.length} label="个文件已读" hint="勾选文件旁的框，或用文件头的“已读”标记" />
       <div className="tree-blocks">
         <TreeBlock key={scope} title="改动" view={targetKey} files={files} empty={loading ? '加载中…' : '没有改动'} />

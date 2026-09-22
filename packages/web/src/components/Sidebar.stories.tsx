@@ -45,7 +45,7 @@ const meta = {
 } satisfies Meta<typeof Sidebar>;
 export default meta;
 type Story = StoryObj<typeof meta>;
-export const Changes: Story = {};
+export const WorkingTree: Story = {};
 export const Commits: Story = {
   beforeEach: () => {
     useStore.setState({ panel: 'commits' });
@@ -60,15 +60,33 @@ export const SwitchView: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     const picker = canvas.getByRole('combobox', { name: '切换视图' });
-    await expect(picker).toHaveValue('diff');
+    await expect(picker).toHaveValue('working');
     await userEvent.selectOptions(picker, 'commits');
     await expect(await canvas.findByText('审阅整条分支')).toBeVisible();
     await expect(await canvas.findByText('补充评论导出')).toBeVisible();
     await userEvent.selectOptions(picker, 'worktrees');
     await expect(await canvas.findByText('检出分支')).toBeVisible();
     await expect(await canvas.findByText('feature/review')).toBeVisible();
-    await userEvent.selectOptions(picker, 'diff');
+    await userEvent.selectOptions(picker, 'working');
     await expect(await canvas.findByText('README.md')).toBeVisible();
     await expect(canvas.queryByText('检出分支')).not.toBeInTheDocument();
+  },
+};
+export const CommitTarget: Story = {
+  beforeEach: () => {
+    useStore.setState({ targetKey: 'commit:def5678', setTarget: fn(async (targetKey) => useStore.setState({ targetKey, panel: 'diff' })) });
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const picker = canvas.getByRole('combobox', { name: '切换视图' });
+    await expect(picker).toHaveValue('target');
+    await expect(canvas.getByRole('option', { name: '提交 def5678' })).toBeInTheDocument();
+    await userEvent.selectOptions(picker, 'commits');
+    await userEvent.selectOptions(picker, 'target');
+    await expect(picker).toHaveValue('target');
+    await userEvent.selectOptions(picker, 'working');
+    await expect(useStore.getState().setTarget).toHaveBeenCalledWith('working');
+    await expect(picker).toHaveValue('working');
+    await expect(canvas.queryByRole('option', { name: '提交 def5678' })).not.toBeInTheDocument();
   },
 };

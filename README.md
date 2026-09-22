@@ -72,19 +72,21 @@ for a global install. The check never delays startup and fails silently. `--no-u
 | Worktree, everything since base | `worktree:<path>:base:<ref>` | same, run inside the worktree |
 
 Refs accept anything git can resolve (`main`, `v1.2`, `HEAD~3`, a sha). `@` is `HEAD`.
-Worktrees are discovered with `git worktree list` (and made in the *Worktrees* tab, see below) and
+Worktrees are discovered with `git worktree list` (and made in the *Worktree* view, see below) and
 share the review state of the main repository.
 One whose directory is gone (git lists it as *prunable*) is not offered, and a remembered target
 inside a removed worktree falls back to the working tree on the next load. The comments and viewed
 flags kept under a worktree's key stay in the state file until a branch is checked out into that
 slot again, which drops them: they were about another branch.
 
-The sidebar is the navigation, and the only navigation: its three tabs — *变更*, *提交*, *Worktree* —
-each fill the left column with the controls for what the middle is showing, and the top bar carries
-none of it. There is no target switcher: the *变更* tab's two blocks *are* the working tree, a commit
-is picked from the *提交* list, and the *审阅整条分支* and *对比两个 ref* forms below that tab's filters
-open the other two. The sidebar names whatever is under review in its block header and puts a
-*返回工作区* link above it.
+The sidebar is the navigation, and the only navigation: the picker at its top — *工作区*, *提交历史*,
+*Worktree* — fills the left column with the controls for what the middle is showing, and the top bar
+carries none of it. There is no separate target switcher: *工作区*'s two blocks *are* the working
+tree, a commit is picked from the *提交历史* list, and the *审阅整条分支* and *对比两个 ref* forms below
+its filters open the other two. While a commit, range or branch is under review the picker gains an
+entry naming it — *提交 89d8ba2*, *main..feature*, *分支 vs main* — and reads that while its files are
+in front, so the control at the top of the column says what the files below belong to; *工作区* is
+then the way back.
 
 `working`, `staged` and `all` are the three **local views** of one worktree. While any of them is
 selected the sidebar shows two blocks — 未暂存 (`working`) and 已暂存 (`staged`) — instead of a
@@ -115,7 +117,7 @@ the fix and delete or re-attach it.
 
 ## Worktrees
 
-Agents do their best work each in a worktree of its own, and the sidebar's *Worktree* tab is
+Agents do their best work each in a worktree of its own, and the sidebar's *Worktree* view is
 where those are made and taken down without a trip to the terminal. The directories are numbered
 **slots** beside the main worktree — `<repo>-1`, `<repo>-2`, … (工位 in the UI) — rather than one
 directory per branch: a directory is where the dependencies get installed, and a fresh one for every
@@ -170,7 +172,7 @@ directory behind, `node_modules` and all, and the next branch is checked out int
 | `n` / `p` | Next / previous hunk |
 | `s` | Stage (Unstaged view) or unstage (Staged view) the picked lines |
 | `Ctrl+Enter` | Save the comment being edited |
-| `Esc` | Drop the picked lines / cancel editing / cancel re-attach mode / shut the rail / back to 变更 |
+| `Esc` | Drop the picked lines / cancel editing / cancel re-attach mode / shut the rail / back to the files under review |
 
 ## Staging
 
