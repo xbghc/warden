@@ -4,7 +4,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import type { CommentSide, DiffLine, FileDiff, Hunk } from '@warden/shared';
 import { useStageMode, useStore } from '../store';
 import { api } from '../api';
-import { buildRows, findRowIndex, hunkRowIndices, pickedLineIndices, type Expansion, type Gap, type Row } from '../lib/rows';
+import { type Block, buildRows, findRowIndex, hides, hunkRowIndices, pickedLineIndices, type Expansion, type Gap, type Row } from '../lib/rows';
 import { langForPath, tokenizeLines, type Token } from '../lib/highlight';
 
 interface Selection {
@@ -112,6 +112,14 @@ export function DiffView({ diff }: { diff: FileDiff }) {
       else next.add(id);
       return next;
     });
+  const [shutBlocks, setShutBlocks] = useState<ReadonlySet<string>>(() => new Set());
+  const toggleBlock = (id: string) =>
+    setShutBlocks((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   const [fullLines, setFullLines] = useState<string[] | null>(null);
   const fullLoading = useRef<Promise<string[] | null> | null>(null);
   const [sel, setSelState] = useState<Selection | null>(null);
@@ -123,8 +131,8 @@ export function DiffView({ diff }: { diff: FileDiff }) {
   const [flash, setFlash] = useState<{ side: CommentSide; line: number } | null>(null);
 
   const rows = useMemo(
-    () => buildRows({ diff, viewMode, expansions, fullLines, foldDebug, openDebug }),
-    [diff, viewMode, expansions, fullLines, foldDebug, openDebug],
+    () => buildRows({ diff, viewMode, expansions, fullLines, foldDebug, openDebug, shutBlocks }),
+    [diff, viewMode, expansions, fullLines, foldDebug, openDebug, shutBlocks],
   );
 
   /** side:line -> comments anchored (by end line) there; drives the pin + count in the row. */
@@ -255,6 +263,10 @@ export function DiffView({ diff }: { diff: FileDiff }) {
     const row = rows[idx]!;
     if (row.kind === 'debug') {
       toggleDebug(row.id);
+      return;
+    }
+    if ((row.kind === 'line' || row.kind === 'pair') && row.block && hides(row.block, jumpTo.side, jumpTo.line)) {
+      toggleBlock(row.block.id);
       return;
     }
     jumped.current = jumpTo;
@@ -476,6 +488,37 @@ export function DiffView({ diff }: { diff: FileDiff }) {
     );
   };
 
+  // ---- code blocks -----------------------------------------------------------------
+  const renderFoldToggle = (block: Block | undefined) => (
+    <span className="foldc">
+      {block && (
+        <button
+          className={`fold-btn ${block.open ? '' : 'shut'}`}
+          onClick={() => toggleBlock(block.id)}
+          aria-expanded={block.open}
+          title={block.open ? `折叠这段代码（${block.lines.length} 行）` : '展开这段代码'}
+        >
+          <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+            <path d="M3 2l4 3-4 3" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      )}
+    </span>
+  );
+  // What a shut block holds, changes first: a pick dragged across it takes none of them.
+  const renderFoldChip = (block: Block | undefined) =>
+    block && !block.open ? (
+      <button className="fold-chip" onClick={() => toggleBlock(block.id)} title="展开这段代码">
+        ⋯ {block.lines.length} 行
+        {(block.adds > 0 || block.dels > 0) && (
+          <>
+            {block.adds > 0 && <span className="add"> +{block.adds}</span>}
+            {block.dels > 0 && <span className="del"> −{block.dels}</span>}
+          </>
+        )}
+      </button>
+    ) : null;
+
   const renderUnified = (row: Extract<Row, { kind: 'line' }>) => {
     const l = row.line;
     const side: CommentSide = l.type === 'del' ? 'old' : 'new';
@@ -497,6 +540,7 @@ export function DiffView({ diff }: { diff: FileDiff }) {
         <span className="gut" onClick={() => gutterClick(l, row.hunkIndex)} title="在 nvim 中打开此行">
           {l.newLineNo ?? ''}
         </span>
+        {renderFoldToggle(row.block)}
         <span className="addc">
           {!row.expanded && no !== undefined && (
             <button className="add-btn" onMouseDown={(e) => startSel(e, side, row.hunkIndex, no)} title="添加评论（可拖选多行）">
@@ -512,6 +556,7 @@ export function DiffView({ diff }: { diff: FileDiff }) {
               ⏎
             </span>
           )}
+          {renderFoldChip(row.block)}
         </span>
         {renderMarker(side, no)}
       </div>
@@ -524,6 +569,9 @@ export function DiffView({ diff }: { diff: FileDiff }) {
     const no = side === 'old' ? l.oldLineNo : l.newLineNo;
     const type = l.type === 'context' ? 'context' : side === 'old' ? 'del' : 'add';
     const tokens = tokenCache.current.get(tokenKey(l, side));
+    // The block is read off the new side, so its toggle sits there — on the old side only when a
+    // deletion has nothing across from it.
+    const block = (side === 'new') === !!row.right ? row.block : undefined;
     return (
       <span
         className={`cell ${type} ${lineClasses(side, no)} ${picked ? 'picked' : ''}`}
@@ -533,6 +581,7 @@ export function DiffView({ diff }: { diff: FileDiff }) {
         <span className="gut" onClick={() => gutterClick(l, hunkIndex)} title="在 nvim 中打开此行">
           {no ?? ''}
         </span>
+        {renderFoldToggle(block)}
         <span className="addc">
           {!expanded && no !== undefined && (
             <button className="add-btn" onMouseDown={(e) => startSel(e, side, hunkIndex, no)} title="添加评论（可拖选多行）">
@@ -542,6 +591,7 @@ export function DiffView({ diff }: { diff: FileDiff }) {
         </span>
         <span className="code">
           <CodeLine content={l.content} tokens={tokens} />
+          {renderFoldChip(block)}
         </span>
         {renderMarker(side, no)}
       </span>

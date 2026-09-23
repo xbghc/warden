@@ -1187,6 +1187,70 @@ kbd {
   font-size: 11px;
   vertical-align: -3px;
 }
+/* Code block toggle: shown on the head's hover, and always while the block is shut. */
+.foldc {
+  flex: 0 0 14px;
+  position: relative;
+  user-select: none;
+}
+.fold-btn {
+  position: absolute;
+  inset: 0;
+  height: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0;
+}
+.fold-btn svg {
+  transform: rotate(90deg);
+  transition: transform 0.1s;
+}
+.fold-btn.shut svg {
+  transform: none;
+}
+.row.line:hover .fold-btn,
+.cell:hover .fold-btn,
+.fold-btn.shut,
+.fold-btn:focus-visible {
+  opacity: 1;
+}
+.fold-btn:hover:not(:disabled) {
+  background: none;
+  color: var(--ink);
+}
+.fold-chip {
+  margin-left: 8px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-ctl);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-family: var(--sans);
+  font-size: var(--t-meta);
+  line-height: 14px;
+  cursor: pointer;
+  /* Shorter than a control and top-aligned, or it grows the line past the row's height. */
+  display: inline-block;
+  height: 16px;
+  vertical-align: top;
+  margin-top: 2px;
+}
+.fold-chip:hover {
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+.fold-chip .add {
+  color: var(--add-fg);
+}
+.fold-chip .del {
+  color: var(--del-fg);
+}
 .marker {
   flex: 0 0 14px;
   text-align: center;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { FileDiff, Hunk } from '@warden/shared';
-import { buildRows, computeGaps, findRowIndex, pickedLineIndices } from './rows';
+import { blockEnds, buildRows, computeGaps, findRowIndex, pickedLineIndices } from './rows';
 
 function hunk(oldStart: number, newStart: number, spec: string[]): Hunk {
   let o = oldStart;
@@ -139,6 +139,60 @@ describe('buildRows', () => {
       0,
       1,
       'fold:2',
+    ]);
+  });
+});
+
+describe('blockEnds', () => {
+  it('heads a block where the next line goes deeper, and leaves the closing line out', () => {
+    const ends = blockEnds(['function f() {', '  if (x) {', '    a();', '', '    b();', '  }', '  c();', '}', 'tail']);
+    expect([...ends]).toEqual([
+      [1, 4],
+      [0, 6],
+    ]);
+  });
+
+  it('folds an indented language, closes open blocks at the end, and ignores a lone blank', () => {
+    expect([...blockEnds(['def f():', '\tx = 1', '', '\treturn x'])]).toEqual([[0, 3]]);
+    expect([...blockEnds(['a', '', 'b'])]).toEqual([]);
+  });
+});
+
+describe('code blocks in rows', () => {
+  // A function whose body holds a change; the closing brace is context after it.
+  const h = hunk(1, 1, [' function f() {', '   keep();', '-  old();', '+  now();', ' }', ' after();']);
+  const d: FileDiff = { ...diff, hunks: [h] };
+  const texts = (rows: ReturnType<typeof buildRows>) =>
+    rows.flatMap((r) => (r.kind === 'line' ? [r.line.content] : r.kind === 'pair' ? [(r.right ?? r.left)!.content] : []));
+
+  it('marks the head, and a shut block hides its body and keeps it out of a pick', () => {
+    const open = buildRows({ diff: d, viewMode: 'unified', expansions: {}, fullLines: null });
+    const head = open.find((r) => r.kind === 'line' && r.block);
+    expect(head?.kind === 'line' && head.block).toMatchObject({ id: 'n1', open: true, adds: 1, dels: 1 });
+
+    const shut = buildRows({ diff: d, viewMode: 'unified', expansions: {}, fullLines: null, shutBlocks: new Set(['n1']) });
+    expect(texts(shut)).toEqual(['function f() {', '}', 'after();']);
+    expect(pickedLineIndices(shut, 0, 0, 5)).toEqual([]);
+    // A line inside is found at the head, which is where a jump opens it.
+    expect(findRowIndex(shut, 'old', 3)).toBe(findRowIndex(shut, 'new', 1));
+    expect(findRowIndex(shut, 'new', 3)).toBe(findRowIndex(shut, 'new', 1));
+  });
+
+  it('folds on the new side of a pair in split view', () => {
+    const shut = buildRows({ diff: d, viewMode: 'split', expansions: {}, fullLines: null, shutBlocks: new Set(['n1']) });
+    expect(texts(shut)).toEqual(['function f() {', '}', 'after();']);
+  });
+
+  it('takes debug runs from what a shut block left in view', () => {
+    const dh = hunk(1, 1, [' function f() {', '+  probe();', ' }', '+log();']);
+    dh.lines[1]!.debug = true;
+    dh.lines[3]!.debug = true;
+    const dd: FileDiff = { ...diff, hunks: [dh] };
+    const shut = buildRows({ diff: dd, viewMode: 'unified', expansions: {}, fullLines: null, foldDebug: true, shutBlocks: new Set(['n1']) });
+    expect(shut.filter((r) => r.kind === 'line' || r.kind === 'debug').map((r) => (r.kind === 'line' ? r.line.content : `fold:${r.id}`))).toEqual([
+      'function f() {',
+      '}',
+      'fold:0:3',
     ]);
   });
 });

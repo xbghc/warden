@@ -26,13 +26,78 @@ export interface Expansion {
 export type Row =
   | { key: string; kind: 'gap'; gap: Gap; hidden: number | null }
   | { key: string; kind: 'hunk'; hunkIndex: number; hunk: Hunk }
-  | { key: string; kind: 'line'; line: DiffLine; hunkIndex: number; expanded: boolean; pos: number; indices: number[] }
-  | { key: string; kind: 'pair'; left?: DiffLine; right?: DiffLine; hunkIndex: number; expanded: boolean; pos: number; indices: number[] }
+  | { key: string; kind: 'line'; line: DiffLine; hunkIndex: number; expanded: boolean; pos: number; indices: number[]; block?: Block }
+  | {
+      key: string;
+      kind: 'pair';
+      left?: DiffLine;
+      right?: DiffLine;
+      hunkIndex: number;
+      expanded: boolean;
+      pos: number;
+      indices: number[];
+      block?: Block;
+    }
   /**
    * A run of debug lines in a hunk: shut, it stands in for them (`lines`); open, it sits above them
    * as the way to shut it again. `id` is what the open ones are remembered by.
    */
   | { key: string; kind: 'debug'; id: string; hunkIndex: number; lines: DiffLine[]; open: boolean };
+
+/**
+ * The code block a row heads: the lines under it, and how many of them are changes. The header
+ * stays in view when the block is shut; `lines` are what it then stands in for.
+ */
+export interface Block {
+  id: string;
+  open: boolean;
+  lines: DiffLine[];
+  adds: number;
+  dels: number;
+}
+
+/** Leading whitespace in columns (a tab as four), or -1 for a blank line. */
+function indentOf(text: string): number {
+  let n = 0;
+  for (const ch of text) {
+    if (ch === ' ') n++;
+    else if (ch === '\t') n += 4;
+    else return n;
+  }
+  return -1;
+}
+
+/**
+ * Code blocks among `texts` by indentation, the way an editor folds a language it has no grammar
+ * for: a line heads a block when the next non-blank line is indented deeper, and the block runs to
+ * the last non-blank line before one indented no deeper than the head. So blank lines inside do not
+ * end it, and a closing `}` — at the head's own depth — stays outside, in view. Keyed by head.
+ */
+export function blockEnds(texts: string[]): Map<number, number> {
+  const ends = new Map<number, number>();
+  const open: { at: number; indent: number }[] = [];
+  let last = -1;
+  const close = (indent: number) => {
+    while (open.length && open[open.length - 1]!.indent >= indent) {
+      const head = open.pop()!;
+      if (last > head.at) ends.set(head.at, last);
+    }
+  };
+  texts.forEach((text, k) => {
+    const indent = indentOf(text);
+    if (indent < 0) return;
+    close(indent);
+    open.push({ at: k, indent });
+    last = k;
+  });
+  close(-1);
+  return ends;
+}
+
+/** Whether `lines` hold `line` on `side`. */
+function holds(lines: DiffLine[], side: CommentSide, line: number): boolean {
+  return lines.some((l) => (side === 'new' ? l.type !== 'del' && l.newLineNo === line : l.type !== 'add' && l.oldLineNo === line));
+}
 
 export function computeGaps(diff: FileDiff, totalNewLines: number | null): Gap[] {
   const gaps: Gap[] = [];
@@ -120,6 +185,8 @@ export interface BuildRowsInput {
   /** Fold runs of debug lines; `openDebug` holds the ids of the runs opened again. */
   foldDebug?: boolean;
   openDebug?: ReadonlySet<string>;
+  /** Ids of the code blocks shut (`Block.id`). */
+  shutBlocks?: ReadonlySet<string>;
 }
 
 /**
@@ -141,30 +208,60 @@ function foldRuns<T>(items: T[], isDebug: (t: T) => boolean, run: (from: number,
 }
 
 /** Rows of the diff column. Comments never interrupt the code: they live in the comment rail. */
-export function buildRows({ diff, viewMode, expansions, fullLines, foldDebug = false, openDebug }: BuildRowsInput): Row[] {
+export function buildRows({ diff, viewMode, expansions, fullLines, foldDebug = false, openDebug, shutBlocks }: BuildRowsInput): Row[] {
   const rows: Row[] = [];
   const canExpand = diff.status !== 'deleted' && diff.status !== 'added' && !diff.binary;
   const gaps = canExpand ? computeGaps(diff, fullLines ? fullLines.length : null) : [];
 
   // Expanded context is borrowed from the full file, not part of any hunk: no position, no lines,
-  // and no debug flag, so only hunk lines ever fold. The rows a shut fold stands in for leave a hole
-  // in the positions: a pick dragged across it takes none of them.
+  // and no debug flag, so only hunk lines ever fold as debug code. Code blocks are found within one
+  // call — a run of rows between a hunk header and the next gap — and never reach across either.
+  // The rows a shut fold stands in for leave a hole in the positions: a pick dragged across it
+  // takes none of them, since staging is saying they were read.
   const emitLines = (lines: DiffLine[], hunkIndex: number, expanded: boolean) => {
-    const withFolds = <T>(items: T[], isDebug: (t: T) => boolean, shows: (t: T) => DiffLine[], emit: (t: T, i: number) => void) => {
+    const withFolds = <T>(
+      items: T[],
+      text: (t: T) => string,
+      head: (t: T) => DiffLine,
+      isDebug: (t: T) => boolean,
+      shows: (t: T) => DiffLine[],
+      emit: (t: T, i: number, block?: Block) => void,
+    ) => {
+      // Shut code blocks first: what they hide is gone before debug runs are looked for.
+      const ends = blockEnds(items.map(text));
+      const visible: { item: T; i: number; block?: Block }[] = [];
+      let hideUntil = -1;
+      items.forEach((item, i) => {
+        if (i <= hideUntil) return;
+        const to = ends.get(i);
+        if (to === undefined) {
+          visible.push({ item, i });
+          return;
+        }
+        const h = head(item);
+        const id = h.newLineNo !== undefined ? `n${h.newLineNo}` : `o${h.oldLineNo}`;
+        const inside = items.slice(i + 1, to + 1).flatMap(shows);
+        const open = !shutBlocks?.has(id);
+        if (!open) hideUntil = to;
+        const adds = inside.filter((l) => l.type === 'add').length;
+        const dels = inside.filter((l) => l.type === 'del').length;
+        visible.push({ item, i, block: { id, open, lines: inside, adds, dels } });
+      });
+      const put = (v: (typeof visible)[number]) => emit(v.item, v.i, v.block);
       if (!foldDebug || expanded) {
-        items.forEach(emit);
+        visible.forEach(put);
         return;
       }
       const run = (from: number, to: number) => {
-        const id = `${hunkIndex}:${from}`;
+        const id = `${hunkIndex}:${visible[from]!.i}`;
         const open = !!openDebug?.has(id);
-        rows.push({ key: `d:${id}`, kind: 'debug', id, hunkIndex, lines: items.slice(from, to).flatMap(shows), open });
-        if (open) for (let k = from; k < to; k++) emit(items[k]!, k);
+        rows.push({ key: `d:${id}`, kind: 'debug', id, hunkIndex, lines: visible.slice(from, to).flatMap((v) => shows(v.item)), open });
+        if (open) visible.slice(from, to).forEach(put);
       };
-      foldRuns(items, isDebug, run, emit);
+      foldRuns(visible, (v) => isDebug(v.item), run, put);
     };
     if (viewMode === 'unified') {
-      const emit = (l: DiffLine, i: number) => {
+      const emit = (l: DiffLine, i: number, block?: Block) => {
         rows.push({
           key: `l:${hunkIndex}:${l.oldLineNo ?? '-'}:${l.newLineNo ?? '-'}`,
           kind: 'line',
@@ -173,17 +270,21 @@ export function buildRows({ diff, viewMode, expansions, fullLines, foldDebug = f
           expanded,
           pos: expanded ? -1 : i,
           indices: expanded || l.type === 'context' ? [] : [i],
+          ...(block ? { block } : {}),
         });
       };
       withFolds(
         lines,
+        (l) => l.content,
+        (l) => l,
         (l) => !!l.debug,
         (l) => [l],
         emit,
       );
     } else {
       const pairs = pairLines(lines);
-      const emit = (p: (typeof pairs)[number], i: number) => {
+      type Pair = (typeof pairs)[number];
+      const emit = (p: Pair, i: number, block?: Block) => {
         rows.push({
           key: `p:${hunkIndex}:${p.left?.oldLineNo ?? '-'}:${p.right?.newLineNo ?? '-'}`,
           kind: 'pair',
@@ -193,12 +294,16 @@ export function buildRows({ diff, viewMode, expansions, fullLines, foldDebug = f
           expanded,
           pos: expanded ? -1 : i,
           indices: expanded ? [] : p.indices,
+          ...(block ? { block } : {}),
         });
       };
+      // The new side is what the code now reads as; a deletion with nothing across from it is
+      // judged by what it was.
+      const side = (p: Pair) => (p.right ?? p.left)!;
       // A pair folds when every line in it is debug code: half of a replacement stays in view.
-      const debugPair = (p: (typeof pairs)[number]) => (!p.left || !!p.left.debug) && (!p.right || !!p.right.debug);
-      const shows = (p: (typeof pairs)[number]) => (p.left === p.right ? [p.left!] : [p.left, p.right].filter((l): l is DiffLine => !!l));
-      withFolds(pairs, debugPair, shows, emit);
+      const debugPair = (p: Pair) => (!p.left || !!p.left.debug) && (!p.right || !!p.right.debug);
+      const shows = (p: Pair) => (p.left === p.right ? [p.left!] : [p.left, p.right].filter((l): l is DiffLine => !!l));
+      withFolds(pairs, (p) => side(p).content, side, debugPair, shows, emit);
     }
   };
 
@@ -222,15 +327,22 @@ export function buildRows({ diff, viewMode, expansions, fullLines, foldDebug = f
   return rows;
 }
 
-/** Index of the row that shows `line` on `side` — or the shut debug fold that holds it — or -1. */
+/**
+ * Index of the row that shows `line` on `side` — or, when a fold hides it, of the shut debug fold
+ * or the head of the shut code block that holds it — or -1.
+ */
 export function findRowIndex(rows: Row[], side: CommentSide, line: number): number {
-  const on = (l: DiffLine) => (side === 'new' ? l.type !== 'del' && l.newLineNo === line : l.type !== 'add' && l.oldLineNo === line);
   return rows.findIndex((r) => {
-    if (r.kind === 'line') return side === 'new' ? r.line.newLineNo === line : r.line.oldLineNo === line;
-    if (r.kind === 'pair') return side === 'new' ? r.right?.newLineNo === line : r.left?.oldLineNo === line;
-    if (r.kind === 'debug') return !r.open && r.lines.some(on);
+    if (r.kind === 'line') return (side === 'new' ? r.line.newLineNo === line : r.line.oldLineNo === line) || hides(r.block, side, line);
+    if (r.kind === 'pair') return (side === 'new' ? r.right?.newLineNo === line : r.left?.oldLineNo === line) || hides(r.block, side, line);
+    if (r.kind === 'debug') return !r.open && holds(r.lines, side, line);
     return false;
   });
+}
+
+/** A shut block hides `line` on `side`. */
+export function hides(block: Block | undefined, side: CommentSide, line: number): boolean {
+  return !!block && !block.open && holds(block.lines, side, line);
 }
 
 /** Changed lines (indices into the hunk) shown by the rows of `hunkIndex` whose position lies in [a, b]. */

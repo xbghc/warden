@@ -13,6 +13,9 @@ with line comments you can copy back to the agent as a prompt.
   over the lines you have read (or a hunk, or a file), and unstage the same way from the Staged view.
 - Debug code marked in a comment is folded out of the review and left out of whole-file staging, and
   the Staged block warns while any of it is in the index (see [Debug code](#debug-code)).
+- Code blocks fold by indentation, as an editor does for a language it has no grammar for: the
+  chevron beside a line that heads one shuts its body, and the head then says how many lines and
+  changes it hides. A dragged pick across a shut block takes none of them; stage the hunk to take them.
 - GitHub-style unified / side-by-side diff with syntax highlighting, collapsed file tree, lazy per-file loading, context expansion, virtual scrolling.
 - Line comments (single line or a dragged range), Markdown, edit / delete.
 - One click copies all comments as an agent-readable prompt to the clipboard.
