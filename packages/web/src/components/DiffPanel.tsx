@@ -26,6 +26,7 @@ function FileHeader({ entry }: { entry: FileEntry }) {
   const staging = useStore((s) => s.staging);
   const mode = useStageMode();
   const marks = useTracksViewed();
+  const skipsDebug = useStore((s) => s.prefs.ignoreDebug) && !!entry.debugAdditions;
   return (
     <div className="file-head">
       <span className={`status status-${entry.status}`} title={entry.status}>
@@ -64,7 +65,7 @@ function FileHeader({ entry }: { entry: FileEntry }) {
             entry.binary
               ? '二进制文件无法从这里暂存，请用 git add / git restore --staged'
               : mode === 'stage'
-                ? '把这个文件的全部改动放入暂存区（含模式变更）'
+                ? `把这个文件的全部改动放入暂存区（含模式变更${skipsDebug ? '，跳过调试代码' : ''}）`
                 : '把这个文件的全部改动移出暂存区'
           }
         >

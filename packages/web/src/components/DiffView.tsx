@@ -73,6 +73,7 @@ function estimateRow(row: Row): number {
   switch (row.kind) {
     case 'hunk':
     case 'gap':
+    case 'debug':
       return 26;
     default:
       return 22;
@@ -81,6 +82,7 @@ function estimateRow(row: Row): number {
 
 export function DiffView({ diff }: { diff: FileDiff }) {
   const viewMode = useStore((s) => s.prefs.viewMode);
+  const foldDebug = useStore((s) => s.prefs.ignoreDebug);
   const targetKey = useStore((s) => s.targetKey);
   const allComments = useStore((s) => s.comments);
   // Comments are shared by the local views, but a marker only belongs on the view it currently
@@ -102,6 +104,14 @@ export function DiffView({ diff }: { diff: FileDiff }) {
   const staging = useStore((s) => s.staging);
 
   const [expansions, setExpansions] = useState<Record<number, Expansion>>({});
+  const [openDebug, setOpenDebug] = useState<ReadonlySet<string>>(() => new Set());
+  const toggleDebug = (id: string) =>
+    setOpenDebug((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   const [fullLines, setFullLines] = useState<string[] | null>(null);
   const fullLoading = useRef<Promise<string[] | null> | null>(null);
   const [sel, setSelState] = useState<Selection | null>(null);
@@ -112,7 +122,10 @@ export function DiffView({ diff }: { diff: FileDiff }) {
   }, []);
   const [flash, setFlash] = useState<{ side: CommentSide; line: number } | null>(null);
 
-  const rows = useMemo(() => buildRows({ diff, viewMode, expansions, fullLines }), [diff, viewMode, expansions, fullLines]);
+  const rows = useMemo(
+    () => buildRows({ diff, viewMode, expansions, fullLines, foldDebug, openDebug }),
+    [diff, viewMode, expansions, fullLines, foldDebug, openDebug],
+  );
 
   /** side:line -> comments anchored (by end line) there; drives the pin + count in the row. */
   const markers = useMemo(() => {
@@ -226,16 +239,32 @@ export function DiffView({ diff }: { diff: FileDiff }) {
   }, []);
 
   // ---- jump to a line (issue / comment navigation) -------------------------
+  // A line inside a shut debug fold opens it first; the rows that brings run this again.
+  const jumped = useRef<typeof jumpTo>(null);
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (flashTimer.current) clearTimeout(flashTimer.current);
+    },
+    [],
+  );
   useEffect(() => {
-    if (!jumpTo || jumpTo.file !== diff.path) return;
+    if (!jumpTo || jumpTo.file !== diff.path || jumped.current === jumpTo) return;
     const idx = findRowIndex(rows, jumpTo.side, jumpTo.line);
     if (idx < 0) return;
+    const row = rows[idx]!;
+    if (row.kind === 'debug') {
+      toggleDebug(row.id);
+      return;
+    }
+    jumped.current = jumpTo;
     virtualizer.scrollToIndex(idx, { align: 'center' });
     setFlash({ side: jumpTo.side, line: jumpTo.line });
-    const t = setTimeout(() => setFlash(null), 1600);
-    return () => clearTimeout(t);
+    // Not an effect cleanup: the next change of `rows` would clear it and leave the flash on.
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+    flashTimer.current = setTimeout(() => setFlash(null), 1600);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jumpTo]);
+  }, [jumpTo, rows]);
 
   // ---- hunk navigation (n / p) -------------------------------------------------
   useEffect(() => {
@@ -519,10 +548,29 @@ export function DiffView({ diff }: { diff: FileDiff }) {
     );
   };
 
+  const renderDebug = (row: Extract<Row, { kind: 'debug' }>) => {
+    const changed = row.lines.filter((l) => l.type !== 'context').length;
+    const what = changed === row.lines.length ? `${changed} 行调试代码改动` : `${row.lines.length} 行调试代码（${changed} 行改动）`;
+    return (
+      <div className={`row debug-row ${row.open ? 'open' : ''}`}>
+        <button
+          className="link"
+          onClick={() => toggleDebug(row.id)}
+          aria-expanded={row.open}
+          title="调试块或标了 nocommit 的行；整个文件或整个 hunk 暂存时会跳过"
+        >
+          {row.open ? `收起 ${what}` : `已折叠 ${what}`}
+        </button>
+      </div>
+    );
+  };
+
   const renderRow = (row: Row) => {
     switch (row.kind) {
       case 'gap':
         return renderGap(row);
+      case 'debug':
+        return renderDebug(row);
       case 'hunk':
         return (
           <div className="row hunk-head">
@@ -534,7 +582,11 @@ export function DiffView({ diff }: { diff: FileDiff }) {
                 className="link hunk-stage"
                 disabled={staging}
                 onClick={() => void stageLines(diff.path, [{ index: row.hunkIndex }])}
-                title={mode === 'stage' ? '把这个 hunk 的全部改动放入暂存区' : '把这个 hunk 的全部改动移出暂存区'}
+                title={
+                  mode === 'stage'
+                    ? `把这个 hunk 的全部改动放入暂存区${foldDebug && row.hunk.lines.some((l) => l.debug) ? '（跳过调试代码）' : ''}`
+                    : '把这个 hunk 的全部改动移出暂存区'
+                }
               >
                 {mode === 'stage' ? '暂存此 hunk' : '取消暂存此 hunk'}
               </button>

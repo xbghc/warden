@@ -21,6 +21,9 @@ export interface FileSummary {
   untracked?: boolean;
   oldMode?: string;
   newMode?: string;
+  /** Added / deleted lines that are debug code (see `debug.ts`); absent when there are none. */
+  debugAdditions?: number;
+  debugDeletions?: number;
 }
 
 export interface FileDiff extends FileSummary {
@@ -48,6 +51,8 @@ export interface DiffLine {
   content: string;
   /** Set when the line is the last of the file and has no trailing newline. */
   noNewline?: boolean;
+  /** Inside a debug block or tagged as not to be committed. */
+  debug?: boolean;
 }
 
 export type CommentSide = 'old' | 'new';
@@ -109,6 +114,11 @@ export interface Prefs {
    * laptop in split view — so it stays shut until there is something to put in it.
    */
   railOpen: boolean;
+  /**
+   * Fold debug code in the diff, leave it out of whole-file and whole-hunk staging, and do not
+   * count a file whose only changes left unstaged are debug code as still to review.
+   */
+  ignoreDebug: boolean;
 }
 
 export interface TargetState {
@@ -412,6 +422,11 @@ export interface StageRequest {
   contentHash: string;
   /** Omitted: the whole file, mode change included. */
   hunks?: HunkSelection[];
+  /**
+   * Leave debug lines out of the whole file or of a hunk picked whole. Lines picked one by one go
+   * in regardless: that is how debug code is staged on purpose. Staging only; unstaging moves all.
+   */
+  skipDebug?: boolean;
 }
 
 export interface StageResponse {

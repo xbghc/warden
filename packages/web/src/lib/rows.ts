@@ -27,7 +27,12 @@ export type Row =
   | { key: string; kind: 'gap'; gap: Gap; hidden: number | null }
   | { key: string; kind: 'hunk'; hunkIndex: number; hunk: Hunk }
   | { key: string; kind: 'line'; line: DiffLine; hunkIndex: number; expanded: boolean; pos: number; indices: number[] }
-  | { key: string; kind: 'pair'; left?: DiffLine; right?: DiffLine; hunkIndex: number; expanded: boolean; pos: number; indices: number[] };
+  | { key: string; kind: 'pair'; left?: DiffLine; right?: DiffLine; hunkIndex: number; expanded: boolean; pos: number; indices: number[] }
+  /**
+   * A run of debug lines in a hunk: shut, it stands in for them (`lines`); open, it sits above them
+   * as the way to shut it again. `id` is what the open ones are remembered by.
+   */
+  | { key: string; kind: 'debug'; id: string; hunkIndex: number; lines: DiffLine[]; open: boolean };
 
 export function computeGaps(diff: FileDiff, totalNewLines: number | null): Gap[] {
   const gaps: Gap[] = [];
@@ -112,18 +117,54 @@ export interface BuildRowsInput {
   viewMode: ViewMode;
   expansions: Record<number, Expansion>;
   fullLines: string[] | null;
+  /** Fold runs of debug lines; `openDebug` holds the ids of the runs opened again. */
+  foldDebug?: boolean;
+  openDebug?: ReadonlySet<string>;
+}
+
+/**
+ * Splits `items` into runs of debug items and the rest, calling `run` once per debug run and
+ * `each` for everything else, in order.
+ */
+function foldRuns<T>(items: T[], isDebug: (t: T) => boolean, run: (from: number, to: number) => void, each: (t: T, i: number) => void): void {
+  for (let i = 0; i < items.length; ) {
+    if (!isDebug(items[i]!)) {
+      each(items[i]!, i);
+      i++;
+      continue;
+    }
+    let j = i;
+    while (j < items.length && isDebug(items[j]!)) j++;
+    run(i, j);
+    i = j;
+  }
 }
 
 /** Rows of the diff column. Comments never interrupt the code: they live in the comment rail. */
-export function buildRows({ diff, viewMode, expansions, fullLines }: BuildRowsInput): Row[] {
+export function buildRows({ diff, viewMode, expansions, fullLines, foldDebug = false, openDebug }: BuildRowsInput): Row[] {
   const rows: Row[] = [];
   const canExpand = diff.status !== 'deleted' && diff.status !== 'added' && !diff.binary;
   const gaps = canExpand ? computeGaps(diff, fullLines ? fullLines.length : null) : [];
 
-  // Expanded context is borrowed from the full file, not part of any hunk: no position, no lines.
+  // Expanded context is borrowed from the full file, not part of any hunk: no position, no lines,
+  // and no debug flag, so only hunk lines ever fold. The rows a shut fold stands in for leave a hole
+  // in the positions: a pick dragged across it takes none of them.
   const emitLines = (lines: DiffLine[], hunkIndex: number, expanded: boolean) => {
+    const withFolds = <T>(items: T[], isDebug: (t: T) => boolean, shows: (t: T) => DiffLine[], emit: (t: T, i: number) => void) => {
+      if (!foldDebug || expanded) {
+        items.forEach(emit);
+        return;
+      }
+      const run = (from: number, to: number) => {
+        const id = `${hunkIndex}:${from}`;
+        const open = !!openDebug?.has(id);
+        rows.push({ key: `d:${id}`, kind: 'debug', id, hunkIndex, lines: items.slice(from, to).flatMap(shows), open });
+        if (open) for (let k = from; k < to; k++) emit(items[k]!, k);
+      };
+      foldRuns(items, isDebug, run, emit);
+    };
     if (viewMode === 'unified') {
-      lines.forEach((l, i) => {
+      const emit = (l: DiffLine, i: number) => {
         rows.push({
           key: `l:${hunkIndex}:${l.oldLineNo ?? '-'}:${l.newLineNo ?? '-'}`,
           kind: 'line',
@@ -133,9 +174,16 @@ export function buildRows({ diff, viewMode, expansions, fullLines }: BuildRowsIn
           pos: expanded ? -1 : i,
           indices: expanded || l.type === 'context' ? [] : [i],
         });
-      });
+      };
+      withFolds(
+        lines,
+        (l) => !!l.debug,
+        (l) => [l],
+        emit,
+      );
     } else {
-      pairLines(lines).forEach((p, i) => {
+      const pairs = pairLines(lines);
+      const emit = (p: (typeof pairs)[number], i: number) => {
         rows.push({
           key: `p:${hunkIndex}:${p.left?.oldLineNo ?? '-'}:${p.right?.newLineNo ?? '-'}`,
           kind: 'pair',
@@ -146,7 +194,11 @@ export function buildRows({ diff, viewMode, expansions, fullLines }: BuildRowsIn
           pos: expanded ? -1 : i,
           indices: expanded ? [] : p.indices,
         });
-      });
+      };
+      // A pair folds when every line in it is debug code: half of a replacement stays in view.
+      const debugPair = (p: (typeof pairs)[number]) => (!p.left || !!p.left.debug) && (!p.right || !!p.right.debug);
+      const shows = (p: (typeof pairs)[number]) => (p.left === p.right ? [p.left!] : [p.left, p.right].filter((l): l is DiffLine => !!l));
+      withFolds(pairs, debugPair, shows, emit);
     }
   };
 
@@ -170,11 +222,13 @@ export function buildRows({ diff, viewMode, expansions, fullLines }: BuildRowsIn
   return rows;
 }
 
-/** Index of the row that shows `line` on `side`, or -1. */
+/** Index of the row that shows `line` on `side` — or the shut debug fold that holds it — or -1. */
 export function findRowIndex(rows: Row[], side: CommentSide, line: number): number {
+  const on = (l: DiffLine) => (side === 'new' ? l.type !== 'del' && l.newLineNo === line : l.type !== 'add' && l.oldLineNo === line);
   return rows.findIndex((r) => {
     if (r.kind === 'line') return side === 'new' ? r.line.newLineNo === line : r.line.oldLineNo === line;
     if (r.kind === 'pair') return side === 'new' ? r.right?.newLineNo === line : r.left?.oldLineNo === line;
+    if (r.kind === 'debug') return !r.open && r.lines.some(on);
     return false;
   });
 }

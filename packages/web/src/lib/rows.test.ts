@@ -112,4 +112,33 @@ describe('buildRows', () => {
     const added = buildRows({ diff: { ...diff, status: 'added' }, viewMode: 'unified', expansions: {}, fullLines: null });
     expect(added.some((r) => r.kind === 'gap')).toBe(false);
   });
+
+  it('folds runs of debug lines into one row that opens again, and keeps them out of a dragged pick', () => {
+    // Hunk 0 is ' a', '-b', '+B', '+B2', ' c': make B, B2 and c debug code.
+    const h = hunk(10, 10, [' a', '-b', '+B', '+B2', ' c']);
+    for (const i of [2, 3, 4]) h.lines[i]!.debug = true;
+    const d: FileDiff = { ...diff, hunks: [h] };
+    const kinds = (rows: ReturnType<typeof buildRows>) =>
+      rows.filter((r) => r.kind === 'line' || r.kind === 'debug').map((r) => (r.kind === 'line' ? r.line.content : `fold:${r.lines.length}`));
+
+    const shut = buildRows({ diff: d, viewMode: 'unified', expansions: {}, fullLines: null, foldDebug: true });
+    expect(kinds(shut)).toEqual(['a', 'b', 'fold:3']);
+    expect(pickedLineIndices(shut, 0, 0, 4)).toEqual([1]);
+    // A comment on a folded line finds the fold.
+    expect(shut[findRowIndex(shut, 'new', 11)]?.kind).toBe('debug');
+
+    const open = buildRows({ diff: d, viewMode: 'unified', expansions: {}, fullLines: null, foldDebug: true, openDebug: new Set(['0:2']) });
+    expect(kinds(open)).toEqual(['a', 'b', 'fold:3', 'B', 'B2', 'c']);
+    expect(pickedLineIndices(open, 0, 0, 4)).toEqual([1, 2, 3]);
+
+    expect(kinds(buildRows({ diff: d, viewMode: 'unified', expansions: {}, fullLines: null }))).toEqual(['a', 'b', 'B', 'B2', 'c']);
+
+    // Split: the (b | B) pair keeps b, which is not debug code, so only B2 and c fold.
+    const split = buildRows({ diff: d, viewMode: 'split', expansions: {}, fullLines: null, foldDebug: true });
+    expect(split.filter((r) => r.kind === 'pair' || r.kind === 'debug').map((r) => (r.kind === 'pair' ? r.pos : `fold:${r.lines.length}`))).toEqual([
+      0,
+      1,
+      'fold:2',
+    ]);
+  });
 });

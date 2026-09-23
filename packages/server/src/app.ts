@@ -55,7 +55,7 @@ import { badRequest, HttpError, notFound } from './errors.js';
 import { COMMIT_FORMAT, parseCommitLog } from './commits.js';
 import { applyToIndex, mergeBase, refExists, revParse, runGit } from './git.js';
 import { currentBranch, getRepoInfo, listWorktrees, type RepoContext } from './repo.js';
-import { getFileDiff, getFullFile, listTargetDiffs, resolveTargetContext, toSummary, type TargetContext } from './targets.js';
+import { annotateDebug, getFileDiff, getFullFile, listTargetDiffs, resolveTargetContext, toSummary, type TargetContext } from './targets.js';
 import { buildAnchor, reanchorComment } from './anchor.js';
 import { buildStagePatch } from './patch.js';
 import { checkoutWorktree, listBranches, listWorktreesDetailed, lookupRemoteBranches, nextSlot, releaseWorktree, removeWorktree } from './worktrees.js';
@@ -204,6 +204,7 @@ export function createApp(opts: AppOptions): Hono {
       if (typeof body.lastTarget === 'string') s.prefs.lastTarget = body.lastTarget;
       if (typeof body.autoRefresh === 'boolean') s.prefs.autoRefresh = body.autoRefresh;
       if (typeof body.railOpen === 'boolean') s.prefs.railOpen = body.railOpen;
+      if (typeof body.ignoreDebug === 'boolean') s.prefs.ignoreDebug = body.ignoreDebug;
       if (body.nvimSocketByRoot && typeof body.nvimSocketByRoot === 'object') {
         s.prefs.nvimSocketByRoot = { ...s.prefs.nvimSocketByRoot, ...body.nvimSocketByRoot };
       }
@@ -218,6 +219,7 @@ export function createApp(opts: AppOptions): Hono {
     const key = c.req.param('key');
     const ctx = await targetCtx(key);
     const diffs = await listTargetDiffs(ctx);
+    await annotateDebug(ctx, diffs);
     listings.set(key, { at: Date.now(), files: diffs });
     const notices = changedNotices.get(key) ?? new Set<string>();
     changedNotices.set(key, notices);
@@ -262,6 +264,7 @@ export function createApp(opts: AppOptions): Hono {
     const untracked = c.req.query('untracked') === '1' ? true : undefined;
     const diff = await fileDiffWithHints(ctx, filePath, { oldPath, untracked });
     if (!diff) throw notFound(`no diff for ${filePath} in ${key}`, 'no_diff');
+    await annotateDebug(ctx, [diff]);
     return c.json(diff);
   });
 
@@ -306,13 +309,16 @@ export function createApp(opts: AppOptions): Hono {
     if (!body.path || typeof body.path !== 'string') throw badRequest('missing path');
     if (!body.contentHash || typeof body.contentHash !== 'string') throw badRequest('contentHash is required');
     if (body.hunks !== undefined && !Array.isArray(body.hunks)) throw badRequest('hunks must be an array', 'bad_selection');
+    if (body.skipDebug !== undefined && typeof body.skipDebug !== 'boolean') throw badRequest('skipDebug must be a boolean', 'bad_selection');
     const diff = await fileDiffWithHints(ctx, body.path);
     if (!diff) throw badRequest(`file ${body.path} is not part of ${key}`, 'no_diff');
     // The selection is a set of indices into a diff the client saw; against any other diff they
     // would name the wrong lines. The agent may well have edited the file since.
     if (diff.contentHash !== body.contentHash)
       throw new HttpError(409, 'the diff changed since it was loaded; refresh and pick the lines again', 'diff_changed');
-    const { patch, lines } = buildStagePatch(diff, mode, body.hunks);
+    // Whether a line is debug code is read from the file as it is now, like the diff itself.
+    if (body.skipDebug) await annotateDebug(ctx, [diff]);
+    const { patch, lines } = buildStagePatch(diff, mode, body.hunks, { skipDebug: body.skipDebug });
     await applyToIndex(ctx.cwd, patch, { reverse: mode === 'unstage' });
     // Tell every page on this worktree straight away rather than at the next poll.
     void watchers.get(ctx.cwd)?.poll();

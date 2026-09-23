@@ -29,4 +29,10 @@ describe('git whitelist', () => {
     expect(() => assertAllowedGitArgs(['log', '--output', '/tmp/x'])).toThrow(GitError);
     expect(() => assertAllowedGitArgs(['diff', '-c', 'core.pager=evil'])).toThrow(GitError);
   });
+  it('lets grep search but never open its matches in a program', () => {
+    expect(() => assertAllowedGitArgs(['grep', '-l', '-z', '-i', '-F', '-e', 'x', '--cached', '--', ':(literal)-Oops'])).not.toThrow();
+    for (const opt of ['-O', '-Ovim', '--open-files-in-pager', '--open-files-in-pager=vim', '--open', '--op=vim']) {
+      expect(() => assertAllowedGitArgs(['grep', opt, '-e', 'x'])).toThrow(GitError);
+    }
+  });
 });

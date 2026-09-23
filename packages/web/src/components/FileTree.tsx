@@ -193,6 +193,22 @@ function useTreeState(tree: DirNode, view: TargetKey) {
   return { open, setOpen, toggle };
 }
 
+/**
+ * Debug code that made it into the index: it is one `git commit` away from history, so the staged
+ * block says so for as long as it is there — whether or not the diff folds it.
+ */
+function StagedDebugMark({ files }: { files: FileEntry[] }) {
+  const holding = files.filter((f) => f.debugAdditions);
+  if (holding.length === 0) return null;
+  const lines = holding.reduce((n, f) => n + (f.debugAdditions ?? 0), 0);
+  const list = holding.map((f) => `${f.path}（${f.debugAdditions} 行）`).join('\n');
+  return (
+    <span className="block-warn" role="img" aria-label={`暂存区含 ${lines} 行调试代码`} title={`暂存区含调试代码，提交前请移出：\n${list}`}>
+      调试代码 {lines}
+    </span>
+  );
+}
+
 function TreeBlock({ title, view, files, empty }: { title: string; view: TargetKey; files: FileEntry[]; empty: string }) {
   const tree = useMemo(() => buildTree(files), [files]);
   const { open, setOpen, toggle } = useTreeState(tree, view);
@@ -213,6 +229,7 @@ function TreeBlock({ title, view, files, empty }: { title: string; view: TargetK
           <span className="block-file-count" aria-label={`${files.length} 个文件`}>
             {files.length}
           </span>
+          {target?.kind === 'staged' && <StagedDebugMark files={files} />}
           <span className="spacer" />
           <span className="tree-tools">
             <button
@@ -270,6 +287,21 @@ function ReviewProgress({ done, total, label, hint }: { done: number; total: num
   );
 }
 
+function DebugToggle({ local }: { local: boolean }) {
+  const on = useStore((s) => s.prefs.ignoreDebug);
+  const setIgnoreDebug = useStore((s) => s.setIgnoreDebug);
+  const title = local ? '折叠调试块和标了 nocommit 的行；整个文件或整个 hunk 暂存时跳过它们；只剩调试代码的文件不算未审' : '折叠调试块和标了 nocommit 的行';
+  return (
+    <label className="side-toggle" title={title}>
+      <input type="checkbox" checked={on} onChange={() => setIgnoreDebug(!on)} />
+      忽略调试代码
+    </label>
+  );
+}
+
+/** Every change of the file is debug code: nothing in it is left to review. */
+const debugOnly = (f: FileEntry) => (f.debugAdditions ?? 0) + (f.debugDeletions ?? 0) === f.additions + f.deletions && f.additions + f.deletions > 0;
+
 export function FileTree() {
   const files = useStore((s) => s.files);
   const unstaged = useStore((s) => s.unstaged);
@@ -278,6 +310,7 @@ export function FileTree() {
   const error = useStore((s) => s.filesError);
   const targetKey = useStore((s) => s.targetKey);
   const setTarget = useStore((s) => s.setTarget);
+  const ignoreDebug = useStore((s) => s.prefs.ignoreDebug);
 
   const target = useMemo(() => tryParseTargetKey(targetKey), [targetKey]);
   const local = !!target && isLocalTarget(target);
@@ -311,13 +344,20 @@ export function FileTree() {
 
   if (local) {
     // A file half staged sits in both blocks; it counts as read only once nothing of it is left
-    // in the working tree, which is exactly what "staged means reviewed" says.
-    const left = new Set(unstaged.map((f) => f.path));
+    // in the working tree, which is exactly what "staged means reviewed" says. Debug code, when it
+    // is being ignored, is not what is left: it is never meant to be staged.
+    const left = new Set(unstaged.filter((f) => !(ignoreDebug && debugOnly(f))).map((f) => f.path));
     const total = new Set([...left, ...staged.map((f) => f.path)]).size;
     const done = staged.filter((f) => !left.has(f.path)).length;
     return (
       <>
-        <ReviewProgress done={done} total={total} label="个文件已审" hint="暂存即已审：一个文件的改动全部进了暂存区，就算审完了" />
+        <ReviewProgress
+          done={done}
+          total={total}
+          label="个文件已审"
+          hint={`暂存即已审：一个文件的改动全部进了暂存区，就算审完了${ignoreDebug ? '（只剩调试代码的文件也算）' : ''}`}
+        />
+        <DebugToggle local />
         <div className="tree-blocks">
           <TreeBlock
             key={`${scope}:unstaged`}
@@ -341,6 +381,7 @@ export function FileTree() {
   return (
     <>
       <ReviewProgress done={files.filter((f) => f.viewed).length} total={files.length} label="个文件已读" hint="勾选文件旁的框，或用文件头的“已读”标记" />
+      <DebugToggle local={false} />
       <div className="tree-blocks">
         <TreeBlock key={scope} title="改动" view={targetKey} files={files} empty={loading ? '加载中…' : '没有改动'} />
       </div>

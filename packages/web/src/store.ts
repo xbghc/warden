@@ -166,6 +166,7 @@ export interface AppStore {
   refresh(): Promise<void>;
   onRepoChanged(event: ChangeEvent): void;
   setAutoRefresh(on: boolean): void;
+  setIgnoreDebug(on: boolean): void;
   consumeRestoreScroll(): boolean;
   openFile(path: string, force?: boolean): Promise<void>;
   setActiveFile(path: string | null): void;
@@ -274,7 +275,7 @@ export const useStore = create<AppStore>((set, get) => {
     repo: null,
     update: null,
     initError: null,
-    prefs: { viewMode: 'unified', nvimSocketByRoot: {}, autoRefresh: true, railOpen: false },
+    prefs: { viewMode: 'unified', nvimSocketByRoot: {}, autoRefresh: true, railOpen: false, ignoreDebug: true },
     targetKey: 'working',
     root: '',
     files: [],
@@ -478,6 +479,11 @@ export const useStore = create<AppStore>((set, get) => {
     setAutoRefresh(on) {
       set((s) => ({ prefs: { ...s.prefs, autoRefresh: on } }));
       api.patchPrefs({ autoRefresh: on }).catch(fail);
+    },
+
+    setIgnoreDebug(on) {
+      set((s) => ({ prefs: { ...s.prefs, ignoreDebug: on } }));
+      api.patchPrefs({ ignoreDebug: on }).catch(fail);
     },
 
     consumeRestoreScroll() {
@@ -904,9 +910,13 @@ export const useStore = create<AppStore>((set, get) => {
       if (!contentHash) return false;
       set({ staging: true });
       try {
-        await api.stage(key, { path, contentHash, hunks });
+        await api.stage(key, { path, contentHash, hunks, skipDebug: get().prefs.ignoreDebug });
       } catch (e) {
         set({ staging: false });
+        if (e instanceof ApiError && e.code === 'debug_only') {
+          get().showToast('剩下的改动都是调试代码，没有暂存；确实要暂存的话，展开后逐行选中', 'info');
+          return false;
+        }
         fail(e);
         // The selection was made on a diff that is no longer what git sees: show what is.
         if (e instanceof ApiError && (e.code === 'diff_changed' || e.code === 'apply_failed')) void get().refresh();

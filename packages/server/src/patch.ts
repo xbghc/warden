@@ -60,10 +60,13 @@ function cutHunk(hunk: Hunk, picked: Set<number>, mode: StageMode): OutLine[] {
   return out;
 }
 
-/** hunk index -> indices of the changed lines picked in it. */
-function pickedLines(diff: FileDiff, selection: HunkSelection[] | undefined): Map<number, Set<number>> {
+/**
+ * hunk index -> indices of the changed lines picked in it. `skipDebug` leaves debug lines out of a
+ * file or hunk taken whole; a line picked by its index is taken as picked.
+ */
+function pickedLines(diff: FileDiff, selection: HunkSelection[] | undefined, skipDebug: boolean): Map<number, Set<number>> {
   const picked = new Map<number, Set<number>>();
-  const changed = (h: Hunk): number[] => h.lines.map((l, i) => (l.type === 'context' ? -1 : i)).filter((i) => i >= 0);
+  const changed = (h: Hunk): number[] => h.lines.map((l, i) => (l.type === 'context' || (skipDebug && l.debug) ? -1 : i)).filter((i) => i >= 0);
   if (selection === undefined) {
     for (const [i, h] of diff.hunks.entries()) picked.set(i, new Set(changed(h)));
     return picked;
@@ -93,10 +96,11 @@ function pickedLines(diff: FileDiff, selection: HunkSelection[] | undefined): Ma
  * reverse, back out of it (`unstage`). No selection means the whole file, mode change and
  * rename included; a selection only ever carries content.
  */
-export function buildStagePatch(diff: FileDiff, mode: StageMode, selection?: HunkSelection[]): StagePatch {
+export function buildStagePatch(diff: FileDiff, mode: StageMode, selection?: HunkSelection[], opts: { skipDebug?: boolean } = {}): StagePatch {
   if (diff.binary) throw badRequest('binary files cannot be staged from here; use git add', 'not_stageable');
   const whole = selection === undefined;
-  const picked = pickedLines(diff, selection);
+  const skipDebug = !!opts.skipDebug && mode === 'stage';
+  const picked = pickedLines(diff, selection, skipDebug);
   let lines = 0;
   for (const set of picked.values()) lines += set.size;
   const changedTotal = diff.hunks.reduce((n, h) => n + h.lines.filter((l) => l.type !== 'context').length, 0);
@@ -136,7 +140,11 @@ export function buildStagePatch(diff: FileDiff, mode: StageMode, selection?: Hun
 
   if (lines === 0) {
     const headerOnly = whole && (modeChange || rename || ((diff.status === 'added' || diff.status === 'deleted') && diff.hunks.length === 0));
-    if (!headerOnly) throw badRequest('no changed lines selected', 'empty_selection');
+    if (!headerOnly) {
+      if (skipDebug && [...pickedLines(diff, selection, false).values()].some((set) => set.size > 0))
+        throw badRequest('every changed line picked is debug code; pick those lines one by one to stage them anyway', 'debug_only');
+      throw badRequest('no changed lines selected', 'empty_selection');
+    }
     return { patch: header.join('\n') + '\n', lines: 0 };
   }
 

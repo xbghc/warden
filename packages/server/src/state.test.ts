@@ -29,7 +29,7 @@ describe('StateStore', () => {
       targets: {},
       issues: [],
       todos: [],
-      prefs: { viewMode: 'unified', nvimSocketByRoot: {}, autoRefresh: true, railOpen: false },
+      prefs: { viewMode: 'unified', nvimSocketByRoot: {}, autoRefresh: true, railOpen: false, ignoreDebug: true },
     });
   });
 

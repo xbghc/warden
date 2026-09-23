@@ -20,7 +20,7 @@ export function stateFilePath(repoRoot: string, baseDir = dataDir()): string {
 }
 
 export function defaultPrefs(): Prefs {
-  return { viewMode: 'unified', nvimSocketByRoot: {}, autoRefresh: true, railOpen: false };
+  return { viewMode: 'unified', nvimSocketByRoot: {}, autoRefresh: true, railOpen: false, ignoreDebug: true };
 }
 
 export function defaultState(repoRoot: string): ReviewState {
@@ -67,6 +67,7 @@ function normalise(raw: unknown, repoRoot: string): ReviewState {
       nvimSocketByRoot: r.prefs?.nvimSocketByRoot ?? {},
       autoRefresh: typeof r.prefs?.autoRefresh === 'boolean' ? r.prefs.autoRefresh : true,
       railOpen: typeof r.prefs?.railOpen === 'boolean' ? r.prefs.railOpen : false,
+      ignoreDebug: typeof r.prefs?.ignoreDebug === 'boolean' ? r.prefs.ignoreDebug : true,
     },
   };
 }

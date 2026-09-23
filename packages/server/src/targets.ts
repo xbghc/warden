@@ -4,6 +4,7 @@ import type { FileDiff, FileSummary, Target, TargetKey, WorktreeInfo, CommentSid
 import { parseTargetKey, TargetKeyError } from '@warden/shared';
 import { EMPTY_TREE_SHA, mergeBase, refExists, revParse, runGit } from './git.js';
 import { parseUnifiedDiff } from './diffparse.js';
+import { DEBUG_MARKER_STRINGS, debugLineNumbers, markDebugLines } from './debug.js';
 import { badRequest, HttpError } from './errors.js';
 import type { RepoContext } from './repo.js';
 
@@ -181,7 +182,9 @@ async function refForSide(ctx: TargetContext, side: CommentSide): Promise<string
       if (side === 'new') return t.sha;
       return (await revParse(ctx.cwd, `${t.sha}^`)) ?? EMPTY_TREE_SHA;
     case 'range':
-      return side === 'new' ? t.head : t.base;
+      // The diff is `base...head`: its old side is where the two forked, not `base` itself.
+      if (side === 'new') return t.head;
+      return (await mergeBase(ctx.cwd, t.base, t.head)) ?? t.base;
     case 'base':
       return side === 'new' ? undefined : baseSha(ctx, t.ref);
   }
@@ -206,4 +209,61 @@ export async function getFullFile(ctx: TargetContext, filePath: string, side: Co
     if (e instanceof HttpError && e.code === 'git_failed') return null;
     throw e;
   }
+}
+
+/** Paths are handed to `git grep` this many at a time, well inside any command-line limit. */
+const GREP_CHUNK = 500;
+
+/** Which of `paths` hold a debug marker on `side` of the target: the only ones worth reading whole. */
+async function pathsWithMarkers(ctx: TargetContext, side: CommentSide, paths: string[]): Promise<Set<string>> {
+  const found = new Set<string>();
+  if (paths.length === 0) return found;
+  const ref = await refForSide(ctx, side);
+  const args = ['grep', '-l', '-z', '-I', '-i', '-F', ...DEBUG_MARKER_STRINGS.flatMap((m) => ['-e', m])];
+  // The working tree includes the untracked files the listing shows; a tree prints `<ref>:<path>`.
+  if (ref === undefined) args.push('--untracked');
+  else if (ref === ':0') args.push('--cached');
+  else args.push(ref);
+  const prefix = ref === undefined || ref === ':0' ? '' : `${ref}:`;
+  for (let i = 0; i < paths.length; i += GREP_CHUNK) {
+    const chunk = paths.slice(i, i + GREP_CHUNK).map(literal);
+    // Exit 1 is "no match".
+    const r = await runGit([...args, '--', ...chunk], { cwd: ctx.cwd, okCodes: [0, 1] });
+    for (const p of r.stdout.split('\0')) if (p) found.add(p.startsWith(prefix) ? p.slice(prefix.length) : p);
+  }
+  return found;
+}
+
+/**
+ * Flags the debug lines of `files` in place (`DiffLine.debug`, `debugAdditions` / `debugDeletions`).
+ * A hunk seldom shows the marker that opened the block its lines sit in, so the sides of a file are
+ * read whole — only for the files `git grep` finds a marker in, which is usually none of them.
+ */
+export async function annotateDebug(ctx: TargetContext, files: FileDiff[]): Promise<void> {
+  const text = files.filter((f) => !f.binary && f.hunks.length > 0);
+  const oldPathOf = (f: FileDiff) => f.oldPath ?? f.path;
+  // A side git cannot search marks nothing rather than failing the listing: there is no such side
+  // to hold debug code when HEAD is unborn, which is where that happens.
+  const none = () => new Set<string>();
+  const [onNew, onOld] = await Promise.all([
+    pathsWithMarkers(
+      ctx,
+      'new',
+      text.filter((f) => f.status !== 'deleted').map((f) => f.path),
+    ).catch(none),
+    pathsWithMarkers(ctx, 'old', text.filter((f) => f.status !== 'added').map(oldPathOf)).catch(none),
+  ]);
+  const read = async (p: string, side: CommentSide, marked: Set<string>) => {
+    if (!marked.has(p)) return undefined;
+    const content = await getFullFile(ctx, p, side).catch(() => null);
+    return content === null ? undefined : debugLineNumbers(content);
+  };
+  await mapLimit(
+    text.filter((f) => onNew.has(f.path) || onOld.has(oldPathOf(f))),
+    8,
+    async (f) => {
+      const [n, o] = await Promise.all([read(f.path, 'new', onNew), read(oldPathOf(f), 'old', onOld)]);
+      markDebugLines(f, n, o);
+    },
+  );
 }

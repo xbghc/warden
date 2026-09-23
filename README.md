@@ -11,6 +11,8 @@ with line comments you can copy back to the agent as a prompt.
   releasing one keeps the directory, installed dependencies included, for the next branch.
 - Side-by-side **Unstaged** and **Staged** file lists: staged means reviewed. Stage from the UI by dragging
   over the lines you have read (or a hunk, or a file), and unstage the same way from the Staged view.
+- Debug code marked in a comment is folded out of the review and left out of whole-file staging, and
+  the Staged block warns while any of it is in the index (see [Debug code](#debug-code)).
 - GitHub-style unified / side-by-side diff with syntax highlighting, collapsed file tree, lazy per-file loading, context expansion, virtual scrolling.
 - Line comments (single line or a dragged range), Markdown, edit / delete.
 - One click copies all comments as an agent-readable prompt to the clipboard.
@@ -200,6 +202,34 @@ Limits, each reported as a plain error rather than a half-applied patch:
   (the agent kept editing), the server answers 409 and the page reloads instead of staging the wrong lines.
 - If another git process holds the index lock the server retries briefly, then gives up with 409.
 
+## Debug code
+
+Code written to poke at a problem and not meant to be committed can be marked in a comment. There is no
+single convention for this, so warden takes the ones in use, in any comment syntax (`//`, `/*`, `#`,
+`--`, `<!--`, `;`, `%`) and any case, as long as the marker opens the comment:
+
+- a block between `debug:start` and `debug:end`, or `develblock:start` and `develblock:end` (the
+  webpack-strip-block / gulp-strip-block spelling); markers included, blocks nest, and a block left
+  open runs to the end of the file;
+- a single line tagged `nocommit`, `no-commit` or `do not commit` (optionally `@nocommit` / `!nocommit`),
+  the tag the usual pre-commit hooks look for.
+
+With *忽略调试代码* ticked in the sidebar (the default):
+
+- runs of debug lines in a hunk fold into one striped row that opens with a click; jumping to a comment
+  inside one opens it;
+- *暂存文件* and *暂存此 hunk* leave debug lines out. Lines picked one by one go in regardless — that
+  is how debug code is staged on purpose. A file whose changes are all debug code is refused with a
+  note to pick the lines instead;
+- a file whose unstaged changes are all debug code does not count as still to review.
+
+Whether it is ticked or not, the 已暂存 heading carries a *调试代码 N* mark while N added lines in the
+index are debug code, with the files in its tooltip.
+
+A hunk rarely shows the marker that opened the block its lines sit in, so warden reads both sides of a
+file whole — only for the files `git grep` finds a marker in. Marker detection is textual: a marker
+inside a string literal that follows a comment leader counts too.
+
 ## Comments and export
 
 Press the `+` that appears next to a line (drag to cover several lines) and write Markdown. What you
@@ -360,7 +390,8 @@ first time the file is read, and the 已读 marks those views used to keep are d
 
 Single user, local only. The server binds to `127.0.0.1` and executes git only through
 `execFile('git', [...])`. Reads go through an argument whitelist (`rev-parse`, `diff`, `show`, `log`,
-`worktree list`, `ls-files`, `status`, `merge-base`, `rev-list`) that refuses option-looking refs and any write-capable
+`worktree list`, `ls-files`, `status`, `merge-base`, `rev-list`, `grep` without `-O` /
+`--open-files-in-pager`) that refuses option-looking refs and any write-capable
 flag; requests that would need anything else get HTTP 400. The writes are few and each composes its
 own arguments. `POST /api/targets/:key/stage` runs `git apply --cached` (with `--reverse` for the
 Staged view) on a patch the server itself builds from the diff it just produced — the patch is never

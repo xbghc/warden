@@ -592,6 +592,69 @@ describe('staging', () => {
   });
 });
 
+describe('debug code', () => {
+  const stage = (key: string, body: unknown) => send('POST', `/api/targets/${k(key)}/stage`, body);
+  const fileDiff = async (key: string, p: string) => json<FileDiff>(await get(`/api/targets/${k(key)}/file?path=${k(p)}`));
+  const entry = async (key: string, p: string) => (await json<FilesResponse>(await get(`/api/targets/${k(key)}/files`))).files.find((f) => f.path === p);
+  // Put together at run time so that this file does not read as debug code itself.
+  const mark = (m: string) => `// ${m}`;
+  const file = 'dbg/app.ts';
+  const loose = 'dbg/scratch.ts';
+  const base = Array.from({ length: 40 }, (_, i) => `line ${i + 1}`);
+  base[4] = mark('debug:start');
+  base[29] = mark('debug:end');
+
+  beforeAll(async () => {
+    // The block's markers are far from both edits: no hunk shows them.
+    await fx.write(file, base.join('\n') + '\n');
+    fx.git('add', file);
+    const edited = [...base];
+    edited[14] = 'line 15 in the block';
+    edited[39] = 'line 40 outside';
+    await fx.write(file, edited.join('\n') + '\n');
+    await fx.write(loose, `keep()\nprobe() ${mark('nocommit')}\n`);
+  });
+
+  afterAll(async () => {
+    fx.git('rm', '-q', '-f', '--cached', '--', file);
+    await rm(path.join(fx.root, 'dbg'), { recursive: true, force: true });
+  });
+
+  it('flags lines inside a block whose markers lie outside the hunk, on both sides', async () => {
+    const diff = await fileDiff('working', file);
+    const changed = diff.hunks.flatMap((h) => h.lines.filter((l) => l.type !== 'context'));
+    expect(changed.map((l) => [l.type, l.content, !!l.debug])).toEqual([
+      ['del', 'line 15', true],
+      ['add', 'line 15 in the block', true],
+      ['del', 'line 40', false],
+      ['add', 'line 40 outside', false],
+    ]);
+    expect(await entry('working', file)).toMatchObject({ additions: 2, debugAdditions: 1, debugDeletions: 1 });
+    expect(await entry('working', loose)).toMatchObject({ untracked: true, additions: 2, debugAdditions: 1 });
+  });
+
+  it('leaves debug lines out of a whole-file stage, and stages them when picked one by one', async () => {
+    let diff = await fileDiff('working', file);
+    expect((await stage('working', { path: file, contentHash: diff.contentHash, skipDebug: true })).status).toBe(200);
+    const indexed = fx.git('show', `:${file}`).split('\n');
+    expect(indexed[14]).toBe('line 15');
+    expect(indexed[39]).toBe('line 40 outside');
+    expect(await entry('working', file)).toMatchObject({ additions: 1, deletions: 1, debugAdditions: 1, debugDeletions: 1 });
+
+    diff = await fileDiff('working', file);
+    const refused = await stage('working', { path: file, contentHash: diff.contentHash, skipDebug: true });
+    expect(refused.status).toBe(400);
+    expect((await json<{ code: string }>(refused)).code).toBe('debug_only');
+
+    const lines = diff.hunks[0]!.lines.flatMap((l, i) => (l.type === 'context' ? [] : [i]));
+    const picked = await stage('working', { path: file, contentHash: diff.contentHash, skipDebug: true, hunks: [{ index: 0, lines }] });
+    expect(picked.status).toBe(200);
+    expect(fx.git('show', `:${file}`).split('\n')[14]).toBe('line 15 in the block');
+    // Staged, it is what the staged view warns about: HEAD lacks the file, so all of the block is new there.
+    expect((await entry('staged', file))?.debugAdditions).toBe(26);
+  });
+});
+
 describe('commit log', () => {
   const log = async (query: string) => json<CommitsResponse>(await get(`/api/commits?${query}`));
   const subjects = (r: CommitsResponse) => r.commits.map((c) => c.subject.slice(0, 2)).sort();

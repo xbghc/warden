@@ -15,6 +15,7 @@ const ALLOWED_SUBCOMMANDS = new Set([
   'rev-list',
   'for-each-ref',
   'check-ref-format',
+  'grep',
 ]);
 
 /** Options that could make an otherwise read-only sub-command write somewhere. */
@@ -57,6 +58,17 @@ export function assertAllowedGitArgs(args: readonly string[]): void {
   }
   if (sub === 'worktree' && args[1] !== 'list') {
     throw new GitError(`git worktree ${args[1] ?? ''} is not allowed`, null, '', 400, 'git_subcommand_forbidden');
+  }
+  // `grep -O` / `--open-files-in-pager` runs a program on the matches. Git takes any unambiguous
+  // prefix of a long option, so everything that could be one is refused, not just the full name.
+  if (sub === 'grep') {
+    for (const arg of args.slice(1)) {
+      if (arg === '--') break;
+      const name = arg.split('=')[0]!;
+      if (arg.startsWith('-O') || (name.length > 3 && '--open-files-in-pager'.startsWith(name))) {
+        throw new GitError(`git option not allowed: ${arg}`, null, '', 400, 'git_option_forbidden');
+      }
+    }
   }
   for (const arg of args.slice(1)) {
     if (arg.includes('\0')) throw new GitError('NUL byte in git argument', null, '', 400, 'git_bad_argument');
