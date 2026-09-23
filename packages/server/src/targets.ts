@@ -2,7 +2,8 @@ import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 import type { FileDiff, FileSummary, Target, TargetKey, WorktreeInfo, CommentSide } from '@warden/shared';
 import { parseTargetKey, TargetKeyError } from '@warden/shared';
-import { EMPTY_TREE_SHA, mergeBase, refExists, revParse, runGit } from './git.js';
+import { EMPTY_TREE_SHA, mergeBase, refExists, revParse, runGit, type SnapshotEnv } from './git.js';
+import { checkpointObjects, withCheckpointIndex } from './checkpoints.js';
 import { parseUnifiedDiff } from './diffparse.js';
 import { DEBUG_MARKER_STRINGS, debugLineNumbers, markDebugLines } from './debug.js';
 import { badRequest, HttpError } from './errors.js';
@@ -13,6 +14,27 @@ export interface TargetContext {
   target: Target;
   /** Working directory to run git in (worktree root or repo root). */
   cwd: string;
+  /** Filled in for a checkpoint target by whoever looked it up in the state (see app.ts). */
+  checkpoint?: { tree: string; store: string };
+}
+
+function checkpointOf(ctx: TargetContext): { tree: string; store: string } {
+  if (!ctx.checkpoint) throw new Error(`checkpoint of ${ctx.key} was not looked up`);
+  return ctx.checkpoint;
+}
+
+/** Git options that let a command read the checkpoint's objects; nothing for any other target. */
+async function objectsFor(ctx: TargetContext): Promise<{ snapshot?: SnapshotEnv }> {
+  return ctx.target.kind === 'checkpoint' ? { snapshot: await checkpointObjects(ctx.cwd, checkpointOf(ctx).store) } : {};
+}
+
+/**
+ * Runs a diff of the target. A checkpoint's is `git diff <tree>` under an index that lists the
+ * untracked files as well; everything else runs as it is.
+ */
+async function runDiff(ctx: TargetContext, args: string[]): Promise<string> {
+  if (ctx.target.kind !== 'checkpoint') return (await runGit(args, { cwd: ctx.cwd })).stdout;
+  return withCheckpointIndex(ctx.cwd, checkpointOf(ctx).store, async (snapshot) => (await runGit(args, { cwd: ctx.cwd, snapshot })).stdout);
 }
 
 const DIFF_BASE_ARGS = ['diff', '--no-color', '--no-ext-diff', '-U3', '-M', '--find-renames'];
@@ -83,6 +105,8 @@ async function diffArgs(ctx: TargetContext): Promise<string[]> {
     }
     case 'base':
       return [...DIFF_BASE_ARGS, await baseSha(ctx, t.ref)];
+    case 'checkpoint':
+      return [...DIFF_BASE_ARGS, checkpointOf(ctx).tree];
   }
 }
 
@@ -132,8 +156,7 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
 /** Full diff for the target, parsed. */
 export async function listTargetDiffs(ctx: TargetContext): Promise<FileDiff[]> {
   const args = await diffArgs(ctx);
-  const r = await runGit(args, { cwd: ctx.cwd });
-  const files = parseUnifiedDiff(r.stdout);
+  const files = parseUnifiedDiff(await runDiff(ctx, args));
   if (includesUntracked(ctx.target)) {
     const untracked = await listUntracked(ctx.cwd);
     const extra = await mapLimit(untracked, 8, (f) => untrackedDiff(ctx.cwd, f).catch(() => undefined));
@@ -163,8 +186,7 @@ export async function getFileDiff(ctx: TargetContext, filePath: string, hints: F
   const args = await diffArgs(ctx);
   const pathspec = [literal(filePath)];
   if (hints.oldPath && hints.oldPath !== filePath) pathspec.push(literal(hints.oldPath));
-  const r = await runGit([...args, '--', ...pathspec], { cwd: ctx.cwd });
-  const files = parseUnifiedDiff(r.stdout);
+  const files = parseUnifiedDiff(await runDiff(ctx, [...args, '--', ...pathspec]));
   return files.find((f) => f.path === filePath) ?? files[0];
 }
 
@@ -187,6 +209,8 @@ async function refForSide(ctx: TargetContext, side: CommentSide): Promise<string
       return (await mergeBase(ctx.cwd, t.base, t.head)) ?? t.base;
     case 'base':
       return side === 'new' ? undefined : baseSha(ctx, t.ref);
+    case 'checkpoint':
+      return side === 'new' ? undefined : checkpointOf(ctx).tree;
   }
 }
 
@@ -203,7 +227,7 @@ export async function getFullFile(ctx: TargetContext, filePath: string, side: Co
     }
   }
   try {
-    const r = await runGit(['show', `${ref}:${filePath}`], { cwd: ctx.cwd });
+    const r = await runGit(['show', `${ref}:${filePath}`], { cwd: ctx.cwd, ...(await objectsFor(ctx)) });
     return r.stdout;
   } catch (e) {
     if (e instanceof HttpError && e.code === 'git_failed') return null;
@@ -225,10 +249,11 @@ async function pathsWithMarkers(ctx: TargetContext, side: CommentSide, paths: st
   else if (ref === ':0') args.push('--cached');
   else args.push(ref);
   const prefix = ref === undefined || ref === ':0' ? '' : `${ref}:`;
+  const objects = await objectsFor(ctx);
   for (let i = 0; i < paths.length; i += GREP_CHUNK) {
     const chunk = paths.slice(i, i + GREP_CHUNK).map(literal);
     // Exit 1 is "no match".
-    const r = await runGit([...args, '--', ...chunk], { cwd: ctx.cwd, okCodes: [0, 1] });
+    const r = await runGit([...args, '--', ...chunk], { cwd: ctx.cwd, okCodes: [0, 1], ...objects });
     for (const p of r.stdout.split('\0')) if (p) found.add(p.startsWith(prefix) ? p.slice(prefix.length) : p);
   }
   return found;

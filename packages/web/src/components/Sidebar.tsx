@@ -9,11 +9,12 @@ const MAX_WIDTH = 520;
 /** A full sha is cut to git's short form; a ref someone typed is shown as typed. */
 const shortRef = (ref: string) => (/^[0-9a-f]{40,}$/.test(ref) ? ref.slice(0, 7) : ref);
 
-/** How the view picker names a commit, range or branch target. The worktree is the top bar's to name. */
+/** How the view picker names a commit, range, branch or checkpoint target. The worktree is the top bar's to name. */
 function historyLabel(t: Target): string {
   if (t.kind === 'commit') return `提交 ${shortRef(t.sha)}`;
   if (t.kind === 'range') return `${shortRef(t.base)}..${shortRef(t.head)}`;
   if (t.kind === 'base') return `分支 vs ${t.ref}`;
+  if (t.kind === 'checkpoint') return `检查点 #${t.id}`;
   return '工作区';
 }
 

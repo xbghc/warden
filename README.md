@@ -5,7 +5,10 @@ with line comments you can copy back to the agent as a prompt.
 
 - Runs as a single local process per repository (`127.0.0.1` only, no auth, no database).
 - Diff sources: working tree, staged, working tree vs HEAD, a branch since it forked off its base (commits and
-  uncommitted work together), any commit, any two refs, and git worktrees.
+  uncommitted work together), any commit, any two refs, git worktrees, and checkpoints.
+- Checkpoints: note the working tree as it is — untracked files included — and later see only what
+  changed since, staged, committed or neither. Taking one writes nothing to the repository (see
+  [Checkpoints](#checkpoints)).
 - Worktrees are made and taken down from the page, one per agent branch, with the path ready to paste.
   Their directories are numbered slots beside the repository that get reused rather than remade:
   releasing one keeps the directory, installed dependencies included, for the next branch.
@@ -34,6 +37,7 @@ with line comments you can copy back to the agent as a prompt.
   `git apply --cached`, which is what the stage / unstage controls run, and the worktree slot
   operations (`worktree add` / `remove`, `branch`, `switch`). Reviewing and staging never write the
   working tree or HEAD; only checking a branch out into a free slot, or releasing one, does.
+  Checkpoints write into warden's own index copy and object store, never the repository.
 
 ## Install / run
 
@@ -75,6 +79,8 @@ for a global install. The check never delays startup and fails silently. `--no-u
 | Worktree, working tree | `worktree:<path>:working` | same, run inside the worktree |
 | Worktree, branch vs base | `worktree:<path>:range:<base>..<head>` | same, run inside the worktree |
 | Worktree, everything since base | `worktree:<path>:base:<ref>` | same, run inside the worktree |
+| Working tree since a checkpoint (incl. untracked) | `checkpoint:<n>` | `git diff <checkpoint tree>`, see [Checkpoints](#checkpoints) |
+| Worktree, since one of its checkpoints | `worktree:<path>:checkpoint:<n>` | same, run inside the worktree |
 
 Refs accept anything git can resolve (`main`, `v1.2`, `HEAD~3`, a sha). `@` is `HEAD`.
 Worktrees are discovered with `git worktree list` (and made in the *Worktree* view, see below) and
@@ -290,11 +296,41 @@ them — the comment's current view first, then `working`, `staged`, `all`. So:
   **deleted** (and unlinked from any issue), because the code they were about is now history.
   Anything still visible in Unstaged or Staged survives, including as a context line.
 
-Commit, range and `base` targets each keep their own pool and only ever search themselves, and none of
-them deletes on a moved HEAD.
+Commit, range, `base` and checkpoint targets each keep their own pool and only ever search
+themselves, and none of them deletes on a moved HEAD.
 
 Comment markers in the diff belong to one view; the rail's *全部* tab lists the whole pool and
 *此文件* lists every comment on the open file regardless of which view it currently sits in.
+
+## Checkpoints
+
+An agent works in rounds, and after the first one the question is no longer "what is uncommitted"
+but "what did it do since I last looked". The working tree answers that only while the agent
+neither stages nor commits, and a `base` target shows the whole branch every time. A checkpoint is
+the working tree noted at the moment you choose, and `checkpoint:<n>` is one diff from it to the
+working tree now — whatever was staged or committed in between does not show, only what changed.
+
+- *新建检查点*, under the progress figure in 工作区, takes one: tracked and untracked files as they are
+  on disk, ignored ones left out. *对比检查点 #n* beside it opens the newest. A checkpoint of a working
+  tree that has not changed since the newest one is not taken twice; that one is handed back.
+- In a checkpoint's view the picker reads *检查点 #n*, and the row under the figure switches to another
+  checkpoint, takes a new one — the round is over, so the view moves on to it, empty — or deletes
+  the one in front after asking.
+- Files there carry the [已读 mark](#viewed-files), which the agent's next edit to a file drops, and
+  comments on a checkpoint are a pool of their own. Deleting the checkpoint deletes both.
+- Checkpoints are numbered per worktree. A worktree keeps the newest 20; taking one more drops the
+  oldest, with its comments. A slot checked out to another branch drops its own.
+
+Nothing of this is written to the repository. The snapshot is `git add --all` plus
+`git write-tree` run against a copy of the index kept in warden's data directory, with
+`GIT_OBJECT_DIRECTORY` pointing there too, so the tree and every blob git hashes for it land beside
+the state file; files the index already has right are not hashed again, so taking one costs about
+what changed. A diff runs `git diff <tree>` under another throwaway copy of the index with the
+untracked files added as intent-to-add (which hashes nothing), reading the repository's objects
+through `GIT_ALTERNATE_OBJECT_DIRECTORIES`. The alternates are only ever set for reads: git refreshes
+the mtime of an object it finds in one while writing, and that would be a write to `.git`. Clean
+filters configured for the repository run as they do for any `git add` (Git LFS keeps its cache in
+`.git/lfs`).
 
 ## Viewed files
 
@@ -370,12 +406,14 @@ jump to the nearest new-side line; for commit targets the working-tree file is o
 
 `~/.local/share/warden/<sha1(repoRoot)[:12]>/state.json` (respects `XDG_DATA_HOME`). Plain JSON with a
 `schemaVersion`, written atomically (temp file + rename) under a small lock file so multiple instances
-can share it. Delete the directory to reset.
+can share it. Delete the directory to reset. Checkpoint objects live beside it in `checkpoints/objects`;
+deleting a checkpoint leaves them there, since another may share them.
 
 `targets` is keyed by target key, plus one *comment scope* per worktree — `local`, or
 `worktree:<path>:local` — holding the comments the three local views share and the HEAD sha the last
-re-anchor saw. `viewed` sits on the key of the commit, range or `base` target it was ticked in; the
-local view keys hold nothing. Issues and todos are top level. State written by an older version is
+re-anchor saw. `viewed` sits on the key of the commit, range, `base` or checkpoint target it was
+ticked in; the local view keys hold nothing. Issues, todos and `checkpoints` (the tree sha, HEAD and
+time of each, per worktree) are top level. State written by an older version is
 migrated on load: comments filed under `working` / `staged` / `all` move into the matching scope the
 first time the file is read, and the 已读 marks those views used to keep are dropped.
 
@@ -409,7 +447,9 @@ and `git reset --hard` plus `git clean -fd` only on the forced release the revie
 a 409. Refs change only when a branch is made for a checkout (plus its upstream setting when it comes
 from a remote) — undone with `branch -D` should the switch into the slot then fail — or deleted on
 request after a release or removal (`-d`, so only a merged one), and the review state lives outside
-the repository. A mutating request the
+the repository. A checkpoint writes only there: `git add --all [--intent-to-add]` and
+`git write-tree --missing-ok`, with `GIT_INDEX_FILE` and `GIT_OBJECT_DIRECTORY` set to files in
+warden's data directory and no alternates (see [Checkpoints](#checkpoints)). A mutating request the
 browser labels as coming from another site (`Sec-Fetch-Site: cross-site`) is refused with 403, so a
 page from elsewhere cannot drive the server through the browser it is open in.
 

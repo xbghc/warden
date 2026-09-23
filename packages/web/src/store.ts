@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type {
   ChangeEvent,
+  Checkpoint,
   Comment,
   CommentSide,
   CreateCommentRequest,
@@ -21,7 +22,17 @@ import type {
   UpdateTodoRequest,
   ViewMode,
 } from '@warden/shared';
-import { insertAfter, isLocalTarget, localViewKeys, moveBefore, stageModeFor, tracksViewed, tryParseTargetKey, type StageMode } from '@warden/shared';
+import {
+  formatTargetKey,
+  insertAfter,
+  isLocalTarget,
+  localViewKeys,
+  moveBefore,
+  stageModeFor,
+  tracksViewed,
+  tryParseTargetKey,
+  type StageMode,
+} from '@warden/shared';
 import { api, ApiError } from './api';
 import { copyText } from './lib/clipboard';
 import { todoText } from './lib/todos';
@@ -113,6 +124,8 @@ export interface AppStore {
   staged: FileEntry[];
   /** HEAD -> working tree; only fetched while `all` is the active view. */
   allFiles: FileEntry[];
+  /** Checkpoints of the worktree under review, oldest first. */
+  checkpoints: Checkpoint[];
   filesLoading: boolean;
   filesError: string | null;
   activeFile: string | null;
@@ -165,6 +178,10 @@ export interface AppStore {
   loadFiles(): Promise<void>;
   refresh(): Promise<void>;
   onRepoChanged(event: ChangeEvent): void;
+  loadCheckpoints(): Promise<void>;
+  /** Takes the worktree as it is now; a checkpoint target in front moves on to the new one. */
+  createCheckpoint(): Promise<void>;
+  deleteCheckpoint(id: number): Promise<void>;
   setAutoRefresh(on: boolean): void;
   setIgnoreDebug(on: boolean): void;
   consumeRestoreScroll(): boolean;
@@ -282,6 +299,7 @@ export const useStore = create<AppStore>((set, get) => {
     unstaged: [],
     staged: [],
     allFiles: [],
+    checkpoints: [],
     filesLoading: false,
     filesError: null,
     activeFile: null,
@@ -348,12 +366,15 @@ export const useStore = create<AppStore>((set, get) => {
     },
 
     async setTarget(key) {
+      // The checkpoints are the worktree's, not the target's: moving between its targets keeps them.
+      const sameWorktree = tryParseTargetKey(key)?.worktree === tryParseTargetKey(get().targetKey)?.worktree;
       set({
         targetKey: key,
         files: [],
         unstaged: [],
         staged: [],
         allFiles: [],
+        ...(sameWorktree ? {} : { checkpoints: [] }),
         diffs: {},
         activeFile: null,
         comments: [],
@@ -395,6 +416,8 @@ export const useStore = create<AppStore>((set, get) => {
       const key = get().targetKey;
       const target = tryParseTargetKey(key);
       set({ filesLoading: true, filesError: null });
+      // Another page may have taken or dropped one; they are listed wherever the files are.
+      void get().loadCheckpoints();
       try {
         // Re-attach comments first so the listings carry fresh comment state.
         await api.reanchor(key).catch(() => undefined);
@@ -462,6 +485,48 @@ export const useStore = create<AppStore>((set, get) => {
       if (get().refreshPending) {
         set({ refreshPending: false });
         await get().refresh();
+      }
+    },
+
+    async loadCheckpoints() {
+      const key = get().targetKey;
+      try {
+        const { checkpoints } = await api.checkpoints(key);
+        if (get().targetKey === key) set({ checkpoints });
+      } catch {
+        // A worktree that is gone fails its listing too, which says so; this has nothing to add.
+      }
+    },
+
+    async createCheckpoint() {
+      const key = get().targetKey;
+      try {
+        const res = await api.createCheckpoint(key);
+        get().showToast(res.unchanged ? `工作区和检查点 #${res.checkpoint.id} 一样，没有新建` : `已建检查点 #${res.checkpoint.id}`);
+        // Taking one from a checkpoint view is closing that round: the next starts from the new one.
+        if (tryParseTargetKey(key)?.kind === 'checkpoint' && res.targetKey !== key) await get().setTarget(res.targetKey);
+        else await get().loadCheckpoints();
+      } catch (e) {
+        fail(e);
+      }
+    },
+
+    async deleteCheckpoint(id) {
+      const key = get().targetKey;
+      const target = tryParseTargetKey(key);
+      try {
+        await api.deleteCheckpoint(key, id);
+        get().showToast(`已删除检查点 #${id}`);
+        if (target?.kind === 'checkpoint' && target.id === id) {
+          // Back to the newest one left, or to the working tree when that was the last.
+          const wt = target.worktree ? { worktree: target.worktree } : {};
+          const next = get()
+            .checkpoints.filter((c) => c.id !== id)
+            .at(-1);
+          await get().setTarget(formatTargetKey(next ? { kind: 'checkpoint', id: next.id, ...wt } : { kind: 'working', ...wt }));
+        } else await get().loadCheckpoints();
+      } catch (e) {
+        fail(e);
       }
     },
 

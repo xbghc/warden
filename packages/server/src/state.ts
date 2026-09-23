@@ -1,7 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import { mkdir, open, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
-import type { Prefs, ReviewState, TargetState } from '@warden/shared';
+import type { Checkpoint, Prefs, ReviewState, TargetState } from '@warden/shared';
 import { commentScopeKey } from '@warden/shared';
 import { sha1 } from './hash.js';
 
@@ -24,7 +24,7 @@ export function defaultPrefs(): Prefs {
 }
 
 export function defaultState(repoRoot: string): ReviewState {
-  return { schemaVersion: 1, repoRoot, targets: {}, issues: [], todos: [], prefs: defaultPrefs() };
+  return { schemaVersion: 1, repoRoot, targets: {}, issues: [], todos: [], checkpoints: [], prefs: defaultPrefs() };
 }
 
 export function ensureTarget(state: ReviewState, key: string): TargetState {
@@ -38,6 +38,10 @@ export function ensureTarget(state: ReviewState, key: string): TargetState {
 
 /** The fields the rest of the server dereferences without checking; anything else is a corrupt row. */
 const usable = (v: unknown): boolean => !!v && typeof v === 'object' && typeof (v as { id?: unknown }).id === 'string';
+const usableCheckpoint = (v: unknown): boolean => {
+  const c = v as Partial<Checkpoint> | null;
+  return !!c && typeof c === 'object' && Number.isInteger(c.id) && typeof c.tree === 'string' && (c.worktree === undefined || typeof c.worktree === 'string');
+};
 const usableComment = (v: unknown): boolean => usable(v) && typeof (v as { anchor?: unknown }).anchor === 'object' && !!(v as { anchor?: unknown }).anchor;
 
 function normalise(raw: unknown, repoRoot: string): ReviewState {
@@ -61,6 +65,7 @@ function normalise(raw: unknown, repoRoot: string): ReviewState {
     targets,
     issues: Array.isArray(r.issues) ? r.issues.filter(usable) : [],
     todos: Array.isArray(r.todos) ? r.todos.filter(usable) : [],
+    checkpoints: Array.isArray(r.checkpoints) ? r.checkpoints.filter(usableCheckpoint) : [],
     prefs: {
       ...defaultPrefs(),
       ...(r.prefs ?? {}),
@@ -197,10 +202,11 @@ export class StateStore {
 }
 
 /**
- * Drops everything kept under one worktree path: the scope its local views share, and the viewed
- * flags and comment pools of its commit, range and `base` targets. A slot is checked out again
- * for the next branch, and what was said about the previous one — `base` comments above all, which
- * no commit ever deletes — would otherwise come back orphaned over code they were never about.
+ * Drops everything kept under one worktree path: the scope its local views share, the viewed
+ * flags and comment pools of its commit, range, `base` and checkpoint targets, and its checkpoints.
+ * A slot is checked out again for the next branch, and what was said about the previous one —
+ * `base` comments above all, which no commit ever deletes — would otherwise come back orphaned
+ * over code they were never about; a checkpoint of the old branch is no baseline for the new one.
  * Issues let go of the comments that went with it.
  */
 export function forgetWorktreeTargets(state: ReviewState, worktreePath: string): void {
@@ -212,4 +218,5 @@ export function forgetWorktreeTargets(state: ReviewState, worktreePath: string):
     delete state.targets[key];
   }
   if (gone.size) for (const issue of state.issues) issue.commentIds = issue.commentIds.filter((id) => !gone.has(id));
+  state.checkpoints = state.checkpoints.filter((c) => c.worktree !== worktreePath);
 }

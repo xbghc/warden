@@ -201,8 +201,12 @@ export function WorktreesPanel() {
 
   const target = useMemo(() => parseTargetKey(targetKey), [targetKey]);
   // Another worktree is a different review altogether; the kind of target carries over, as in the
-  // top bar's selector. The server's own root is the target without a worktree.
-  const open = (wt: WorktreeDetail) => void setTarget(formatTargetKey({ ...target, worktree: wt.path === repo?.root ? undefined : wt.path }));
+  // top bar's selector. The server's own root is the target without a worktree. A checkpoint does
+  // not: it was taken in one worktree, and its number names another one, or none, anywhere else.
+  const open = (wt: WorktreeDetail) =>
+    void setTarget(
+      formatTargetKey({ ...(target.kind === 'checkpoint' ? { kind: 'working' } : target), worktree: wt.path === repo?.root ? undefined : wt.path }),
+    );
 
   const checkedOut = async (res: CreateWorktreeResponse, branch: string) => {
     const name = dirName(res.worktree.path);

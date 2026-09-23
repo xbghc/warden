@@ -147,12 +147,32 @@ export interface Todo {
   updatedAt: string;
 }
 
+/**
+ * The working tree of one worktree as it was at a moment the reviewer chose, tracked and untracked
+ * files alike (ignored ones left out). Its content is a git tree warden wrote into an object store
+ * of its own beside the state file, so taking one leaves the repository's index, refs and objects
+ * as they were; the target `checkpoint:<id>` diffs it against the working tree.
+ */
+export interface Checkpoint {
+  /** Counted per worktree from 1: the next one is one above the highest still kept. */
+  id: number;
+  /** The worktree it was taken in, as in its target keys; absent for the repository root. */
+  worktree?: string;
+  /** Tree sha, in warden's object store. */
+  tree: string;
+  /** HEAD when it was taken; empty on an unborn branch. */
+  head: string;
+  createdAt: string;
+}
+
 export interface ReviewState {
   schemaVersion: 1;
   repoRoot: string;
   targets: Record<TargetKey, TargetState>;
   issues: Issue[];
   todos: Todo[];
+  /** Oldest first. */
+  checkpoints: Checkpoint[];
   prefs: Prefs;
 }
 
@@ -384,6 +404,19 @@ export interface NvimInstancesResponse {
   /** Socket currently selected for this root (persisted preference, validated). */
   selected?: string;
   scannedAt: string;
+}
+
+/** The checkpoints of the worktree a target key names, oldest first. */
+export interface CheckpointsResponse {
+  checkpoints: Checkpoint[];
+}
+
+export interface CreateCheckpointResponse {
+  checkpoint: Checkpoint;
+  /** The working tree was just as the newest checkpoint has it, so that one is handed back instead of a copy. */
+  unchanged: boolean;
+  /** Target key that diffs the new checkpoint against the working tree. */
+  targetKey: TargetKey;
 }
 
 export interface ExportResponse {

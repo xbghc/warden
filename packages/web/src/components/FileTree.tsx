@@ -1,7 +1,7 @@
 import { ActionIcon } from './ActionIcon';
 import { useEffect, useMemo, useState } from 'react';
 import { FileIcon } from '@react-symbols/icons/utils';
-import type { FileEntry, TargetKey } from '@warden/shared';
+import type { FileEntry, Target, TargetKey } from '@warden/shared';
 import { formatTargetKey, targetLabel, stageModeFor, commentScopeKey, isLocalTarget, tracksViewed, tryParseTargetKey } from '@warden/shared';
 import { useStore } from '../store';
 import { allDirPaths, buildTree, type DirNode, type TreeNode } from '../lib/tree';
@@ -299,6 +299,70 @@ function DebugToggle({ local }: { local: boolean }) {
   );
 }
 
+/** 14:05 for today, 9/21 14:05 before that. */
+function checkpointTime(iso: string): string {
+  const d = new Date(iso);
+  const hm = d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+  return d.toDateString() === new Date().toDateString() ? hm : `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
+}
+
+/**
+ * A checkpoint is the working tree as it was when the reviewer said "from here": whatever the agent
+ * does next, staged, committed or neither, is then one diff against it. In the local views the bar
+ * takes one and opens the newest; in a checkpoint's own view it switches between them, and taking
+ * one there closes the round and moves on to the new one.
+ */
+function CheckpointBar({ target }: { target: Target }) {
+  const checkpoints = useStore((s) => s.checkpoints);
+  const setTarget = useStore((s) => s.setTarget);
+  const createCheckpoint = useStore((s) => s.createCheckpoint);
+  const deleteCheckpoint = useStore((s) => s.deleteCheckpoint);
+  const wt = target.worktree ? { worktree: target.worktree } : {};
+  const open = (id: number) => void setTarget(formatTargetKey({ kind: 'checkpoint', id, ...wt }));
+  const take = (
+    <button onClick={() => void createCheckpoint()} title="记下工作区现在的样子（含未跟踪的文件），之后只看这以后的改动。不会写入仓库">
+      新建检查点
+    </button>
+  );
+
+  if (target.kind === 'checkpoint') {
+    const remove = () => {
+      if (window.confirm(`删除检查点 #${target.id}？它上面的评论和已读标记会一起删除。`)) void deleteCheckpoint(target.id);
+    };
+    return (
+      <div className="checkpoint-bar">
+        <select className="checkpoint-select" aria-label="对比的检查点" value={target.id} onChange={(e) => open(Number(e.target.value))}>
+          {/* Listed before the checkpoints arrive, so the control never reads blank. */}
+          {!checkpoints.some((c) => c.id === target.id) && <option value={target.id}>#{target.id}</option>}
+          {checkpoints.map((c) => (
+            <option key={c.id} value={c.id}>
+              #{c.id} · {checkpointTime(c.createdAt)}
+            </option>
+          ))}
+        </select>
+        {take}
+        <button className="link" onClick={remove} title="删除这个检查点">
+          删除
+        </button>
+      </div>
+    );
+  }
+
+  const newest = checkpoints.at(-1);
+  return (
+    <div className="checkpoint-bar">
+      {newest ? (
+        <button className="checkpoint-open" onClick={() => open(newest.id)} title={`只看检查点 #${newest.id}（${checkpointTime(newest.createdAt)}）以后的改动`}>
+          对比检查点 #{newest.id} · {checkpointTime(newest.createdAt)}
+        </button>
+      ) : (
+        <span className="checkpoint-none">还没有检查点</span>
+      )}
+      {take}
+    </div>
+  );
+}
+
 /** Every change of the file is debug code: nothing in it is left to review. */
 const debugOnly = (f: FileEntry) => (f.debugAdditions ?? 0) + (f.debugDeletions ?? 0) === f.additions + f.deletions && f.additions + f.deletions > 0;
 
@@ -358,6 +422,7 @@ export function FileTree() {
           hint={`暂存即已审：一个文件的改动全部进了暂存区，就算审完了${ignoreDebug ? '（只剩调试代码的文件也算）' : ''}`}
         />
         <DebugToggle local />
+        <CheckpointBar target={target} />
         <div className="tree-blocks">
           <TreeBlock
             key={`${scope}:unstaged`}
@@ -382,6 +447,7 @@ export function FileTree() {
     <>
       <ReviewProgress done={files.filter((f) => f.viewed).length} total={files.length} label="个文件已读" hint="勾选文件旁的框，或用文件头的“已读”标记" />
       <DebugToggle local={false} />
+      {target?.kind === 'checkpoint' && <CheckpointBar target={target} />}
       <div className="tree-blocks">
         <TreeBlock key={scope} title="改动" view={targetKey} files={files} empty={loading ? '加载中…' : '没有改动'} />
       </div>

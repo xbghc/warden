@@ -2594,6 +2594,34 @@ button.link.danger:has(> .action-icon):hover:not(:disabled) {
   font-size: var(--t-meta);
   cursor: pointer;
 }
+.checkpoint-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px 10px;
+  color: var(--ink-2);
+  font-size: var(--t-meta);
+}
+.checkpoint-bar button,
+.checkpoint-select {
+  font-size: var(--t-meta);
+}
+.checkpoint-open,
+.checkpoint-select,
+.checkpoint-none {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.checkpoint-open {
+  text-align: left;
+}
+.checkpoint-none {
+  color: var(--muted);
+}
 .block-file-count {
   padding: 0 6px;
   border: 1px solid var(--line);

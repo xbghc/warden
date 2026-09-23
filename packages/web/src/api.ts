@@ -1,7 +1,9 @@
 import type {
+  CheckpointsResponse,
   Comment,
   CommentSide,
   CommitsResponse,
+  CreateCheckpointResponse,
   CreateCommentRequest,
   CreateIssueRequest,
   CreateTodoRequest,
@@ -92,6 +94,10 @@ export const api = {
   fullFile: (key: TargetKey, path: string, side: CommentSide) => req<FullFileResponse>('GET', `/api/targets/${enc(key)}/file/full${q({ path, side })}`),
   setViewed: (key: TargetKey, path: string, viewed: boolean, contentHash: string) =>
     req<{ viewed: Record<string, string> }>('PUT', `/api/targets/${enc(key)}/viewed`, { path, viewed, contentHash }),
+
+  checkpoints: (key: TargetKey) => req<CheckpointsResponse>('GET', `/api/targets/${enc(key)}/checkpoints`),
+  createCheckpoint: (key: TargetKey) => req<CreateCheckpointResponse>('POST', `/api/targets/${enc(key)}/checkpoints`),
+  deleteCheckpoint: (key: TargetKey, id: number) => req<{ ok: true }>('DELETE', `/api/targets/${enc(key)}/checkpoints/${id}`),
 
   stage: (key: TargetKey, body: StageRequest) => req<StageResponse>('POST', `/api/targets/${enc(key)}/stage`, body),
 

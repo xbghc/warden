@@ -4,6 +4,8 @@ import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type {
   ChangeEvent,
+  CheckpointsResponse,
+  CreateCheckpointResponse,
   Comment,
   CommitsResponse,
   CreateCommentRequest,
@@ -58,6 +60,7 @@ import { currentBranch, getRepoInfo, listWorktrees, type RepoContext } from './r
 import { annotateDebug, getFileDiff, getFullFile, listTargetDiffs, resolveTargetContext, toSummary, type TargetContext } from './targets.js';
 import { buildAnchor, reanchorComment } from './anchor.js';
 import { buildStagePatch } from './patch.js';
+import { addCheckpoint, checkpointKey, checkpointStore, checkpointsOf, findCheckpoint, forgetCheckpoint, snapshotWorktree } from './checkpoints.js';
 import { checkoutWorktree, listBranches, listWorktreesDetailed, lookupRemoteBranches, nextSlot, releaseWorktree, removeWorktree } from './worktrees.js';
 import { ensureTarget, forgetWorktreeTargets, type StateStore } from './state.js';
 import { formatCommentsExport, formatIssueExport } from './export.js';
@@ -118,7 +121,10 @@ export function createApp(opts: AppOptions): Hono {
     return list;
   };
 
-  const targetCtx = async (key: string): Promise<TargetContext> => {
+  const checkpoints = checkpointStore(store.file);
+
+  /** The target and the directory it is read in; a checkpoint is not looked up (see `targetCtx`). */
+  const worktreeCtx = async (key: string): Promise<TargetContext> => {
     let list = await worktrees();
     try {
       return resolveTargetContext(repo, list, key);
@@ -129,6 +135,14 @@ export function createApp(opts: AppOptions): Hono {
       }
       throw e;
     }
+  };
+
+  const targetCtx = async (key: string): Promise<TargetContext> => {
+    const ctx = await worktreeCtx(key);
+    if (ctx.target.kind !== 'checkpoint') return ctx;
+    const cp = findCheckpoint(await store.load(), ctx.target.worktree, ctx.target.id);
+    if (!cp) throw notFound(`no checkpoint #${ctx.target.id} in this worktree`, 'unknown_checkpoint');
+    return { ...ctx, checkpoint: { tree: cp.tree, store: checkpoints } };
   };
 
   const fileDiffWithHints = async (ctx: TargetContext, filePath: string, explicit?: { oldPath?: string; untracked?: boolean }) => {
@@ -181,7 +195,10 @@ export function createApp(opts: AppOptions): Hono {
     // could click next carries that worktree along, and the next load would land there again.
     const last = state.prefs.lastTarget;
     const target = last ? tryParseTargetKey(last) : undefined;
-    const usable = !!target && (!target.worktree || info.worktrees.some((w) => w.path === target.worktree));
+    const usable =
+      !!target &&
+      (!target.worktree || info.worktrees.some((w) => w.path === target.worktree)) &&
+      (target.kind !== 'checkpoint' || !!findCheckpoint(state, target.worktree, target.id));
     if (last && usable) info.defaultTarget = last;
     else if (last) {
       await store.update((s) => {
@@ -293,6 +310,40 @@ export function createApp(opts: AppOptions): Hono {
     });
     changedNotices.get(key)?.delete(body.path);
     return c.json({ viewed });
+  });
+
+  // ---- checkpoints -------------------------------------------------------
+
+  // Any target key names the worktree whose checkpoints are meant, a checkpoint's own included.
+  api.get('/targets/:key/checkpoints', async (c) => {
+    const ctx = await worktreeCtx(c.req.param('key'));
+    const res: CheckpointsResponse = { checkpoints: checkpointsOf(await store.load(), ctx.target.worktree) };
+    return c.json(res);
+  });
+
+  api.post('/targets/:key/checkpoints', async (c) => {
+    const ctx = await worktreeCtx(c.req.param('key'));
+    const tree = await snapshotWorktree(ctx.cwd, checkpoints);
+    const head = (await revParse(ctx.cwd, 'HEAD')) ?? '';
+    const res = await store.update((s): CreateCheckpointResponse => {
+      // Taking one twice over the same working tree would only leave two names for one baseline.
+      const newest = checkpointsOf(s, ctx.target.worktree).at(-1);
+      const unchanged = newest?.tree === tree;
+      const checkpoint = unchanged ? newest : addCheckpoint(s, ctx.target.worktree, tree, head);
+      return { checkpoint, unchanged, targetKey: checkpointKey(checkpoint) };
+    });
+    return c.json(res, res.unchanged ? 200 : 201);
+  });
+
+  api.delete('/targets/:key/checkpoints/:id', async (c) => {
+    const ctx = await worktreeCtx(c.req.param('key'));
+    const id = Number(c.req.param('id'));
+    await store.update((s) => {
+      const cp = Number.isInteger(id) ? findCheckpoint(s, ctx.target.worktree, id) : undefined;
+      if (!cp) throw notFound(`no checkpoint #${c.req.param('id')} in this worktree`, 'unknown_checkpoint');
+      forgetCheckpoint(s, cp);
+    });
+    return c.json({ ok: true });
   });
 
   // ---- staging -----------------------------------------------------------

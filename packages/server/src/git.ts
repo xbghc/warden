@@ -37,12 +37,34 @@ export class GitError extends HttpError {
   }
 }
 
+/**
+ * Points git at warden's own object store instead of the repository's for one command. New objects
+ * land in `objects`, the repository's are still read through `alternates`, and `index`, when given,
+ * stands in for the real index. This is how checkpoints are taken and read without the repository
+ * seeing any of it (see checkpoints.ts).
+ */
+export interface SnapshotEnv {
+  objects: string;
+  alternates: string;
+  index?: string;
+}
+
+function snapshotVars(snapshot: SnapshotEnv | undefined): Record<string, string> {
+  if (!snapshot) return {};
+  return {
+    GIT_OBJECT_DIRECTORY: snapshot.objects,
+    GIT_ALTERNATE_OBJECT_DIRECTORIES: snapshot.alternates,
+    ...(snapshot.index ? { GIT_INDEX_FILE: snapshot.index } : {}),
+  };
+}
+
 export interface GitRunOptions {
   cwd: string;
   timeoutMs?: number;
   maxBuffer?: number;
   /** Exit codes considered successful (default [0]). */
   okCodes?: number[];
+  snapshot?: SnapshotEnv;
 }
 
 export interface GitResult {
@@ -103,6 +125,7 @@ export async function runGit(args: readonly string[], opts: GitRunOptions): Prom
           GIT_PAGER: 'cat',
           PAGER: 'cat',
           GIT_TERMINAL_PROMPT: '0',
+          ...snapshotVars(opts.snapshot),
         },
         windowsHide: true,
       },
@@ -218,6 +241,26 @@ async function applyOnce(cwd: string, patch: string, opts: { reverse?: boolean; 
  * in use) from a crash.
  */
 export async function runGitWrite(args: readonly string[], opts: { cwd: string; timeoutMs?: number }): Promise<GitResult> {
+  return execWrite(args, opts, {});
+}
+
+/**
+ * The writes a checkpoint needs, and nothing else: `add --all` (with `--intent-to-add` for a diff)
+ * and `write-tree --missing-ok`, always into an index and an object directory of warden's own. No
+ * alternates are set here, deliberately: git "freshens" an object it finds in one — touches its
+ * mtime — so the repository's objects would be written after all. Without them the entries git
+ * does not re-hash point at objects this store lacks, which `--missing-ok` allows; reads of the
+ * tree pass the alternates (see `SnapshotEnv`). Only checkpoints.ts calls it, with fixed arguments.
+ */
+export async function runGitSnapshot(args: readonly string[], opts: { cwd: string; objects: string; index: string; timeoutMs?: number }): Promise<GitResult> {
+  const allowed =
+    (args[0] === 'add' && args[1] === '--all' && args.slice(2).every((a) => a === '--intent-to-add')) ||
+    (args[0] === 'write-tree' && args[1] === '--missing-ok' && args.length === 2);
+  if (!allowed) throw new GitError(`not a snapshot command: git ${args.join(' ')}`, null, '', 400, 'git_subcommand_forbidden');
+  return execWrite(args, opts, { GIT_OBJECT_DIRECTORY: opts.objects, GIT_INDEX_FILE: opts.index });
+}
+
+function execWrite(args: readonly string[], opts: { cwd: string; timeoutMs?: number }, extraEnv: Record<string, string>): Promise<GitResult> {
   for (const arg of args) if (arg.includes('\0')) throw new GitError('NUL byte in git argument', null, '', 400, 'git_bad_argument');
   return new Promise((resolve, reject) => {
     execFile(
@@ -228,7 +271,7 @@ export async function runGitWrite(args: readonly string[], opts: { cwd: string; 
         timeout: opts.timeoutMs ?? DEFAULT_GIT_TIMEOUT_MS,
         maxBuffer: 16 * 1024 * 1024,
         encoding: 'utf8',
-        env: { ...process.env, LC_ALL: 'C', GIT_PAGER: 'cat', PAGER: 'cat', GIT_TERMINAL_PROMPT: '0' },
+        env: { ...process.env, LC_ALL: 'C', GIT_PAGER: 'cat', PAGER: 'cat', GIT_TERMINAL_PROMPT: '0', ...extraEnv },
         windowsHide: true,
       },
       (error, stdout, stderr) => {

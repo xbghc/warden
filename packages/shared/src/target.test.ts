@@ -26,6 +26,15 @@ describe('target keys', () => {
     expect(commentScopeKey('worktree:/p/q:base:main')).toBe('worktree:/p/q:base:main');
     expect(targetLabel(parseTargetKey('worktree:/p/wt:base:main'))).toBe('[wt] Branch vs main');
   });
+  it('parses checkpoints, which keep a pool and 已读 marks of their own', () => {
+    expect(parseTargetKey('checkpoint:3')).toEqual({ kind: 'checkpoint', id: 3 });
+    expect(parseTargetKey('worktree:/p/a:b:checkpoint:12')).toEqual({ kind: 'checkpoint', id: 12, worktree: '/p/a:b' });
+    for (const bad of ['checkpoint:', 'checkpoint:0', 'checkpoint:01', 'checkpoint:-1', 'checkpoint:1.5', 'checkpoint:x', 'worktree:/p:checkpoint:x'])
+      expect(() => parseTargetKey(bad)).toThrow(TargetKeyError);
+    expect(commentScopeKey('checkpoint:3')).toBe('checkpoint:3');
+    expect(tracksViewed(parseTargetKey('checkpoint:3'))).toBe(true);
+    expect(targetLabel(parseTargetKey('worktree:/p/wt:checkpoint:2'))).toBe('[wt] Checkpoint #2');
+  });
   it('keeps the viewed mark off the local views, where staging is the mark', () => {
     for (const key of ['working', 'staged', 'all', 'worktree:/p/wt:staged']) expect(tracksViewed(parseTargetKey(key))).toBe(false);
     for (const key of ['base:main', 'commit:abc1234', 'range:a..b', 'worktree:/p/wt:base:main']) expect(tracksViewed(parseTargetKey(key))).toBe(true);
@@ -57,6 +66,8 @@ describe('target keys', () => {
       'worktree:/p/q:staged',
       'worktree:/p/q:range:x..y',
       'worktree:/p/q:base:origin/main',
+      'checkpoint:7',
+      'worktree:/p/q:checkpoint:7',
     ]) {
       expect(formatTargetKey(parseTargetKey(key))).toBe(key);
     }
