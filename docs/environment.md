@@ -1,0 +1,30 @@
+# Editor and platform
+
+Jumping to nvim, and running under WSL2.
+
+## nvim integration
+
+Requirements:
+
+- `nvim` on `PATH` of the machine running warden (WSL2 in the typical setup).
+- nvim started normally so it creates its default server socket (`$XDG_RUNTIME_DIR/nvim.<pid>.0`
+  or `/tmp/nvim.<user>/…/nvim.<pid>.0`), or with `--listen` into one of those directories.
+- nvim's working directory is the repository (or worktree) root or somewhere below it.
+
+warden scans those socket directories, asks each instance for `getcwd()` (500 ms timeout) and keeps the
+instances whose cwd is inside the current target's root. One match is used automatically; with several
+matches a selector appears in the top bar and the choice is remembered per repository root. Results
+are cached for 10 s; use ⟳ to rescan.
+
+Clicking a line number runs, roughly, `:edit +<line> <absolute path>` in that instance. Deleted lines
+jump to the nearest new-side line; for commit targets the working-tree file is opened.
+
+## WSL2 notes
+
+- Access the UI from the Windows browser at the printed `http://127.0.0.1:<port>/` URL; WSL2 forwards
+  localhost automatically.
+- Install [wslu](https://github.com/wslutilities/wslu) for `wslview` if `explorer.exe` doesn't open the
+  URL for you, or run with `--no-open`.
+- Keep the repository on the Linux filesystem for reasonable git performance.
+- Clipboard access uses `navigator.clipboard`, which works on `localhost`; if you expose the port via
+  another hostname the copy button falls back to `document.execCommand('copy')`.
