@@ -3,7 +3,7 @@ import path from 'node:path';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Hono } from 'hono';
-import type { Comment, FilesResponse, Issue, ReanchorResponse, ReviewState } from '@warden/shared';
+import type { Comment, FilesResponse, ReanchorResponse, ReviewState, Todo, TodosResponse } from '@warden/shared';
 import { createApp, resolveRepo, StateStore, NvimService } from '@warden/server';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
@@ -54,7 +54,7 @@ afterAll(async () => {
 describe('comments follow the code across views', () => {
   let alpha: Comment;
   let beta: Comment;
-  let issue: Issue;
+  let todo: Todo;
 
   it('stores local comments in a shared scope, not per view', async () => {
     await fx.write(FILE, withBoth);
@@ -94,9 +94,9 @@ describe('comments follow the code across views', () => {
     expect(byId(re.comments, beta.id)).toMatchObject({ targetKey: 'working', status: 'active', startLine: 20 });
   });
 
-  it('deletes committed comments and unlinks them from issues, keeping unstaged ones', async () => {
-    issue = await json<Issue>(await send('POST', '/api/issues', { title: 'Alpha', commentIds: [alpha.id, beta.id] }));
-    expect(issue.commentIds).toEqual([alpha.id, beta.id]);
+  it('deletes committed comments and unlinks them from todos, keeping unstaged ones', async () => {
+    todo = await json<Todo>(await send('POST', '/api/todos', { title: 'Alpha', commentIds: [alpha.id, beta.id] }));
+    expect(todo.commentIds).toEqual([alpha.id, beta.id]);
 
     // Commits the index only, so the beta edit stays unstaged in the worktree.
     fx.git('commit', '-q', '-m', 'ship alpha');
@@ -105,8 +105,8 @@ describe('comments follow the code across views', () => {
     expect(byId(re.comments, alpha.id)).toBeUndefined();
     expect(byId(re.comments, beta.id)).toMatchObject({ targetKey: 'working', status: 'active' });
 
-    const after = await json<{ issues: Issue[] }>(await get('/api/issues'));
-    expect(after.issues[0]!.commentIds).toEqual([beta.id]);
+    const after = await json<TodosResponse>(await get('/api/todos'));
+    expect(after.todos.find((t) => t.id === todo.id)!.commentIds).toEqual([beta.id]);
   });
 
   it('orphans instead of deleting when HEAD did not move', async () => {

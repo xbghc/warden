@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { ActionIcon } from './ActionIcon';
 import type { Comment, TargetKey } from '@warden/shared';
 import { awaitsReviewer, targetLabel, tryParseTargetKey } from '@warden/shared';
-import { useStore } from '../store';
+import { branchOf, useStore } from '../store';
 import { Markdown } from './Markdown';
 import { CommentEditor } from './CommentEditor';
 
@@ -41,6 +41,14 @@ export function CommentCard({ comment, showSnippet = false, showFile = false }: 
   const targetKey = useStore((s) => s.targetKey);
   const [editing, setEditing] = useState(false);
   const [replying, setReplying] = useState(false);
+  const [picking, setPicking] = useState(false);
+  const linkComment = useStore((s) => s.linkComment);
+  const repo = useStore((s) => s.repo);
+  const root = useStore((s) => s.root);
+  const todos = useStore((s) => s.todos);
+  const branch = branchOf(repo, root);
+  // Open todos of the branch in front that do not carry this comment yet: where it can still go.
+  const openTodos = todos.filter((t) => t.branch === branch && t.status === 'open' && !t.commentIds?.includes(comment.id));
   const answered = awaitsReviewer(comment);
 
   const range = comment.startLine === comment.endLine ? `${comment.startLine}` : `${comment.startLine}–${comment.endLine}`;
@@ -112,6 +120,17 @@ export function CommentCard({ comment, showSnippet = false, showFile = false }: 
           ) : null}
           <button
             className="link"
+            aria-expanded={picking}
+            onClick={(e) => {
+              e.stopPropagation();
+              setPicking((v) => !v);
+            }}
+            title="让这条评论随一条待办交给 agent"
+          >
+            <ActionIcon name="todos" label="加入待办" />
+          </button>
+          <button
+            className="link"
             onClick={(e) => {
               e.stopPropagation();
               void exportComments([comment.id]);
@@ -140,6 +159,35 @@ export function CommentCard({ comment, showSnippet = false, showFile = false }: 
           </button>
         </span>
       </div>
+      {picking && (
+        // Stops here so picking a todo does not also focus the card, which would scroll the diff to it.
+        <div className="todo-pick" onClick={(e) => e.stopPropagation()}>
+          <button
+            type="button"
+            className="link"
+            onClick={() => {
+              setPicking(false);
+              void linkComment(comment.id, null);
+            }}
+          >
+            <ActionIcon name="add" label="新建待办" />
+          </button>
+          {openTodos.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              className="link todo-pick-item"
+              onClick={() => {
+                setPicking(false);
+                void linkComment(comment.id, t.id);
+              }}
+              title={`加入「${t.title}」`}
+            >
+              {t.title}
+            </button>
+          ))}
+        </div>
+      )}
       {showSnippet && comment.codeSnippet.length > 0 && (
         <pre className="snippet">
           {comment.codeSnippet.map((l, i) => (

@@ -27,7 +27,6 @@ describe('StateStore', () => {
       schemaVersion: 1,
       repoRoot: '/repo',
       targets: {},
-      issues: [],
       todos: [],
       checkpoints: [],
       prefs: { viewMode: 'unified', nvimSocketByRoot: {}, autoRefresh: true, railOpen: false, ignoreDebug: true },
@@ -54,14 +53,15 @@ describe('StateStore', () => {
         schemaVersion: 1,
         repoRoot: '/repo',
         targets: { local: { viewed: {}, comments: [null, 'junk', { id: 'no-anchor' }, ok] } },
-        issues: [null, { title: 'no id' }, { id: 'i1', title: 't', body: '', status: 'open', commentIds: [] }],
+        // Issues were folded into todos; what an older file kept of them is let go.
+        issues: [{ id: 'i1', title: 't', body: '', status: 'open', commentIds: [] }],
         todos: [{ title: 'no id' }, { id: 't1', branch: 'main', title: 'x', body: '', status: 'open', createdAt: '', updatedAt: '' }],
         prefs: {},
       }),
     );
     const s = await new StateStore(file, '/repo').load();
     expect(s.targets.local!.comments.map((c) => c.id)).toEqual(['ok']);
-    expect(s.issues.map((i) => i.id)).toEqual(['i1']);
+    expect(s).not.toHaveProperty('issues');
     expect(s.todos.map((t) => t.id)).toEqual(['t1']);
   });
 
@@ -94,12 +94,12 @@ describe('StateStore', () => {
         ensureTarget(s, 'base:main').viewed['b.ts'] = '2';
       }),
       a.update((s) => {
-        s.issues.push({ id: 'i1', title: 't', body: '', status: 'open', commentIds: [], createdAt: '', updatedAt: '' });
+        s.todos.push({ id: 't1', branch: 'main', title: 't', body: '', status: 'open', commentIds: [], createdAt: '', updatedAt: '' });
       }),
     ]);
     const s = await a.load();
     expect(s.targets['base:main']?.viewed).toEqual({ 'a.ts': '1', 'b.ts': '2' });
-    expect(s.issues).toHaveLength(1);
+    expect(s.todos).toHaveLength(1);
   });
 
   it('recovers from a corrupt file', async () => {
@@ -188,9 +188,9 @@ describe('forgetWorktreeTargets', () => {
       local: { viewed: {}, comments: [comment('c4', 'working')] },
       'base:main': { viewed: { 'a.ts': 'h2' }, comments: [] },
     };
-    s.issues = [{ id: 'i1', title: 't', body: '', status: 'open', commentIds: ['c1', 'c2', 'c3', 'c4'], createdAt: '', updatedAt: '' }];
+    s.todos = [{ id: 't1', branch: 'main', title: 't', body: '', status: 'open', commentIds: ['c1', 'c2', 'c3', 'c4'], createdAt: '', updatedAt: '' }];
     forgetWorktreeTargets(s, slot);
     expect(Object.keys(s.targets).sort()).toEqual(['base:main', 'local', 'worktree:/x/repo-10:local']);
-    expect(s.issues[0]!.commentIds).toEqual(['c3', 'c4']);
+    expect(s.todos[0]!.commentIds).toEqual(['c3', 'c4']);
   });
 });

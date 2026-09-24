@@ -119,9 +119,9 @@ export function TopBar() {
           className={`rail-switch ${railOpen ? 'active' : ''} ${waiting > 0 ? 'has-unexported' : ''}`}
           aria-pressed={railOpen}
           onClick={() => setRailOpen(!railOpen)}
-          title={railOpen ? '收起右栏 (Esc)' : '展开评论、待办和 Issue'}
+          title={railOpen ? '收起右栏 (Esc)' : '展开评论和待办'}
         >
-          <ActionIcon name="comments" label="评论、待办和 Issue" />
+          <ActionIcon name="comments" label="评论和待办" />
           {commentCount > 0 && <span className="rail-switch-n">{commentCount}</span>}
         </button>
       </div>

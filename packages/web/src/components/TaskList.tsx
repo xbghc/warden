@@ -6,7 +6,7 @@ import { Markdown } from './Markdown';
  * A checklist that behaves like Google Tasks: an "add" row at the top, titles and details edited
  * in place, Enter at the end of a row starting the next one, a circle that strikes the row
  * through and files it under a collapsed "done" section, and rows dragged into the order the
- * reviewer wants. Todos and issues are both this list with different trimmings.
+ * reviewer wants. The todos are this list with their trimmings.
  */
 export interface TaskItem {
   id: string;
@@ -36,7 +36,7 @@ export interface TaskListProps<T extends TaskItem> {
   onClearDone?(): Promise<void>;
   /** Inline after the title: badges, counts. */
   meta?(item: T): ReactNode;
-  /** Under the details while the row is open: the issue's linked comments, say. */
+  /** Under the details while the row is open: a todo's linked comments, say. */
   extra?(item: T): ReactNode;
   /** Hover actions before 删除. */
   actions?(item: T): ReactNode;

@@ -104,18 +104,6 @@ export interface CommentReply {
   at: string;
 }
 
-export type IssueStatus = 'open' | 'closed';
-
-export interface Issue {
-  id: string;
-  title: string;
-  body: string;
-  status: IssueStatus;
-  commentIds: string[];
-  createdAt: string;
-  updatedAt: string;
-}
-
 export type ViewMode = 'unified' | 'split';
 
 export interface Prefs {
@@ -159,6 +147,11 @@ export interface Todo {
   /** Markdown, may be empty. */
   body: string;
   status: TodoStatus;
+  /**
+   * Comments that go with the task, in the order they were added: copying the todo hands them to the
+   * agent with it. Absent when there are none; a comment deleted anywhere is dropped from here too.
+   */
+  commentIds?: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -187,7 +180,6 @@ export interface ReviewState {
   schemaVersion: 1;
   repoRoot: string;
   targets: Record<TargetKey, TargetState>;
-  issues: Issue[];
   todos: Todo[];
   /** Oldest first. */
   checkpoints: Checkpoint[];
@@ -517,25 +509,9 @@ export interface ExportRequest {
   commentIds: string[];
 }
 
-export interface CreateIssueRequest {
-  title: string;
-  body?: string;
-  commentIds?: string[];
-  status?: IssueStatus;
-  /** Put the new issue right after this one; omitted = at the top of the list. */
-  after?: string;
-}
-
 /** Reorder: put the item right before `before`, or last when null. */
 export interface MoveRequest {
   before: string | null;
-}
-
-export interface UpdateIssueRequest {
-  title?: string;
-  body?: string;
-  status?: IssueStatus;
-  commentIds?: string[];
 }
 
 export interface NvimOpenRequest {
@@ -553,12 +529,15 @@ export interface CreateTodoRequest {
   status?: TodoStatus;
   /** Put the new todo right after this one; omitted = at the top of the list. */
   after?: string;
+  commentIds?: string[];
 }
 
 export interface UpdateTodoRequest {
   title?: string;
   body?: string;
   status?: TodoStatus;
+  /** The whole list: linking a comment appends to it, unlinking filters it. Unknown ids are refused. */
+  commentIds?: string[];
 }
 
 export interface TodosResponse {

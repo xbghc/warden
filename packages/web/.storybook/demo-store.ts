@@ -1,5 +1,5 @@
 import { fn } from 'storybook/test';
-import type { Comment, Issue, Todo } from '@warden/shared';
+import type { Comment, Todo } from '@warden/shared';
 import { parseTargetKey } from '@warden/shared';
 import { branchOf, useStore, type AppStore } from '../src/store';
 
@@ -29,20 +29,17 @@ export function setupDemoStore() {
     demoComment({ id: 'comment-2', startLine: 25, endLine: 25, body: '请补充空列表的测试。', status: 'exported', exportedAt: timestamp }),
     demoComment({ id: 'comment-3', filePath: 'src/utils/total.ts', body: '请补充金额舍入的边界测试。', status: 'orphaned' }),
   ];
-  const issues: Issue[] = [
+  const todos: Todo[] = [
     {
-      id: 'issue-1',
+      id: 'todo-1',
+      branch: 'main',
       title: '统一金额计算逻辑',
       body: '复用 `calcTotal`，并补充边界情况测试。',
       status: 'open',
-      commentIds: ['comment-1'],
+      commentIds: ['comment-1', 'comment-3'],
       createdAt: timestamp,
       updatedAt: timestamp,
     },
-    { id: 'issue-2', title: '空列表状态', body: '已补充占位提示。', status: 'closed', commentIds: [], createdAt: timestamp, updatedAt: timestamp },
-  ];
-  const todos: Todo[] = [
-    { id: 'todo-1', branch: 'main', title: '补充空列表测试', body: '- [ ] 空列表\n- [ ] 折扣金额', status: 'open', createdAt: timestamp, updatedAt: timestamp },
     { id: 'todo-2', branch: 'main', title: '检查键盘操作', body: '已验证 Tab 和 Enter。', status: 'done', createdAt: timestamp, updatedAt: timestamp },
     { id: 'todo-3', branch: 'feature/review', title: '完善评论导出', body: '保留文件名和行号。', status: 'open', createdAt: timestamp, updatedAt: timestamp },
   ];
@@ -55,7 +52,6 @@ export function setupDemoStore() {
     activeFile: 'src/App.tsx',
     comments,
     allComments: comments,
-    issues,
     todos,
     repo: {
       root: '/workspace/warden',
@@ -77,9 +73,7 @@ export function setupDemoStore() {
     },
     lastRefreshAt: timestamp,
     deleteTodos: fn(async () => {}),
-    deleteIssues: fn(async () => {}),
     moveTodo: fn(async () => {}),
-    moveIssue: fn(async () => {}),
     stageLines: fn(async () => true),
     setTarget: fn(changeTarget),
     switchView: fn(changeTarget),
@@ -113,28 +107,14 @@ export function setupDemoStore() {
     }),
     exportComments: fn(async () => {}),
     copyAllComments: fn(async () => {}),
-    loadIssues: fn(async () => {}),
     loadTodos: fn(async () => {}),
-    exportIssue: fn(async () => {}),
     copyTodo: fn(async () => {}),
-    createIssue: fn<AppStore['createIssue']>(async (request) => {
-      const issue: Issue = {
-        ...request,
-        body: request.body ?? '',
-        commentIds: request.commentIds ?? [],
-        id: `new-issue-${++sequence}`,
-        status: 'open',
-        createdAt: timestamp,
-        updatedAt: timestamp,
-      };
-      useStore.setState((s) => ({ issues: [...s.issues, issue], selectedCommentIds: [] }));
-      return issue;
-    }),
-    updateIssue: fn<AppStore['updateIssue']>(async (id, patch) => {
-      useStore.setState((s) => ({ issues: s.issues.map((i) => (i.id === id ? { ...i, ...patch } : i)) }));
-    }),
-    deleteIssue: fn<AppStore['deleteIssue']>(async (id) => {
-      useStore.setState((s) => ({ issues: s.issues.filter((i) => i.id !== id) }));
+    loadAllComments: fn(async () => {}),
+    linkComment: fn(async () => {}),
+    unlinkComment: fn<AppStore['unlinkComment']>(async (todoId, commentId) => {
+      useStore.setState((s) => ({
+        todos: s.todos.map((t) => (t.id === todoId ? { ...t, commentIds: (t.commentIds ?? []).filter((x) => x !== commentId) } : t)),
+      }));
     }),
     createTodo: fn<AppStore['createTodo']>(async (request) => {
       const todo: Todo = {

@@ -24,13 +24,13 @@ with line comments you can copy back to the agent as a prompt.
 - One click copies all comments as an agent-readable prompt to the clipboard — or the agent fetches them
   itself with `warden feedback` and answers each one with `warden reply`, the answer showing under the
   comment in the page (see [Handing comments to the agent](#handing-comments-to-the-agent)).
-- Review state (viewed files, comments, local issues, todos, preferences) persists outside the repo and survives restarts.
+- Review state (viewed files, comments, todos, preferences) persists outside the repo and survives restarts.
 - Comments follow the code: they move with a hunk that gets staged, re-attach after the agent edits the file, and are cleaned up once the change is committed.
 - Auto-refresh — warden watches the repository and reloads itself when you edit, stage, commit or switch branches.
-- Local issues (title, Markdown body, open/closed) that link comments, and branch-scoped todos, each
-  copied to the clipboard on its own — one task at a time for the agent. Both are task lists in the
-  manner of Google Tasks: add at the top, Enter for the next one, tick to file it under 已完成, drag
-  into your own order, edit in place, 撤消 after a delete.
+- Branch-scoped todos that can carry comments, each copied to the clipboard on its own — one task at
+  a time for the agent, with the review notes it is about. A task list in the manner of Google Tasks:
+  add at the top, Enter for the next one, tick to file it under 已完成, drag into your own order, edit
+  in place, 撤消 after a delete.
 - Commit history browser: grouped by day, branch / tag labels, search by message, sha, author or
   path (each a `git log` on the server, not a filter over the rows already loaded), and a
   first-parent view that folds merged branches into their merge commits.
@@ -297,8 +297,8 @@ When you have dealt with a comment, answer it with `warden reply <id> "<what you
 
 A comment with a thread carries it whole, so a follow-up arrives with what it follows up on. The last
 line tells whatever agent the text is pasted into how to answer; it names `npx @xbghc/warden` instead
-when warden itself was started through npx. Issues can be copied in the same format (with the issue
-title, status and body on top).
+when warden itself was started through npx. A [todo](#todos) that carries comments is copied the
+same way, under its title and body.
 
 ## Handing comments to the agent
 
@@ -354,7 +354,7 @@ them — the comment's current view first, then `working`, `staged`, `all`. So:
 - The agent edits the commented line → nothing matches, and the comment becomes *orphaned*: listed
   at the top of the rail with its original snippet, ready to be deleted or re-attached to a new selection.
 - `git commit` → re-anchoring notices HEAD moved. Comments that no longer have a home anywhere are
-  **deleted** (and unlinked from any issue), because the code they were about is now history.
+  **deleted** (and unlinked from any todo), because the code they were about is now history.
   Anything still visible in Unstaged or Staged survives, including as a context line, and so does a
   comment with replies under it, orphaned, until you resolve it.
 
@@ -375,7 +375,7 @@ working tree now — whatever was staged or committed in between does not show, 
 - *新建检查点*, under the progress figure in 工作区, takes one: tracked and untracked files as they are
   on disk, ignored ones left out. *对比检查点 #n* beside it opens the newest. A checkpoint of a working
   tree that has not changed since the newest one is not taken twice; that one is handed back.
-- Handing comments to the agent takes one by itself — *复制评论*, *复制此条*, an issue's *复制*, or
+- Handing comments to the agent takes one by itself — *复制评论*, *复制此条*, a todo's *复制* when it carries comments, or
   the agent's own `warden feedback` — in each worktree the comments are about, marked *交付反馈* in
   the list. A round is the reviewer's, not the agent's: it ends when feedback goes out, however many
   turns the agent then takes, so *对比检查点* afterwards shows what it did about that feedback and
@@ -438,14 +438,14 @@ rail next to the comments, under the *待办* tab, as a task list that works the
 - Rows are dragged into your own order by the handle at their left edge. That order is what the state
   file keeps, and new todos go on top.
 - Delete asks nothing; the toast offers *撤消* for a few seconds.
-- The picker at the top is the list selector: the current branch, any other branch that has todos,
-  or all of them with the branch on each row. A new todo goes to the branch being shown.
+- The list is the branch checked out where the review is (the main worktree, or the worktree under
+  review), and a new todo goes to that branch.
 
-Issues (the rail's third tab) are the same list: closing an issue is ticking it, a
-*已关闭* section holds the closed ones, and the comments linked to an issue sit under its open row
-like subtasks, each with *跳转* and *解除关联*. Tick comments in the rail and the *创建 Issue* button
-switches to that tab with the add row ready and the comments attached on creation; for an existing
-issue, open its row and use *关联选中的评论*.
+A todo can carry comments: a task and the review notes it is about, handed over together. *加入待办*
+on a comment card offers *新建待办* — titled after the comment's first line — or any open todo of
+the branch. A todo that carries comments says how many beside its title, and lists them under its
+open row, each with *跳转* and *解除关联*. Deleting a comment, or a commit that finishes one, takes it
+off the todo as well.
 
 Each row has its own *复制* button, and there is deliberately no "copy all": a todo is one task to
 hand to an agent, and the agent it goes to is already working in that branch. So the clipboard gets
@@ -456,6 +456,13 @@ the title and the body — no branch, repo, count or numbering:
 
 描述正文（Markdown）…
 ```
+
+and after them, when the todo carries comments, those comments in the
+[export format](#comments-and-export), reply line included. Such a copy is a hand-off like any
+other: the comments are marked exported and a checkpoint is taken.
+
+Versions before 0.16 had a separate *Issue* tab; a todo that carries comments is what an issue was,
+and the issues an older state file holds are dropped on upgrade.
 
 ## nvim integration
 
@@ -484,7 +491,7 @@ deleting a checkpoint leaves them there, since another may share them.
 `targets` is keyed by target key, plus one *comment scope* per worktree — `local`, or
 `worktree:<path>:local` — holding the comments the three local views share and the HEAD sha the last
 re-anchor saw. `viewed` sits on the key of the commit, range, `base` or checkpoint target it was
-ticked in; the local view keys hold nothing. Issues, todos and `checkpoints` (the tree sha, HEAD and
+ticked in; the local view keys hold nothing. Todos (with the ids of the comments they carry) and `checkpoints` (the tree sha, HEAD and
 time of each, per worktree) are top level. State written by an older version is
 migrated on load: comments filed under `working` / `staged` / `all` move into the matching scope the
 first time the file is read, and the 已读 marks those views used to keep are dropped.

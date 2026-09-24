@@ -1409,6 +1409,27 @@ button.wt-review:hover {
 .comment-card.reattaching .card-actions {
   opacity: 1;
 }
+/* Where 加入待办 lists the todos the comment can join: 新建 first, then the branch's open ones. */
+.todo-pick {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  margin: 6px 0 2px;
+  padding: 4px 6px;
+  border-radius: var(--r-ctl);
+  background: var(--surface-2);
+}
+.todo-pick .link {
+  font-size: 12px;
+}
+.todo-pick-item {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
 /* The thread under a comment. Each answer hangs off the note it answers rather than
    becoming a card of its own: the conversation is about one place in the code. */
 .comment-reply {
@@ -2172,10 +2193,6 @@ button.wt-review:hover {
   flex-direction: column;
   background: var(--ground);
   min-height: 0;
-}
-/* Issues carry their linked comments underneath, so they need the width the other two do not. */
-.rail.rail-wide {
-  width: 440px;
 }
 .rail-head {
   display: flex;

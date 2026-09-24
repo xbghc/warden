@@ -24,7 +24,7 @@ export function defaultPrefs(): Prefs {
 }
 
 export function defaultState(repoRoot: string): ReviewState {
-  return { schemaVersion: 1, repoRoot, targets: {}, issues: [], todos: [], checkpoints: [], prefs: defaultPrefs() };
+  return { schemaVersion: 1, repoRoot, targets: {}, todos: [], checkpoints: [], prefs: defaultPrefs() };
 }
 
 export function ensureTarget(state: ReviewState, key: string): TargetState {
@@ -63,7 +63,8 @@ function normalise(raw: unknown, repoRoot: string): ReviewState {
     schemaVersion: 1,
     repoRoot: r.repoRoot ?? repoRoot,
     targets,
-    issues: Array.isArray(r.issues) ? r.issues.filter(usable) : [],
+    // Issues were folded into todos (a todo links comments now); the few there were are let go,
+    // and the next write leaves them out of the file.
     todos: Array.isArray(r.todos) ? r.todos.filter(usable) : [],
     checkpoints: Array.isArray(r.checkpoints) ? r.checkpoints.filter(usableCheckpoint) : [],
     prefs: {
@@ -207,7 +208,7 @@ export class StateStore {
  * A slot is checked out again for the next branch, and what was said about the previous one —
  * `base` comments above all, which no commit ever deletes — would otherwise come back orphaned
  * over code they were never about; a checkpoint of the old branch is no baseline for the new one.
- * Issues let go of the comments that went with it.
+ * Todos let go of the comments that went with it.
  */
 export function forgetWorktreeTargets(state: ReviewState, worktreePath: string): void {
   const prefix = `worktree:${worktreePath}:`;
@@ -217,6 +218,18 @@ export function forgetWorktreeTargets(state: ReviewState, worktreePath: string):
     for (const c of state.targets[key]!.comments) gone.add(c.id);
     delete state.targets[key];
   }
-  if (gone.size) for (const issue of state.issues) issue.commentIds = issue.commentIds.filter((id) => !gone.has(id));
+  unlinkComments(state, gone);
   state.checkpoints = state.checkpoints.filter((c) => c.worktree !== worktreePath);
+}
+
+/** Takes deleted comments off the todos that linked them; a todo left with none loses the field. */
+export function unlinkComments(state: ReviewState, ids: Iterable<string>): void {
+  const gone = new Set(ids);
+  if (gone.size === 0) return;
+  for (const todo of state.todos) {
+    if (!todo.commentIds?.some((id) => gone.has(id))) continue;
+    const kept = todo.commentIds.filter((id) => !gone.has(id));
+    if (kept.length) todo.commentIds = kept;
+    else delete todo.commentIds;
+  }
 }

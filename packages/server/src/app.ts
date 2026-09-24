@@ -10,7 +10,6 @@ import type {
   Comment,
   CommitsResponse,
   CreateCommentRequest,
-  CreateIssueRequest,
   CreateTodoRequest,
   CreateWorktreeRequest,
   ExportRequest,
@@ -20,7 +19,6 @@ import type {
   FileEntry,
   FilesResponse,
   FullFileResponse,
-  Issue,
   MoveRequest,
   NvimInstancesResponse,
   NvimOpenRequest,
@@ -39,7 +37,6 @@ import type {
   Todo,
   TodosResponse,
   UpdateCommentRequest,
-  UpdateIssueRequest,
   UpdateNotice,
   UpdateTodoRequest,
   WorktreeInfo,
@@ -69,8 +66,8 @@ import { buildAnchor, reanchorComment } from './anchor.js';
 import { buildStagePatch } from './patch.js';
 import { checkpointKey, checkpointStore, checkpointsOf, findCheckpoint, forgetCheckpoint, takeCheckpoint } from './checkpoints.js';
 import { checkoutWorktree, listBranches, listWorktreesDetailed, lookupRemoteBranches, nextSlot, releaseWorktree, removeWorktree } from './worktrees.js';
-import { ensureTarget, forgetWorktreeTargets, type StateStore } from './state.js';
-import { formatCommentsExport, formatIssueExport } from './export.js';
+import { ensureTarget, forgetWorktreeTargets, type StateStore, unlinkComments } from './state.js';
+import { formatCommentsExport, formatTodoExport } from './export.js';
 import { addReply } from './feedback.js';
 import { NvimService } from './nvim.js';
 import { TmuxService } from './tmux.js';
@@ -193,6 +190,15 @@ export function createApp(opts: AppOptions): Hono {
       if (index >= 0) return { comment: t.comments[index]!, targetKey, index };
     }
     return undefined;
+  };
+
+  /** The ids of a request that name existing comments, each once; any other is refused rather than kept dangling. */
+  const linkable = (state: ReviewState, raw: unknown): string[] => {
+    if (!Array.isArray(raw) || raw.some((x) => typeof x !== 'string')) throw badRequest('commentIds must be a list of ids');
+    const ids = [...new Set(raw as string[])];
+    const missing = ids.find((x) => !findComment(state, x));
+    if (missing) throw notFound(`no comment with id ${missing}`, 'unknown_comment');
+    return ids;
   };
 
   app.onError((err, c) => {
@@ -516,7 +522,7 @@ export function createApp(opts: AppOptions): Hono {
       if (!t) return false;
       const before = t.comments.length;
       t.comments = t.comments.filter((x) => x.id !== id);
-      for (const issue of s.issues) issue.commentIds = issue.commentIds.filter((x) => x !== id);
+      unlinkComments(s, [id]);
       return t.comments.length !== before;
     });
     if (!removed) throw notFound('comment not found');
@@ -635,9 +641,7 @@ export function createApp(opts: AppOptions): Hono {
           cm.anchor.hunkHash === next.anchor.hunkHash;
         return [unchanged ? cm : { ...next, updatedAt: now }];
       });
-      for (const id of dropped) {
-        for (const issue of s.issues) issue.commentIds = issue.commentIds.filter((x) => x !== id);
-      }
+      unlinkComments(s, dropped);
       t.head = head;
       return t.comments;
     });
@@ -666,101 +670,6 @@ export function createApp(opts: AppOptions): Hono {
         text: formatCommentsExport({ repoRoot: repo.root, comments: selected, replyCommand: opts.replyCommand }),
         count: selected.length,
         commentIds: selected.map((x) => x.id),
-      };
-    });
-    checkpointHandoff(handed);
-    return c.json(res);
-  });
-
-  // ---- issues ------------------------------------------------------------
-
-  api.get('/issues', async (c) => {
-    const s = await store.load();
-    return c.json({ issues: s.issues });
-  });
-
-  api.post('/issues', async (c) => {
-    const body = (await c.req.json()) as CreateIssueRequest;
-    if (!body.title?.trim()) throw badRequest('title is required');
-    const now = new Date().toISOString();
-    const issue: Issue = {
-      id: randomUUID(),
-      title: body.title.trim(),
-      body: typeof body.body === 'string' ? body.body : '',
-      status: body.status === 'closed' ? 'closed' : 'open',
-      commentIds: Array.isArray(body.commentIds) ? body.commentIds.filter((x): x is string => typeof x === 'string') : [],
-      createdAt: now,
-      updatedAt: now,
-    };
-    // The list is in the reviewer's own order: a new issue goes on top, or under the one it was
-    // typed after (Enter at the end of a row), like a task list.
-    await store.update((s) => {
-      s.issues = insertAfter(s.issues, issue, typeof body.after === 'string' ? body.after : undefined);
-    });
-    return c.json(issue, 201);
-  });
-
-  api.post('/issues/:id/move', async (c) => {
-    const id = c.req.param('id');
-    const body = (await c.req.json()) as MoveRequest;
-    if (body.before !== null && typeof body.before !== 'string') throw badRequest('before must be an id or null');
-    const issues = await store.update((s) => {
-      const next = moveBefore(s.issues, id, body.before);
-      if (!next) throw notFound('issue not found');
-      s.issues = next;
-      return s.issues;
-    });
-    return c.json({ issues });
-  });
-
-  api.patch('/issues/:id', async (c) => {
-    const id = c.req.param('id');
-    const body = (await c.req.json()) as UpdateIssueRequest;
-    const updated = await store.update((s) => {
-      const issue = s.issues.find((i) => i.id === id);
-      if (!issue) throw notFound('issue not found');
-      if (typeof body.title === 'string' && body.title.trim()) issue.title = body.title.trim();
-      if (typeof body.body === 'string') issue.body = body.body;
-      if (body.status === 'open' || body.status === 'closed') issue.status = body.status;
-      if (Array.isArray(body.commentIds)) issue.commentIds = [...new Set(body.commentIds.filter((x): x is string => typeof x === 'string'))];
-      issue.updatedAt = new Date().toISOString();
-      return issue;
-    });
-    return c.json(updated);
-  });
-
-  api.delete('/issues/:id', async (c) => {
-    const id = c.req.param('id');
-    const removed = await store.update((s) => {
-      const before = s.issues.length;
-      s.issues = s.issues.filter((i) => i.id !== id);
-      return s.issues.length !== before;
-    });
-    if (!removed) throw notFound('issue not found');
-    return c.json({ ok: true });
-  });
-
-  api.post('/issues/:id/export', async (c) => {
-    const id = c.req.param('id');
-    let handed: Comment[] = [];
-    const res = await store.update((s): ExportResponse => {
-      const issue = s.issues.find((i) => i.id === id);
-      if (!issue) throw notFound('issue not found');
-      const now = new Date().toISOString();
-      const comments: Comment[] = [];
-      for (const cid of issue.commentIds) {
-        const found = findComment(s, cid);
-        if (!found) continue;
-        const next: Comment = { ...found.comment, exportedAt: now, updatedAt: now };
-        if (next.status === 'active') next.status = 'exported';
-        s.targets[found.targetKey]!.comments[found.index] = next;
-        comments.push(next);
-      }
-      handed = comments;
-      return {
-        text: formatIssueExport({ repoRoot: repo.root, issue, comments, replyCommand: opts.replyCommand }),
-        count: comments.length,
-        commentIds: comments.map((x) => x.id),
       };
     });
     checkpointHandoff(handed);
@@ -802,6 +711,10 @@ export function createApp(opts: AppOptions): Hono {
       updatedAt: now,
     };
     await store.update((s) => {
+      if (body.commentIds !== undefined) {
+        const ids = linkable(s, body.commentIds);
+        if (ids.length) todo.commentIds = ids;
+      }
       s.todos = insertAfter(s.todos, todo, typeof body.after === 'string' ? body.after : undefined);
     });
     return c.json(todo, 201);
@@ -830,10 +743,42 @@ export function createApp(opts: AppOptions): Hono {
       if (typeof body.title === 'string' && body.title.trim()) todo.title = body.title.trim();
       if (typeof body.body === 'string') todo.body = body.body;
       if (body.status === 'open' || body.status === 'done') todo.status = body.status;
+      if (body.commentIds !== undefined) {
+        const ids = linkable(s, body.commentIds);
+        if (ids.length) todo.commentIds = ids;
+        else delete todo.commentIds;
+      }
       todo.updatedAt = new Date().toISOString();
       return todo;
     });
     return c.json(updated);
+  });
+
+  // A todo with comments is what an issue was: a task with the review notes it is about, handed to
+  // the agent together. So its copy is a hand-off, as copying the comments would be.
+  api.post('/todos/:id/export', async (c) => {
+    const id = c.req.param('id');
+    const handed: Comment[] = [];
+    const res = await store.update((s): ExportResponse => {
+      const todo = s.todos.find((t) => t.id === id);
+      if (!todo) throw notFound('todo not found');
+      const now = new Date().toISOString();
+      for (const cid of todo.commentIds ?? []) {
+        const found = findComment(s, cid);
+        if (!found) continue;
+        const next: Comment = { ...found.comment, exportedAt: now, updatedAt: now };
+        if (next.status === 'active') next.status = 'exported';
+        s.targets[found.targetKey]!.comments[found.index] = next;
+        handed.push(next);
+      }
+      return {
+        text: formatTodoExport({ todo, comments: handed, replyCommand: opts.replyCommand }),
+        count: handed.length,
+        commentIds: handed.map((x) => x.id),
+      };
+    });
+    checkpointHandoff(handed);
+    return c.json(res);
   });
 
   api.delete('/todos/:id', async (c) => {

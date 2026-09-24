@@ -1,4 +1,4 @@
-import type { Comment, Issue } from '@warden/shared';
+import type { Comment, Todo } from '@warden/shared';
 
 const LANG_BY_EXT: Record<string, string> = {
   ts: 'ts',
@@ -97,19 +97,21 @@ export function formatCommentsExport({ repoRoot, comments, replyCommand }: Expor
   return [head.join('\n'), ...sections, ...tail].join('\n\n') + '\n';
 }
 
-export interface IssueExportOptions {
-  repoRoot: string;
-  issue: Issue;
+export interface TodoExportOptions {
+  todo: Todo;
+  /** The linked comments that still exist, in the todo's order. */
   comments: Comment[];
   replyCommand?: string;
 }
 
-export function formatIssueExport({ repoRoot, issue, comments, replyCommand }: IssueExportOptions): string {
-  const targets = [...new Set(comments.map((c) => c.targetKey))];
-  const head = [`# Issue: ${issue.title}`, `Status: ${issue.status}`, `Target: ${targets.join(', ') || '-'}`, `Repo: ${repoRoot}`, `Count: ${comments.length}`];
-  const parts = [head.join('\n')];
-  if (issue.body.trim()) parts.push(issue.body.trim());
-  parts.push(...comments.map(formatCommentSection));
+/**
+ * A todo as it goes to the agent: the title, the body when there is one, and the comments linked to
+ * it. Nothing else — no branch, repo or count: it is pasted at an agent already working in the
+ * todo's branch, and one todo is one task.
+ */
+export function formatTodoExport({ todo, comments, replyCommand }: TodoExportOptions): string {
+  const body = todo.body.replace(/\r\n/g, '\n').trim();
+  const parts = [todo.title, ...(body ? [body] : []), ...comments.map(formatCommentSection)];
   if (replyCommand && comments.length > 0) parts.push(replyFooter(replyCommand));
-  return parts.join('\n\n') + '\n';
+  return parts.join('\n\n');
 }

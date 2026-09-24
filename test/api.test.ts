@@ -20,6 +20,8 @@ import type {
   RepoInfo,
   ReviewState,
   StageResponse,
+  Todo,
+  TodosResponse,
   UpdateNotice,
   WorktreesResponse,
 } from '@warden/shared';
@@ -272,7 +274,7 @@ describe('repo & targets', () => {
   });
 });
 
-describe('viewed, comments, export, issues', () => {
+describe('viewed, comments, export, todos', () => {
   let comment: Comment;
 
   // `base:main` on main is HEAD against the working tree: a target that tracks the mark and whose
@@ -373,40 +375,30 @@ describe('viewed, comments, export, issues', () => {
     expect(edited.body).toBe('why 4?');
   });
 
-  it('issues link comments and survive a store reload', async () => {
-    const created = await json<{ id: string; status: string }>(await send('POST', '/api/issues', { title: 'Totals', body: 'desc', commentIds: [comment.id] }));
-    expect(created.status).toBe('open');
-    const closed = await json<{ status: string }>(await send('PATCH', `/api/issues/${created.id}`, { status: 'closed' }));
-    expect(closed.status).toBe('closed');
-    const exp = await json<ExportResponse>(await send('POST', `/api/issues/${created.id}/export`));
-    expect(exp.text.startsWith('# Issue: Totals\nStatus: closed\n')).toBe(true);
-    expect(exp.count).toBe(1);
+  it('todos link comments, hand them over when copied, and survive a store reload', async () => {
+    const created = await json<Todo>(await send('POST', '/api/todos', { title: 'Totals', body: 'desc', commentIds: [comment.id, comment.id] }));
+    expect(created.commentIds).toEqual([comment.id]);
+    expect((await send('POST', '/api/todos', { title: 'x', commentIds: ['missing'] })).status).toBe(404);
+    expect((await send('PATCH', `/api/todos/${created.id}`, { commentIds: 'nope' })).status).toBe(400);
+
+    const exp = await json<ExportResponse>(await send('POST', `/api/todos/${created.id}/export`));
+    expect(exp.text.startsWith('Totals\n\ndesc\n\n## src/a.ts:3 (new)')).toBe(true);
+    expect(exp.commentIds).toEqual([comment.id]);
     // fresh store instance == server restart
     const repo = await resolveRepo(fx.root);
     const fresh = new StateStore(stateFile, repo.commonRoot);
     const state = await fresh.load();
-    expect(state.issues[0]).toMatchObject({ title: 'Totals', status: 'closed', commentIds: [comment.id] });
-    expect(state.targets.local!.comments).toHaveLength(1);
-    // deleting a comment unlinks it from issues
-    await send('DELETE', `/api/targets/${k('working')}/comments/${comment.id}`);
-    const after = await json<{ issues: { commentIds: string[] }[] }>(await get('/api/issues'));
-    expect(after.issues[0]!.commentIds).toEqual([]);
-    expect((await send('DELETE', `/api/issues/${created.id}`)).status).toBe(200);
-    expect((await send('DELETE', `/api/issues/${created.id}`)).status).toBe(404);
-  });
+    expect(state.todos.find((t) => t.id === created.id)).toMatchObject({ title: 'Totals', commentIds: [comment.id] });
+    expect(state.targets.local!.comments[0]!.exportedAt).toBeTruthy();
 
-  it('issues keep their own order: new on top, moved by drag', async () => {
-    const ids = async () => (await json<{ issues: { id: string }[] }>(await get('/api/issues'))).issues.map((i) => i.id);
-    const one = await json<{ id: string }>(await send('POST', '/api/issues', { title: 'one' }));
-    const two = await json<{ id: string }>(await send('POST', '/api/issues', { title: 'two' }));
-    const under = await json<{ id: string }>(await send('POST', '/api/issues', { title: 'under two', after: two.id }));
-    expect(await ids()).toEqual([two.id, under.id, one.id]);
-    const moved = await json<{ issues: { id: string }[] }>(await send('POST', `/api/issues/${one.id}/move`, { before: under.id }));
-    expect(moved.issues.map((i) => i.id)).toEqual([two.id, one.id, under.id]);
-    expect((await send('POST', `/api/issues/${one.id}/move`, { before: 'nope' })).status).toBe(404);
-    const closed = await json<{ status: string }>(await send('POST', '/api/issues', { title: 'closed on arrival', status: 'closed' }));
-    expect(closed.status).toBe('closed');
-    for (const id of await ids()) await send('DELETE', `/api/issues/${id}`);
+    // Unlinking the last comment drops the field; deleting a comment unlinks it everywhere.
+    const unlinked = await json<Todo>(await send('PATCH', `/api/todos/${created.id}`, { commentIds: [] }));
+    expect(unlinked).not.toHaveProperty('commentIds');
+    await send('PATCH', `/api/todos/${created.id}`, { commentIds: [comment.id] });
+    await send('DELETE', `/api/targets/${k('working')}/comments/${comment.id}`);
+    const after = await json<TodosResponse>(await get('/api/todos'));
+    expect(after.todos.find((t) => t.id === created.id)).not.toHaveProperty('commentIds');
+    expect((await send('DELETE', `/api/todos/${created.id}`)).status).toBe(200);
   });
 
   it('prefs are persisted', async () => {

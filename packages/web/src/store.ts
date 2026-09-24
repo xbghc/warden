@@ -5,19 +5,16 @@ import type {
   Comment,
   CommentSide,
   CreateCommentRequest,
-  CreateIssueRequest,
   CreateTodoRequest,
   FileDiff,
   FileEntry,
   HunkSelection,
-  Issue,
   NvimInstancesResponse,
   Prefs,
   RepoInfo,
   TargetKey,
   Todo,
   UpdateCommentRequest,
-  UpdateIssueRequest,
   UpdateNotice,
   UpdateTodoRequest,
   ViewMode,
@@ -36,7 +33,6 @@ import {
 } from '@warden/shared';
 import { api, ApiError } from './api';
 import { copyText } from './lib/clipboard';
-import { todoText } from './lib/todos';
 
 /** Branch the todo list is scoped to: the worktree currently in view, else the repository's. */
 export function branchOf(repo: RepoInfo | null, root: string): string {
@@ -45,7 +41,7 @@ export function branchOf(repo: RepoInfo | null, root: string): string {
 }
 
 export type DiffState = { status: 'loading' } | { status: 'ok'; diff: FileDiff } | { status: 'error'; message: string };
-/** What the middle of the window is showing. Issues moved to the rail, beside the other two things the reviewer writes. */
+/** What the middle of the window is showing. */
 export type Panel = 'diff' | 'commits' | 'worktrees';
 
 /** The one thing a toast can offer besides its text: the way back (撤消). */
@@ -70,7 +66,7 @@ export interface EditorTarget {
 
 export type RailFilter = 'file' | 'all' | 'unexported' | 'replied';
 /** The three notebooks of the right-hand rail — everything the reviewer writes. */
-export type RailTab = 'comments' | 'todos' | 'issues';
+export type RailTab = 'comments' | 'todos';
 
 /**
  * Rows picked for staging in the open diff: a drag over one hunk, kept as the positions it
@@ -132,9 +128,8 @@ export interface AppStore {
   activeFile: string | null;
   diffs: Record<string, DiffState>;
   comments: Comment[];
-  issues: Issue[];
   todos: Todo[];
-  /** All comments across targets (loaded with the issues panel). */
+  /** All comments across targets (loaded with the todo tab, for the comments todos link). */
   allComments: Comment[];
   nvim: NvimInstancesResponse | null;
   nvimScanning: boolean;
@@ -199,15 +194,11 @@ export interface AppStore {
   replyToComment(id: string, body: string): Promise<boolean>;
   exportComments(ids: string[]): Promise<void>;
   copyAllComments(): Promise<void>;
-  loadIssues(): Promise<void>;
-  createIssue(body: CreateIssueRequest): Promise<Issue | undefined>;
-  updateIssue(id: string, body: UpdateIssueRequest): Promise<void>;
-  /** No confirmation: the toast offers 撤消 instead, as a task list would. */
-  deleteIssue(id: string): Promise<void>;
-  deleteIssues(ids: string[]): Promise<void>;
-  /** Put the issue right before `before` in the list, or last. */
-  moveIssue(id: string, before: string | null): Promise<void>;
-  exportIssue(id: string): Promise<void>;
+  /** Every comment in the state file, whatever its pool: what a todo's linked comments are looked up in. */
+  loadAllComments(): Promise<void>;
+  /** Link a comment to a todo, or to a new one titled after the comment when `todoId` is null. */
+  linkComment(commentId: string, todoId: string | null): Promise<void>;
+  unlinkComment(todoId: string, commentId: string): Promise<void>;
   scanNvim(force?: boolean): Promise<void>;
   selectNvim(socket: string): Promise<void>;
   openInNvim(filePath: string, line: number): Promise<void>;
@@ -313,7 +304,6 @@ export const useStore = create<AppStore>((set, get) => {
     activeFile: null,
     diffs: {},
     comments: [],
-    issues: [],
     todos: [],
     allComments: [],
     nvim: null,
@@ -348,7 +338,7 @@ export const useStore = create<AppStore>((set, get) => {
       );
       try {
         const [repo, state] = await Promise.all([api.repo(), api.state()]);
-        set({ repo, prefs: state.prefs, issues: state.issues, todos: state.todos, root: repo.root });
+        set({ repo, prefs: state.prefs, todos: state.todos, allComments: Object.values(state.targets).flatMap((t) => t.comments), root: repo.root });
         await get().setTarget(repo.defaultTarget || 'working');
       } catch (e) {
         set({ initError: errMsg(e) });
@@ -630,7 +620,8 @@ export const useStore = create<AppStore>((set, get) => {
           comments: s.comments.filter((x) => x.id !== id),
           selectedCommentIds: s.selectedCommentIds.filter((x) => x !== id),
           focusedCommentId: s.focusedCommentId === id ? null : s.focusedCommentId,
-          issues: s.issues.map((i) => (i.commentIds.includes(id) ? { ...i, commentIds: i.commentIds.filter((x) => x !== id) } : i)),
+          todos: s.todos.map((t) => (t.commentIds?.includes(id) ? { ...t, commentIds: t.commentIds.filter((x) => x !== id) } : t)),
+          allComments: s.allComments.filter((x) => x.id !== id),
         }));
       } catch (e) {
         fail(e);
@@ -654,6 +645,7 @@ export const useStore = create<AppStore>((set, get) => {
       const key = get().targetKey;
       set((s) => ({ stateSeq: s.stateSeq + 1 }));
       void get().loadCheckpoints();
+      if (get().railTab === 'todos') void get().loadAllComments();
       try {
         const res = await api.comments(key);
         if (get().targetKey === key) set({ comments: res.comments });
@@ -688,106 +680,40 @@ export const useStore = create<AppStore>((set, get) => {
       await get().exportComments(ids);
     },
 
-    async loadIssues() {
+    async loadAllComments() {
       try {
         const state = await api.state();
-        const allComments = Object.values(state.targets).flatMap((t) => t.comments);
-        set({ issues: state.issues, allComments });
+        set({ allComments: Object.values(state.targets).flatMap((t) => t.comments) });
       } catch (e) {
         fail(e);
       }
     },
 
-    async createIssue(body) {
-      try {
-        const issue = await api.createIssue(body);
-        set((s) => ({ issues: insertAfter(s.issues, issue, body.after), selectedCommentIds: [] }));
-        return issue;
-      } catch (e) {
-        fail(e);
-        return undefined;
+    async linkComment(commentId, todoId) {
+      const todo = todoId ? get().todos.find((t) => t.id === todoId) : undefined;
+      if (todo) {
+        if (todo.commentIds?.includes(commentId)) return;
+        await get().updateTodo(todo.id, { commentIds: [...(todo.commentIds ?? []), commentId] });
+        get().showToast(`已加入待办「${todo.title}」`);
+        return;
       }
+      const comment = get().comments.find((c) => c.id === commentId) ?? get().allComments.find((c) => c.id === commentId);
+      if (!comment) return;
+      // The comment's first line is what the task is about; the reviewer retitles it in place.
+      const title =
+        comment.body
+          .split('\n')
+          .find((l) => l.trim())
+          ?.trim()
+          .slice(0, 80) || comment.filePath;
+      const created = await get().createTodo({ title, body: '', branch: branchOf(get().repo, get().root), commentIds: [commentId] });
+      if (created) get().showToast(`已新建待办「${created.title}」`);
     },
 
-    async updateIssue(id, body) {
-      try {
-        const issue = await api.updateIssue(id, body);
-        set((s) => ({ issues: s.issues.map((i) => (i.id === id ? issue : i)) }));
-      } catch (e) {
-        fail(e);
-      }
-    },
-
-    async deleteIssue(id) {
-      const issues = get().issues;
-      const idx = issues.findIndex((i) => i.id === id);
-      const issue = issues[idx];
-      if (!issue) return;
-      const prev = issues[idx - 1]?.id;
-      try {
-        await api.deleteIssue(id);
-        set((s) => ({ issues: s.issues.filter((i) => i.id !== id) }));
-        get().showToast(`已删除「${issue.title}」`, 'info', {
-          label: '撤消',
-          run: () => void get().createIssue({ title: issue.title, body: issue.body, commentIds: issue.commentIds, status: issue.status, after: prev }),
-        });
-      } catch (e) {
-        fail(e);
-      }
-    },
-
-    async deleteIssues(ids) {
-      const gone: Issue[] = [];
-      for (const id of ids) {
-        const issue = get().issues.find((i) => i.id === id);
-        if (!issue) continue;
-        try {
-          await api.deleteIssue(id);
-          gone.push(issue);
-          set((s) => ({ issues: s.issues.filter((i) => i.id !== id) }));
-        } catch (e) {
-          fail(e);
-          break;
-        }
-      }
-      if (gone.length === 0) return;
-      get().showToast(`已删除 ${gone.length} 个 Issue`, 'info', {
-        label: '撤消',
-        run: async () => {
-          // Each goes back on top, last first, so they end up in the order they were in.
-          for (const i of [...gone].reverse()) await get().createIssue({ title: i.title, body: i.body, commentIds: i.commentIds, status: i.status });
-        },
-      });
-    },
-
-    async moveIssue(id, before) {
-      const prev = get().issues;
-      const next = moveBefore(prev, id, before);
-      if (!next) return;
-      set({ issues: next });
-      try {
-        const res = await api.moveIssue(id, before);
-        set({ issues: res.issues });
-      } catch (e) {
-        fail(e);
-        set({ issues: prev });
-      }
-    },
-
-    async exportIssue(id) {
-      try {
-        const res = await api.exportIssue(id);
-        await copyText(res.text);
-        const now = new Date().toISOString();
-        set((s) => ({
-          comments: s.comments.map((c) =>
-            res.commentIds.includes(c.id) ? { ...c, status: c.status === 'active' ? 'exported' : c.status, exportedAt: now } : c,
-          ),
-        }));
-        get().showToast(`已复制 Issue（含 ${res.count} 条评论）到剪贴板`);
-      } catch (e) {
-        fail(e);
-      }
+    async unlinkComment(todoId, commentId) {
+      const todo = get().todos.find((t) => t.id === todoId);
+      if (!todo) return;
+      await get().updateTodo(todoId, { commentIds: (todo.commentIds ?? []).filter((x) => x !== commentId) });
     },
 
     async scanNvim(force = false) {
@@ -888,8 +814,10 @@ export const useStore = create<AppStore>((set, get) => {
     setRailTab(tab) {
       set({ railTab: tab });
       get().setRailOpen(true);
-      if (tab === 'todos') void get().loadTodos();
-      if (tab === 'issues') void get().loadIssues();
+      if (tab === 'todos') {
+        void get().loadTodos();
+        void get().loadAllComments();
+      }
     },
     setRailOpen(open) {
       if (get().prefs.railOpen === open) return;
@@ -943,7 +871,8 @@ export const useStore = create<AppStore>((set, get) => {
         set((s) => ({ todos: s.todos.filter((t) => t.id !== id) }));
         get().showToast(`已删除「${todo.title}」`, 'info', {
           label: '撤消',
-          run: () => void get().createTodo({ title: todo.title, body: todo.body, branch: todo.branch, status: todo.status, after: prev }),
+          run: () =>
+            void get().createTodo({ title: todo.title, body: todo.body, branch: todo.branch, status: todo.status, commentIds: todo.commentIds, after: prev }),
         });
       } catch (e) {
         fail(e);
@@ -968,7 +897,8 @@ export const useStore = create<AppStore>((set, get) => {
       get().showToast(`已删除 ${gone.length} 条待办`, 'info', {
         label: '撤消',
         run: async () => {
-          for (const t of [...gone].reverse()) await get().createTodo({ title: t.title, body: t.body, branch: t.branch, status: t.status });
+          for (const t of [...gone].reverse())
+            await get().createTodo({ title: t.title, body: t.body, branch: t.branch, status: t.status, commentIds: t.commentIds });
         },
       });
     },
@@ -991,8 +921,14 @@ export const useStore = create<AppStore>((set, get) => {
       const todo = get().todos.find((t) => t.id === id);
       if (!todo) return;
       try {
-        await copyText(todoText(todo));
-        get().showToast('已复制待办到剪贴板');
+        // Through the server even without comments: with them, the copy is a hand-off it records.
+        const res = await api.exportTodo(id);
+        await copyText(res.text);
+        const now = new Date().toISOString();
+        const handed = (c: Comment): Comment =>
+          res.commentIds.includes(c.id) ? { ...c, status: c.status === 'active' ? 'exported' : c.status, exportedAt: now } : c;
+        set((s) => ({ comments: s.comments.map(handed), allComments: s.allComments.map(handed) }));
+        get().showToast(res.count ? `已复制待办（含 ${res.count} 条评论）到剪贴板` : '已复制待办到剪贴板');
       } catch (e) {
         fail(e);
       }

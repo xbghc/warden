@@ -4,7 +4,7 @@ import { copyFile, mkdir, rm, stat, utimes } from 'node:fs/promises';
 import type { Checkpoint, ReviewState, TargetKey } from '@warden/shared';
 import { formatTargetKey } from '@warden/shared';
 import { revParse, runGit, runGitSnapshot, type SnapshotEnv } from './git.js';
-import type { StateStore } from './state.js';
+import { type StateStore, unlinkComments } from './state.js';
 
 /**
  * Where checkpoints keep their objects: a directory of warden's beside the state file, never the
@@ -100,7 +100,7 @@ export function checkpointKey(c: Checkpoint): TargetKey {
 
 /**
  * Drops a checkpoint and what was kept under its target: the comments and 已读 marks were about a
- * diff against it, and the next checkpoint may be given its number. Issues let go of those comments.
+ * diff against it, and the next checkpoint may be given its number. Todos let go of those comments.
  * Its objects stay in the store; they are small and another checkpoint may share them.
  */
 export function forgetCheckpoint(state: ReviewState, c: Checkpoint): void {
@@ -108,7 +108,7 @@ export function forgetCheckpoint(state: ReviewState, c: Checkpoint): void {
   const key = checkpointKey(c);
   const gone = new Set((state.targets[key]?.comments ?? []).map((x) => x.id));
   delete state.targets[key];
-  if (gone.size) for (const issue of state.issues) issue.commentIds = issue.commentIds.filter((id) => !gone.has(id));
+  unlinkComments(state, gone);
 }
 
 /** Records a tree just written as the worktree's newest checkpoint, dropping the oldest past the limit. */

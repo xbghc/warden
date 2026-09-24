@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { Comment } from '@warden/shared';
-import { formatCommentsExport, formatIssueExport, langForPath } from './export.js';
+import type { Comment, Todo } from '@warden/shared';
+import { formatCommentsExport, formatTodoExport, langForPath } from './export.js';
 
 const anchor = { hunkHash: '', lineHashes: [], contextBefore: [], contextAfter: [], hunkLineOffset: 0 };
 
@@ -68,12 +68,35 @@ Count: 2
     expect(langForPath('Makefile')).toBe('');
     expect(langForPath('x.unknownext')).toBe('unknownext');
   });
-  it('formats issues with body and linked comments', () => {
-    const text = formatIssueExport({
-      repoRoot: '/r',
-      issue: { id: 'i', title: 'Fix totals', body: 'Body **md**', status: 'open', commentIds: ['1'], createdAt: '', updatedAt: '' },
-      comments: [c1],
-    });
-    expect(text.startsWith('# Issue: Fix totals\nStatus: open\nTarget: working\nRepo: /r\nCount: 1\n\nBody **md**\n\n## src/')).toBe(true);
+});
+
+const todo = (over: Partial<Todo>): Todo => ({
+  id: 't1',
+  branch: 'feature/x',
+  title: '补充 OrderList 的空状态',
+  body: '',
+  status: 'open',
+  createdAt: '2026-09-08T00:00:00.000Z',
+  updatedAt: '2026-09-08T00:00:00.000Z',
+  ...over,
+});
+
+describe('todo export', () => {
+  it('is the title alone when there is no body', () => {
+    expect(formatTodoExport({ todo: todo({}), comments: [] })).toBe('补充 OrderList 的空状态');
+    expect(formatTodoExport({ todo: todo({ body: '  \r\n' }), comments: [], replyCommand: 'warden' })).toBe('补充 OrderList 的空状态');
+  });
+
+  it('puts the body under the title and adds nothing: no branch, repo, number or status', () => {
+    const text = formatTodoExport({ todo: todo({ body: '描述正文（Markdown）…\r\n\r\n- 第二段\r\n', status: 'done' }), comments: [] });
+    expect(text).toBe('补充 OrderList 的空状态\n\n描述正文（Markdown）…\n\n- 第二段');
+    expect(text).not.toMatch(/feature\/x|Branch|Repo|done|^#|^\d+\./m);
+  });
+
+  it('follows with the linked comments and how to answer them', () => {
+    const text = formatTodoExport({ todo: todo({ body: 'Body **md**', commentIds: ['1'] }), comments: [c1], replyCommand: 'warden' });
+    expect(text.startsWith('补充 OrderList 的空状态\n\nBody **md**\n\n## src/features/order/OrderList.tsx:120-124 (new) [id: 1]\n')).toBe(true);
+    expect(text.endsWith('so the reviewer sees your answer beside it.')).toBe(true);
+    expect(text).not.toMatch(/^# |Repo:|Count:/m);
   });
 });
