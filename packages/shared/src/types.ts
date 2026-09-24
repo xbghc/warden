@@ -240,6 +240,21 @@ export interface WorktreeDetail extends WorktreeInfo {
   /** The upstream the branch is set to track when that ref no longer exists, as in `[origin/topic: gone]`. */
   upstreamGone?: string;
   comparisonError?: string;
+  /** Where the comments on its code stand in the loop with its agent, across all their pools. */
+  review?: WorktreeReview;
+}
+
+export interface WorktreeReview {
+  /** Not handed to the agent yet: new, or followed up since. */
+  toAgent: number;
+  /** Answered by the agent, waiting on the reviewer. */
+  toReviewer: number;
+  /**
+   * The target the latest of each sits in. The counts span every pool of the worktree — local
+   * views, base, commits, checkpoints — and the rail lists one pool, so a count leads there.
+   */
+  toAgentTarget?: TargetKey;
+  toReviewerTarget?: TargetKey;
 }
 
 export interface TmuxSession {

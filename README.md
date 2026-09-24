@@ -160,6 +160,11 @@ directory behind, `node_modules` and all, and the next branch is checked out int
   reports. *查看* switches the review to it (the kind of target carries over), *复制路径* is for the
   agent's prompt. A free slot is a row of its own, marked *空闲*, and its *检出到这里* points the form
   at it.
+- A row also says where its agent stands with the review, in violet: *N 条未交付* for comments on
+  that worktree's code the agent has not had yet, *N 条待确认* for those it has answered and you
+  have not resolved — every pool counted, local views, `base`, commits and checkpoints alike. Each
+  opens the pool its latest such comment sits in, with the rail filtered to that kind. The counts
+  follow the state file, so an agent's `warden feedback` or `warden reply` moves them while you watch.
 - *释放* is what a slot's row offers, and it always asks first, in the row: `git switch --detach` in
   the slot leaves the last commit checked out with no branch on it and touches no file, and the slot
   is free for the next checkout. A slot with uncommitted changes is not released until you confirm

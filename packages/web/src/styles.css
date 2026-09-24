@@ -248,6 +248,15 @@ kbd {
   background: var(--accent-soft);
   color: var(--accent);
 }
+/* A count that leads somewhere: the badge's look, a button's behaviour. */
+button.wt-review {
+  border: 0;
+  cursor: pointer;
+}
+button.wt-review:hover {
+  background: var(--accent);
+  color: var(--surface);
+}
 .badge-exported {
   background: var(--surface-3);
   color: var(--muted);

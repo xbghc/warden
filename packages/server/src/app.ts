@@ -43,9 +43,13 @@ import type {
   UpdateNotice,
   UpdateTodoRequest,
   WorktreeInfo,
+  WorktreeReview,
   WorktreesResponse,
 } from '@warden/shared';
 import {
+  awaitsAgent,
+  awaitsReviewer,
+  commentWorktree,
   commentScopeKey,
   insertAfter,
   isLocalTarget,
@@ -931,8 +935,32 @@ export function createApp(opts: AppOptions): Hono {
   });
 
   api.get('/worktrees', async (c) => {
-    const list = await listWorktreesDetailed(repo);
+    const [list, state] = await Promise.all([listWorktreesDetailed(repo), store.load()]);
     const [branches, newSlot] = await Promise.all([listBranches(repo, list), nextSlot(repo, list)]);
+    // Here the key without a worktree is unambiguous: it is this server's own root.
+    const review = new Map<string, WorktreeReview>();
+    const latest = new Map<string, { agent: string; reviewer: string }>();
+    for (const t of Object.values(state.targets)) {
+      for (const cm of t.comments) {
+        const at = commentWorktree(cm) ?? repo.root;
+        const r = review.get(at) ?? { toAgent: 0, toReviewer: 0 };
+        const seen = latest.get(at) ?? { agent: '', reviewer: '' };
+        if (awaitsAgent(cm)) {
+          r.toAgent++;
+          if (cm.updatedAt >= seen.agent) [seen.agent, r.toAgentTarget] = [cm.updatedAt, cm.targetKey];
+        }
+        if (awaitsReviewer(cm)) {
+          r.toReviewer++;
+          if (cm.updatedAt >= seen.reviewer) [seen.reviewer, r.toReviewerTarget] = [cm.updatedAt, cm.targetKey];
+        }
+        review.set(at, r);
+        latest.set(at, seen);
+      }
+    }
+    for (const wt of list) {
+      const r = review.get(wt.path);
+      if (r && (r.toAgent || r.toReviewer)) wt.review = r;
+    }
     const res: WorktreesResponse = { worktrees: list, branches, newSlot };
     return c.json(res);
   });

@@ -3,7 +3,7 @@ import path from 'node:path';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Hono } from 'hono';
-import type { Comment, ExportResponse, ReanchorResponse, ReviewState } from '@warden/shared';
+import type { Comment, ExportResponse, ReanchorResponse, ReviewState, WorktreesResponse } from '@warden/shared';
 import { addReply, createApp, formatCommentsExport, NvimService, resolveRepo, shortId, StateStore, takeFeedback } from '@warden/server';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
@@ -168,5 +168,30 @@ describe('a hand-off notes the working tree', () => {
     await json<ExportResponse>(await send('POST', '/api/comments/export', { commentIds: [c.id] }));
     await new Promise((r) => setTimeout(r, 300));
     expect(await handoffs()).toHaveLength(before + 1);
+  });
+});
+
+describe('GET /api/worktrees', () => {
+  it('counts, per worktree, what waits on the agent and what waits on the reviewer', async () => {
+    const res = await json<WorktreesResponse>(await app.request('/api/worktrees'));
+    const main = res.worktrees.find((w) => w.isMain)!;
+    const state = await store.load();
+    const mine = Object.values(state.targets)
+      .flatMap((t) => t.comments)
+      .filter((c) => !c.targetKey.startsWith('worktree:'));
+    const toAgent = mine.filter((c) => !c.exportedAt).length;
+    const toReviewer = mine.filter((c) => c.replies?.at(-1)?.author === 'agent').length;
+    expect(toAgent + toReviewer).toBeGreaterThan(0);
+    expect(main.review).toMatchObject({ toAgent, toReviewer });
+  });
+});
+
+describe('GET /api/worktrees leads each count to a pool', () => {
+  it('names the target the latest comment of each kind sits in', async () => {
+    const at = await json<Comment>(
+      await send('POST', `/api/targets/${k('commit:HEAD')}/comments`, { filePath: 'src/a.ts', side: 'new', startLine: 4, endLine: 4, body: 'on the commit' }),
+    );
+    const res = await json<WorktreesResponse>(await app.request('/api/worktrees'));
+    expect(res.worktrees.find((w) => w.isMain)!.review?.toAgentTarget).toBe(at.targetKey);
   });
 });

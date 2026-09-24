@@ -1,7 +1,7 @@
 import { realpath } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import type { Comment, CommentReply, ReplyAuthor, ReviewState } from '@warden/shared';
-import { awaitsAgent, tryParseTargetKey } from '@warden/shared';
+import { awaitsAgent, commentWorktree } from '@warden/shared';
 import { badRequest, notFound } from './errors.js';
 import type { StateStore } from './state.js';
 
@@ -23,7 +23,7 @@ async function real(p: string): Promise<string> {
  * this guess is wrong, as the key itself is ambiguous in the state both servers share.
  */
 function worktreeOf(c: Comment, mainRoot: string): string {
-  return tryParseTargetKey(c.targetKey)?.worktree ?? mainRoot;
+  return commentWorktree(c) ?? mainRoot;
 }
 
 /** Every comment on code in `worktreeRoot`, across its pools (local views, base, commits, checkpoints). */

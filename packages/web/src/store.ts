@@ -220,6 +220,10 @@ export interface AppStore {
   setEditor(editor: EditorTarget | null): void;
   focusComment(id: string | null, scroll?: boolean): Promise<void>;
   setRailFilter(filter: RailFilter): void;
+  /** The comments tab, open, showing `filter`: where a count of comments elsewhere leads. */
+  showComments(filter: RailFilter): void;
+  /** Bumped on every state event, for views that summarise the state file and have no other cue. */
+  stateSeq: number;
   /** Picking a tab also opens the rail; shutting it is the ✕, the top bar's switch or Esc. */
   setRailTab(tab: RailTab): void;
   setRailOpen(open: boolean): void;
@@ -328,6 +332,7 @@ export const useStore = create<AppStore>((set, get) => {
     editor: null,
     focusedCommentId: null,
     railFilter: 'file',
+    stateSeq: 0,
     railTab: 'comments',
     stageSel: null,
     staging: false,
@@ -647,6 +652,7 @@ export const useStore = create<AppStore>((set, get) => {
       // What only the state file says changed — an agent's `warden reply` above all, and the
       // checkpoint a hand-off takes. The pool is re-read, not re-anchored: nothing about the code moved.
       const key = get().targetKey;
+      set((s) => ({ stateSeq: s.stateSeq + 1 }));
       void get().loadCheckpoints();
       try {
         const res = await api.comments(key);
@@ -874,6 +880,10 @@ export const useStore = create<AppStore>((set, get) => {
 
     setRailFilter(filter) {
       set({ railFilter: filter });
+    },
+    showComments(filter) {
+      set({ railFilter: filter });
+      openRail('comments');
     },
     setRailTab(tab) {
       set({ railTab: tab });

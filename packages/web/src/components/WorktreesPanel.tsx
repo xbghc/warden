@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
-import type { CreateWorktreeResponse, WorktreeDetail, WorktreesResponse } from '@warden/shared';
+import type { CreateWorktreeResponse, TargetKey, WorktreeDetail, WorktreesResponse } from '@warden/shared';
 import { formatTargetKey, parseTargetKey } from '@warden/shared';
 import { api, ApiError } from '../api';
 import { copyText } from '../lib/clipboard';
@@ -172,6 +172,9 @@ export function WorktreesPanel() {
   const reloadRepo = useStore((s) => s.reloadRepo);
   const showToast = useStore((s) => s.showToast);
   const sideSlot = useStore((s) => s.sideSlot);
+  const showComments = useStore((s) => s.showComments);
+  // The counts below move when an agent replies or fetches, which only the state event reports.
+  const stateSeq = useStore((s) => s.stateSeq);
   const [data, setData] = useState<WorktreesResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [slot, setSlot] = useState<number | null>(null);
@@ -197,16 +200,20 @@ export function WorktreesPanel() {
   }, []);
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, stateSeq]);
 
   const target = useMemo(() => parseTargetKey(targetKey), [targetKey]);
   // Another worktree is a different review altogether; the kind of target carries over, as in the
   // top bar's selector. The server's own root is the target without a worktree. A checkpoint does
   // not: it was taken in one worktree, and its number names another one, or none, anywhere else.
   const open = (wt: WorktreeDetail) =>
-    void setTarget(
-      formatTargetKey({ ...(target.kind === 'checkpoint' ? { kind: 'working' } : target), worktree: wt.path === repo?.root ? undefined : wt.path }),
-    );
+    setTarget(formatTargetKey({ ...(target.kind === 'checkpoint' ? { kind: 'working' } : target), worktree: wt.path === repo?.root ? undefined : wt.path }));
+
+  /** Where a review count leads: the pool its latest comment sits in, with the rail filtered to the kind. */
+  const showIn = async (key: TargetKey | undefined, filter: 'replied' | 'unexported') => {
+    if (key && key !== targetKey) await setTarget(key);
+    showComments(filter);
+  };
 
   const checkedOut = async (res: CreateWorktreeResponse, branch: string) => {
     const name = dirName(res.worktree.path);
@@ -300,6 +307,25 @@ export function WorktreesPanel() {
                     <span className="badge">{wt.dirty} 处未提交改动</span>
                   ) : null}
                   {isCurrent && <span className="badge badge-open">当前</span>}
+                  {/* Where this worktree's agent stands with its review: the reason to go there next. */}
+                  {!!wt.review?.toReviewer && (
+                    <button
+                      className="badge badge-active wt-review"
+                      onClick={() => void showIn(wt.review!.toReviewerTarget, 'replied')}
+                      title="agent 回复了这些评论，等你确认或追问"
+                    >
+                      {wt.review.toReviewer} 条待确认
+                    </button>
+                  )}
+                  {!!wt.review?.toAgent && (
+                    <button
+                      className="badge badge-active wt-review"
+                      onClick={() => void showIn(wt.review!.toAgentTarget, 'unexported')}
+                      title="还没交给 agent 的评论：复制给它，或等它运行 warden feedback"
+                    >
+                      {wt.review.toAgent} 条未交付
+                    </button>
+                  )}
                 </div>
                 {wt.free ? <div className="muted small">目录和装好的依赖都还在，等下一个分支检出到这里。</div> : <WorktreeExtras wt={wt} />}
                 {confirming?.path === wt.path && (
@@ -364,7 +390,7 @@ export function WorktreesPanel() {
                 ) : (
                   <>
                     {!wt.prunable && !isCurrent && (
-                      <button className="link" onClick={() => open(wt)} title="把 review 切换到这个 worktree">
+                      <button className="link" onClick={() => void open(wt)} title="把 review 切换到这个 worktree">
                         <ActionIcon name="forward" label="查看 worktree" />
                       </button>
                     )}
