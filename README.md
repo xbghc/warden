@@ -370,6 +370,12 @@ working tree now — whatever was staged or committed in between does not show, 
 - *新建检查点*, under the progress figure in 工作区, takes one: tracked and untracked files as they are
   on disk, ignored ones left out. *对比检查点 #n* beside it opens the newest. A checkpoint of a working
   tree that has not changed since the newest one is not taken twice; that one is handed back.
+- Handing comments to the agent takes one by itself — *复制评论*, *复制此条*, an issue's *复制*, or
+  the agent's own `warden feedback` — in each worktree the comments are about, marked *交付反馈* in
+  the list. A round is the reviewer's, not the agent's: it ends when feedback goes out, however many
+  turns the agent then takes, so *对比检查点* afterwards shows what it did about that feedback and
+  nothing before. A copy in the page does not wait for the snapshot, which on a large tree can
+  outlast the moment a browser allows for writing the clipboard; the list catches up when it lands.
 - In a checkpoint's view the picker reads *检查点 #n*, and the row under the figure switches to another
   checkpoint, takes a new one — the round is over, so the view moves on to it, empty — or deletes
   the one in front after asking.

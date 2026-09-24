@@ -63,7 +63,7 @@ import { currentBranch, getRepoInfo, listWorktrees, type RepoContext } from './r
 import { annotateDebug, getFileDiff, getFullFile, listTargetDiffs, resolveTargetContext, toSummary, type TargetContext } from './targets.js';
 import { buildAnchor, reanchorComment } from './anchor.js';
 import { buildStagePatch } from './patch.js';
-import { addCheckpoint, checkpointKey, checkpointStore, checkpointsOf, findCheckpoint, forgetCheckpoint, snapshotWorktree } from './checkpoints.js';
+import { checkpointKey, checkpointStore, checkpointsOf, findCheckpoint, forgetCheckpoint, takeCheckpoint } from './checkpoints.js';
 import { checkoutWorktree, listBranches, listWorktreesDetailed, lookupRemoteBranches, nextSlot, releaseWorktree, removeWorktree } from './worktrees.js';
 import { ensureTarget, forgetWorktreeTargets, type StateStore } from './state.js';
 import { formatCommentsExport, formatIssueExport } from './export.js';
@@ -167,6 +167,20 @@ export function createApp(opts: AppOptions): Hono {
       oldPath: explicit?.oldPath ?? hint?.oldPath,
       untracked: explicit?.untracked ?? hint?.untracked,
     });
+  };
+
+  // Handing comments to the agent ends a round, so the working tree is noted then: what the agent
+  // does about them is `checkpoint:<n>`, the view the reviewer comes back to. It runs after the
+  // response, not before: the page writes the clipboard when the export returns, which a browser
+  // allows only shortly after the click, and a snapshot of a large tree can take longer than that.
+  // The page hears of the checkpoint through the state event.
+  const checkpointHandoff = (comments: Comment[]): void => {
+    const worktrees = new Set(comments.map((x) => tryParseTargetKey(x.targetKey)?.worktree));
+    for (const wt of worktrees) {
+      takeCheckpoint(store, wt ?? repo.root, wt, { handoff: true }).catch((e) => {
+        console.error(`warden: no checkpoint for the comments handed over in ${wt ?? repo.root}: ${e instanceof Error ? e.message : e}`);
+      });
+    }
   };
 
   const findComment = (state: ReviewState, id: string): { comment: Comment; targetKey: string; index: number } | undefined => {
@@ -354,16 +368,9 @@ export function createApp(opts: AppOptions): Hono {
 
   api.post('/targets/:key/checkpoints', async (c) => {
     const ctx = await worktreeCtx(c.req.param('key'));
-    const tree = await snapshotWorktree(ctx.cwd, checkpoints);
-    const head = (await revParse(ctx.cwd, 'HEAD')) ?? '';
-    const res = await store.update((s): CreateCheckpointResponse => {
-      // Taking one twice over the same working tree would only leave two names for one baseline.
-      const newest = checkpointsOf(s, ctx.target.worktree).at(-1);
-      const unchanged = newest?.tree === tree;
-      const checkpoint = unchanged ? newest : addCheckpoint(s, ctx.target.worktree, tree, head);
-      return { checkpoint, unchanged, targetKey: checkpointKey(checkpoint) };
-    });
-    return c.json(res, res.unchanged ? 200 : 201);
+    const { checkpoint, unchanged } = await takeCheckpoint(store, ctx.cwd, ctx.target.worktree);
+    const res: CreateCheckpointResponse = { checkpoint, unchanged, targetKey: checkpointKey(checkpoint) };
+    return c.json(res, unchanged ? 200 : 201);
   });
 
   api.delete('/targets/:key/checkpoints/:id', async (c) => {
@@ -638,6 +645,7 @@ export function createApp(opts: AppOptions): Hono {
     const body = (await c.req.json()) as ExportRequest;
     if (!Array.isArray(body.commentIds)) throw badRequest('commentIds required');
     const ids = body.commentIds.filter((x): x is string => typeof x === 'string');
+    let handed: Comment[] = [];
     const res = await store.update((s): ExportResponse => {
       const now = new Date().toISOString();
       const selected: Comment[] = [];
@@ -649,12 +657,14 @@ export function createApp(opts: AppOptions): Hono {
         s.targets[found.targetKey]!.comments[found.index] = next;
         selected.push(next);
       }
+      handed = selected;
       return {
         text: formatCommentsExport({ repoRoot: repo.root, comments: selected, replyCommand: opts.replyCommand }),
         count: selected.length,
         commentIds: selected.map((x) => x.id),
       };
     });
+    checkpointHandoff(handed);
     return c.json(res);
   });
 
@@ -728,6 +738,7 @@ export function createApp(opts: AppOptions): Hono {
 
   api.post('/issues/:id/export', async (c) => {
     const id = c.req.param('id');
+    let handed: Comment[] = [];
     const res = await store.update((s): ExportResponse => {
       const issue = s.issues.find((i) => i.id === id);
       if (!issue) throw notFound('issue not found');
@@ -741,12 +752,14 @@ export function createApp(opts: AppOptions): Hono {
         s.targets[found.targetKey]!.comments[found.index] = next;
         comments.push(next);
       }
+      handed = comments;
       return {
         text: formatIssueExport({ repoRoot: repo.root, issue, comments, replyCommand: opts.replyCommand }),
         count: comments.length,
         commentIds: comments.map((x) => x.id),
       };
     });
+    checkpointHandoff(handed);
     return c.json(res);
   });
 

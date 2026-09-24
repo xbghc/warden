@@ -22,6 +22,7 @@ export { parseUnifiedDiff } from './diffparse.js';
 export { buildAnchor, reanchorComment } from './anchor.js';
 export { formatCommentsExport, formatIssueExport, replyFooter, shortId } from './export.js';
 export { addReply, takeFeedback } from './feedback.js';
+export { takeCheckpoint } from './checkpoints.js';
 
 export const HOST = '127.0.0.1';
 export const DEFAULT_PORT_START = 4100;

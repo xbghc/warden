@@ -179,6 +179,8 @@ export interface Checkpoint {
   /** HEAD when it was taken; empty on an unborn branch. */
   head: string;
   createdAt: string;
+  /** Taken by warden as comments went to the agent, rather than by the reviewer's hand. */
+  handoff?: boolean;
 }
 
 export interface ReviewState {

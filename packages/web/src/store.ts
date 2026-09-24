@@ -644,9 +644,10 @@ export const useStore = create<AppStore>((set, get) => {
     },
 
     async onStateChanged() {
-      // What only the state file says changed — an agent's `warden reply` above all. The pool is
-      // re-read, not re-anchored: nothing about the code moved.
+      // What only the state file says changed — an agent's `warden reply` above all, and the
+      // checkpoint a hand-off takes. The pool is re-read, not re-anchored: nothing about the code moved.
       const key = get().targetKey;
+      void get().loadCheckpoints();
       try {
         const res = await api.comments(key);
         if (get().targetKey === key) set({ comments: res.comments });

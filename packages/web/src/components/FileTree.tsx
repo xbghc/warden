@@ -1,7 +1,7 @@
 import { ActionIcon } from './ActionIcon';
 import { useEffect, useMemo, useState } from 'react';
 import { FileIcon } from '@react-symbols/icons/utils';
-import type { FileEntry, Target, TargetKey } from '@warden/shared';
+import type { Checkpoint, FileEntry, Target, TargetKey } from '@warden/shared';
 import { formatTargetKey, targetLabel, stageModeFor, commentScopeKey, isLocalTarget, tracksViewed, tryParseTargetKey } from '@warden/shared';
 import { useStore } from '../store';
 import { allDirPaths, buildTree, type DirNode, type TreeNode } from '../lib/tree';
@@ -299,6 +299,11 @@ function DebugToggle({ local }: { local: boolean }) {
   );
 }
 
+/** What a checkpoint is called in a list: its number, its time, and why it exists when warden took it. */
+function checkpointName(c: Checkpoint): string {
+  return `#${c.id} · ${checkpointTime(c.createdAt)}${c.handoff ? ' · 交付反馈' : ''}`;
+}
+
 /** 14:05 for today, 9/21 14:05 before that. */
 function checkpointTime(iso: string): string {
   const d = new Date(iso);
@@ -336,7 +341,7 @@ function CheckpointBar({ target }: { target: Target }) {
           {!checkpoints.some((c) => c.id === target.id) && <option value={target.id}>#{target.id}</option>}
           {checkpoints.map((c) => (
             <option key={c.id} value={c.id}>
-              #{c.id} · {checkpointTime(c.createdAt)}
+              {checkpointName(c)}
             </option>
           ))}
         </select>
@@ -352,7 +357,11 @@ function CheckpointBar({ target }: { target: Target }) {
   return (
     <div className="checkpoint-bar">
       {newest ? (
-        <button className="checkpoint-open" onClick={() => open(newest.id)} title={`只看检查点 #${newest.id}（${checkpointTime(newest.createdAt)}）以后的改动`}>
+        <button
+          className="checkpoint-open"
+          onClick={() => open(newest.id)}
+          title={`只看检查点 ${checkpointName(newest)} 以后的改动${newest.handoff ? '：评论交给 agent 时自动记下的' : ''}`}
+        >
           对比检查点 #{newest.id} · {checkpointTime(newest.createdAt)}
         </button>
       ) : (

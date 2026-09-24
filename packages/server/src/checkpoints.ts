@@ -3,7 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { copyFile, mkdir, rm, stat, utimes } from 'node:fs/promises';
 import type { Checkpoint, ReviewState, TargetKey } from '@warden/shared';
 import { formatTargetKey } from '@warden/shared';
-import { runGit, runGitSnapshot, type SnapshotEnv } from './git.js';
+import { revParse, runGit, runGitSnapshot, type SnapshotEnv } from './git.js';
+import type { StateStore } from './state.js';
 
 /**
  * Where checkpoints keep their objects: a directory of warden's beside the state file, never the
@@ -111,11 +112,31 @@ export function forgetCheckpoint(state: ReviewState, c: Checkpoint): void {
 }
 
 /** Records a tree just written as the worktree's newest checkpoint, dropping the oldest past the limit. */
-export function addCheckpoint(state: ReviewState, worktree: string | undefined, tree: string, head: string): Checkpoint {
+export function addCheckpoint(state: ReviewState, worktree: string | undefined, tree: string, head: string, handoff = false): Checkpoint {
   const mine = checkpointsOf(state, worktree);
   const id = mine.reduce((n, c) => Math.max(n, c.id), 0) + 1;
-  const checkpoint: Checkpoint = { id, ...(worktree ? { worktree } : {}), tree, head, createdAt: new Date().toISOString() };
+  const checkpoint: Checkpoint = { id, ...(worktree ? { worktree } : {}), tree, head, createdAt: new Date().toISOString(), ...(handoff ? { handoff } : {}) };
   state.checkpoints.push(checkpoint);
   for (const old of mine.slice(0, Math.max(0, mine.length + 1 - MAX_CHECKPOINTS))) forgetCheckpoint(state, old);
   return checkpoint;
+}
+
+/**
+ * Snapshots the working tree in `cwd` and records it for `worktree` (absent for the repository
+ * root), unless the newest checkpoint already holds that very tree: two names for one baseline
+ * would only be noise. The snapshot runs outside the state lock; it touches only warden's store.
+ */
+export async function takeCheckpoint(
+  store: StateStore,
+  cwd: string,
+  worktree: string | undefined,
+  opts: { handoff?: boolean } = {},
+): Promise<{ checkpoint: Checkpoint; unchanged: boolean }> {
+  const tree = await snapshotWorktree(cwd, checkpointStore(store.file));
+  const head = (await revParse(cwd, 'HEAD')) ?? '';
+  return store.update((s) => {
+    const newest = checkpointsOf(s, worktree).at(-1);
+    if (newest?.tree === tree) return { checkpoint: newest, unchanged: true };
+    return { checkpoint: addCheckpoint(s, worktree, tree, head, opts.handoff), unchanged: false };
+  });
 }

@@ -143,3 +143,30 @@ describe('GET /api/events', () => {
     expect(seen).toContain('event: state');
   });
 });
+
+describe('a hand-off notes the working tree', () => {
+  const handoffs = async () => (await store.load()).checkpoints.filter((c) => c.handoff);
+  const settle = async (want: number) => {
+    const deadline = Date.now() + 5000;
+    while ((await handoffs()).length < want && Date.now() < deadline) await new Promise((r) => setTimeout(r, 25));
+  };
+
+  it('takes a checkpoint once comments are copied, after answering the copy', async () => {
+    await fx.write('src/b.ts', 'export const b = 3;\n');
+    const c = await json<Comment>(
+      await send('POST', `/api/targets/${k('working')}/comments`, { filePath: 'src/b.ts', side: 'new', startLine: 1, endLine: 1, body: 'why 3?' }),
+    );
+    const before = (await handoffs()).length;
+    await json<ExportResponse>(await send('POST', '/api/comments/export', { commentIds: [c.id] }));
+    await settle(before + 1);
+    const taken = await handoffs();
+    expect(taken).toHaveLength(before + 1);
+    expect(taken.at(-1)!.worktree).toBeUndefined();
+
+    // Nothing handed over, nothing noted; and the same tree is not noted twice.
+    await json<ExportResponse>(await send('POST', '/api/comments/export', { commentIds: ['missing'] }));
+    await json<ExportResponse>(await send('POST', '/api/comments/export', { commentIds: [c.id] }));
+    await new Promise((r) => setTimeout(r, 300));
+    expect(await handoffs()).toHaveLength(before + 1);
+  });
+});
