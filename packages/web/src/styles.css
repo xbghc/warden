@@ -1400,6 +1400,27 @@ kbd {
 .comment-card.reattaching .card-actions {
   opacity: 1;
 }
+/* The thread under a comment. Each answer hangs off the note it answers rather than
+   becoming a card of its own: the conversation is about one place in the code. */
+.comment-reply {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--line);
+}
+.comment-reply-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--ink-2);
+}
+.reply-agent .comment-reply-head > :first-child {
+  color: var(--accent);
+  font-weight: 600;
+}
+.comment-card .comment-editor {
+  margin-top: 6px;
+}
 .comment-editor {
   background: var(--surface);
   border: 1px solid var(--accent);

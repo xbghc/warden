@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ActionIcon } from './ActionIcon';
 import type { Comment, TargetKey } from '@warden/shared';
-import { targetLabel, tryParseTargetKey } from '@warden/shared';
+import { awaitsReviewer, targetLabel, tryParseTargetKey } from '@warden/shared';
 import { useStore } from '../store';
 import { Markdown } from './Markdown';
 import { CommentEditor } from './CommentEditor';
@@ -34,11 +34,14 @@ function viewLabel(key: TargetKey): string {
 export function CommentCard({ comment, showSnippet = false, showFile = false }: { comment: Comment; showSnippet?: boolean; showFile?: boolean }) {
   const updateComment = useStore((s) => s.updateComment);
   const deleteComment = useStore((s) => s.deleteComment);
+  const replyToComment = useStore((s) => s.replyToComment);
   const exportComments = useStore((s) => s.exportComments);
   const focused = useStore((s) => s.focusedCommentId === comment.id);
   const focusComment = useStore((s) => s.focusComment);
   const targetKey = useStore((s) => s.targetKey);
   const [editing, setEditing] = useState(false);
+  const [replying, setReplying] = useState(false);
+  const answered = awaitsReviewer(comment);
 
   const range = comment.startLine === comment.endLine ? `${comment.startLine}` : `${comment.startLine}–${comment.endLine}`;
   const location = `${comment.filePath} · ${comment.side === 'old' ? '修改前' : '修改后'}第 ${range} 行`;
@@ -61,10 +64,16 @@ export function CommentCard({ comment, showSnippet = false, showFile = false }: 
           </span>
         </span>
         {comment.side === 'old' && <span className="badge">修改前</span>}
-        {comment.status === 'exported' && (
-          <span className="badge badge-exported" title="这条评论已复制导出">
-            已复制
+        {answered ? (
+          <span className="badge badge-active" title="agent 已回复，等你确认或追问">
+            待确认
           </span>
+        ) : (
+          comment.status === 'exported' && (
+            <span className="badge badge-exported" title="这条评论已复制，或已由 agent 通过 warden feedback 取走">
+              已导出
+            </span>
+          )
         )}
         {elsewhere && (
           <span className="badge" title={`这条评论现在位于 ${comment.targetKey}，点击卡片可跳转`}>
@@ -75,6 +84,32 @@ export function CommentCard({ comment, showSnippet = false, showFile = false }: 
           {shortTime(comment.updatedAt)}
         </span>
         <span className="card-actions">
+          {/* Accepting the answer ends the conversation, and the comment with it: there is
+              nothing left for it to ask. */}
+          {answered && (
+            <button
+              className="link"
+              onClick={(e) => {
+                e.stopPropagation();
+                void deleteComment(comment.id);
+              }}
+              title="接受 agent 的回复并删除这条评论"
+            >
+              <ActionIcon name="check" label="解决" />
+            </button>
+          )}
+          {comment.replies?.length ? (
+            <button
+              className="link"
+              onClick={(e) => {
+                e.stopPropagation();
+                setReplying(true);
+              }}
+              title="追问：回复会在下次导出时交给 agent"
+            >
+              <ActionIcon name="reply" label="回复" />
+            </button>
+          ) : null}
           <button
             className="link"
             onClick={(e) => {
@@ -128,6 +163,27 @@ export function CommentCard({ comment, showSnippet = false, showFile = false }: 
         />
       ) : (
         <Markdown text={comment.body} />
+      )}
+      {comment.replies?.map((r) => (
+        <div key={r.id} className={`comment-reply reply-${r.author}`}>
+          <div className="comment-reply-head">
+            <span>{r.author === 'agent' ? 'Agent' : '我'}</span>
+            <span className="muted time" title={fmtTime(r.at)}>
+              {shortTime(r.at)}
+            </span>
+          </div>
+          <Markdown text={r.body} />
+        </div>
+      ))}
+      {replying && (
+        <CommentEditor
+          title="追问"
+          submitLabel="发送"
+          onSave={async (body) => {
+            if (await replyToComment(comment.id, body)) setReplying(false);
+          }}
+          onCancel={() => setReplying(false)}
+        />
       )}
     </div>
   );

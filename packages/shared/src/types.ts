@@ -85,7 +85,23 @@ export interface Comment {
   anchor: CommentAnchor;
   createdAt: string;
   updatedAt: string;
+  /**
+   * When the comment last went to the agent, by the clipboard or by `warden feedback`. A reviewer
+   * reply clears it: the follow-up has not gone anywhere yet.
+   */
   exportedAt?: string;
+  /** The conversation under the comment, oldest first; absent until someone answers. */
+  replies?: CommentReply[];
+}
+
+export type ReplyAuthor = 'agent' | 'reviewer';
+
+export interface CommentReply {
+  id: string;
+  author: ReplyAuthor;
+  /** Markdown. */
+  body: string;
+  at: string;
 }
 
 export type IssueStatus = 'open' | 'closed';
@@ -476,6 +492,10 @@ export interface ReanchorResponse {
   comments: Comment[];
 }
 
+export interface ReplyRequest {
+  body: string;
+}
+
 export interface ExportRequest {
   commentIds: string[];
 }
@@ -535,6 +555,12 @@ export interface ChangeEvent {
   type: 'changed';
   head: string;
   branch: string;
+  at: string;
+}
+
+/** The state file was written, by this server or by the CLI an agent ran (`warden reply`). */
+export interface StateEvent {
+  type: 'state';
   at: string;
 }
 

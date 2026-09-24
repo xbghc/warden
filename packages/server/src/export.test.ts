@@ -36,7 +36,7 @@ Target: working
 Repo: /home/user/project
 Count: 2
 
-## src/features/order/OrderList.tsx:120-124 (new)
+## src/features/order/OrderList.tsx:120-124 (new) [id: 1]
 \`\`\`tsx
 120 | const total = items.reduce((s, i) => s + i.price, 0);
 121 | // ...
@@ -46,7 +46,7 @@ Count: 2
 \`\`\`
 > 这里没有考虑 discount 字段，参考 utils/price.ts 里的 calcTotal。
 
-## src/features/order/hooks/useOrder.ts:42 (new)
+## src/features/order/hooks/useOrder.ts:42 (new) [id: 2]
 \`\`\`ts
 42 | useEffect(() => { fetchOrder(id) }, []);
 \`\`\`

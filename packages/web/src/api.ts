@@ -103,6 +103,8 @@ export const api = {
 
   createComment: (key: TargetKey, body: CreateCommentRequest) => req<Comment>('POST', `/api/targets/${enc(key)}/comments`, body),
   updateComment: (key: TargetKey, id: string, body: UpdateCommentRequest) => req<Comment>('PATCH', `/api/targets/${enc(key)}/comments/${enc(id)}`, body),
+  comments: (key: TargetKey) => req<{ comments: Comment[] }>('GET', `/api/targets/${enc(key)}/comments`),
+  replyComment: (key: TargetKey, id: string, body: string) => req<Comment>('POST', `/api/targets/${enc(key)}/comments/${enc(id)}/replies`, { body }),
   deleteComment: (key: TargetKey, id: string) => req<{ ok: true }>('DELETE', `/api/targets/${enc(key)}/comments/${enc(id)}`),
   reanchor: (key: TargetKey, files?: FileDiff[]) => req<ReanchorResponse>('POST', `/api/targets/${enc(key)}/comments/reanchor`, { files }),
   exportComments: (commentIds: string[]) => req<ExportResponse>('POST', '/api/comments/export', { commentIds }),

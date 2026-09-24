@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { ActionIcon } from './ActionIcon';
 import type { Comment } from '@warden/shared';
+import { awaitsAgent, awaitsReviewer } from '@warden/shared';
 import { useStore, type RailFilter } from '../store';
 import { CommentCard } from './CommentThread';
 import { CommentEditor } from './CommentEditor';
@@ -34,7 +35,8 @@ export function CommentRail() {
     () => ({
       file: comments.filter((c) => c.filePath === activeFile).length,
       all: comments.length,
-      unexported: comments.filter((c) => c.status === 'active').length,
+      unexported: comments.filter(awaitsAgent).length,
+      replied: comments.filter(awaitsReviewer).length,
     }),
     [comments, activeFile],
   );
@@ -42,7 +44,8 @@ export function CommentRail() {
   const shown = useMemo(() => {
     let list = comments;
     if (filter === 'file') list = list.filter((c) => c.filePath === activeFile);
-    else if (filter === 'unexported') list = list.filter((c) => c.status === 'active');
+    else if (filter === 'unexported') list = list.filter(awaitsAgent);
+    else if (filter === 'replied') list = list.filter(awaitsReviewer);
     return list.slice().sort(compare);
   }, [comments, filter, activeFile]);
 
@@ -62,6 +65,8 @@ export function CommentRail() {
     ['file', '此文件', counts.file],
     ['all', '全部', counts.all],
     ['unexported', '未导出', counts.unexported],
+    // Only there while it holds something: a fourth segment in a 360px rail is dear.
+    ...(counts.replied > 0 || filter === 'replied' ? [['replied', '待确认', counts.replied] as [RailFilter, string, number]] : []),
   ];
 
   const editorCard = editor && (

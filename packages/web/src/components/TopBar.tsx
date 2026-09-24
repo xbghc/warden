@@ -1,6 +1,6 @@
 import { ActionIcon } from './ActionIcon';
 import { useMemo } from 'react';
-import { formatTargetKey, parseTargetKey } from '@warden/shared';
+import { awaitsAgent, awaitsReviewer, formatTargetKey, parseTargetKey } from '@warden/shared';
 import { useStore } from '../store';
 import { dirName } from '../lib/paths';
 import { NvimSelector } from './NvimSelector';
@@ -43,7 +43,8 @@ export function TopBar() {
   const railOpen = useStore((s) => s.prefs.railOpen);
   const setRailOpen = useStore((s) => s.setRailOpen);
   const commentCount = useStore((s) => s.comments.length);
-  const unexported = useStore((s) => s.comments.filter((c) => c.status === 'active').length);
+  // Either way round, something in the thread is waiting on the loop between reviewer and agent.
+  const waiting = useStore((s) => s.comments.filter((c) => awaitsAgent(c) || awaitsReviewer(c)).length);
 
   const target = useMemo(() => parseTargetKey(targetKey), [targetKey]);
   const otherWorktrees = repo.worktrees.filter((w) => w.path !== repo.root);
@@ -112,9 +113,10 @@ export function TopBar() {
           <ActionIcon name="auto" label="自动刷新" />
         </button>
         {/* The rail's switch. It carries the count because that is the reason to open it — and
-            the unexported ones are the point of the whole tool, so they get the accent. */}
+            the ones still in the loop — not yet handed over, or answered and not yet read — are the
+            point of the whole tool, so they get the accent. */}
         <button
-          className={`rail-switch ${railOpen ? 'active' : ''} ${unexported > 0 ? 'has-unexported' : ''}`}
+          className={`rail-switch ${railOpen ? 'active' : ''} ${waiting > 0 ? 'has-unexported' : ''}`}
           aria-pressed={railOpen}
           onClick={() => setRailOpen(!railOpen)}
           title={railOpen ? '收起右栏 (Esc)' : '展开评论、待办和 Issue'}

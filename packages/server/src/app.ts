@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { stat } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
@@ -27,10 +28,12 @@ import type {
   ReanchorRequest,
   ReanchorResponse,
   ReleaseWorktreeRequest,
+  ReplyRequest,
   RemoteBranchesResponse,
   RemoveWorktreeRequest,
   RepoInfo,
   ReviewState,
+  StateEvent,
   StageRequest,
   StageResponse,
   Todo,
@@ -64,9 +67,10 @@ import { addCheckpoint, checkpointKey, checkpointStore, checkpointsOf, findCheck
 import { checkoutWorktree, listBranches, listWorktreesDetailed, lookupRemoteBranches, nextSlot, releaseWorktree, removeWorktree } from './worktrees.js';
 import { ensureTarget, forgetWorktreeTargets, type StateStore } from './state.js';
 import { formatCommentsExport, formatIssueExport } from './export.js';
+import { addReply } from './feedback.js';
 import { NvimService } from './nvim.js';
 import { TmuxService } from './tmux.js';
-import { RepoWatcher } from './watcher.js';
+import { DEFAULT_POLL_INTERVAL_MS, RepoWatcher } from './watcher.js';
 import { serveStaticFile } from './static.js';
 
 export interface AppOptions {
@@ -82,6 +86,8 @@ export interface AppOptions {
   instanceToken?: string;
   /** The CLI's update check, still in flight when the first page loads; it never rejects. */
   update?: Promise<UpdateNotice | null>;
+  /** How an agent runs the CLI (`warden`, `npx @xbghc/warden`); exports tell it to reply that way. */
+  replyCommand?: string;
 }
 
 const SSE_HEARTBEAT_MS = 15_000;
@@ -125,6 +131,12 @@ export function createApp(opts: AppOptions): Hono {
   };
 
   const checkpoints = checkpointStore(store.file);
+
+  const stateStamp = (): Promise<number> =>
+    stat(store.file).then(
+      (st) => st.mtimeMs,
+      () => 0,
+    );
 
   /** The target and the directory it is read in; a checkpoint is not looked up (see `targetCtx`). */
   const worktreeCtx = async (key: string): Promise<TargetContext> => {
@@ -500,6 +512,14 @@ export function createApp(opts: AppOptions): Hono {
     return c.json({ ok: true });
   });
 
+  api.post('/targets/:key/comments/:id/replies', async (c) => {
+    const body = (await c.req.json()) as ReplyRequest;
+    if (typeof body.body !== 'string') throw badRequest('body is required');
+    const found = findComment(await store.load(), c.req.param('id'));
+    if (!found || found.targetKey !== commentScopeKey(c.req.param('key'))) throw notFound('comment not found');
+    return c.json(await addReply(store, found.comment.id, 'reviewer', body.body), 201);
+  });
+
   api.post('/targets/:key/comments/reanchor', async (c) => {
     const key = c.req.param('key');
     const ctx = await targetCtx(key);
@@ -586,7 +606,10 @@ export function createApp(opts: AppOptions): Hono {
         if (!patch) {
           // Created after the snapshot: not part of this pass, leave untouched.
           if (!comments.some((x) => x.id === cm.id)) return [cm];
-          if (committed) {
+          // A thread is a conversation the reviewer has not closed: the agent's answer usually
+          // arrives with the very commit that makes the code it was about disappear, and dropping
+          // the comment then would lose the answer unread.
+          if (committed && !cm.replies?.length) {
             dropped.push(cm.id);
             return [];
           }
@@ -627,7 +650,7 @@ export function createApp(opts: AppOptions): Hono {
         selected.push(next);
       }
       return {
-        text: formatCommentsExport({ repoRoot: repo.root, comments: selected }),
+        text: formatCommentsExport({ repoRoot: repo.root, comments: selected, replyCommand: opts.replyCommand }),
         count: selected.length,
         commentIds: selected.map((x) => x.id),
       };
@@ -719,7 +742,7 @@ export function createApp(opts: AppOptions): Hono {
         comments.push(next);
       }
       return {
-        text: formatIssueExport({ repoRoot: repo.root, issue, comments }),
+        text: formatIssueExport({ repoRoot: repo.root, issue, comments, replyCommand: opts.replyCommand }),
         count: comments.length,
         commentIds: comments.map((x) => x.id),
       };
@@ -953,7 +976,21 @@ export function createApp(opts: AppOptions): Hono {
         const event: ChangeEvent = { type: 'changed', ...change };
         void enqueue(() => stream.writeSSE({ event: 'changed', data: JSON.stringify(event) }));
       });
-      stream.onAbort(release);
+      // The page's own writes land here too; the agent's `warden reply` only lands here, since the
+      // CLI writes the state file without a server. mtime is enough: every write is a rename.
+      let stamp = await stateStamp();
+      const statePoll = setInterval(() => {
+        void stateStamp().then((next) => {
+          if (next === stamp) return;
+          stamp = next;
+          const event: StateEvent = { type: 'state', at: new Date().toISOString() };
+          void enqueue(() => stream.writeSSE({ event: 'state', data: JSON.stringify(event) }));
+        });
+      }, opts.watchIntervalMs ?? DEFAULT_POLL_INTERVAL_MS);
+      stream.onAbort(() => {
+        clearInterval(statePoll);
+        release();
+      });
       try {
         while (!stream.aborted && !stream.closed) {
           await stream.sleep(SSE_HEARTBEAT_MS);
@@ -961,6 +998,7 @@ export function createApp(opts: AppOptions): Hono {
           await enqueue(() => stream.write(': ping\n\n'));
         }
       } finally {
+        clearInterval(statePoll);
         release();
       }
     });

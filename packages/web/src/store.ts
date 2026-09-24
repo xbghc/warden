@@ -23,6 +23,7 @@ import type {
   ViewMode,
 } from '@warden/shared';
 import {
+  awaitsAgent,
   formatTargetKey,
   insertAfter,
   isLocalTarget,
@@ -67,7 +68,7 @@ export interface EditorTarget {
   endLine: number;
 }
 
-export type RailFilter = 'file' | 'all' | 'unexported';
+export type RailFilter = 'file' | 'all' | 'unexported' | 'replied';
 /** The three notebooks of the right-hand rail — everything the reviewer writes. */
 export type RailTab = 'comments' | 'todos' | 'issues';
 
@@ -178,6 +179,7 @@ export interface AppStore {
   loadFiles(): Promise<void>;
   refresh(): Promise<void>;
   onRepoChanged(event: ChangeEvent): void;
+  onStateChanged(): Promise<void>;
   loadCheckpoints(): Promise<void>;
   /** Takes the worktree as it is now; a checkpoint target in front moves on to the new one. */
   createCheckpoint(): Promise<void>;
@@ -193,6 +195,8 @@ export interface AppStore {
   createComment(body: CreateCommentRequest): Promise<Comment | undefined>;
   updateComment(id: string, body: UpdateCommentRequest): Promise<Comment | undefined>;
   deleteComment(id: string): Promise<void>;
+  /** The reviewer's side of a comment's thread; false when it did not go through. */
+  replyToComment(id: string, body: string): Promise<boolean>;
   exportComments(ids: string[]): Promise<void>;
   copyAllComments(): Promise<void>;
   loadIssues(): Promise<void>;
@@ -628,6 +632,29 @@ export const useStore = create<AppStore>((set, get) => {
       }
     },
 
+    async replyToComment(id, body) {
+      try {
+        const c = await api.replyComment(get().targetKey, id, body);
+        set((s) => ({ comments: s.comments.map((x) => (x.id === id ? c : x)) }));
+        return true;
+      } catch (e) {
+        fail(e);
+        return false;
+      }
+    },
+
+    async onStateChanged() {
+      // What only the state file says changed — an agent's `warden reply` above all. The pool is
+      // re-read, not re-anchored: nothing about the code moved.
+      const key = get().targetKey;
+      try {
+        const res = await api.comments(key);
+        if (get().targetKey === key) set({ comments: res.comments });
+      } catch {
+        /* the next repository refresh carries them anyway */
+      }
+    },
+
     async exportComments(ids) {
       if (ids.length === 0) {
         get().showToast('没有可复制的评论');
@@ -650,7 +677,7 @@ export const useStore = create<AppStore>((set, get) => {
 
     async copyAllComments() {
       const { comments, includeExported } = get();
-      const ids = comments.filter((c) => c.status === 'active' || (includeExported && c.status === 'exported')).map((c) => c.id);
+      const ids = comments.filter((c) => awaitsAgent(c) || (includeExported && c.status === 'exported')).map((c) => c.id);
       await get().exportComments(ids);
     },
 

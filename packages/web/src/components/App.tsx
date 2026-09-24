@@ -67,6 +67,8 @@ export function App() {
       }
     };
     source.addEventListener('changed', onChanged);
+    const onState = () => void useStore.getState().onStateChanged();
+    source.addEventListener('state', onState);
     source.onopen = () => {
       if (!wasDown) return;
       wasDown = false;
@@ -77,6 +79,7 @@ export function App() {
     };
     return () => {
       source.removeEventListener('changed', onChanged);
+      source.removeEventListener('state', onState);
       source.close();
     };
   }, [root]);

@@ -20,7 +20,8 @@ export { runGit, GitError, assertAllowedGitArgs, applyToIndex } from './git.js';
 export { buildStagePatch, quotePath } from './patch.js';
 export { parseUnifiedDiff } from './diffparse.js';
 export { buildAnchor, reanchorComment } from './anchor.js';
-export { formatCommentsExport, formatIssueExport } from './export.js';
+export { formatCommentsExport, formatIssueExport, replyFooter, shortId } from './export.js';
+export { addReply, takeFeedback } from './feedback.js';
 
 export const HOST = '127.0.0.1';
 export const DEFAULT_PORT_START = 4100;
@@ -54,6 +55,8 @@ export interface StartOptions {
   probeWindows?: (port: number, token: string) => Promise<boolean | undefined>;
   /** Handed to the page through GET /api/update; the CLI starts the check, the server only relays it. */
   update?: Promise<UpdateNotice | null>;
+  /** How an agent runs the CLI, for the reply line at the end of an export. */
+  replyCommand?: string;
 }
 
 export interface RunningServer {
@@ -73,7 +76,7 @@ export async function startServer(opts: StartOptions): Promise<RunningServer> {
   const stateFile = opts.stateFile ?? stateFilePath(repo.commonRoot);
   const store = new StateStore(stateFile, repo.commonRoot);
   const instanceToken = randomUUID();
-  const app = createApp({ repo, store, nvim: new NvimService(), webDir: opts.webDir, instanceToken, update: opts.update });
+  const app = createApp({ repo, store, nvim: new NvimService(), webDir: opts.webDir, instanceToken, update: opts.update, replyCommand: opts.replyCommand });
 
   const listen = (p: number): Promise<ServerType> =>
     new Promise((resolve, reject) => {

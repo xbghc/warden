@@ -357,7 +357,11 @@ describe('viewed, comments, export, issues', () => {
     const res = await json<ExportResponse>(await send('POST', '/api/comments/export', { commentIds: [comment.id, 'missing'] }));
     expect(res.count).toBe(1);
     expect(res.text).toContain(
-      '# Review comments\nTarget: working\nRepo: ' + fx.root + '\nCount: 1\n\n## src/a.ts:3 (new)\n```ts\n3 |   return 4;\n```\n> why 3?',
+      '# Review comments\nTarget: working\nRepo: ' +
+        fx.root +
+        '\nCount: 1\n\n## src/a.ts:3 (new) [id: ' +
+        comment.id.slice(0, 8) +
+        ']\n```ts\n3 |   return 4;\n```\n> why 3?',
     );
     const state = await json<ReviewState>(await get('/api/state'));
     const c = state.targets.local!.comments[0]!;

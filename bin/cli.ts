@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { checkForUpdate, startServer, updateCheckEnabled } from '@warden/server';
+import { agentUsage, runAgentCommand } from './agent.js';
 
 declare const __WARDEN_VERSION__: string | undefined;
 const VERSION = typeof __WARDEN_VERSION__ !== 'undefined' ? __WARDEN_VERSION__ : 'dev';
@@ -39,10 +40,16 @@ function parseArgs(argv: string[]): CliArgs {
   return args;
 }
 
+// npx unpacks into a `_npx` cache directory, which is how that case is told from a global install.
+const viaNpx = fileURLToPath(import.meta.url).includes(`${path.sep}_npx${path.sep}`);
+/** How this copy is run again, for the lines that tell a user or an agent what to type. */
+const selfCommand = viaNpx ? 'npx @xbghc/warden' : 'warden';
+
 function usage(): string {
   return `warden — local git diff review UI
 
 Usage: warden [repoPath] [options]
+       warden <command> [args]
 
 Options:
   --port <n>, -p <n>   Listen on a fixed port (default: first free port from 4100, and under WSL
@@ -52,6 +59,9 @@ Options:
                        (also: WARDEN_NO_UPDATE_CHECK=1, NO_UPDATE_NOTIFIER=1, CI)
   -h, --help           Show this help
   -v, --version        Print version
+
+${agentUsage('warden')}
+A repository in a directory named after a command is given as ./<name>.
 `;
 }
 
@@ -96,6 +106,9 @@ function resolveWebDir(): string | undefined {
 }
 
 async function main(): Promise<void> {
+  const code = await runAgentCommand(process.argv.slice(2), selfCommand);
+  if (code !== undefined) process.exit(code);
+
   let args: CliArgs;
   try {
     args = parseArgs(process.argv.slice(2));
@@ -120,15 +133,13 @@ async function main(): Promise<void> {
 
   // Started before the server so the two overlap, and never awaited on the way to a usable page:
   // the answer is printed whenever it lands, and the page asks for it on its own. A dev run has no
-  // version to compare. npx unpacks into a `_npx` cache directory, which is how that case is told
-  // from a global install and given the command that actually refreshes it.
-  const viaNpx = fileURLToPath(import.meta.url).includes(`${path.sep}_npx${path.sep}`);
+  // version to compare, and an npx run is given the command that actually refreshes it.
   const checking = args.updateCheck && VERSION !== 'dev' && updateCheckEnabled();
   const update = checking ? checkForUpdate({ current: VERSION, npx: viaNpx }) : Promise.resolve(null);
 
   let server: Awaited<ReturnType<typeof startServer>>;
   try {
-    server = await startServer({ repoPath: args.repoPath, port: args.port, webDir, update });
+    server = await startServer({ repoPath: args.repoPath, port: args.port, webDir, update, replyCommand: selfCommand });
   } catch (e) {
     console.error(`warden: ${(e as Error).message}`);
     process.exit(1);
