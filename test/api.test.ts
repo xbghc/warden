@@ -988,6 +988,24 @@ describe('worktree management', () => {
     expect((await app.request('/api/worktrees', { headers: { 'sec-fetch-site': 'cross-site' } })).status).toBe(200);
     expect((await app.request('/api/worktrees', { headers: { 'sec-fetch-site': 'same-origin' } })).status).toBe(200);
   });
+
+  it('refuses a write whose Origin is another origin, for browsers that send no Sec-Fetch-Site', async () => {
+    const headers = { 'content-type': 'application/json', origin: 'http://evil.example' };
+    const res = await app.request('/api/worktrees/remove', { method: 'POST', headers, body: JSON.stringify({ path: fx.root }) });
+    expect(res.status).toBe(403);
+    expect(await code(res)).toBe('cross_site');
+    expect(existsSync(fx.root)).toBe(true);
+  });
+
+  it('refuses any request, reads included, addressed to a name other than loopback', async () => {
+    // DNS rebinding: the page is same-origin with the server, only Host gives it away.
+    const res = await app.request('http://evil.example:4100/api/state', { headers: { 'sec-fetch-site': 'same-origin' } });
+    expect(res.status).toBe(403);
+    expect(await code(res)).toBe('bad_host');
+    expect((await app.request('http://evil.example:4100/')).status).toBe(403);
+    expect((await app.request('http://127.0.0.1:4100/api/worktrees')).status).toBe(200);
+    expect((await app.request('http://localhost:5173/api/worktrees')).status).toBe(200);
+  });
 });
 
 describe('update notice', () => {

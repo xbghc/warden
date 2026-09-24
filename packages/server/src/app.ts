@@ -86,6 +86,9 @@ export interface AppOptions {
 
 const SSE_HEARTBEAT_MS = 15_000;
 
+/** The names a browser on this machine reaches the server by; anything else arrived by way of DNS. */
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost']);
+
 interface ListingCache {
   at: number;
   files: FileDiff[];
@@ -170,15 +173,31 @@ export function createApp(opts: AppOptions): Hono {
     return c.json({ error: err instanceof Error ? err.message : String(err), code: 'internal' }, 500);
   });
 
+  // Binding to 127.0.0.1 keeps other machines out, not other sites: a domain whose DNS answer is
+  // switched to 127.0.0.1 after its page loads (DNS rebinding) makes that page same-origin with
+  // this server, free to read every diff and drive every write. The one thing it cannot change is
+  // the name it was loaded under, which the browser sends as Host, so only loopback names pass.
+  app.use('*', async (c, next) => {
+    const host = new URL(c.req.url).hostname;
+    if (!LOOPBACK_HOSTS.has(host)) {
+      throw new HttpError(403, `requests for host ${host} are refused; open warden at http://127.0.0.1 or http://localhost`, 'bad_host');
+    }
+    await next();
+  });
+
   const api = new Hono();
 
   // The server trusts the browser it was opened in; what it must not trust is a page from another
   // origin driving that browser, which could stage lines or remove a worktree. Browsers label such
-  // requests, so they are refused before any route sees them. Reads stay open: a page from
-  // elsewhere cannot read the response anyway.
+  // requests with Sec-Fetch-Site, and with Origin — the older and wider-supported of the two — so a
+  // write carrying either sign of another origin is refused before any route sees it. Reads stay
+  // open: with Host checked above, a page from elsewhere cannot read the response.
   api.use('*', async (c, next) => {
-    if (c.req.method !== 'GET' && c.req.method !== 'HEAD' && c.req.header('sec-fetch-site') === 'cross-site') {
-      throw new HttpError(403, 'cross-site requests are refused', 'cross_site');
+    if (c.req.method !== 'GET' && c.req.method !== 'HEAD') {
+      const origin = c.req.header('origin');
+      if (c.req.header('sec-fetch-site') === 'cross-site' || (origin && origin !== new URL(c.req.url).origin)) {
+        throw new HttpError(403, 'cross-site requests are refused', 'cross_site');
+      }
     }
     await next();
   });

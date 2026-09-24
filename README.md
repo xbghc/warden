@@ -449,9 +449,16 @@ from a remote) — undone with `branch -D` should the switch into the slot then 
 request after a release or removal (`-d`, so only a merged one), and the review state lives outside
 the repository. A checkpoint writes only there: `git add --all [--intent-to-add]` and
 `git write-tree --missing-ok`, with `GIT_INDEX_FILE` and `GIT_OBJECT_DIRECTORY` set to files in
-warden's data directory and no alternates (see [Checkpoints](#checkpoints)). A mutating request the
-browser labels as coming from another site (`Sec-Fetch-Site: cross-site`) is refused with 403, so a
-page from elsewhere cannot drive the server through the browser it is open in.
+warden's data directory and no alternates (see [Checkpoints](#checkpoints)).
+
+Binding to `127.0.0.1` keeps other machines out but not other web pages, which reach the server
+through the browser. Every request whose `Host` is not `127.0.0.1` or `localhost` is refused with
+403, reads included: that is what a DNS-rebinding page — its own domain re-pointed at `127.0.0.1`,
+and so same-origin with warden — cannot hide. Open warden under one of those two names; a tunnel or
+proxy that rewrites the host name will be refused. A mutating request the browser labels as coming
+from another origin (`Sec-Fetch-Site: cross-site`, or an `Origin` that is not the server's own) is
+refused with 403 as well, so a page from elsewhere cannot drive the server through the browser it
+is open in.
 
 The only request warden makes off the machine is the update check: a `GET` of
 `https://registry.npmjs.org/@xbghc%2fwarden/latest`, no more than once a day, carrying nothing about
