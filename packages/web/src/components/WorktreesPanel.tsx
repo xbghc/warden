@@ -166,7 +166,6 @@ function AddForm({
  */
 export function WorktreesPanel() {
   const root = useStore((s) => s.root);
-  const repo = useStore((s) => s.repo);
   const targetKey = useStore((s) => s.targetKey);
   const setTarget = useStore((s) => s.setTarget);
   const reloadRepo = useStore((s) => s.reloadRepo);
