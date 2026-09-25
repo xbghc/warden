@@ -130,6 +130,24 @@ async function listUntracked(cwd: string): Promise<string[]> {
   return r.stdout.split('\0').filter(Boolean);
 }
 
+/** Paths with unmerged index entries: what a stopped merge, rebase or cherry-pick left in conflict. */
+async function listUnmerged(cwd: string, file?: string): Promise<string[]> {
+  const r = await runGit(['ls-files', '--unmerged', '-z', ...(file ? ['--', literal(file)] : [])], { cwd });
+  // Each entry is `<mode> <sha> <stage>\t<path>`, one per stage of the same path.
+  return [...new Set(r.stdout.split('\0').flatMap((e) => (e.includes('\t') ? [e.slice(e.indexOf('\t') + 1)] : [])))];
+}
+
+/**
+ * A conflicted file as the working view shows it. `git diff` prints a combined diff for it, which
+ * the parser cannot read, and `--cached` only a note, so the file vanished from both blocks just
+ * when it needed looking at. Against HEAD it is an ordinary two-way diff with the markers in it.
+ */
+async function conflictDiff(ctx: TargetContext, file: string): Promise<FileDiff | undefined> {
+  const base = (await hasHead(ctx.cwd)) ? 'HEAD' : EMPTY_TREE_SHA;
+  const f = parseUnifiedDiff(await runDiff(ctx, [...DIFF_BASE_ARGS, base, '--', literal(file)])).find((d) => d.path === file);
+  return f ? { ...f, conflicted: true } : undefined;
+}
+
 async function isUntracked(cwd: string, file: string): Promise<boolean> {
   const r = await runGit(['ls-files', '--others', '--exclude-standard', '-z', '--', literal(file)], { cwd });
   return r.stdout.split('\0').filter(Boolean).includes(file);
@@ -169,6 +187,15 @@ export async function listTargetDiffs(ctx: TargetContext): Promise<FileDiff[]> {
   const args = await diffArgs(ctx);
   // `--` so that a file named like a revision (`HEAD`, a branch) is not read as one.
   const files = parseUnifiedDiff(await runDiff(ctx, [...args, '--']));
+  if (ctx.target.kind === 'working') {
+    for (const path of await listUnmerged(ctx.cwd)) {
+      const d = await conflictDiff(ctx, path);
+      if (!d) continue;
+      const at = files.findIndex((f) => f.path === path);
+      if (at >= 0) files[at] = d;
+      else files.push(d);
+    }
+  }
   if (includesUntracked(ctx.target)) {
     const untracked = await listUntracked(ctx.cwd);
     const extra = await mapLimit(untracked, 8, (f) => untrackedDiff(ctx.cwd, f).catch(() => undefined));
@@ -195,6 +222,7 @@ export async function getFileDiff(ctx: TargetContext, filePath: string, hints: F
   if (includesUntracked(ctx.target) && (hints.untracked || (await isUntracked(ctx.cwd, filePath)))) {
     return untrackedDiff(ctx.cwd, filePath);
   }
+  if (ctx.target.kind === 'working' && (await listUnmerged(ctx.cwd, filePath)).includes(filePath)) return conflictDiff(ctx, filePath);
   const args = await diffArgs(ctx);
   const pathspec = [literal(filePath)];
   if (hints.oldPath && hints.oldPath !== filePath) pathspec.push(literal(hints.oldPath));

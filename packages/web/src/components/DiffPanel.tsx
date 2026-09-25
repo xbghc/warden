@@ -29,9 +29,15 @@ function FileHeader({ entry }: { entry: FileEntry }) {
   const skipsDebug = useStore((s) => s.prefs.ignoreDebug) && !!entry.debugAdditions;
   return (
     <div className="file-head">
-      <span className={`status status-${entry.status}`} title={entry.status}>
-        {STATUS_LETTER[entry.status]}
-      </span>
+      {entry.conflicted ? (
+        <span className="status status-conflicted" title="合并冲突：在终端里解决并 git add；这里显示的是相对 HEAD 的 diff">
+          U 冲突
+        </span>
+      ) : (
+        <span className={`status status-${entry.status}`} title={entry.status}>
+          {STATUS_LETTER[entry.status]}
+        </span>
+      )}
       <span className="path">
         {entry.oldPath && (
           <>

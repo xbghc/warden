@@ -19,6 +19,11 @@ export interface FileSummary {
   contentHash: string;
   /** True when the file is untracked in the working tree (only for working/all targets). */
   untracked?: boolean;
+  /**
+   * A merge, rebase or cherry-pick stopped on this file (working view only). Its diff is against
+   * HEAD, conflict markers and all; it is resolved in the terminal and `git add`ed, not staged here.
+   */
+  conflicted?: boolean;
   oldMode?: string;
   newMode?: string;
   /** Added / deleted lines that are debug code (see `debug.ts`); absent when there are none. */

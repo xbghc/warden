@@ -9,7 +9,14 @@ import { allDirPaths, buildTree, type DirNode, type TreeNode } from '../lib/tree
 const STATUS_LABEL: Record<FileEntry['status'], string> = { added: '新增', modified: '修改', deleted: '删除', renamed: '重命名' };
 export const STATUS_LETTER: Record<FileEntry['status'], string> = { added: 'A', modified: 'M', deleted: 'D', renamed: 'R' };
 
-function FileStatusLabel({ status }: { status: FileEntry['status'] }) {
+function FileStatusLabel({ status, conflicted }: { status: FileEntry['status']; conflicted?: boolean }) {
+  if (conflicted) {
+    return (
+      <span className="status status-conflicted" title="合并冲突：在终端里解决并 git add" role="img" aria-label="合并冲突">
+        U
+      </span>
+    );
+  }
   return (
     <span className={`status status-${status}`} title={STATUS_LABEL[status]} role="img" aria-label={STATUS_LABEL[status]}>
       {STATUS_LETTER[status]}
@@ -103,7 +110,7 @@ function FileRow({ node, depth, view, marks }: RowProps & { node: Extract<TreeNo
             {commentCount}
           </span>
         )}
-        <FileStatusLabel status={e.status} />
+        <FileStatusLabel status={e.status} conflicted={e.conflicted} />
         <span className="counts">
           {e.binary ? (
             <span className="tree-binary">BIN</span>

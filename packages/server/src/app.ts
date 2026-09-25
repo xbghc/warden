@@ -420,6 +420,7 @@ export function createApp(opts: AppOptions): Hono {
     if (body.skipDebug !== undefined && typeof body.skipDebug !== 'boolean') throw badRequest('skipDebug must be a boolean', 'bad_selection');
     const diff = await fileDiffWithHints(ctx, body.path);
     if (!diff) throw badRequest(`file ${body.path} is not part of ${key}`, 'no_diff');
+    if (diff.conflicted) throw new HttpError(409, `${body.path} is in conflict; resolve it and git add it in the terminal`, 'conflicted');
     // The selection is a set of indices into a diff the client saw; against any other diff they
     // would name the wrong lines. The agent may well have edited the file since.
     if (diff.contentHash !== body.contentHash)

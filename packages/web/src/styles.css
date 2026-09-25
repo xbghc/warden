@@ -865,6 +865,10 @@ button.wt-review:hover {
 .status-renamed {
   color: var(--ink-2);
 }
+.status-conflicted {
+  color: var(--del-fg);
+  font-weight: 600;
+}
 .changed {
   font-size: 11px;
   background: var(--warn-bg);
