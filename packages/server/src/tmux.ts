@@ -20,10 +20,12 @@ const runTmux: TmuxRunner = (args) =>
 /**
  * The session a worktree gets: its directory's name, as `<repo>-<n>` for a slot. A slot outlives its
  * branch and so does its session, which keeps the name it was given when the next branch comes in.
- * tmux does not allow `.` or `:` in a session name, and would rewrite them on its own.
+ * tmux does not allow `.` or `:` in a session name, and would rewrite them on its own. It also
+ * expands `-s` as a format, so a `#` would let a directory name run a command through `#()`:
+ * it is replaced too, rather than escaped, so the name looked up is the name tmux keeps.
  */
 export function sessionNameFor(worktreePath: string): string {
-  return path.basename(worktreePath).replace(/[.:]/g, '_') || 'warden';
+  return path.basename(worktreePath).replace(/[.:#]/g, '_') || 'warden';
 }
 
 /** Optional tmux integration; commands never pass through a shell. */

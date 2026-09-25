@@ -30,6 +30,9 @@ describe('tmux integration', () => {
   it('names a session after the worktree directory, as tmux would accept it', () => {
     expect(sessionNameFor('/work/warden-2')).toBe('warden-2');
     expect(sessionNameFor('/work/my.app:1')).toBe('my_app_1');
+    // tmux expands -s as a format: #(...) would run a command, #{...} would rename the session.
+    expect(sessionNameFor('/work/x#(touch p)-1')).toBe('x_(touch p)-1');
+    expect(sessionNameFor('/work/a#{pid}')).toBe('a_{pid}');
   });
 
   it('creates a detached session in the worktree, and hands back the one it already has', async () => {
@@ -42,11 +45,11 @@ describe('tmux integration', () => {
       const run = vi.fn(async (args: string[]) => (args[0] === 'list-sessions' ? listing : ''));
       const tmux = new TmuxService(run);
 
-      expect(await tmux.openSession(wt)).toEqual({ session: 'repo-1 #1', created: true });
-      expect(run).toHaveBeenLastCalledWith(['new-session', '-d', '-s', 'repo-1 #1', '-c', dir.replaceAll('#', '##')]);
+      expect(await tmux.openSession(wt)).toEqual({ session: 'repo-1 _1', created: true });
+      expect(run).toHaveBeenLastCalledWith(['new-session', '-d', '-s', 'repo-1 _1', '-c', dir.replaceAll('#', '##')]);
 
-      listing = `$3\trepo-1 #1\t${dir}\n`;
-      expect(await tmux.openSession(wt)).toEqual({ session: 'repo-1 #1', created: false });
+      listing = `$3\trepo-1 _1\t${dir}\n`;
+      expect(await tmux.openSession(wt)).toEqual({ session: 'repo-1 _1', created: false });
       expect(run.mock.calls.filter(([args]) => args[0] === 'new-session')).toHaveLength(1);
     } finally {
       await rm(root, { recursive: true, force: true });

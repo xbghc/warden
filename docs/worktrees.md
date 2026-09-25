@@ -62,7 +62,8 @@ Each checkout reports how many commits it is ahead of and behind a base, named b
 The *tmux session* button on a row gives that worktree a tmux session of its own: detached, started
 in the worktree's directory, with a shell and nothing run in it, named after the directory —
 `<repo>-<n>` for a slot, which keeps its session when the next branch is checked out into it (tmux
-does not allow `.` or `:` in a name; they become `_`). Getting into it is yours:
+does not allow `.` or `:` in a name, and reads `#` as the start of a format — `#()` would run a
+command — so all three become `_`). Getting into it is yours:
 `tmux attach -t <repo>-<n>`, or `switch-client` from inside tmux. Pressing it again for a worktree
 that already has its session hands that one back rather than making a second; a session of the same
 name in another directory is left alone and reported. No tmux server running yet is fine: the
