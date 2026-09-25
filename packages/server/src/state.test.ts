@@ -1,6 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, utimes, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Comment } from '@warden/shared';
 import { StateStore, defaultState, ensureTarget, forgetWorktreeTargets, repoHash, stateFilePath } from './state.js';
@@ -150,13 +150,60 @@ describe('StateStore', () => {
     expect(s.targets['commit:abc']!.viewed).toEqual({ 'a.ts': 'h' });
     expect(s.todos).toEqual([]);
   });
+});
 
-  it('ignores unknown schema versions', async () => {
+describe('what the state file will not lose', () => {
+  const todo = (id: string) => ({ id, branch: 'main', title: id, body: '', status: 'open' as const, createdAt: '', updatedAt: '' });
+
+  it('refuses a file a newer warden wrote, and leaves it as it is', async () => {
     const file = path.join(dir, 'state.json');
-    await writeFile(file, JSON.stringify({ schemaVersion: 99, targets: { x: {} } }));
-    const s = await new StateStore(file, '/repo').load();
-    expect(s.schemaVersion).toBe(1);
-    expect(s.targets).toEqual({});
+    const text = JSON.stringify({ schemaVersion: 2, repoRoot: '/repo', targets: {}, todos: [todo('t')] });
+    await writeFile(file, text);
+    const store = new StateStore(file, '/repo');
+    await expect(store.load()).rejects.toMatchObject({ code: 'state_too_new' });
+    await expect(store.update((s) => s.todos.push(todo('u')))).rejects.toMatchObject({ code: 'state_too_new' });
+    expect(await readFile(file, 'utf8')).toBe(text);
+  });
+
+  it('sets aside a file that parses but is no state file, rather than writing over it', async () => {
+    const file = path.join(dir, 'state.json');
+    await writeFile(file, '[1, 2, 3]');
+    expect((await new StateStore(file, '/repo').load()).todos).toEqual([]);
+    expect((await readdir(dir)).some((f) => f.startsWith('state.json.corrupt-'))).toBe(true);
+  });
+
+  it('keeps top-level fields it does not know, so a newer field survives this build writing', async () => {
+    const file = path.join(dir, 'state.json');
+    await writeFile(file, JSON.stringify({ schemaVersion: 1, repoRoot: '/repo', targets: {}, todos: [], futureThing: { keep: true } }));
+    await new StateStore(file, '/repo').update((s) => s.todos.push(todo('t')));
+    const written = JSON.parse(await readFile(file, 'utf8'));
+    expect(written.futureThing).toEqual({ keep: true });
+    expect(written.todos.map((t: { id: string }) => t.id)).toEqual(['t']);
+  });
+
+  it('takes over the lock of a process that died holding it', async () => {
+    const file = path.join(dir, 'state.json');
+    await writeFile(`${file}.lock`, '999999:gone');
+    const old = new Date(Date.now() - 60_000);
+    await utimes(`${file}.lock`, old, old);
+    await new StateStore(file, '/repo').update((s) => s.todos.push(todo('t')));
+    expect(JSON.parse(await readFile(file, 'utf8')).todos).toHaveLength(1);
+    expect((await readdir(dir)).filter((f) => f.includes('.lock'))).toEqual([]);
+  });
+
+  it('does not write when its lock was taken over meanwhile, and leaves the new holder’s lock alone', async () => {
+    const file = path.join(dir, 'state.json');
+    const store = new StateStore(file, '/repo');
+    await store.update((s) => s.todos.push(todo('first')));
+    await expect(
+      store.update(async (s) => {
+        s.todos.push(todo('stale'));
+        // Another process decided this one had stalled, took the lock and wrote.
+        await writeFile(`${file}.lock`, 'other:holder');
+      }),
+    ).rejects.toMatchObject({ code: 'state_lock_lost' });
+    expect(JSON.parse(await readFile(file, 'utf8')).todos.map((t: { id: string }) => t.id)).toEqual(['first']);
+    expect(await readFile(`${file}.lock`, 'utf8')).toBe('other:holder');
   });
 });
 

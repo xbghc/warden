@@ -5,8 +5,13 @@ Where the review state lives, and what warden will and will not do to the reposi
 ## State
 
 `~/.local/share/warden/<sha1(repoRoot)[:12]>/state.json` (respects `XDG_DATA_HOME`). Plain JSON with a
-`schemaVersion`, written atomically (temp file + rename) under a small lock file so multiple instances
-can share it. Delete the directory to reset. Checkpoint objects live beside it in `checkpoints/objects`;
+`schemaVersion`, written atomically (temp file, fsync, rename) under a small lock file so multiple
+instances and the agent CLI can share it. The lock carries a token of its own and is refreshed while
+held: one left by a process that died is taken over after 5 s, a slow holder's is not, and a holder
+whose lock was taken over meanwhile writes nothing. A file written by a newer warden is refused
+rather than read as empty; one that is not a state file at all is set aside as `.corrupt-<time>`;
+top-level fields this version does not know are kept when it writes. `schemaVersion` stays 1: every
+warden up to 0.16 replaces a file with any other version by an empty state. Delete the directory to reset. Checkpoint objects live beside it in `checkpoints/objects`;
 deleting a checkpoint leaves them there, since another may share them.
 
 `targets` is keyed by target key, plus one *comment scope* per worktree — `local`, or
