@@ -515,9 +515,18 @@ export interface MoveRequest {
 }
 
 export interface NvimOpenRequest {
-  socket: string;
+  /** The worktree the file is in: the nvim to use is one whose cwd is inside it. */
+  root: string;
+  /** The instance the page has selected, if any. Used while it is alive; the server picks otherwise. */
+  socket?: string;
   absPath: string;
   line: number;
+}
+
+export interface NvimOpenResponse {
+  ok: true;
+  /** The instance the file went to, which the page shows as selected from then on. */
+  socket: string;
 }
 
 export interface CreateTodoRequest {

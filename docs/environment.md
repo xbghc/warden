@@ -13,8 +13,17 @@ Requirements:
 
 warden scans those socket directories, asks each instance for `getcwd()` (500 ms timeout) and keeps the
 instances whose cwd is inside the current target's root. One match is used automatically; with several
-matches a selector appears in the top bar and the choice is remembered per repository root. Results
-are cached for 10 s; use ⟳ to rescan.
+matches a selector appears in the top bar and the choice is remembered per repository root.
+
+Which instance a click goes to is settled when the click arrives, not by an earlier scan: nvim is
+started, quit and restarted while the page stays open. The server tries the selected instance, then
+the one remembered for the root, then the only one open there; when the cached scan (10 s) cannot
+answer, or the instance it names does not respond, it scans afresh and tries again, so a click
+reaches an nvim started after the page loaded, or the one that replaced a restarted editor. An
+instance that is still running but refuses the file (`E37`, say) is reported, not bypassed for
+another; two instances with none selected are left for you to choose between. The top bar's status
+catches up after each click and whenever the browser window regains focus; ⟳ is left for the rare
+case that neither happens.
 
 Clicking a line number runs, roughly, `:edit +<line> <absolute path>` in that instance. Deleted lines
 jump to the nearest new-side line; for commit targets the working-tree file is opened.

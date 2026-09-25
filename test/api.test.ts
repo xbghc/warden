@@ -413,8 +413,9 @@ describe('viewed, comments, export, todos', () => {
     const res = await json<{ instances: unknown[]; selected?: string }>(await get(`/api/nvim/instances?root=${k(fx.root)}`));
     expect(res.instances).toEqual([]);
     expect(res.selected).toBeUndefined();
-    const open = await send('POST', '/api/nvim/open', { socket: '/nope.sock', absPath: '/x', line: 1 });
-    expect(open.status).toBe(400);
+    const open = await send('POST', '/api/nvim/open', { root: fx.root, socket: '/nope.sock', absPath: '/x', line: 1 });
+    expect(open.status).toBe(404);
+    expect(((await open.json()) as { code?: string }).code).toBe('nvim_none');
   });
 });
 

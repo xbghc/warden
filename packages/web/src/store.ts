@@ -740,18 +740,18 @@ export const useStore = create<AppStore>((set, get) => {
     },
 
     async openInNvim(filePath, line) {
+      // No check against the last scan: nvim comes and goes while the page stays open, so the
+      // server finds the instance when the click arrives, and the header catches up afterwards.
       const { nvim, root } = get();
-      const socket = nvim?.selected;
-      if (!socket) {
-        get().showToast(nvim && nvim.instances.length > 1 ? '请先在顶部选择一个 nvim 实例' : '未发现在此仓库打开的 nvim', 'error');
-        return;
-      }
       const absPath = `${root.replace(/\/+$/, '')}/${filePath}`;
       try {
-        await api.nvimOpen(socket, absPath, line);
+        const res = await api.nvimOpen({ root, socket: nvim?.selected, absPath, line });
+        if (res.socket !== nvim?.selected) void get().scanNvim();
       } catch (e) {
-        fail(e);
-        if (e instanceof ApiError && e.code === 'nvim_gone') void get().scanNvim(true);
+        if (e instanceof ApiError && e.code === 'nvim_none') get().showToast('没有在这个仓库里打开的 nvim', 'error');
+        else if (e instanceof ApiError && e.code === 'nvim_ambiguous') get().showToast('这个仓库里开着多个 nvim，在顶栏的 nvim 设置里选一个', 'error');
+        else fail(e);
+        void get().scanNvim();
       }
     },
 

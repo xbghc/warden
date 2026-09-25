@@ -14,6 +14,8 @@ import type {
   ForkPointResponse,
   FullFileResponse,
   NvimInstancesResponse,
+  NvimOpenRequest,
+  NvimOpenResponse,
   Prefs,
   ReanchorResponse,
   ReleaseWorktreeRequest,
@@ -130,5 +132,5 @@ export const api = {
 
   nvimInstances: (root: string, rescan = false) => req<NvimInstancesResponse>('GET', `/api/nvim/instances${q({ root, rescan })}`),
   nvimSelect: (root: string, socket: string) => req<{ ok: true }>('POST', '/api/nvim/select', { root, socket }),
-  nvimOpen: (socket: string, absPath: string, line: number) => req<{ ok: true }>('POST', '/api/nvim/open', { socket, absPath, line }),
+  nvimOpen: (body: NvimOpenRequest) => req<NvimOpenResponse>('POST', '/api/nvim/open', body),
 };

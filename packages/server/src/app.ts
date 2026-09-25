@@ -22,6 +22,7 @@ import type {
   MoveRequest,
   NvimInstancesResponse,
   NvimOpenRequest,
+  NvimOpenResponse,
   Prefs,
   ReanchorRequest,
   ReanchorResponse,
@@ -69,7 +70,7 @@ import { checkoutWorktree, listBranches, listWorktreesDetailed, lookupRemoteBran
 import { ensureTarget, forgetWorktreeTargets, type StateStore, unlinkComments } from './state.js';
 import { formatCommentsExport, formatTodoExport } from './export.js';
 import { addReply } from './feedback.js';
-import { NvimService } from './nvim.js';
+import { chooseNvim, NvimService } from './nvim.js';
 import { TmuxService } from './tmux.js';
 import { DEFAULT_POLL_INTERVAL_MS, RepoWatcher } from './watcher.js';
 import { serveStaticFile } from './static.js';
@@ -999,9 +1000,8 @@ export function createApp(opts: AppOptions): Hono {
     const instances = NvimService.matching(scan.instances, root);
     const state = await store.load();
     const preferred = state.prefs.nvimSocketByRoot[root];
-    let selected: string | undefined;
-    if (preferred && instances.some((i) => i.socket === preferred)) selected = preferred;
-    else if (instances.length === 1) selected = instances[0]!.socket;
+    const choice = chooseNvim(instances, [preferred]);
+    const selected = 'socket' in choice ? choice.socket : undefined;
     const res: NvimInstancesResponse = { root, nvimAvailable: scan.nvimAvailable, instances, selected, scannedAt: scan.scannedAt };
     return c.json(res);
   });
@@ -1015,21 +1015,46 @@ export function createApp(opts: AppOptions): Hono {
     return c.json({ ok: true });
   });
 
+  // The click decides which nvim, not an earlier scan: nvim is started, quit and restarted while
+  // the page stays open, and a list the page fetched at load would send the click nowhere or to a
+  // socket that is gone. The cached scan answers first, being cheap; when it cannot pick, or the
+  // instance it picked does not answer, a fresh scan settles it and the click is not lost.
   api.post('/nvim/open', async (c) => {
     const body = (await c.req.json()) as NvimOpenRequest;
-    if (!body.socket || !body.absPath) throw badRequest('socket and absPath are required');
+    if (!body.absPath) throw badRequest('absPath is required');
     if (!path.isAbsolute(body.absPath)) throw badRequest('absPath must be absolute');
-    const scan = await nvim.scan();
-    if (!scan.instances.some((i) => i.socket === body.socket)) {
-      const fresh = await nvim.scan(true);
-      if (!fresh.instances.some((i) => i.socket === body.socket)) throw badRequest('nvim instance not found (rescan)', 'nvim_gone');
+    const root = await knownRoot(body.root);
+    const wanted = [body.socket, (await store.load()).prefs.nvimSocketByRoot[root]];
+    const line = Number(body.line) || 1;
+    const pick = async (force: boolean) => {
+      const scan = await nvim.scan(force);
+      if (!scan.nvimAvailable) throw badRequest('nvim is not on PATH', 'nvim_unavailable');
+      return { matching: NvimService.matching(scan.instances, root), choice: chooseNvim(NvimService.matching(scan.instances, root), wanted) };
+    };
+    let { choice } = await pick(false);
+    if ('error' in choice) choice = (await pick(true)).choice;
+    if ('error' in choice) {
+      if (choice.error === 'none') throw notFound(`no nvim is open inside ${root}`, 'nvim_none');
+      throw new HttpError(409, `several nvim instances are open inside ${root}; select one`, 'nvim_ambiguous');
     }
     try {
-      await nvim.open(body.socket, body.absPath, Number(body.line) || 1);
+      await nvim.open(choice.socket, body.absPath, line);
+      const res: NvimOpenResponse = { ok: true, socket: choice.socket };
+      return c.json(res);
     } catch (e) {
-      throw new HttpError(502, e instanceof Error ? e.message : String(e), 'nvim_failed');
+      const failure = new HttpError(502, e instanceof Error ? e.message : String(e), 'nvim_failed');
+      // An instance that still answers a scan refused the file itself (say, E37): that is its
+      // answer, not a reason to send the file to another editor. One that is gone is replaced.
+      const fresh = await pick(true);
+      if (fresh.matching.some((i) => i.socket === choice.socket) || 'error' in fresh.choice) throw failure;
+      try {
+        await nvim.open(fresh.choice.socket, body.absPath, line);
+      } catch (e2) {
+        throw new HttpError(502, e2 instanceof Error ? e2.message : String(e2), 'nvim_failed');
+      }
+      const res: NvimOpenResponse = { ok: true, socket: fresh.choice.socket };
+      return c.json(res);
     }
-    return c.json({ ok: true });
   });
 
   app.route('/api', api);

@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { findSockets, NvimService, socketDirs } from './nvim.js';
+import { chooseNvim, findSockets, NvimService, socketDirs } from './nvim.js';
 
 let dir: string;
 const servers: net.Server[] = [];
@@ -53,6 +53,16 @@ describe('nvim discovery', () => {
       { socket: 'd', cwd: '/other' },
     ];
     expect(NvimService.matching(list, '/repo/').map((i) => i.socket)).toEqual(['a', 'b']);
+  });
+
+  it('chooses the wanted instance while it is alive, else the only one, and never guesses between two', () => {
+    const a = { socket: 'a', cwd: '/repo' };
+    const b = { socket: 'b', cwd: '/repo' };
+    expect(chooseNvim([a, b], [undefined, 'b'])).toEqual({ socket: 'b' });
+    expect(chooseNvim([a, b], ['a', 'b'])).toEqual({ socket: 'a' });
+    expect(chooseNvim([a], ['gone', 'gone-too'])).toEqual({ socket: 'a' });
+    expect(chooseNvim([a, b], ['gone'])).toEqual({ error: 'ambiguous' });
+    expect(chooseNvim([], ['a'])).toEqual({ error: 'none' });
   });
 
   it('scan tolerates a missing nvim binary and caches results', async () => {

@@ -80,6 +80,19 @@ export interface NvimScanResult {
   scannedAt: string;
 }
 
+export type NvimChoice = { socket: string } | { error: 'none' | 'ambiguous' };
+
+/**
+ * Which of the instances open on a root to use: the first of `wanted` that is still among them (the
+ * page's selection, then the preference saved for the root), else the only one there is. Several
+ * with none wanted is for the reviewer to settle; warden does not guess between two editors.
+ */
+export function chooseNvim(matching: NvimInstance[], wanted: (string | undefined)[]): NvimChoice {
+  for (const w of wanted) if (w && matching.some((i) => i.socket === w)) return { socket: w };
+  if (matching.length === 1) return { socket: matching[0]!.socket };
+  return { error: matching.length ? 'ambiguous' : 'none' };
+}
+
 export class NvimService {
   private cache: { at: number; result: NvimScanResult } | null = null;
   private pending: Promise<NvimScanResult> | null = null;

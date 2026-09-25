@@ -53,6 +53,20 @@ export function App() {
     if (repoRoot) document.title = `${dirName(repoRoot)} · warden`;
   }, [repoRoot]);
 
+  // Coming back to the page is the usual sign an nvim was just started or quit in the terminal, so
+  // the header's nvim status is refreshed then, at most every few seconds. Clicks do not wait on it:
+  // the server finds the instance when a line number is clicked.
+  useEffect(() => {
+    let last = 0;
+    const onFocus = () => {
+      if (Date.now() - last < 5_000) return;
+      last = Date.now();
+      void useStore.getState().scanNvim(true);
+    };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, []);
+
   // Live repository changes. Reconnects are handled by EventSource itself; a successful reconnect
   // catches up on whatever was missed while the stream was down.
   useEffect(() => {
