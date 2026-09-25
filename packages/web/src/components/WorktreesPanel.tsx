@@ -303,6 +303,14 @@ export function WorktreesPanel() {
                   )}
                   {wt.prunable ? (
                     <span className="badge badge-orphaned">目录已不存在</span>
+                  ) : wt.foreign ? (
+                    <span className="badge badge-orphaned" title="这个目录现在是另一个仓库，warden 不会在里面释放或检出">
+                      不属于本仓库
+                    </span>
+                  ) : wt.busy ? (
+                    <span className="badge badge-orphaned" title="先在终端里完成或中止它，再释放或检出">
+                      {wt.busy} 进行中
+                    </span>
                   ) : wt.dirty > 0 ? (
                     <span className="badge">{wt.dirty} 处未提交改动</span>
                   ) : null}

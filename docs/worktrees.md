@@ -49,6 +49,12 @@ directory behind, `node_modules` and all, and the next branch is checked out int
   whose directory you no longer want; a slot on a branch gets it through *连目录一起删除*. It runs
   `git worktree remove` without `--force`: uncommitted changes are put to you first, as with a
   release, and so is whatever else git refuses without `--force`.
+- A slot is written — released, reset, cleaned, checked out into — only while its directory is still
+  this repository's own checkout. git keeps listing an entry as long as `<dir>/.git` exists, so a
+  repository cloned or initialised where a deleted slot was passes for the slot; warden marks it
+  *不属于本仓库* and refuses every write to it, forced or not. A slot with a rebase, merge,
+  cherry-pick, revert or bisect stopped in it is marked *… 进行中*: it is not free, cannot be
+  released, and removing it asks first, since each would throw the half-done operation away.
 - A worktree whose directory was deleted behind git's back is listed struck through; *清理* drops that
   one entry (`git worktree remove` handles it; nothing is pruned wholesale). A slot in that state
   cannot be released or checked out into, and its number is skipped until the entry is gone.

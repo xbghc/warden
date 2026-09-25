@@ -77,6 +77,53 @@ async function listUpstreams(ctx: RepoContext): Promise<Map<string, Upstream>> {
   return out;
 }
 
+/** The checkout `dir` is, if it is one of its own: git finds a parent's repository from a plain directory too. */
+async function commonDirOf(dir: string): Promise<string | undefined> {
+  try {
+    const r = await runGit(['rev-parse', '--show-toplevel', '--git-common-dir'], { cwd: dir });
+    const [top, common] = r.stdout.trim().split('\n');
+    if (!top || !common || (await realpath(top)) !== (await realpath(dir))) return undefined;
+    return await realpath(path.resolve(dir, common));
+  } catch {
+    return undefined;
+  }
+}
+
+/** The files git keeps while an operation that owns the working tree is stopped halfway. */
+const IN_PROGRESS: [string, string][] = [
+  ['rebase-merge', 'rebase'],
+  ['rebase-apply', 'rebase'],
+  ['MERGE_HEAD', 'merge'],
+  ['CHERRY_PICK_HEAD', 'cherry-pick'],
+  ['REVERT_HEAD', 'revert'],
+  ['BISECT_LOG', 'bisect'],
+];
+
+/**
+ * Whether the directory at a slot's path may be written: it has to be a checkout of this repository
+ * — git lists an entry as long as `<dir>/.git` exists, so a repository cloned where a deleted slot
+ * was still passes for the slot — and nothing may be stopped halfway in it, since a release, a
+ * reuse or a removal would throw the half-done rebase or merge away.
+ */
+async function checkoutState(ctx: RepoContext, dir: string): Promise<{ foreign: boolean; busy?: string }> {
+  const [ours, theirs] = await Promise.all([commonDirOf(ctx.commonRoot), commonDirOf(dir)]);
+  if (!ours || ours !== theirs) return { foreign: true };
+  const r = await runGit(['rev-parse', ...IN_PROGRESS.flatMap(([f]) => ['--git-path', f])], { cwd: dir });
+  const paths = r.stdout.trim().split('\n');
+  for (const [i, [, what]] of IN_PROGRESS.entries()) {
+    const p = paths[i];
+    if (
+      p &&
+      (await stat(path.resolve(dir, p)).then(
+        () => true,
+        () => false,
+      ))
+    )
+      return { foreign: false, busy: what };
+  }
+  return { foreign: false };
+}
+
 export async function listWorktreesDetailed(ctx: RepoContext): Promise<WorktreeDetail[]> {
   const [all, upstreams] = await Promise.all([listWorktreesAll(ctx), listUpstreams(ctx)]);
   const main = all.find((w) => w.isMain);
@@ -84,12 +131,16 @@ export async function listWorktreesDetailed(ctx: RepoContext): Promise<WorktreeD
     all.map(async (w) => {
       const slot = w.isMain || w.bare ? undefined : slotOf(ctx, w.path);
       const dirty = w.prunable || w.bare ? 0 : await dirtyCount(w.path);
+      const state = slot === undefined || w.prunable ? { foreign: false } : await checkoutState(ctx, w.path);
       const detail: WorktreeDetail = {
         ...w,
         dirty,
         ...(slot === undefined ? {} : { slot }),
-        // Free is what the next checkout may take over: a detached HEAD and nothing that would be lost.
-        free: slot !== undefined && !w.prunable && w.detached && dirty === 0,
+        ...(state.foreign ? { foreign: true } : {}),
+        ...(state.busy ? { busy: state.busy } : {}),
+        // Free is what the next checkout may take over: a detached HEAD, nothing that would be lost,
+        // nothing stopped halfway, and a checkout that is this repository's own.
+        free: slot !== undefined && !w.prunable && w.detached && dirty === 0 && !state.foreign && !state.busy,
       };
       // A free slot holds no branch: there is nothing to compare.
       if (detail.free) return detail;
@@ -196,6 +247,8 @@ async function pickSlot(ctx: RepoContext, worktrees: WorktreeDetail[], wanted: n
   }
   const have = slots.find((w) => w.slot === wanted);
   if (have?.prunable) throw new HttpError(409, `the directory of slot ${wanted} is gone; remove its entry first`, 'slot_gone');
+  if (have?.foreign) throw new HttpError(409, `${have.path} is not a checkout of this repository`, 'not_our_checkout');
+  if (have?.busy) throw new HttpError(409, `a ${have.busy} is in progress in slot ${wanted}`, 'operation_in_progress');
   if (have && !have.free) throw new HttpError(409, `slot ${wanted} is in use${have.branch ? ` by ${have.branch}` : ''}`, 'slot_in_use');
   if (have) return { slot: wanted, path: have.path, reuse: true };
   const p = slotPath(ctx, wanted);
@@ -311,6 +364,10 @@ export async function releaseWorktree(ctx: RepoContext, req: ReleaseWorktreeRequ
   if (wt.isMain) throw badRequest('the main worktree cannot be released', 'main_worktree');
   if (wt.bare || slotOf(ctx, wt.path) === undefined) throw badRequest(`${wt.path} is not a slot; remove it instead`, 'not_a_slot');
   if (wt.prunable) throw badRequest(`the directory of ${wt.path} is gone; remove its entry instead`, 'worktree_gone');
+  // Checked before anything else touches the directory: a forced release runs reset --hard and clean.
+  const state = await checkoutState(ctx, wt.path);
+  if (state.foreign) throw new HttpError(409, `${wt.path} is not a checkout of this repository; warden will not write in it`, 'not_our_checkout');
+  if (state.busy) throw new HttpError(409, `a ${state.busy} is in progress in ${wt.path}; finish or abort it first`, 'operation_in_progress');
   const dirty = await dirtyCount(wt.path);
   if (dirty > 0 && !req.force) throw new HttpError(409, `${wt.path} has uncommitted changes`, 'worktree_dirty');
   if (dirty > 0) {
@@ -336,6 +393,11 @@ export async function removeWorktree(ctx: RepoContext, req: RemoveWorktreeReques
   const wt = (await listWorktreesAll(ctx)).find((w) => w.path === p || (p && w.path === path.resolve(p)));
   if (!wt) throw badRequest(`unknown worktree: ${p}`, 'unknown_worktree');
   if (wt.isMain) throw badRequest('the main worktree cannot be removed', 'main_worktree');
+  // git removes a clean checkout with a rebase stopped in it without a word; that is asked first.
+  if (!wt.prunable && !req.force) {
+    const state = await checkoutState(ctx, wt.path);
+    if (state.busy) throw new HttpError(409, `a ${state.busy} is in progress in ${wt.path}; removing it throws that away`, 'needs_force');
+  }
   const args = ['worktree', 'remove'];
   if (req.force) args.push('--force');
   args.push(wt.path);

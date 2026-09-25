@@ -221,6 +221,13 @@ export interface WorktreeDetail extends WorktreeInfo {
   /** git still lists it but its directory is gone; removing it drops the entry, nothing else. */
   prunable: boolean;
   /**
+   * The directory is there but is not a checkout of this repository — another repository was cloned
+   * or initialised where a slot used to be. warden writes nothing in it.
+   */
+  foreign?: boolean;
+  /** A rebase, merge, cherry-pick, revert or bisect is under way in it, which a release or reuse would throw away. */
+  busy?: string;
+  /**
    * Its number when the checkout is one of warden's slots — `<repo>-<n>` beside the main worktree,
    * the directories that outlive their branch and get checked out into again. A worktree made
    * anywhere else has none.
