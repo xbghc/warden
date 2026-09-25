@@ -285,10 +285,14 @@ export const useStore = create<AppStore>((set, get) => {
     return t.kind === 'working' ? s.unstaged : t.kind === 'staged' ? s.staged : s.allFiles;
   };
 
-  const loadDiff = async (path: string): Promise<FileDiff | undefined> => {
+  /** The refresh in progress, which a refresh asked for meanwhile waits on (see refresh). */
+  let refreshRun: Promise<void> | null = null;
+
+  /** `keep` leaves a diff already on screen there while the new one loads, rather than a placeholder. */
+  const loadDiff = async (path: string, keep = false): Promise<FileDiff | undefined> => {
     const { targetKey, files } = get();
     const entry = files.find((f) => f.path === path);
-    set((s) => ({ diffs: { ...s.diffs, [path]: { status: 'loading' } } }));
+    if (!(keep && get().diffs[path]?.status === 'ok')) set((s) => ({ diffs: { ...s.diffs, [path]: { status: 'loading' } } }));
     try {
       const diff = await api.file(targetKey, path, { oldPath: entry?.oldPath, untracked: entry?.untracked });
       if (get().targetKey !== targetKey) return undefined;
@@ -484,23 +488,46 @@ export const useStore = create<AppStore>((set, get) => {
     },
 
     async refresh() {
-      // A change landing mid-refresh is coalesced into a single follow-up pass.
+      // A change landing mid-refresh is coalesced into a single follow-up pass, and whoever asked
+      // waits for that pass: a stage that refreshes to hand on to the next file must see the index
+      // it just wrote, not the listing of a pass that started before it.
       if (get().refreshing) {
         set({ refreshPending: true });
-        return;
+        return refreshRun ?? undefined;
       }
-      const { activeFile } = get();
-      set({ refreshing: true, restoreScroll: true, diffs: {}, stageSel: null, refreshNonce: get().refreshNonce + 1 });
+      refreshRun = (async () => {
+        const { activeFile, diffs } = get();
+        // The open file's diff stays on screen while it reloads. An agent writing other files moves
+        // the listing, not this diff, and swapping it for a placeholder rebuilt the view: the lines
+        // being picked for staging, the context opened up and the folds were all lost with it.
+        const shown = activeFile ? diffs[activeFile] : undefined;
+        const before = shown?.status === 'ok' ? shown.diff.contentHash : undefined;
+        set({
+          refreshing: true,
+          restoreScroll: true,
+          diffs: activeFile && shown ? { [activeFile]: shown } : {},
+          refreshNonce: get().refreshNonce + 1,
+        });
+        try {
+          await get().loadFiles();
+          const after = activeFile && get().files.some((f) => f.path === activeFile) ? await loadDiff(activeFile, true) : undefined;
+          // Only a diff that changed invalidates the pick (it indexes lines of the diff it was made
+          // on) and remounts the view, which is what consumes restoreScroll.
+          if (after?.contentHash === before && before !== undefined) set({ restoreScroll: false });
+          else set({ stageSel: null });
+          set({ lastRefreshAt: new Date().toISOString() });
+        } finally {
+          set({ refreshing: false });
+        }
+        if (get().refreshPending) {
+          set({ refreshPending: false });
+          await get().refresh();
+        }
+      })();
       try {
-        await get().loadFiles();
-        if (activeFile && get().files.some((f) => f.path === activeFile)) await loadDiff(activeFile);
-        set({ lastRefreshAt: new Date().toISOString() });
+        await refreshRun;
       } finally {
-        set({ refreshing: false });
-      }
-      if (get().refreshPending) {
-        set({ refreshPending: false });
-        await get().refresh();
+        refreshRun = null;
       }
     },
 
