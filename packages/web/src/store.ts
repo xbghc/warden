@@ -409,7 +409,10 @@ export const useStore = create<AppStore>((set, get) => {
 
     async switchView(key, nextActiveFile) {
       const target = tryParseTargetKey(key);
-      if (!target || !isLocalTarget(target)) {
+      // The cached lists and comments are the local views of the worktree in front. Anything else —
+      // a commit or checkpoint, or a local view of another worktree (a todo's comment can be in
+      // either) — is a new target altogether and is loaded as one.
+      if (!target || !isLocalTarget(target) || commentScopeKey(key) !== commentScopeKey(get().targetKey)) {
         await get().setTarget(key);
         return;
       }
