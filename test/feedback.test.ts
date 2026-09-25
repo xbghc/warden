@@ -104,6 +104,20 @@ describe('the loop between reviewer and agent', () => {
     expect(text).toContain('> why z?\nAgent replied:\n> renamed it to zeta\nReviewer replied:\n> and the callers?');
   });
 
+  it('sends a comment out again once its body is edited after it went', async () => {
+    const c = await json<Comment>(
+      await send('POST', `/api/targets/${k('working')}/comments`, { filePath: 'src/a.ts', side: 'new', startLine: 4, endLine: 4, body: 'first take' }),
+    );
+    expect((await take()).map((x) => x.id)).toContain(c.id);
+    const same = await json<Comment>(await send('PATCH', `/api/targets/${k('working')}/comments/${c.id}`, { body: 'first take' }));
+    expect(same.exportedAt).toBeTruthy();
+    const edited = await json<Comment>(await send('PATCH', `/api/targets/${k('working')}/comments/${c.id}`, { body: 'second take' }));
+    expect(edited.exportedAt).toBeUndefined();
+    expect(edited.status).toBe('active');
+    expect((await take()).map((x) => [x.id, x.body])).toEqual([[c.id, 'second take']]);
+    await send('DELETE', `/api/targets/${k('working')}/comments/${c.id}`);
+  });
+
   it('refuses a reply through a target whose pool the comment is not in', async () => {
     const res = await send('POST', `/api/targets/${k('commit:HEAD')}/comments/${comment.id}/replies`, { body: 'x' });
     expect(res.status).toBe(404);

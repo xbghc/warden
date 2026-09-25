@@ -516,7 +516,13 @@ export function createApp(opts: AppOptions): Hono {
       const t = ensureTarget(s, scope);
       const idx = t.comments.findIndex((x) => x.id === id);
       if (idx < 0) throw notFound('comment not found');
-      const next: Comment = { ...t.comments[idx]!, ...patch, updatedAt: new Date().toISOString() };
+      const prev = t.comments[idx]!;
+      const next: Comment = { ...prev, ...patch, updatedAt: new Date().toISOString() };
+      // A changed note is one the agent has not read: it goes out again, as a reviewer reply does.
+      if (patch.body !== undefined && patch.body !== prev.body && next.exportedAt) {
+        delete next.exportedAt;
+        if (next.status === 'exported') next.status = 'active';
+      }
       t.comments[idx] = next;
       return next;
     });

@@ -369,9 +369,10 @@ describe('viewed, comments, export, todos', () => {
     const c = state.targets.local!.comments[0]!;
     expect(c.status).toBe('exported');
     expect(c.exportedAt).toBeTruthy();
-    // editing the body keeps it exported; re-anchoring an exported comment keeps exported status
+    // A changed body is one the agent has not read, so it waits to go out again.
     const edited = await json<Comment>(await send('PATCH', `/api/targets/${k('working')}/comments/${comment.id}`, { body: 'why 4?' }));
-    expect(edited.status).toBe('exported');
+    expect(edited.status).toBe('active');
+    expect(edited.exportedAt).toBeUndefined();
     expect(edited.body).toBe('why 4?');
   });
 
