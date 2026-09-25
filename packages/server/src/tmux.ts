@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
+import path from 'node:path';
 import { realpath } from 'node:fs/promises';
-import type { TmuxSession, TmuxWindowResponse } from '@warden/shared';
+import type { TmuxSession, TmuxSessionResponse } from '@warden/shared';
 import { HttpError } from './errors.js';
 
 export type TmuxRunner = (args: string[]) => Promise<string>;
@@ -16,28 +17,49 @@ const runTmux: TmuxRunner = (args) =>
     });
   });
 
+/**
+ * The session a worktree gets: its directory's name, as `<repo>-<n>` for a slot. A slot outlives its
+ * branch and so does its session, which keeps the name it was given when the next branch comes in.
+ * tmux does not allow `.` or `:` in a session name, and would rewrite them on its own.
+ */
+export function sessionNameFor(worktreePath: string): string {
+  return path.basename(worktreePath).replace(/[.:]/g, '_') || 'warden';
+}
+
 /** Optional tmux integration; commands never pass through a shell. */
 export class TmuxService {
   constructor(private run: TmuxRunner = runTmux) {}
 
-  async sessions(mainRoot: string): Promise<TmuxSession[]> {
-    const root = await realpath(mainRoot);
-    const output = await this.run(['list-sessions', '-F', '#{session_id}\t#{session_name}\t#{session_path}']);
+  private async list(): Promise<TmuxSession[]> {
+    const output = await this.run(['list-sessions', '-F', '#{session_id}\t#{session_name}\t#{session_path}']).catch((e) => {
+      // No server running is "no sessions yet", not a failure: new-session starts one.
+      if (e instanceof HttpError && /no server running|error connecting/i.test(e.message)) return '';
+      throw e;
+    });
     const sessions: TmuxSession[] = [];
     for (const line of output.trimEnd().split('\n')) {
       const [id, name, ...parts] = line.split('\t');
-      const path = parts.join('\t');
-      if (!id || !/^\$\d+$/.test(id) || !name || !path) continue;
-      if ((await realpath(path).catch(() => null)) === root) sessions.push({ id, name, path });
+      const dir = parts.join('\t');
+      if (!id || !/^\$\d+$/.test(id) || !name || !dir) continue;
+      sessions.push({ id, name, path: dir });
     }
     return sessions;
   }
 
-  async open(mainRoot: string, worktreePath: string, sessionId: string): Promise<TmuxWindowResponse> {
-    const session = (await this.sessions(mainRoot)).find((s) => s.id === sessionId);
-    if (!session) throw new HttpError(409, '主仓库对应的 tmux session 已不存在，请刷新后重试', 'tmux_session_missing');
+  /**
+   * A detached session in the worktree, named after its directory, with a shell and nothing run in
+   * it. One already there for the same directory is handed back rather than doubled; one of that
+   * name elsewhere is refused, not replaced — it is someone's work.
+   */
+  async openSession(worktreePath: string): Promise<TmuxSessionResponse> {
     const directory = await realpath(worktreePath);
-    const window = (await this.run(['new-window', '-d', '-P', '-F', '#{window_id}', '-t', `${session.id}:`, '-c', directory.replaceAll('#', '##')])).trim();
-    return { session: session.name, window };
+    const name = sessionNameFor(directory);
+    const existing = (await this.list()).find((x) => x.name === name);
+    if (existing) {
+      if ((await realpath(existing.path).catch(() => null)) === directory) return { session: name, created: false };
+      throw new HttpError(409, `已有同名 tmux session ${name}，工作目录是 ${existing.path}`, 'tmux_name_taken');
+    }
+    await this.run(['new-session', '-d', '-s', name, '-c', directory.replaceAll('#', '##')]);
+    return { session: name, created: true };
   }
 }

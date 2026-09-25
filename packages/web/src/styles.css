@@ -1815,9 +1815,6 @@ button.wt-review:hover {
   text-decoration: line-through;
   color: var(--muted);
 }
-.wt-tmux > * + * {
-  margin-top: 8px;
-}
 @media (max-width: 650px) {
   .wt-commit {
     flex-wrap: wrap;

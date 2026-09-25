@@ -34,8 +34,7 @@ import type {
   UpdateNotice,
   UpdateTodoRequest,
   WorktreesResponse,
-  TmuxSessionsResponse,
-  TmuxWindowResponse,
+  TmuxSessionResponse,
 } from '@warden/shared';
 
 export class ApiError extends Error {
@@ -124,8 +123,7 @@ export const api = {
 
   worktrees: () => req<WorktreesResponse>('GET', '/api/worktrees'),
   remoteBranches: (branch: string) => req<RemoteBranchesResponse>('GET', `/api/worktrees/remotes${q({ branch })}`),
-  tmuxSessions: () => req<TmuxSessionsResponse>('GET', '/api/tmux/sessions'),
-  openTmuxWindow: (body: { path: string; sessionId: string }) => req<TmuxWindowResponse>('POST', '/api/tmux/windows', body),
+  openTmuxSession: (body: { path: string }) => req<TmuxSessionResponse>('POST', '/api/tmux/sessions', body),
   createWorktree: (body: CreateWorktreeRequest) => req<CreateWorktreeResponse>('POST', '/api/worktrees', body),
   releaseWorktree: (body: ReleaseWorktreeRequest) => req<ReleaseWorktreeResponse>('POST', '/api/worktrees/release', body),
   removeWorktree: (body: RemoveWorktreeRequest) => req<RemoveWorktreeResponse>('POST', '/api/worktrees/remove', body),

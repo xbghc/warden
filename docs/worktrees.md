@@ -59,6 +59,16 @@ directory behind, `node_modules` and all, and the next branch is checked out int
 
 Each checkout reports how many commits it is ahead of and behind a base, named beside the counts. A branch with an upstream, the main checkout's included, is counted against it (`origin/topic`): what is not pushed and what is not pulled yet, as `git status` counts them. Any other checkout, or one whose upstream is gone (`[origin/topic: gone]`, which the row notes), is counted against the branch currently checked out in the main repository; “已合并” there means its HEAD is reachable from the main checkout HEAD, which squash merges and cherry-picks do not imply. Either way the base is the ref `git branch -d` checks, so a branch with nothing ahead is one *一并删除分支* will take. Expand a row to browse its paginated commit history (including shared commits) or view that branch’s todos.
 
-The optional tmux integration discovers sessions whose `session_path` resolves to the main repository directory. Click tmux to create a window immediately when exactly one session matches. With multiple matches, choose a session first. The new window starts in the worktree directory. It uses `tmux new-window -d -c` without sending a shell command; existing windows stay selected. No session is created automatically. Run warden alongside tmux in Linux, macOS, or WSL, using the same user/server environment. See the [tmux manual](https://man.openbsd.org/tmux.1).
+The *tmux session* button on a row gives that worktree a tmux session of its own: detached, started
+in the worktree's directory, with a shell and nothing run in it, named after the directory —
+`<repo>-<n>` for a slot, which keeps its session when the next branch is checked out into it (tmux
+does not allow `.` or `:` in a name; they become `_`). Getting into it is yours:
+`tmux attach -t <repo>-<n>`, or `switch-client` from inside tmux. Pressing it again for a worktree
+that already has its session hands that one back rather than making a second; a session of the same
+name in another directory is left alone and reported. No tmux server running yet is fine: the
+session starts one. It runs `tmux new-session -d -s <name> -c <dir>` without a shell, and touches no
+repository file. Run warden in the same user and tmux environment as your terminals (Linux, macOS or
+WSL); see the [tmux manual](https://man.openbsd.org/tmux.1).
 
-`GET /api/tmux/sessions` lists matching sessions. `POST /api/tmux/windows` accepts a registered worktree `path` and a matching `sessionId`; the server revalidates both before creating a window. This optional action creates a terminal window but does not modify repository files.
+`POST /api/tmux/sessions` takes a registered worktree `path`; the server checks it against
+`git worktree list` before running anything.

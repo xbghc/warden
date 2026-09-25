@@ -84,8 +84,7 @@ export function setupWorktreeStore() {
         ? [{ id: 't1', branch, title: '验证导出格式', body: '覆盖文件名和行号。', status: 'open' as const, createdAt: '', updatedAt: '' }]
         : [],
   }));
-  api.tmuxSessions = fn(async () => ({ sessions: [{ id: '$1', name: 'warden', path: root }] }));
-  api.openTmuxWindow = fn(async () => ({ session: 'warden', window: '@3' }));
+  api.openTmuxSession = fn(async () => ({ session: 'warden-1', created: true }));
   api.createWorktree = fn(async ({ slot }) => ({ worktree: worktrees[1]!, slot: slot ?? 2, reused: slot !== 3 }));
   api.releaseWorktree = fn(async () => ({ ok: true as const, branchDeleted: true }));
   api.removeWorktree = fn(async () => ({ ok: true as const, branchDeleted: false }));

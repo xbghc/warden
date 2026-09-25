@@ -871,13 +871,14 @@ export function createApp(opts: AppOptions): Hono {
   // ---- worktrees -----------------------------------------------------------
 
   const tmux = opts.tmux ?? new TmuxService();
-  api.get('/tmux/sessions', async (c) => c.json({ sessions: await tmux.sessions(repo.commonRoot) }));
-  api.post('/tmux/windows', async (c) => {
+  // One session per worktree, in its directory, created detached: getting into it is the reviewer's.
+  api.post('/tmux/sessions', async (c) => {
     const body = await c.req.json();
-    if (!body || typeof body.path !== 'string' || typeof body.sessionId !== 'string') throw badRequest('path and sessionId are required');
+    if (!body || typeof body.path !== 'string') throw badRequest('path is required');
     const wt = (await worktrees(true)).find((w) => w.path === body.path && !w.bare);
     if (!wt) throw badRequest('unknown worktree', 'unknown_worktree');
-    return c.json(await tmux.open(repo.commonRoot, wt.path, body.sessionId), 201);
+    const res = await tmux.openSession(wt.path);
+    return c.json(res, res.created ? 201 : 200);
   });
 
   api.get('/worktrees', async (c) => {

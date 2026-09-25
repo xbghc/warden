@@ -254,12 +254,10 @@ export interface TmuxSession {
   name: string;
   path: string;
 }
-export interface TmuxSessionsResponse {
-  sessions: TmuxSession[];
-}
-export interface TmuxWindowResponse {
+export interface TmuxSessionResponse {
   session: string;
-  window: string;
+  /** False when the worktree already had its session, which is handed back as it is. */
+  created: boolean;
 }
 
 export interface BranchInfo {

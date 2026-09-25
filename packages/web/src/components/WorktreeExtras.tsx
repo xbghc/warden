@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import type { CommitInfo, TmuxSession, Todo, WorktreeComparison, WorktreeDetail } from '@warden/shared';
+import { useEffect, useState } from 'react';
+import type { CommitInfo, Todo, WorktreeComparison, WorktreeDetail } from '@warden/shared';
 import { formatTargetKey } from '@warden/shared';
 import { api } from '../api';
 import { useStore } from '../store';
@@ -107,74 +107,6 @@ function BranchTodos({ branch }: { branch: string }) {
   );
 }
 
-function TmuxWindow({ wt, initialSessions, initialError }: { wt: WorktreeDetail; initialSessions: TmuxSession[] | null; initialError: string }) {
-  const [sessions, setSessions] = useState(initialSessions);
-  const [selected, setSelected] = useState(initialSessions?.[0]?.id ?? '');
-  const [error, setError] = useState(initialError);
-  const [busy, setBusy] = useState(false);
-  const [refresh, setRefresh] = useState(0);
-  const showToast = useStore((s) => s.showToast);
-  useEffect(() => {
-    if (refresh === 0) return;
-    let alive = true;
-    setSessions(null);
-    setError('');
-    setSelected('');
-    api
-      .tmuxSessions()
-      .then((result) => {
-        if (!alive) return;
-        setSessions(result.sessions);
-        setSelected(result.sessions[0]?.id ?? '');
-      })
-      .catch((e) => {
-        if (alive) setError(message(e));
-      });
-    return () => {
-      alive = false;
-    };
-  }, [refresh]);
-  return (
-    <div className="wt-tmux">
-      <div className="muted small">在主仓库的 tmux session 中新建窗口，目录为 {wt.path}</div>
-      {error && <div role="alert">{error}</div>}
-      {!sessions && !error && <div role="status">查找 tmux session…</div>}
-      {sessions?.length === 0 && <div className="muted">没有工作目录为主仓库的 tmux session。请先在主仓库目录启动 tmux。</div>}
-      {!!sessions?.length && (
-        <div className="row-actions">
-          <select aria-label="tmux session" value={selected} onChange={(e) => setSelected(e.target.value)}>
-            {sessions.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </select>
-          <button
-            disabled={busy || !selected}
-            onClick={async () => {
-              setBusy(true);
-              setError('');
-              try {
-                const result = await api.openTmuxWindow({ path: wt.path, sessionId: selected });
-                showToast(`已在 ${result.session} 创建窗口 ${result.window}`);
-              } catch (e) {
-                setError(message(e));
-              } finally {
-                setBusy(false);
-              }
-            }}
-          >
-            <ActionIcon name={busy ? 'loading' : 'add'} label="新建 tmux 窗口" />
-          </button>
-        </div>
-      )}
-      <button className="link" disabled={busy} onClick={() => setRefresh((n) => n + 1)}>
-        <ActionIcon name="refresh" label="刷新 tmux session" />
-      </button>
-    </div>
-  );
-}
-
 /**
  * Ahead and behind, with what they are counted against named beside them, since the two read
  * differently: against the branch's upstream they are what is not pushed and not pulled yet; against
@@ -201,36 +133,19 @@ function Comparison({ comparison: c }: { comparison: WorktreeComparison }) {
 }
 
 export function WorktreeExtras({ wt }: { wt: WorktreeDetail }) {
-  const [tab, setTab] = useState<'commits' | 'todos' | 'tmux' | null>(null);
+  const [tab, setTab] = useState<'commits' | 'todos' | null>(null);
   const [tmuxBusy, setTmuxBusy] = useState(false);
-  const tmuxPending = useRef(false);
-  const [tmuxSessions, setTmuxSessions] = useState<TmuxSession[] | null>(null);
-  const [tmuxError, setTmuxError] = useState('');
   const showToast = useStore((s) => s.showToast);
+  // A session of its own for the worktree, made in the background; getting into it is up to you.
   const openTmux = async () => {
-    if (tmuxPending.current) return;
-    if (tab === 'tmux') {
-      setTab(null);
-      return;
-    }
-    tmuxPending.current = true;
+    if (tmuxBusy) return;
     setTmuxBusy(true);
-    setTmuxError('');
-    setTmuxSessions(null);
     try {
-      const { sessions } = await api.tmuxSessions();
-      if (sessions.length === 1) {
-        const result = await api.openTmuxWindow({ path: wt.path, sessionId: sessions[0]!.id });
-        showToast(`已在 ${result.session} 创建窗口 ${result.window}`);
-      } else {
-        setTmuxSessions(sessions);
-        setTab('tmux');
-      }
+      const res = await api.openTmuxSession({ path: wt.path });
+      showToast(res.created ? `已创建 tmux session ${res.session}` : `tmux session ${res.session} 已存在`);
     } catch (e) {
-      setTmuxError(message(e));
-      setTab('tmux');
+      showToast(message(e), 'error');
     } finally {
-      tmuxPending.current = false;
       setTmuxBusy(false);
     }
   };
@@ -244,32 +159,27 @@ export function WorktreeExtras({ wt }: { wt: WorktreeDetail }) {
       )}
       {wt.comparisonError && <span className="muted">{wt.comparisonError}</span>}
       <div className="row-actions">
-        {(['commits', 'todos', 'tmux'] as const).map((item) => (
+        {(['commits', 'todos'] as const).map((item) => (
           <button
             key={item}
             className="link"
             aria-expanded={tab === item}
-            disabled={tmuxBusy || (item !== 'todos' && (wt.prunable || wt.bare)) || (item === 'todos' && !wt.branch)}
-            onClick={() => (item === 'tmux' ? void openTmux() : setTab(tab === item ? null : item))}
+            disabled={(item === 'commits' && (wt.prunable || wt.bare)) || (item === 'todos' && !wt.branch)}
+            onClick={() => setTab(tab === item ? null : item)}
           >
-            <ActionIcon
-              name={item === 'commits' ? 'history' : item === 'todos' ? 'todos' : tmuxBusy ? 'loading' : 'terminal'}
-              label={item === 'commits' ? '提交列表' : item === 'todos' ? '分支 TODO' : 'tmux'}
-            />
+            <ActionIcon name={item === 'commits' ? 'history' : 'todos'} label={item === 'commits' ? '提交列表' : '分支 TODO'} />
           </button>
         ))}
+        <button
+          className="link"
+          disabled={tmuxBusy || wt.prunable || wt.bare}
+          onClick={() => void openTmux()}
+          title={`在 ${wt.path} 新建 tmux session（已有就复用），不切换过去`}
+        >
+          <ActionIcon name={tmuxBusy ? 'loading' : 'terminal'} label="tmux session" />
+        </button>
       </div>
-      {tab && (
-        <div className="wt-expanded">
-          {tab === 'commits' ? (
-            <History key={wt.head} wt={wt} />
-          ) : tab === 'todos' ? (
-            <BranchTodos key={wt.branch} branch={wt.branch!} />
-          ) : (
-            <TmuxWindow wt={wt} initialSessions={tmuxSessions} initialError={tmuxError} />
-          )}
-        </div>
-      )}
+      {tab && <div className="wt-expanded">{tab === 'commits' ? <History key={wt.head} wt={wt} /> : <BranchTodos key={wt.branch} branch={wt.branch!} />}</div>}
     </div>
   );
 }
