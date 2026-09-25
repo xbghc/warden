@@ -178,6 +178,8 @@ describe('a hand-off notes the working tree', () => {
     expect(await handoffs()).toHaveLength(before);
     await json<ExportResponse>(await send('POST', '/api/comments/export', { commentIds: [c.id] }));
     expect((await find(c.id))?.exportedAt).toBeTruthy();
+    // The confirmed hand-off's checkpoint lands in the background; let it, so the next test counts from after it.
+    await settle(before + 1);
     await send('DELETE', `/api/targets/${k('working')}/comments/${c.id}`);
   });
 

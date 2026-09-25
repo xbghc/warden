@@ -162,3 +162,24 @@ describe('reanchorComment', () => {
     expect(r.startLine).toBe(3); // old side unchanged
   });
 });
+
+describe('a lone match elsewhere in the file', () => {
+  it('does not follow a short, common line to unrelated code', () => {
+    const before = diffOf(['+function load() {', '+  if (!id) {', '+    return null;', '+  }', '+}']);
+    const c = makeComment(before, 'new', 3, 3);
+    // That function is gone; another one, with nothing in common around it, also returns null.
+    const after = diffOf(['+export const rows = [];', '+', '+export function pick(i) {', '+  const r = rows[i];', '+    return null;', '+}'], {
+      newStart: 20,
+    });
+    expect(reanchorComment(c, after).status).toBe('orphaned');
+  });
+
+  it('still follows a line that says enough on its own to a new place', () => {
+    const before = diffOf(['+function total(items) {', '+  return items.reduce((sum, item) => sum + item.price, 0);', '+}']);
+    const c = makeComment(before, 'new', 2, 2);
+    const after = diffOf(['+// moved below', '+const x = 1;', '+  return items.reduce((sum, item) => sum + item.price, 0);'], { newStart: 40 });
+    const moved = reanchorComment(c, after);
+    expect(moved.status).toBe('active');
+    expect(moved.startLine).toBe(42);
+  });
+});

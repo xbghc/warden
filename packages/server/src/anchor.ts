@@ -81,6 +81,15 @@ function matchesAt(lines: SideLine[], start: number, hashes: string[]): boolean 
   return true;
 }
 
+/** Enough non-blank text across the lines that finding them again is not a coincidence. */
+const DISTINCTIVE_CHARS = 24;
+
+function distinctive(lines: SideLine[], start: number, count: number): boolean {
+  let chars = 0;
+  for (let i = start; i < start + count; i++) chars += lines[i]!.content.replace(/\s+/g, '').length;
+  return chars >= DISTINCTIVE_CHARS;
+}
+
 function contextScore(lines: SideLine[], start: number, count: number, anchor: CommentAnchor): number {
   let score = 0;
   const before = anchor.contextBefore;
@@ -115,7 +124,13 @@ export function locateAnchor(diff: FileDiff, side: CommentSide, anchor: CommentA
     if (matchesAt(lines, i, anchor.lineHashes)) candidates.push(i);
   }
   if (candidates.length === 0) return undefined;
-  if (candidates.length === 1) return candidates[0];
+  if (candidates.length === 1) {
+    // Found once, with nothing around it that it had before: trusted only when the lines say enough
+    // on their own. A `return null;` or a `}` turns up elsewhere in a file all the time, and
+    // following it would move the comment onto unrelated code and overwrite the snippet it kept.
+    const c = candidates[0]!;
+    return contextScore(lines, c, n, anchor) > 0 || distinctive(lines, c, n) ? c : undefined;
+  }
   let best: number[] = [];
   let bestScore = -1;
   for (const c of candidates) {
