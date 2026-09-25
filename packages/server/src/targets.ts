@@ -37,7 +37,15 @@ async function runDiff(ctx: TargetContext, args: string[]): Promise<string> {
   return withCheckpointIndex(ctx.cwd, checkpointOf(ctx).store, async (snapshot) => (await runGit(args, { cwd: ctx.cwd, snapshot })).stdout);
 }
 
-const DIFF_BASE_ARGS = ['diff', '--no-color', '--no-ext-diff', '-U3', '-M', '--find-renames'];
+/**
+ * Every diff warden parses or turns into a patch. The user's git config reaches these commands, and
+ * each flag here overrides one setting that would change the output: textconv would put a
+ * converted text in the patch staging applies (a PDF's extracted text, say, in the index), the
+ * mnemonic or no-prefix settings would break every path, and diff.submodule would hide a
+ * submodule's change or list files from inside it.
+ */
+const DIFF_OUTPUT_ARGS = ['--no-color', '--no-ext-diff', '--no-textconv', '--src-prefix=a/', '--dst-prefix=b/', '--submodule=short', '-U3'];
+const DIFF_BASE_ARGS = ['diff', ...DIFF_OUTPUT_ARGS, '-M', '--find-renames'];
 
 export function resolveTargetContext(repo: RepoContext, worktrees: WorktreeInfo[], key: TargetKey): TargetContext {
   let target: Target;
@@ -62,7 +70,7 @@ function assertRepoPath(p: string): void {
 }
 
 /** Pathspec for exactly this file: without the magic, a name starting with `:` is read as pathspec syntax. */
-const literal = (p: string): string => `:(literal)${p}`;
+export const literal = (p: string): string => `:(literal)${p}`;
 
 async function hasHead(cwd: string): Promise<boolean> {
   return refExists(cwd, 'HEAD');
@@ -126,7 +134,7 @@ async function isUntracked(cwd: string, file: string): Promise<boolean> {
 
 async function untrackedDiff(cwd: string, file: string): Promise<FileDiff | undefined> {
   // `git diff --no-index` exits 1 when there are differences (always, for a new file).
-  const r = await runGit(['diff', '--no-color', '--no-ext-diff', '-U3', '--no-index', '--', '/dev/null', file], {
+  const r = await runGit(['diff', ...DIFF_OUTPUT_ARGS, '--no-index', '--', '/dev/null', file], {
     cwd,
     okCodes: [0, 1],
   });
@@ -156,7 +164,8 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
 /** Full diff for the target, parsed. */
 export async function listTargetDiffs(ctx: TargetContext): Promise<FileDiff[]> {
   const args = await diffArgs(ctx);
-  const files = parseUnifiedDiff(await runDiff(ctx, args));
+  // `--` so that a file named like a revision (`HEAD`, a branch) is not read as one.
+  const files = parseUnifiedDiff(await runDiff(ctx, [...args, '--']));
   if (includesUntracked(ctx.target)) {
     const untracked = await listUntracked(ctx.cwd);
     const extra = await mapLimit(untracked, 8, (f) => untrackedDiff(ctx.cwd, f).catch(() => undefined));
@@ -243,7 +252,9 @@ async function pathsWithMarkers(ctx: TargetContext, side: CommentSide, paths: st
   const found = new Set<string>();
   if (paths.length === 0) return found;
   const ref = await refForSide(ctx, side);
-  const args = ['grep', '-l', '-z', '-I', '-i', '-F', ...DEBUG_MARKER_STRINGS.flatMap((m) => ['-e', m])];
+  // color.ui=always would wrap each name in escapes, submodule.recurse would make --untracked fatal:
+  // either way no file would be found to hold a marker, and debug lines would be staged as code.
+  const args = ['grep', '--no-color', '--no-recurse-submodules', '-l', '-z', '-I', '-i', '-F', ...DEBUG_MARKER_STRINGS.flatMap((m) => ['-e', m])];
   // The working tree includes the untracked files the listing shows; a tree prints `<ref>:<path>`.
   if (ref === undefined) args.push('--untracked');
   else if (ref === ':0') args.push('--cached');

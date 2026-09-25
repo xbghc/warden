@@ -63,7 +63,7 @@ import { badRequest, HttpError, notFound } from './errors.js';
 import { COMMIT_FORMAT, parseCommitLog } from './commits.js';
 import { applyToIndex, mergeBase, refExists, revParse, runGit } from './git.js';
 import { currentBranch, getRepoInfo, listWorktrees, type RepoContext } from './repo.js';
-import { annotateDebug, getFileDiff, getFullFile, listTargetDiffs, resolveTargetContext, toSummary, type TargetContext } from './targets.js';
+import { annotateDebug, getFileDiff, getFullFile, listTargetDiffs, literal, resolveTargetContext, toSummary, type TargetContext } from './targets.js';
 import { buildAnchor, reanchorComment } from './anchor.js';
 import { buildStagePatch } from './patch.js';
 import { checkpointKey, checkpointStore, checkpointsOf, findCheckpoint, forgetCheckpoint, takeCheckpoint } from './checkpoints.js';
@@ -836,14 +836,16 @@ export function createApp(opts: AppOptions): Hono {
     if (filePath && (filePath.startsWith('/') || filePath.split('/').includes('..'))) throw badRequest('invalid path');
     if (q.length > 200 || author.length > 200) throw badRequest('search text too long');
 
-    const args = ['log', `--max-count=${limit + 1}`, `--skip=${offset}`, `--format=${COMMIT_FORMAT}`];
+    // log.showSignature would print verification lines into the format, where they read as commits.
+    const args = ['log', '--no-show-signature', `--max-count=${limit + 1}`, `--skip=${offset}`, `--format=${COMMIT_FORMAT}`];
     if (firstParent) args.push('--first-parent');
     // Both patterns are literal, case-insensitive substrings — what a search box promises.
     if (q || author) args.push('--fixed-strings', '--regexp-ignore-case');
     if (q) args.push(`--grep=${q}`);
     if (author) args.push(`--author=${author}`);
     if (ref) args.push(ref);
-    if (filePath) args.push('--', filePath);
+    args.push('--');
+    if (filePath) args.push(literal(filePath));
     let stdout = '';
     try {
       stdout = (await runGit(args, { cwd })).stdout;
@@ -860,7 +862,7 @@ export function createApp(opts: AppOptions): Hono {
     if (q && offset === 0 && /^[0-9a-f]{4,40}$/i.test(q)) {
       const sha = await revParse(cwd, `${q}^{commit}`);
       if (sha && !commits.some((x) => x.sha === sha)) {
-        const hit = parseCommitLog((await runGit(['log', '--max-count=1', `--format=${COMMIT_FORMAT}`, sha], { cwd })).stdout)[0];
+        const hit = parseCommitLog((await runGit(['log', '--no-show-signature', '--max-count=1', `--format=${COMMIT_FORMAT}`, sha, '--'], { cwd })).stdout)[0];
         if (hit) commits = [hit, ...commits];
       }
     }
