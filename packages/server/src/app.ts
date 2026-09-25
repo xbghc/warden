@@ -680,30 +680,41 @@ export function createApp(opts: AppOptions): Hono {
     return c.json(res);
   });
 
-  api.post('/comments/export', async (c) => {
-    const body = (await c.req.json()) as ExportRequest;
-    if (!Array.isArray(body.commentIds)) throw badRequest('commentIds required');
-    const ids = body.commentIds.filter((x): x is string => typeof x === 'string');
-    let handed: Comment[] = [];
-    const res = await store.update((s): ExportResponse => {
+  /**
+   * Marks comments as handed to the agent and notes the working tree, as one hand-off. Kept apart
+   * from building the text: the page asks for the text first (`preview`), writes the clipboard,
+   * and only then confirms, so a clipboard that refused the text does not leave the comments
+   * looking delivered.
+   */
+  const handOver = async (ids: string[]): Promise<Comment[]> => {
+    const handed = await store.update((s): Comment[] => {
       const now = new Date().toISOString();
-      const selected: Comment[] = [];
+      const out: Comment[] = [];
       for (const id of ids) {
         const found = findComment(s, id);
         if (!found) continue;
         const next: Comment = { ...found.comment, exportedAt: now, updatedAt: now };
         if (next.status === 'active') next.status = 'exported';
         s.targets[found.targetKey]!.comments[found.index] = next;
-        selected.push(next);
+        out.push(next);
       }
-      handed = selected;
-      return {
-        text: formatCommentsExport({ repoRoot: repo.root, comments: selected, replyCommand: opts.replyCommand }),
-        count: selected.length,
-        commentIds: selected.map((x) => x.id),
-      };
+      return out;
     });
     checkpointHandoff(handed);
+    return handed;
+  };
+  const existing = (state: ReviewState, ids: string[]): Comment[] => ids.flatMap((id) => findComment(state, id)?.comment ?? []);
+
+  api.post('/comments/export', async (c) => {
+    const body = (await c.req.json()) as ExportRequest;
+    if (!Array.isArray(body.commentIds)) throw badRequest('commentIds required');
+    const ids = body.commentIds.filter((x): x is string => typeof x === 'string');
+    const comments = body.preview ? existing(await store.load(), ids) : await handOver(ids);
+    const res: ExportResponse = {
+      text: formatCommentsExport({ repoRoot: repo.root, comments, replyCommand: opts.replyCommand }),
+      count: comments.length,
+      commentIds: comments.map((x) => x.id),
+    };
     return c.json(res);
   });
 
@@ -789,26 +800,17 @@ export function createApp(opts: AppOptions): Hono {
   // the agent together. So its copy is a hand-off, as copying the comments would be.
   api.post('/todos/:id/export', async (c) => {
     const id = c.req.param('id');
-    const handed: Comment[] = [];
-    const res = await store.update((s): ExportResponse => {
-      const todo = s.todos.find((t) => t.id === id);
-      if (!todo) throw notFound('todo not found');
-      const now = new Date().toISOString();
-      for (const cid of todo.commentIds ?? []) {
-        const found = findComment(s, cid);
-        if (!found) continue;
-        const next: Comment = { ...found.comment, exportedAt: now, updatedAt: now };
-        if (next.status === 'active') next.status = 'exported';
-        s.targets[found.targetKey]!.comments[found.index] = next;
-        handed.push(next);
-      }
-      return {
-        text: formatTodoExport({ todo, comments: handed, replyCommand: opts.replyCommand }),
-        count: handed.length,
-        commentIds: handed.map((x) => x.id),
-      };
-    });
-    checkpointHandoff(handed);
+    const body = ((await c.req.json().catch(() => ({}))) ?? {}) as { preview?: boolean };
+    const state = await store.load();
+    const todo = state.todos.find((t) => t.id === id);
+    if (!todo) throw notFound('todo not found');
+    const ids = todo.commentIds ?? [];
+    const comments = body.preview ? existing(state, ids) : await handOver(ids);
+    const res: ExportResponse = {
+      text: formatTodoExport({ todo, comments, replyCommand: opts.replyCommand }),
+      count: comments.length,
+      commentIds: comments.map((x) => x.id),
+    };
     return c.json(res);
   });
 

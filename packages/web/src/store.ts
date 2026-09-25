@@ -269,6 +269,13 @@ export const useStore = create<AppStore>((set, get) => {
     get().setRailOpen(true);
   };
 
+  /** What a hand-off does to the comments in memory, until the next load says the same. */
+  const markHanded = (ids: string[]) => {
+    const now = new Date().toISOString();
+    const handed = (c: Comment): Comment => (ids.includes(c.id) ? { ...c, status: c.status === 'active' ? 'exported' : c.status, exportedAt: now } : c);
+    set((s) => ({ comments: s.comments.map(handed), allComments: s.allComments.map(handed) }));
+  };
+
   /** The listing behind a view key, whether or not it is the one in front. */
   const entriesOf = (view: TargetKey): FileEntry[] => {
     const s = get();
@@ -669,14 +676,12 @@ export const useStore = create<AppStore>((set, get) => {
         return;
       }
       try {
-        const res = await api.exportComments(ids);
+        // The text first, the clipboard next, and only then the hand-off: a clipboard that refused
+        // the text must not leave the comments marked as delivered.
+        const res = await api.exportComments(ids, true);
         await copyText(res.text);
-        const now = new Date().toISOString();
-        set((s) => ({
-          comments: s.comments.map((c) =>
-            res.commentIds.includes(c.id) ? { ...c, status: c.status === 'active' ? 'exported' : c.status, exportedAt: now } : c,
-          ),
-        }));
+        await api.exportComments(res.commentIds);
+        markHanded(res.commentIds);
         get().showToast(`已复制 ${res.count} 条评论到剪贴板`);
       } catch (e) {
         fail(e);
@@ -930,13 +935,14 @@ export const useStore = create<AppStore>((set, get) => {
       const todo = get().todos.find((t) => t.id === id);
       if (!todo) return;
       try {
-        // Through the server even without comments: with them, the copy is a hand-off it records.
-        const res = await api.exportTodo(id);
+        // Through the server even without comments: with them, the copy is a hand-off it records,
+        // once the clipboard has taken the text.
+        const res = await api.exportTodo(id, true);
         await copyText(res.text);
-        const now = new Date().toISOString();
-        const handed = (c: Comment): Comment =>
-          res.commentIds.includes(c.id) ? { ...c, status: c.status === 'active' ? 'exported' : c.status, exportedAt: now } : c;
-        set((s) => ({ comments: s.comments.map(handed), allComments: s.allComments.map(handed) }));
+        if (res.count) {
+          await api.exportTodo(id);
+          markHanded(res.commentIds);
+        }
         get().showToast(res.count ? `已复制待办（含 ${res.count} 条评论）到剪贴板` : '已复制待办到剪贴板');
       } catch (e) {
         fail(e);

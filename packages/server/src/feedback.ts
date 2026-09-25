@@ -56,9 +56,22 @@ export interface TakeFeedbackOptions {
  * marked as exported unless `peek`, exactly as copying them to the clipboard would.
  */
 export async function takeFeedback(store: StateStore, opts: TakeFeedbackOptions): Promise<Comment[]> {
-  if (opts.peek) return (await commentsIn(await store.load(), opts.worktreeRoot, opts.mainRoot)).filter(awaitsAgent);
-  return store.update(async (s) => {
-    const ids = new Set((await commentsIn(s, opts.worktreeRoot, opts.mainRoot)).filter(awaitsAgent).map((c) => c.id));
+  const waiting = (await commentsIn(await store.load(), opts.worktreeRoot, opts.mainRoot)).filter(awaitsAgent);
+  if (opts.peek) return waiting;
+  return markHandedOver(
+    store,
+    waiting.map((c) => c.id),
+  );
+}
+
+/**
+ * Marks these comments as handed to the agent. The CLI calls it only after the text is out: marked
+ * first, a feedback cut off on its way (a closed pipe, a crash, output the agent truncated) would
+ * leave comments no later feedback offers again.
+ */
+export async function markHandedOver(store: StateStore, commentIds: string[]): Promise<Comment[]> {
+  return store.update((s) => {
+    const ids = new Set(commentIds);
     const now = new Date().toISOString();
     const taken: Comment[] = [];
     for (const t of Object.values(s.targets)) {

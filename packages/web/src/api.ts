@@ -105,12 +105,12 @@ export const api = {
   replyComment: (key: TargetKey, id: string, body: string) => req<Comment>('POST', `/api/targets/${enc(key)}/comments/${enc(id)}/replies`, { body }),
   deleteComment: (key: TargetKey, id: string) => req<{ ok: true }>('DELETE', `/api/targets/${enc(key)}/comments/${enc(id)}`),
   reanchor: (key: TargetKey, files?: FileDiff[]) => req<ReanchorResponse>('POST', `/api/targets/${enc(key)}/comments/reanchor`, { files }),
-  exportComments: (commentIds: string[]) => req<ExportResponse>('POST', '/api/comments/export', { commentIds }),
+  exportComments: (commentIds: string[], preview = false) => req<ExportResponse>('POST', '/api/comments/export', { commentIds, preview }),
 
   todos: (branch?: string) => req<TodosResponse>('GET', `/api/todos${q({ branch })}`),
   createTodo: (body: CreateTodoRequest) => req<Todo>('POST', '/api/todos', body),
   updateTodo: (id: string, body: UpdateTodoRequest) => req<Todo>('PATCH', `/api/todos/${enc(id)}`, body),
-  exportTodo: (id: string) => req<ExportResponse>('POST', `/api/todos/${enc(id)}/export`),
+  exportTodo: (id: string, preview = false) => req<ExportResponse>('POST', `/api/todos/${enc(id)}/export`, { preview }),
   deleteTodo: (id: string) => req<{ ok: true }>('DELETE', `/api/todos/${enc(id)}`),
   moveTodo: (id: string, before: string | null) => req<TodosResponse>('POST', `/api/todos/${enc(id)}/move`, { before }),
 

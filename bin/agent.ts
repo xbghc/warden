@@ -1,4 +1,15 @@
-import { addReply, formatCommentsExport, HttpError, resolveRepo, shortId, StateStore, stateFilePath, takeCheckpoint, takeFeedback } from '@warden/server';
+import {
+  addReply,
+  formatCommentsExport,
+  HttpError,
+  markHandedOver,
+  resolveRepo,
+  shortId,
+  StateStore,
+  stateFilePath,
+  takeCheckpoint,
+  takeFeedback,
+} from '@warden/server';
 
 // The commands an agent runs, in the worktree it works in. They read and write the review state
 // directly, so they work whether or not a warden page is open.
@@ -29,21 +40,25 @@ async function feedback(args: string[], replyCommand: string): Promise<void> {
   const unknown = args.find((a) => a !== '--peek');
   if (unknown) throw new Error(`unknown argument: ${unknown}`);
   const { store, root, commonRoot } = await openStore();
-  const peek = args.includes('--peek');
-  const comments = await takeFeedback(store, { worktreeRoot: root, mainRoot: commonRoot, peek });
+  const comments = await takeFeedback(store, { worktreeRoot: root, mainRoot: commonRoot, peek: true });
   if (comments.length === 0) {
     console.log('No review comments are waiting for you.');
     return;
   }
+  // Out first, marked after: a write that fails (the reader went away) leaves them waiting.
+  const text = formatCommentsExport({ repoRoot: root, comments, replyCommand });
+  await new Promise<void>((resolve, reject) => process.stdout.write(text, (e) => (e ? reject(e) : resolve())));
+  if (args.includes('--peek')) return;
+  await markHandedOver(
+    store,
+    comments.map((c) => c.id),
+  );
   // The same round boundary a copy in the page marks (see checkpointHandoff in app.ts). The main
   // worktree is keyed without a path, as the page keys it. A failed snapshot costs the reviewer a
   // baseline, not the agent its comments, so it is reported and passed over.
-  if (!peek) {
-    await takeCheckpoint(store, root, root === commonRoot ? undefined : root, { handoff: true }).catch((e) => {
-      console.error(`warden feedback: no checkpoint taken: ${e instanceof Error ? e.message : e}`);
-    });
-  }
-  process.stdout.write(formatCommentsExport({ repoRoot: root, comments, replyCommand }));
+  await takeCheckpoint(store, root, root === commonRoot ? undefined : root, { handoff: true }).catch((e) => {
+    console.error(`warden feedback: no checkpoint taken: ${e instanceof Error ? e.message : e}`);
+  });
 }
 
 async function reply(args: string[]): Promise<void> {

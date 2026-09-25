@@ -165,6 +165,22 @@ describe('a hand-off notes the working tree', () => {
     while ((await handoffs()).length < want && Date.now() < deadline) await new Promise((r) => setTimeout(r, 25));
   };
 
+  it('marks nothing and notes nothing for a preview, which is how the page reads the text before copying it', async () => {
+    await fx.write('src/b.ts', 'export const b = 4;\n');
+    const c = await json<Comment>(
+      await send('POST', `/api/targets/${k('working')}/comments`, { filePath: 'src/b.ts', side: 'new', startLine: 1, endLine: 1, body: 'why 4?' }),
+    );
+    const before = (await handoffs()).length;
+    const preview = await json<ExportResponse>(await send('POST', '/api/comments/export', { commentIds: [c.id], preview: true }));
+    expect(preview.text).toContain('why 4?');
+    await new Promise((r) => setTimeout(r, 300));
+    expect((await find(c.id))?.exportedAt).toBeUndefined();
+    expect(await handoffs()).toHaveLength(before);
+    await json<ExportResponse>(await send('POST', '/api/comments/export', { commentIds: [c.id] }));
+    expect((await find(c.id))?.exportedAt).toBeTruthy();
+    await send('DELETE', `/api/targets/${k('working')}/comments/${c.id}`);
+  });
+
   it('takes a checkpoint once comments are copied, after answering the copy', async () => {
     await fx.write('src/b.ts', 'export const b = 3;\n');
     const c = await json<Comment>(

@@ -512,6 +512,8 @@ export interface ReplyRequest {
 
 export interface ExportRequest {
   commentIds: string[];
+  /** Build the text only. Without it the comments are marked as handed over and a checkpoint is taken. */
+  preview?: boolean;
 }
 
 /** Reorder: put the item right before `before`, or last when null. */
