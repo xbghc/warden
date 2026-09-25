@@ -180,8 +180,8 @@ export function createApp(opts: AppOptions): Hono {
   const checkpointHandoff = (comments: Comment[]): void => {
     const worktrees = new Set(comments.map((x) => tryParseTargetKey(x.targetKey)?.worktree));
     for (const wt of worktrees) {
-      takeCheckpoint(store, wt ?? repo.root, wt, { handoff: true }).catch((e) => {
-        console.error(`warden: no checkpoint for the comments handed over in ${wt ?? repo.root}: ${e instanceof Error ? e.message : e}`);
+      takeCheckpoint(store, wt ?? repo.commonRoot, wt, { handoff: true }).catch((e) => {
+        console.error(`warden: no checkpoint for the comments handed over in ${wt ?? repo.commonRoot}: ${e instanceof Error ? e.message : e}`);
       });
     }
   };
@@ -245,7 +245,9 @@ export function createApp(opts: AppOptions): Hono {
 
   api.get('/repo', async (c) => {
     const state = await store.load();
-    const info: RepoInfo = await getRepoInfo(repo, 'working');
+    // Started inside a linked worktree, the page opens that worktree: its own keys carry its path.
+    const own = repo.root === repo.commonRoot ? 'working' : formatTargetKey({ kind: 'working', worktree: repo.root });
+    const info: RepoInfo = await getRepoInfo(repo, own);
     worktreeCache = { at: Date.now(), list: info.worktrees };
     // The remembered target is handed back only while it can still be opened. One inside a
     // worktree that has since been removed would strand the page on an error: everything it
@@ -255,12 +257,17 @@ export function createApp(opts: AppOptions): Hono {
     const usable =
       !!target &&
       (!target.worktree || info.worktrees.some((w) => w.path === target.worktree)) &&
+      // A server started in a linked worktree is there to review that one, not whatever the main
+      // worktree's page last looked at: the preference is shared by every server on the repository.
+      (repo.root === repo.commonRoot || target.worktree === repo.root) &&
       (target.kind !== 'checkpoint' || !!findCheckpoint(state, target.worktree, target.id));
     if (last && usable) info.defaultTarget = last;
     else if (last) {
-      await store.update((s) => {
-        s.prefs.lastTarget = 'working';
-      });
+      if (repo.root === repo.commonRoot) {
+        await store.update((s) => {
+          s.prefs.lastTarget = 'working';
+        });
+      }
     }
     return c.json(info);
   });
@@ -903,12 +910,12 @@ export function createApp(opts: AppOptions): Hono {
   api.get('/worktrees', async (c) => {
     const [list, state] = await Promise.all([listWorktreesDetailed(repo), store.load()]);
     const [branches, newSlot] = await Promise.all([listBranches(repo, list), nextSlot(repo, list)]);
-    // Here the key without a worktree is unambiguous: it is this server's own root.
+    // A key without a worktree is the main worktree's (see resolveTargetContext).
     const review = new Map<string, WorktreeReview>();
     const latest = new Map<string, { agent: string; reviewer: string }>();
     for (const t of Object.values(state.targets)) {
       for (const cm of t.comments) {
-        const at = commentWorktree(cm) ?? repo.root;
+        const at = commentWorktree(cm) ?? repo.commonRoot;
         const r = review.get(at) ?? { toAgent: 0, toReviewer: 0 };
         const seen = latest.get(at) ?? { agent: '', reviewer: '' };
         if (awaitsAgent(cm)) {

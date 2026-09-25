@@ -71,8 +71,8 @@ echo "long answer" | warden reply 8b04e7aa
 `feedback` takes every pool on the worktree it runs in — the local views, `base`, commits, ranges and
 checkpoints alike — and prints them in the export format above, reply line included. A worktree
 reaches only its own comments: the agent in `<repo>-2` never sees what was said about `<repo>-1`.
-(One limit: a key with no worktree in it names the directory warden was started in, which this
-takes to be the main worktree. Start warden there, not inside a linked worktree.)
+A key with no worktree in it always names the main worktree, and a warden started inside a linked
+worktree keys that worktree's views by its path, so it does not matter where warden was started.
 
 In the page the answer appears under the comment, which is flagged *待确认* and counted under the
 rail's *待确认* filter until you act on it:

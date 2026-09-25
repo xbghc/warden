@@ -47,7 +47,9 @@ export function TopBar() {
   const waiting = useStore((s) => s.comments.filter((c) => awaitsAgent(c) || awaitsReviewer(c)).length);
 
   const target = useMemo(() => parseTargetKey(targetKey), [targetKey]);
-  const otherWorktrees = repo.worktrees.filter((w) => w.path !== repo.root);
+  // A key without a worktree is the main worktree's, whichever checkout the server was started in.
+  const main = repo.worktrees.find((w) => w.isMain);
+  const otherWorktrees = repo.worktrees.filter((w) => !w.isMain);
 
   // Another worktree is a different review altogether, so this is a full target change; the kind
   // of target carries over (the same commit exists in every worktree, a branch view keeps its base).
@@ -72,7 +74,7 @@ export function TopBar() {
         <span className="branch">{repo.branch}</span>
         {otherWorktrees.length > 0 && (
           <select value={target.worktree ?? ''} title="Worktree" aria-label="Worktree" onChange={(e) => pickWorktree(e.target.value)}>
-            <option value="">主仓库 ({repo.branch})</option>
+            <option value="">主仓库 ({main?.branch ?? repo.branch})</option>
             {otherWorktrees.map((w) => (
               <option key={w.path} value={w.path}>
                 worktree: {dirName(w.path)} ({w.branch ?? w.head.slice(0, 7)})

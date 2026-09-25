@@ -18,9 +18,8 @@ async function real(p: string): Promise<string> {
 }
 
 /**
- * The worktree a comment's code lives in. A key without a worktree names the one the server was
- * started in, which is the main worktree unless warden was launched inside a linked one — then
- * this guess is wrong, as the key itself is ambiguous in the state both servers share.
+ * The worktree a comment's code lives in. A key without a worktree is the main worktree's, wherever
+ * the server that wrote it was started (see resolveTargetContext).
  */
 function worktreeOf(c: Comment, mainRoot: string): string {
   return commentWorktree(c) ?? mainRoot;

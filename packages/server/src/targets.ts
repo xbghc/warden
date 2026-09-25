@@ -55,7 +55,10 @@ export function resolveTargetContext(repo: RepoContext, worktrees: WorktreeInfo[
     if (e instanceof TargetKeyError) throw badRequest(e.message, 'invalid_target');
     throw e;
   }
-  let cwd = repo.root;
+  // A key without a worktree is the main worktree's, whichever checkout this server was started in.
+  // Keyed by "the server's own directory" instead, a server started inside a slot shared the main
+  // worktree's comment pool and HEAD, and each one's re-anchoring deleted the other's comments.
+  let cwd = repo.commonRoot;
   if (target.worktree) {
     const wt = worktrees.find((w) => w.path === target.worktree);
     if (!wt) throw badRequest(`unknown worktree: ${target.worktree}`, 'unknown_worktree');

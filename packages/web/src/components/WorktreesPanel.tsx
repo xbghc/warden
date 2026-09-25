@@ -207,7 +207,7 @@ export function WorktreesPanel() {
   // top bar's selector. The server's own root is the target without a worktree. A checkpoint does
   // not: it was taken in one worktree, and its number names another one, or none, anywhere else.
   const open = (wt: WorktreeDetail) =>
-    setTarget(formatTargetKey({ ...(target.kind === 'checkpoint' ? { kind: 'working' } : target), worktree: wt.path === repo?.root ? undefined : wt.path }));
+    setTarget(formatTargetKey({ ...(target.kind === 'checkpoint' ? { kind: 'working' } : target), worktree: wt.isMain ? undefined : wt.path }));
 
   /** Where a review count leads: the pool its latest comment sits in, with the rail filtered to the kind. */
   const showIn = async (key: TargetKey | undefined, filter: 'replied' | 'unexported') => {
