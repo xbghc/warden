@@ -111,13 +111,21 @@ export function forgetCheckpoint(state: ReviewState, c: Checkpoint): void {
   unlinkComments(state, gone);
 }
 
-/** Records a tree just written as the worktree's newest checkpoint, dropping the oldest past the limit. */
+/**
+ * Records a tree just written as the worktree's newest checkpoint, dropping the oldest past the
+ * limit — except one whose pool still holds comments. A comment is deleted when it is resolved, so
+ * one still there is open: not handed over yet, waiting on the agent, or answered and waiting on the
+ * reviewer. Every hand-off takes a checkpoint, and evicting by age alone would delete those after
+ * twenty rounds. Such a checkpoint stays past the limit until its comments are dealt with.
+ */
 export function addCheckpoint(state: ReviewState, worktree: string | undefined, tree: string, head: string, handoff = false): Checkpoint {
   const mine = checkpointsOf(state, worktree);
   const id = mine.reduce((n, c) => Math.max(n, c.id), 0) + 1;
   const checkpoint: Checkpoint = { id, ...(worktree ? { worktree } : {}), tree, head, createdAt: new Date().toISOString(), ...(handoff ? { handoff } : {}) };
   state.checkpoints.push(checkpoint);
-  for (const old of mine.slice(0, Math.max(0, mine.length + 1 - MAX_CHECKPOINTS))) forgetCheckpoint(state, old);
+  const evictable = mine.filter((c) => !state.targets[checkpointKey(c)]?.comments.length);
+  const excess = mine.length + 1 - MAX_CHECKPOINTS;
+  for (const old of evictable.slice(0, Math.max(0, excess))) forgetCheckpoint(state, old);
   return checkpoint;
 }
 

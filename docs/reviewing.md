@@ -147,7 +147,9 @@ working tree now — whatever was staged or committed in between does not show, 
 - Files there carry the [已读 mark](#viewed-files), which the agent's next edit to a file drops, and
   comments on a checkpoint are a pool of their own. Deleting the checkpoint deletes both.
 - Checkpoints are numbered per worktree. A worktree keeps the newest 20; taking one more drops the
-  oldest, with its comments. A slot checked out to another branch drops its own.
+  oldest with no comments on it, and its 已读 marks. One that still has comments is kept past the
+  limit until they are resolved: since every hand-off takes a checkpoint, dropping by age alone
+  would delete open comments after twenty rounds. A slot checked out to another branch drops its own.
 
 Nothing of this is written to the repository. The snapshot is `git add --all` plus
 `git write-tree` run against a copy of the index kept in warden's data directory, with
