@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import { ActionIcon } from './ActionIcon';
 import type { Comment } from '@warden/shared';
 import { awaitsAgent, awaitsReviewer } from '@warden/shared';
@@ -21,7 +21,12 @@ function compare(a: Comment, b: Comment): number {
 /** Right-hand rail: comments in file/line order, plus the editor for the current selection. */
 export function CommentRail() {
   const comments = useStore((s) => s.comments);
-  const activeFile = useStore((s) => s.activeFile);
+  const current = useStore((s) => s.activeFile);
+  // When a refresh drops the open file (the agent committed or staged it), 此文件 stays on it rather
+  // than emptying: the card being edited or replied to would unmount, and its draft with it.
+  const lastFile = useRef(current);
+  if (current) lastFile.current = current;
+  const activeFile = current ?? lastFile.current;
   const filter = useStore((s) => s.railFilter);
   const setFilter = useStore((s) => s.setRailFilter);
   const editor = useStore((s) => s.editor);
