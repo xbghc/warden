@@ -107,10 +107,15 @@ them — the comment's current view first, then `working`, `staged`, `all`. So:
   unchanged. The card shows which view it moved to; clicking it jumps there.
 - The agent edits the commented line → nothing matches, and the comment becomes *orphaned*: listed
   at the top of the rail with its original snippet, ready to be deleted or re-attached to a new selection.
-- `git commit` → re-anchoring notices HEAD moved. Comments that no longer have a home anywhere are
-  **deleted** (and unlinked from any todo), because the code they were about is now history.
-  Anything still visible in Unstaged or Staged survives, including as a context line, and so does a
-  comment with replies under it, orphaned, until you resolve it.
+- `git commit` → re-anchoring notices HEAD moved forward. A comment that no longer has a home
+  anywhere, and whose lines are in the commits since the last pass, is **deleted** (and unlinked
+  from any todo): the code it was about is now history. Anything still visible in Unstaged or Staged
+  survives, including as a context line, and so does a comment with replies under it, orphaned,
+  until you resolve it.
+- Anything else that moves HEAD — a branch switch, `reset`, a stash and checkout, an amend or rebase,
+  or a commit that does not carry the commented lines (the agent rewrote them first) — deletes
+  nothing: such a comment is orphaned, and comes back when its code does, as after `stash pop`. What
+  is left orphaned is yours to delete or re-attach.
 
 Commit, range, `base` and checkpoint targets each keep their own pool and only ever search
 themselves, and none of them deletes on a moved HEAD.

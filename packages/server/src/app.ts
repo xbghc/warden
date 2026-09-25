@@ -49,6 +49,7 @@ import {
   awaitsReviewer,
   commentWorktree,
   commentScopeKey,
+  formatTargetKey,
   insertAfter,
   isLocalTarget,
   isValidRef,
@@ -585,9 +586,6 @@ export function createApp(opts: AppOptions): Hono {
     const comments = state.targets[scope]?.comments ?? [];
     const prevHead = state.targets[scope]?.head;
     const head = (await revParse(ctx.cwd, 'HEAD')) ?? '';
-    // A moved HEAD means the round under review was committed: comments with nowhere left to sit
-    // are finished work, not orphans. Never on the first pass, when there is no HEAD to compare to.
-    const committed = local && prevHead !== undefined && prevHead !== head;
 
     const now = new Date().toISOString();
     /** comment id -> the view it was located in, and the fields that follow from that location. */
@@ -614,6 +612,25 @@ export function createApp(opts: AppOptions): Hono {
       }),
     );
 
+    // A comment with nowhere left to sit is finished work only if its lines went into a commit: HEAD
+    // moved forward from where the last pass saw it, and the code it was on is in that stretch of
+    // history. Anything else that moves HEAD — a branch switch, a reset, a stash and checkout, an
+    // amend or rebase — leaves the comment orphaned for the reviewer, never deleted. Never on the
+    // first pass, when there is no HEAD to compare to.
+    const landed = new Set<string>();
+    const lost = comments.filter((cm) => !located.has(cm.id));
+    if (local && lost.length && prevHead && head && prevHead !== head && (await mergeBase(ctx.cwd, prevHead, head)) === prevHead) {
+      const range = await worktreeCtx(
+        formatTargetKey({ kind: 'range', base: prevHead, head, ...(ctx.target.worktree ? { worktree: ctx.target.worktree } : {}) }),
+      );
+      await Promise.all(
+        lost.map(async (cm) => {
+          const committedDiff = await getFileDiff(range, cm.filePath).catch(() => undefined);
+          if (committedDiff && reanchorComment(cm, committedDiff, now).status !== 'orphaned') landed.add(cm.id);
+        }),
+      );
+    }
+
     const result = await store.update((s) => {
       const t = ensureTarget(s, scope);
       const dropped: string[] = [];
@@ -627,7 +644,7 @@ export function createApp(opts: AppOptions): Hono {
           // A thread is a conversation the reviewer has not closed: the agent's answer usually
           // arrives with the very commit that makes the code it was about disappear, and dropping
           // the comment then would lose the answer unread.
-          if (committed && !cm.replies?.length) {
+          if (landed.has(cm.id) && !cm.replies?.length) {
             dropped.push(cm.id);
             return [];
           }
