@@ -204,8 +204,8 @@ export function CommentCard({ comment, showSnippet = false, showFile = false }: 
           title="编辑评论"
           initial={comment.body}
           onSave={async (body) => {
-            await updateComment(comment.id, { body });
-            setEditing(false);
+            // Shut only once it is saved: on an error the toast says why and the text is still here.
+            if (await updateComment(comment.id, { body })) setEditing(false);
           }}
           onCancel={() => setEditing(false)}
         />
