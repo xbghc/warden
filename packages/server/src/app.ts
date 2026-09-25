@@ -935,12 +935,22 @@ export function createApp(opts: AppOptions): Hono {
     return c.json(res);
   });
 
+  // Checkout, release and removal each read the slots and then write one of them. Two at once would
+  // both see slot 1 free and both switch into it, the second leaving the first branch dangling; run
+  // one after the other, each reads what the last one did.
+  let worktreeWrites: Promise<unknown> = Promise.resolve();
+  const oneAtATime = <T>(fn: () => Promise<T>): Promise<T> => {
+    const run = worktreeWrites.then(fn, fn);
+    worktreeWrites = run.catch(() => undefined);
+    return run;
+  };
+
   api.post('/worktrees', async (c) => {
     const body = (await c.req.json()) as CreateWorktreeRequest;
     if (typeof body.branch !== 'string') throw badRequest('branch is required');
     if (body.base !== undefined && typeof body.base !== 'string') throw badRequest('base must be a ref');
     if (body.slot !== undefined && (!Number.isInteger(body.slot) || body.slot < 1)) throw badRequest('slot must be a positive integer', 'invalid_slot');
-    const res = await checkoutWorktree(repo, body);
+    const res = await oneAtATime(() => checkoutWorktree(repo, body));
     worktreeCache = null;
     // Whatever was reviewed in this slot before was another branch; its state does not carry over.
     await store.update((s) => forgetWorktreeTargets(s, res.worktree.path));
@@ -950,7 +960,7 @@ export function createApp(opts: AppOptions): Hono {
   api.post('/worktrees/release', async (c) => {
     const body = (await c.req.json()) as ReleaseWorktreeRequest;
     if (typeof body.path !== 'string') throw badRequest('path is required');
-    const res = await releaseWorktree(repo, body);
+    const res = await oneAtATime(() => releaseWorktree(repo, body));
     worktreeCache = null;
     return c.json(res);
   });
@@ -958,7 +968,7 @@ export function createApp(opts: AppOptions): Hono {
   api.post('/worktrees/remove', async (c) => {
     const body = (await c.req.json()) as RemoveWorktreeRequest;
     if (typeof body.path !== 'string') throw badRequest('path is required');
-    const res = await removeWorktree(repo, body);
+    const res = await oneAtATime(() => removeWorktree(repo, body));
     worktreeCache = null;
     return c.json(res);
   });

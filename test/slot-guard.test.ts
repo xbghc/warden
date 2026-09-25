@@ -71,4 +71,19 @@ describe('writes to a slot', () => {
     expect(await code(await send('POST', '/api/worktrees/remove', { path: row.path }))).toBe('needs_force');
     expect(existsSync(slotDir())).toBe(true);
   });
+
+  it('gives two checkouts at once two slots, not the same free one', async () => {
+    const row = (await list()).worktrees.find((w) => w.slot === 1)!;
+    expect((await send('POST', '/api/worktrees/release', { path: row.path })).status).toBe(200);
+    const [a, b] = await Promise.all([
+      send('POST', '/api/worktrees', { branch: 'agent/a', base: 'main' }),
+      send('POST', '/api/worktrees', { branch: 'agent/b', base: 'main' }),
+    ]);
+    expect([a.status, b.status]).toEqual([201, 201]);
+    const slots = (await list()).worktrees.filter((w) => w.branch?.startsWith('agent/')).map((w) => [w.branch, w.slot]);
+    expect(slots.sort()).toEqual([
+      ['agent/a', 1],
+      ['agent/b', 2],
+    ]);
+  });
 });
