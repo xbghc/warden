@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { FileEntry } from '@warden/shared';
 import { useStageMode, useStore, useTracksViewed } from '../store';
+import { ActionIcon } from './ActionIcon';
 import { DiffView } from './DiffView';
 import { STATUS_LETTER } from './FileTree';
 import { totalDiffLines } from '../lib/rows';
@@ -21,6 +22,7 @@ function PathParts({ path }: { path: string }) {
 function FileHeader({ entry }: { entry: FileEntry }) {
   const toggleViewed = useStore((s) => s.toggleViewed);
   const openInNvim = useStore((s) => s.openInNvim);
+  const copyToClipboard = useStore((s) => s.copyToClipboard);
   const nvimReady = useStore((s) => !!s.nvim?.selected);
   const stageLines = useStore((s) => s.stageLines);
   const staging = useStore((s) => s.staging);
@@ -46,6 +48,9 @@ function FileHeader({ entry }: { entry: FileEntry }) {
         )}
         <PathParts path={entry.path} />
       </span>
+      <button className="icon quiet copy-path" onClick={() => void copyToClipboard(entry.path)} title={`复制路径 ${entry.path}`}>
+        <ActionIcon name="copy" label="复制路径" />
+      </button>
       {entry.oldMode && entry.newMode && (
         <span className="muted mono">
           mode {entry.oldMode} → {entry.newMode}

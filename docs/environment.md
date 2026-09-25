@@ -26,7 +26,9 @@ catches up after each click and whenever the browser window regains focus; ⟳ i
 case that neither happens.
 
 Clicking a line number runs, roughly, `:edit +<line> <absolute path>` in that instance. Deleted lines
-jump to the nearest new-side line; for commit targets the working-tree file is opened.
+jump to the nearest new-side line; for commit targets the working-tree file is opened. With `Alt` held
+the click copies the place instead (`src/a.ts:12`), and `Alt`+`Shift` the range from the line last
+copied; see the keyboard table in the [README](../README.md#keyboard).
 
 ## WSL2 notes
 

@@ -245,6 +245,8 @@ export interface AppStore {
   /** Stage or unstage whatever `stageSel` holds. */
   stageSelection(): Promise<void>;
   showToast(message: string, kind?: Toast['kind'], action?: ToastAction): void;
+  /** Copy a short piece of text (a path, a location) and say what went, or why it did not. */
+  copyToClipboard(text: string): Promise<void>;
 }
 
 let toastSeq = 0;
@@ -958,6 +960,15 @@ export const useStore = create<AppStore>((set, get) => {
       } catch (e) {
         fail(e);
         set({ todos: prev });
+      }
+    },
+
+    async copyToClipboard(text) {
+      try {
+        await copyText(text);
+        get().showToast(`已复制 ${text}`);
+      } catch (e) {
+        fail(e);
       }
     },
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActionIcon } from './ActionIcon';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { CommentSide, DiffLine, FileDiff, Hunk } from '@warden/shared';
@@ -54,6 +54,8 @@ function CodeLine({ content, tokens }: { content: string; tokens: Token[] | unde
 }
 
 /** Line to jump to in nvim for a diff line (nearest new-side line for deleted lines). */
+const GUTTER_TITLE = '点击：在 nvim 中打开此行\nAlt+点击：复制 文件:行号\nAlt+Shift+点击：复制从上次复制的行到这一行的范围';
+
 function nvimLine(line: DiffLine, hunk: Hunk | undefined): number {
   if (line.newLineNo !== undefined) return line.newLineNo;
   if (!hunk) return line.oldLineNo ?? 1;
@@ -94,6 +96,7 @@ export function DiffView({ diff }: { diff: FileDiff }) {
   const editor = useStore((s) => s.editor);
   const focusedCommentId = useStore((s) => s.focusedCommentId);
   const openInNvim = useStore((s) => s.openInNvim);
+  const copyToClipboard = useStore((s) => s.copyToClipboard);
   const showToast = useStore((s) => s.showToast);
   const reattaching = useStore((s) => s.reattaching);
   const jumpTo = useStore((s) => s.jumpTo);
@@ -461,9 +464,28 @@ export function DiffView({ diff }: { diff: FileDiff }) {
   };
 
   // ---- rendering -----------------------------------------------------------------
-  const gutterClick = (line: DiffLine, hunkIndex: number) => {
-    const hunk = diff.hunks[hunkIndex];
-    void openInNvim(diff.path, nvimLine(line, hunk));
+  /** Where the last Alt-click copied from, so that Alt+Shift-click can copy the range up to another line. */
+  const copyAnchor = useRef<{ side: CommentSide; line: number } | null>(null);
+
+  /**
+   * A click on a line number opens it in nvim; with Alt it copies the place instead, as
+   * `path:line`, and with Alt+Shift the range from the last one copied. The number copied is the one
+   * in the column clicked — unified view shows both sides — falling back to the other side where
+   * that column is blank. A line of the old side says so: the same number is other code after.
+   */
+  const gutterClick = (e: ReactMouseEvent, line: DiffLine, hunkIndex: number, column: CommentSide) => {
+    if (!e.altKey) {
+      void openInNvim(diff.path, nvimLine(line, diff.hunks[hunkIndex]));
+      return;
+    }
+    const side: CommentSide = column === 'old' ? (line.oldLineNo !== undefined ? 'old' : 'new') : line.newLineNo !== undefined ? 'new' : 'old';
+    const no = side === 'old' ? line.oldLineNo : line.newLineNo;
+    if (no === undefined) return;
+    const anchor = copyAnchor.current;
+    const range = e.shiftKey && anchor?.side === side ? [Math.min(anchor.line, no), Math.max(anchor.line, no)] : [no, no];
+    if (!(e.shiftKey && anchor?.side === side)) copyAnchor.current = { side, line: no };
+    const lines = range[0] === range[1] ? `${range[0]}` : `${range[0]}-${range[1]}`;
+    void copyToClipboard(`${diff.path}:${lines}${side === 'old' ? '（修改前）' : ''}`);
   };
 
   const renderGap = (row: Extract<Row, { kind: 'gap' }>) => {
@@ -535,10 +557,10 @@ export function DiffView({ diff }: { diff: FileDiff }) {
         }}
       >
         {renderPickBox(row, l, picked)}
-        <span className="gut" onClick={() => gutterClick(l, row.hunkIndex)} title="在 nvim 中打开此行">
+        <span className="gut" onClick={(e) => gutterClick(e, l, row.hunkIndex, 'old')} title={GUTTER_TITLE}>
           {l.oldLineNo ?? ''}
         </span>
-        <span className="gut" onClick={() => gutterClick(l, row.hunkIndex)} title="在 nvim 中打开此行">
+        <span className="gut" onClick={(e) => gutterClick(e, l, row.hunkIndex, 'new')} title={GUTTER_TITLE}>
           {l.newLineNo ?? ''}
         </span>
         {renderFoldToggle(row.block)}
@@ -579,7 +601,7 @@ export function DiffView({ diff }: { diff: FileDiff }) {
         onMouseEnter={() => no !== undefined && extendSel(side, hunkIndex, no)}
       >
         {renderPickBox(row, l, picked)}
-        <span className="gut" onClick={() => gutterClick(l, hunkIndex)} title="在 nvim 中打开此行">
+        <span className="gut" onClick={(e) => gutterClick(e, l, hunkIndex, side)} title={GUTTER_TITLE}>
           {no ?? ''}
         </span>
         {renderFoldToggle(block)}

@@ -911,6 +911,10 @@ button.wt-review:hover {
   font-size: var(--t-lead);
   letter-spacing: -0.01em;
 }
+.file-head .copy-path {
+  /* Reads as part of the path it copies, not as one more control in the row. */
+  margin-left: -6px;
+}
 .file-head .path .dir {
   color: var(--muted);
 }

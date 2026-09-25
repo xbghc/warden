@@ -75,6 +75,11 @@ you did not>"`.
 | `s` | Stage (Unstaged view) or unstage (Staged view) the picked lines |
 | `Ctrl+Enter` | Save the comment being edited |
 | `Esc` | Drop the picked lines / cancel editing / cancel re-attach mode / shut the rail / back to the files under review |
+| Click a line number | Open that line in nvim (see [Editor and platform](docs/environment.md)) |
+| `Alt`+click a line number | Copy the place as `src/a.ts:12` — `src/a.ts:12（修改前）` for a line of the old side |
+| `Alt`+`Shift`+click a line number | Copy the range from the line last copied, `src/a.ts:12-18` |
+
+The copy button beside the path in the file header copies the path, relative to the repository.
 
 ## Documentation
 
