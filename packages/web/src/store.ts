@@ -21,6 +21,7 @@ import type {
 } from '@warden/shared';
 import {
   awaitsAgent,
+  commentScopeKey,
   formatTargetKey,
   insertAfter,
   isLocalTarget,
@@ -58,6 +59,11 @@ export interface Toast {
 }
 
 export interface EditorTarget {
+  /**
+   * The view the lines were picked in. Switching between the local views keeps the draft, but its
+   * line numbers belong to this view's diff: in another one they point at other code.
+   */
+  view: TargetKey;
   filePath: string;
   side: CommentSide;
   startLine: number;
@@ -187,7 +193,8 @@ export interface AppStore {
   setViewMode(mode: ViewMode): void;
   /** `view` defaults to the current one; the two sidebar blocks pass their own. */
   toggleViewed(path: string): Promise<void>;
-  createComment(body: CreateCommentRequest): Promise<Comment | undefined>;
+  /** Posts to `view` (the one the lines were picked in), or to the view in front. */
+  createComment(body: CreateCommentRequest, view?: TargetKey): Promise<Comment | undefined>;
   updateComment(id: string, body: UpdateCommentRequest): Promise<Comment | undefined>;
   deleteComment(id: string): Promise<void>;
   /** The reviewer's side of a comment's thread; false when it did not go through. */
@@ -591,10 +598,12 @@ export const useStore = create<AppStore>((set, get) => {
       }
     },
 
-    async createComment(body) {
+    async createComment(body, view) {
       try {
-        const c = await api.createComment(get().targetKey, body);
-        set((s) => ({ comments: [...s.comments, c], editor: null, focusedCommentId: c.id }));
+        const c = await api.createComment(view ?? get().targetKey, body);
+        // The pool in front is the view's own unless the reviewer has since left for another one.
+        const here = commentScopeKey(c.targetKey) === commentScopeKey(get().targetKey);
+        set((s) => ({ comments: here ? [...s.comments, c] : s.comments, editor: null, focusedCommentId: here ? c.id : s.focusedCommentId }));
         return c;
       } catch (e) {
         fail(e);

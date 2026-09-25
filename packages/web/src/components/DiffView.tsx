@@ -150,7 +150,8 @@ export function DiffView({ diff }: { diff: FileDiff }) {
     return m;
   }, [comments]);
   const focused = useMemo(() => comments.find((c) => c.id === focusedCommentId && c.status !== 'orphaned') ?? null, [comments, focusedCommentId]);
-  const editorHere = editor && editor.filePath === diff.path ? editor : null;
+  // Only in the view the lines were picked in: the same numbers mean other lines in another.
+  const editorHere = editor && editor.view === targetKey && editor.filePath === diff.path ? editor : null;
 
   // ---- syntax highlighting -------------------------------------------------
   const lang = useMemo(() => langForPath(diff.path), [diff.path]);
@@ -324,7 +325,7 @@ export function DiffView({ diff }: { diff: FileDiff }) {
       if (re) {
         void updateComment(re, { side: s.side, startLine, endLine });
       } else {
-        setEditor({ filePath: diff.path, side: s.side, startLine, endLine });
+        setEditor({ view: targetKey, filePath: diff.path, side: s.side, startLine, endLine });
       }
     };
     window.addEventListener('mouseup', up);

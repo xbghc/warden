@@ -43,7 +43,7 @@ export const NoMatchingComments: Story = {
 };
 export const WritingComment: Story = {
   beforeEach: () => {
-    useStore.setState({ editor: { filePath: 'src/App.tsx', side: 'new', startLine: 18, endLine: 20 } });
+    useStore.setState({ editor: { view: 'working', filePath: 'src/App.tsx', side: 'new', startLine: 18, endLine: 20 } });
   },
 };
 export const SaveComment: Story = {

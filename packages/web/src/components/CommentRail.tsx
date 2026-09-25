@@ -74,7 +74,7 @@ export function CommentRail() {
       key={`${editor.filePath}:${editor.side}:${editor.startLine}:${editor.endLine}`}
       title={`${editor.filePath.split('/').pop()} ${editor.side} ${editor.startLine === editor.endLine ? editor.startLine : `${editor.startLine}-${editor.endLine}`}`}
       onSave={async (body) => {
-        await createComment({ filePath: editor.filePath, side: editor.side, startLine: editor.startLine, endLine: editor.endLine, body });
+        await createComment({ filePath: editor.filePath, side: editor.side, startLine: editor.startLine, endLine: editor.endLine, body }, editor.view);
       }}
       onCancel={() => setEditor(null)}
     />
