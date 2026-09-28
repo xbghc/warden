@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { HttpError } from './errors.js';
 
@@ -16,7 +16,11 @@ const ALLOWED_SUBCOMMANDS = new Set([
   'for-each-ref',
   'check-ref-format',
   'grep',
+  'config',
 ]);
+
+/** The only forms of `git config` that read: anything else it takes (a value, `--unset`, `--edit`) writes. */
+const CONFIG_READS = new Set(['--get', '--get-all', '--get-regexp']);
 
 /** Options that could make an otherwise read-only sub-command write somewhere. */
 const FORBIDDEN_OPTION_PREFIXES = ['--output', '--ext-diff', '--textconv', '-c', '--config-env', '--exec-path', '--git-dir', '--work-tree'];
@@ -80,6 +84,11 @@ export function assertAllowedGitArgs(args: readonly string[]): void {
   }
   if (sub === 'worktree' && args[1] !== 'list') {
     throw new GitError(`git worktree ${args[1] ?? ''} is not allowed`, null, '', 400, 'git_subcommand_forbidden');
+  }
+  // One read and one name or pattern, nothing else: `--file`, `--global` or a second argument
+  // (the value to set) would each turn it into something other than a lookup in this repository.
+  if (sub === 'config' && (!CONFIG_READS.has(args[1] ?? '') || args.length !== 3 || args[2]!.startsWith('-'))) {
+    throw new GitError(`git config ${args.slice(1).join(' ')} is not allowed`, null, '', 400, 'git_subcommand_forbidden');
   }
   // `grep -O` / `--open-files-in-pager` runs a program on the matches. Git takes any unambiguous
   // prefix of a long option, so everything that could be one is refused, not just the full name.
@@ -233,16 +242,25 @@ async function applyOnce(cwd: string, patch: string, opts: { reverse?: boolean; 
 
 /**
  * Runs a git command that writes to the repository, without the read whitelist. Only worktrees.ts
- * calls it — `worktree add`, `worktree remove`, `branch` (with `-d`, or `-D` to undo a branch it
- * made moments before), and in a slot it owns `switch`, `reset --hard` and `clean -fd` — each with an argument
- * list it composes itself from a branch name and a ref that were validated first and a slot path
- * of its own making, so nothing from a request reaches git as an option. A failure carries git's
- * first stderr line, and `stderr` whole, so the caller can tell a refusal (dirty worktree, branch
- * in use) from a crash.
+ * and clones.ts call it — `worktree add`, `worktree remove`, `branch` (with `-d`, or `-D` to undo a
+ * branch it made moments before), and in a slot it owns `switch`, `reset --hard` and `clean -fd`;
+ * for a clone slot also `clone --local`, `remote add` / `remove` / `set-url` / `set-head` and
+ * `fetch` — each with an argument list it composes itself from a branch name and a ref that were
+ * validated first, a slot path of its own making, and remote names and URLs read from the main
+ * worktree's config, so nothing from a request reaches git as an option. A failure carries git's
+ * first stderr line, and `stderr` whole, so the caller can tell a refusal (dirty worktree, branch in
+ * use) from a crash.
+ *
+ * `network` is for the one command that reaches the server, a clone's `fetch`: it gets minutes
+ * rather than seconds, and runs in a session of its own, without the terminal warden was started
+ * from, so that ssh wanting a passphrase fails at once instead of waiting on a prompt nobody sees.
  */
-export async function runGitWrite(args: readonly string[], opts: { cwd: string; timeoutMs?: number }): Promise<GitResult> {
+export async function runGitWrite(args: readonly string[], opts: { cwd: string; timeoutMs?: number; network?: boolean }): Promise<GitResult> {
   return execWrite(args, opts, {});
 }
+
+/** How long a command that reaches the server, or copies a whole repository, may take. */
+export const LONG_GIT_TIMEOUT_MS = 10 * 60_000;
 
 /**
  * The writes a checkpoint needs, and nothing else: `add --all` (with `--intent-to-add` for a diff)
@@ -260,42 +278,91 @@ export async function runGitSnapshot(args: readonly string[], opts: { cwd: strin
   return execWrite(args, opts, { GIT_OBJECT_DIRECTORY: opts.objects, GIT_INDEX_FILE: opts.index });
 }
 
-function execWrite(args: readonly string[], opts: { cwd: string; timeoutMs?: number }, extraEnv: Record<string, string>): Promise<GitResult> {
+/** How a command failed, as `execFile` reports it: an exit code, or `ENOENT` and the like. */
+interface ExecFailure {
+  message: string;
+  code?: number | string | null;
+  killed?: boolean;
+  signal?: string | null;
+}
+type ExecCallback = (error: ExecFailure | null, stdout: string, stderr: string) => void;
+
+/**
+ * `execFile` for a command that may reach the server: in a session of its own (`detached`, which
+ * `execFile` does not pass on), so it has no terminal for ssh to prompt on, and killed as a whole
+ * process group on timeout, ssh included. Reports the way `execFile` does.
+ */
+function execDetached(args: readonly string[], opts: { cwd: string; timeout: number; env: NodeJS.ProcessEnv }, done: ExecCallback): void {
+  const child = spawn('git', [...args], { cwd: opts.cwd, env: opts.env, detached: true, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+  let stdout = '';
+  let stderr = '';
+  let killed = false;
+  child.stdout.setEncoding('utf8').on('data', (d: string) => {
+    stdout += d;
+  });
+  child.stderr.setEncoding('utf8').on('data', (d: string) => {
+    stderr += d;
+  });
+  const timer = setTimeout(() => {
+    killed = true;
+    try {
+      if (child.pid) process.kill(-child.pid, 'SIGTERM');
+    } catch {
+      child.kill('SIGTERM');
+    }
+  }, opts.timeout);
+  // A spawn that fails (no git, no directory) reports `error` and then `close`; the first one answers.
+  let settled = false;
+  const settle: ExecCallback = (err, out, errOut) => {
+    clearTimeout(timer);
+    if (!settled) done(err, out, errOut);
+    settled = true;
+  };
+  child.once('error', (e: NodeJS.ErrnoException) => settle({ message: e.message, code: e.code }, stdout, stderr));
+  child.once('close', (code, signal) => {
+    if (code === 0 && !killed) settle(null, stdout, stderr);
+    else settle({ message: `git ${args[0]} exited with ${code ?? signal}`, code, killed, signal }, stdout, stderr);
+  });
+}
+
+function execWrite(
+  args: readonly string[],
+  opts: { cwd: string; timeoutMs?: number; network?: boolean },
+  extraEnv: Record<string, string>,
+): Promise<GitResult> {
   for (const arg of args) if (arg.includes('\0')) throw new GitError('NUL byte in git argument', null, '', 400, 'git_bad_argument');
   return new Promise((resolve, reject) => {
+    const done: ExecCallback = (err, stdout, stderr) => {
+      if (!err) {
+        resolve({ stdout, stderr, code: 0 });
+        return;
+      }
+      if (err.killed || err.signal === 'SIGTERM') {
+        reject(new GitError(`git ${args[0]} timed out`, null, stderr, 504, 'git_timeout'));
+        return;
+      }
+      if (err.code === 'ENOENT') {
+        if (!existsSync(opts.cwd)) {
+          reject(new GitError(`working directory no longer exists: ${opts.cwd}`, null, '', 400, 'unknown_worktree'));
+          return;
+        }
+        reject(new GitError('git executable not found in PATH', null, '', 500, 'git_missing'));
+        return;
+      }
+      const code = typeof err.code === 'number' ? err.code : -1;
+      const first = stderr.split('\n').find((l) => l.trim()) ?? err.message;
+      reject(new GitError(first.trim().replace(/^(fatal|error): /, ''), code, stderr, 500, 'git_failed'));
+    };
+    const env = { ...process.env, LC_ALL: 'C', GIT_PAGER: 'cat', PAGER: 'cat', GIT_TERMINAL_PROMPT: '0', ...extraEnv };
+    if (opts.network) {
+      execDetached(args, { cwd: opts.cwd, timeout: opts.timeoutMs ?? LONG_GIT_TIMEOUT_MS, env }, done);
+      return;
+    }
     execFile(
       'git',
       [...args],
-      {
-        cwd: opts.cwd,
-        timeout: opts.timeoutMs ?? DEFAULT_GIT_TIMEOUT_MS,
-        maxBuffer: 16 * 1024 * 1024,
-        encoding: 'utf8',
-        env: { ...process.env, LC_ALL: 'C', GIT_PAGER: 'cat', PAGER: 'cat', GIT_TERMINAL_PROMPT: '0', ...extraEnv },
-        windowsHide: true,
-      },
-      (error, stdout, stderr) => {
-        const err = error as (NodeJS.ErrnoException & { code?: number | string; killed?: boolean; signal?: string }) | null;
-        if (!err) {
-          resolve({ stdout, stderr, code: 0 });
-          return;
-        }
-        if (err.killed || err.signal === 'SIGTERM') {
-          reject(new GitError(`git ${args[0]} timed out`, null, stderr, 504, 'git_timeout'));
-          return;
-        }
-        if (err.code === 'ENOENT') {
-          if (!existsSync(opts.cwd)) {
-            reject(new GitError(`working directory no longer exists: ${opts.cwd}`, null, '', 400, 'unknown_worktree'));
-            return;
-          }
-          reject(new GitError('git executable not found in PATH', null, '', 500, 'git_missing'));
-          return;
-        }
-        const code = typeof err.code === 'number' ? err.code : -1;
-        const first = stderr.split('\n').find((l) => l.trim()) ?? err.message;
-        reject(new GitError(first.trim().replace(/^(fatal|error): /, ''), code, stderr, 500, 'git_failed'));
-      },
+      { cwd: opts.cwd, timeout: opts.timeoutMs ?? DEFAULT_GIT_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024, encoding: 'utf8', env, windowsHide: true },
+      (error, stdout, stderr) => done(error, stdout, stderr),
     );
   });
 }

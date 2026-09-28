@@ -62,7 +62,7 @@ import {
 import { badRequest, HttpError, notFound } from './errors.js';
 import { COMMIT_FORMAT, parseCommitLog } from './commits.js';
 import { applyToIndex, mergeBase, refExists, revParse, runGit } from './git.js';
-import { currentBranch, getRepoInfo, listWorktrees, type RepoContext } from './repo.js';
+import { currentBranch, getRepoInfo, listWorktrees, remoteDefault, type RepoContext } from './repo.js';
 import { annotateDebug, getFileDiff, getFullFile, listTargetDiffs, literal, resolveTargetContext, toSummary, type TargetContext } from './targets.js';
 import { buildAnchor, reanchorComment } from './anchor.js';
 import { buildStagePatch } from './patch.js';
@@ -943,13 +943,17 @@ export function createApp(opts: AppOptions): Hono {
       const r = review.get(wt.path);
       if (r && (r.toAgent || r.toReviewer)) wt.review = r;
     }
-    const res: WorktreesResponse = { worktrees: list, branches, newSlot };
+    const trunk = await remoteDefault(repo.commonRoot).catch(() => undefined);
+    const res: WorktreesResponse = { worktrees: list, branches, newSlot, slotKind: state.prefs.slotKind ?? 'clone', ...(trunk ? { trunk } : {}) };
     return c.json(res);
   });
 
   // One name at a time: the list above leaves remote branches out, since a remote can carry thousands.
+  // A clone slot's are its own, so the slot the form points at says where to look.
   api.get('/worktrees/remotes', async (c) => {
-    const res: RemoteBranchesResponse = { remotes: await lookupRemoteBranches(repo, c.req.query('branch') ?? '') };
+    const slot = c.req.query('slot') ? Number(c.req.query('slot')) : undefined;
+    if (slot !== undefined && (!Number.isInteger(slot) || slot < 1)) throw badRequest('slot must be a positive integer', 'invalid_slot');
+    const res: RemoteBranchesResponse = { remotes: await lookupRemoteBranches(repo, c.req.query('branch') ?? '', slot) };
     return c.json(res);
   });
 
@@ -968,10 +972,16 @@ export function createApp(opts: AppOptions): Hono {
     if (typeof body.branch !== 'string') throw badRequest('branch is required');
     if (body.base !== undefined && typeof body.base !== 'string') throw badRequest('base must be a ref');
     if (body.slot !== undefined && (!Number.isInteger(body.slot) || body.slot < 1)) throw badRequest('slot must be a positive integer', 'invalid_slot');
+    if (body.kind !== undefined && body.kind !== 'clone' && body.kind !== 'worktree') throw badRequest('kind must be clone or worktree', 'invalid_kind');
+    if (body.fetch !== undefined && typeof body.fetch !== 'boolean') throw badRequest('fetch must be a boolean');
     const res = await oneAtATime(() => checkoutWorktree(repo, body));
     worktreeCache = null;
-    // Whatever was reviewed in this slot before was another branch; its state does not carry over.
-    await store.update((s) => forgetWorktreeTargets(s, res.worktree.path));
+    await store.update((s) => {
+      // Whatever was reviewed in this slot before was another branch; its state does not carry over.
+      forgetWorktreeTargets(s, res.worktree.path);
+      // The kind a new slot was made as is the one the form offers next time, per repository.
+      if (!res.reused && body.kind) s.prefs.slotKind = body.kind;
+    });
     return c.json(res, 201);
   });
 

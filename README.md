@@ -4,7 +4,7 @@ A local web page for reviewing what a coding agent just changed in a git reposit
 your review back to it — line comments the agent fetches and answers itself.
 
 One process per repository, on `127.0.0.1` only, with no account and no database. It stages from the
-page and manages worktree slots, but otherwise leaves the repository alone; see
+page and manages checkout slots, but otherwise leaves the repository alone; see
 [State and security](docs/internals.md).
 
 ## Install / run
@@ -41,7 +41,8 @@ for a global install. The check never delays startup and fails silently. `--no-u
 A round with an agent, in the order it happens:
 
 1. **Point the agent at a worktree.** In *Worktree*, *检出分支* puts a branch into a numbered slot
-   beside the repository (`<repo>-1`, …) that keeps its installed dependencies between branches;
+   beside the repository (`<repo>-1`, …) — a clone of its own, or a linked worktree — that keeps its
+   installed dependencies between branches;
    *复制路径* is for the agent's prompt. Or let it work in the main checkout.
 2. **Review what it did.** *工作区* shows 未暂存 and 已暂存 side by side. Read a change, then stage it —
    drag over the lines, or take a hunk or a file: staged means reviewed, and the figure at the top
@@ -87,7 +88,7 @@ The copy button beside the path in the file header copies the path, relative to 
 |---|---|
 | [Reviewing](docs/reviewing.md) | Targets and the sidebar, staging, debug code, 已读, checkpoints, auto-refresh |
 | [Comments and the agent](docs/agent.md) | Comments, the export format, `warden feedback` / `reply`, re-anchoring, todos |
-| [Worktrees](docs/worktrees.md) | Slots, checkout and release, commit counts, tmux |
+| [Worktrees](docs/worktrees.md) | Slots, clone slots, checkout and release, commit counts, tmux |
 | [Editor and platform](docs/environment.md) | Jumping to nvim, WSL2 |
 | [State and security](docs/internals.md) | The state file, what git commands run and why |
 | [Development](docs/development.md) | Building, testing, releasing, Storybook |

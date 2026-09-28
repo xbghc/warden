@@ -19,8 +19,9 @@ What warden can put under review, and the ways to mark it done.
 | Worktree, since one of its checkpoints | `worktree:<path>:checkpoint:<n>` | same, run inside the worktree |
 
 Refs accept anything git can resolve (`main`, `v1.2`, `HEAD~3`, a sha). `@` is `HEAD`.
-Worktrees are discovered with `git worktree list` (and made in the *Worktree* view, see below) and
-share the review state of the main repository.
+Worktrees are discovered with `git worktree list`, and clone slots beside the main worktree (see
+[Clone slots](worktrees.md#clone-slots)); both are made in the *Worktree* view and share the review
+state of the main repository.
 One whose directory is gone (git lists it as *prunable*) is not offered, and a remembered target
 inside a removed worktree falls back to the working tree on the next load. The comments and viewed
 flags kept under a worktree's key stay in the state file until a branch is checked out into that

@@ -42,6 +42,37 @@ const worktrees: WorktreeDetail[] = [
     slot: 2,
     free: true,
   },
+  // A clone slot: a repository of its own, counted against its remote's default branch.
+  {
+    path: '/workspace/warden-3',
+    branch: 'agent/clone-work',
+    head: 'bcd2345',
+    isMain: false,
+    detached: false,
+    bare: false,
+    prunable: false,
+    clone: true,
+    dirty: 0,
+    slot: 3,
+    free: false,
+    trunk: 'origin/main',
+    comparison: { kind: 'trunk', base: 'origin/main', ahead: 3, behind: 1 },
+  },
+  // Released clone: its own branches are what the form offers for it.
+  {
+    path: '/workspace/warden-4',
+    head: 'cde3456',
+    isMain: false,
+    detached: true,
+    bare: false,
+    prunable: false,
+    clone: true,
+    dirty: 0,
+    slot: 4,
+    free: true,
+    trunk: 'origin/main',
+    branches: [{ name: 'agent/old-task', sha: 'cde3456' }],
+  },
   // Made by hand, not a slot: it can only be removed.
   {
     path: '/workspace/warden-done',
@@ -61,7 +92,13 @@ const worktrees: WorktreeDetail[] = [
 export function setupWorktreeStore() {
   setupDemoStore();
   const original = { ...api };
-  api.worktrees = fn(async () => ({ worktrees, branches: [], newSlot: { slot: 3, path: '/workspace/warden-3' } }));
+  api.worktrees = fn(async () => ({
+    worktrees,
+    branches: [],
+    newSlot: { slot: 5, path: '/workspace/warden-5' },
+    slotKind: 'clone' as const,
+    trunk: 'origin/main',
+  }));
   api.commits = fn(async () => ({
     commits: [
       {
@@ -85,7 +122,7 @@ export function setupWorktreeStore() {
         : [],
   }));
   api.openTmuxSession = fn(async () => ({ session: 'warden-1', created: true }));
-  api.createWorktree = fn(async ({ slot }) => ({ worktree: worktrees[1]!, slot: slot ?? 2, reused: slot !== 3 }));
+  api.createWorktree = fn(async ({ slot }) => ({ worktree: worktrees[1]!, slot: slot ?? 2, reused: slot !== 5 }));
   api.releaseWorktree = fn(async () => ({ ok: true as const, branchDeleted: true }));
   api.removeWorktree = fn(async () => ({ ok: true as const, branchDeleted: false }));
   return () => Object.assign(api, original);

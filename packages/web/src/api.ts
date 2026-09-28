@@ -122,7 +122,8 @@ export const api = {
   forkPoint: (params: { root?: string; base: string }) => req<ForkPointResponse>('GET', `/api/fork-point${q(params)}`),
 
   worktrees: () => req<WorktreesResponse>('GET', '/api/worktrees'),
-  remoteBranches: (branch: string) => req<RemoteBranchesResponse>('GET', `/api/worktrees/remotes${q({ branch })}`),
+  /** `slot`: a clone slot, whose remote branches are its own; omitted, the main worktree's. */
+  remoteBranches: (branch: string, slot?: number) => req<RemoteBranchesResponse>('GET', `/api/worktrees/remotes${q({ branch, slot })}`),
   openTmuxSession: (body: { path: string }) => req<TmuxSessionResponse>('POST', '/api/tmux/sessions', body),
   createWorktree: (body: CreateWorktreeRequest) => req<CreateWorktreeResponse>('POST', '/api/worktrees', body),
   releaseWorktree: (body: ReleaseWorktreeRequest) => req<ReleaseWorktreeResponse>('POST', '/api/worktrees/release', body),

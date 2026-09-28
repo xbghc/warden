@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
-import type { CreateWorktreeResponse, TargetKey, WorktreeDetail, WorktreesResponse } from '@warden/shared';
+import type { CreateWorktreeResponse, SlotKind, TargetKey, WorktreeDetail, WorktreesResponse } from '@warden/shared';
 import { formatTargetKey, parseTargetKey } from '@warden/shared';
 import { api, ApiError } from '../api';
 import { copyText } from '../lib/clipboard';
@@ -18,7 +18,11 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
  * a name is, the server decides when the request arrives — this list may predate a fetch — so the
  * base goes out only when it was typed, never the suggestion shown in its place. Where it goes is a
  * slot: a free one is reused, directory and installed dependencies included, and failing that a new
- * directory is made. The picker lists both, lowest free slot first; a row's 检出到这里 sets it.
+ * directory is made, as a clone or as a worktree. The picker lists both, lowest free slot first; a
+ * row's 检出到这里 sets it.
+ *
+ * A clone's branches are its own, so into one the names offered and looked up are that clone's, the
+ * default base is its remote's default branch, and 先 fetch has the server asked first.
  */
 function AddForm({
   data,
@@ -40,23 +44,36 @@ function AddForm({
   const [branch, setBranch] = useState('');
   const [base, setBase] = useState('');
   const [busy, setBusy] = useState(false);
+  /** How a new slot is made; the server remembers the last one made per repository. */
+  const [newKind, setNewKind] = useState<SlotKind>(data.slotKind);
+  const [fetchFirst, setFetchFirst] = useState(true);
   const branchField = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (focusKey) branchField.current?.focus();
   }, [focusKey]);
+  const freeSlots = data.worktrees.filter((w) => w.free).sort((a, b) => a.slot! - b.slot!);
+  // The lowest free slot, unless one was picked and is still on offer: the list may have moved under it.
+  const offered = slot !== null && (slot === data.newSlot.slot || freeSlots.some((w) => w.slot === slot));
+  const chosen = offered ? slot! : (freeSlots[0]?.slot ?? data.newSlot.slot);
+  const reused = freeSlots.find((w) => w.slot === chosen);
+  const chosenPath = reused?.path ?? data.newSlot.path;
+  const toClone = reused ? !!reused.clone : newKind === 'clone';
+  // Where the name is looked up: a free clone's own branches; a new clone has none of its own yet.
+  const branches = toClone ? (reused?.branches ?? []) : data.branches;
+  const lookupSlot = reused?.clone ? chosen : undefined;
   const name = branch.trim();
-  const local = useMemo(() => data.branches.some((b) => b.name === name), [data.branches, name]);
+  const local = useMemo(() => branches.some((b) => b.name === name), [branches, name]);
   // Remote branches do not come with the list — a remote can carry thousands — so the name typed is
   // looked up on its own once typing pauses, to tell a remote branch from a new name before submitting.
-  const [lookup, setLookup] = useState<{ name: string; remotes: string[] } | null>(null);
+  const [lookup, setLookup] = useState<{ name: string; slot?: number; remotes: string[] } | null>(null);
   useEffect(() => {
     if (!name || local) return;
     let alive = true;
     const timer = setTimeout(() => {
       api
-        .remoteBranches(name)
+        .remoteBranches(name, lookupSlot)
         .then((res) => {
-          if (alive) setLookup({ name, remotes: res.remotes });
+          if (alive) setLookup({ name, slot: lookupSlot, remotes: res.remotes });
         })
         // A name git would refuse is on no remote either; submitting it says what is wrong with it.
         .catch(() => {});
@@ -65,17 +82,14 @@ function AddForm({
       alive = false;
       clearTimeout(timer);
     };
-  }, [name, local]);
-  const remotes = !local && lookup?.name === name ? lookup.remotes : [];
+  }, [name, local, lookupSlot]);
+  const remotes = !local && lookup?.name === name && lookup.slot === lookupSlot ? lookup.remotes : [];
   // Nothing is left to choose for a local branch, nor for a remote one when only one remote has it.
   const baseFixed = local || remotes.length === 1;
-  // Only a branch nobody has checked out can be offered: git keeps one worktree per branch.
-  const free = data.branches.filter((b) => !b.worktree);
-  const freeSlots = data.worktrees.filter((w) => w.free).sort((a, b) => a.slot! - b.slot!);
-  // The lowest free slot, unless one was picked and is still on offer: the list may have moved under it.
-  const offered = slot !== null && (slot === data.newSlot.slot || freeSlots.some((w) => w.slot === slot));
-  const chosen = offered ? slot! : (freeSlots[0]?.slot ?? data.newSlot.slot);
-  const chosenPath = freeSlots.find((w) => w.slot === chosen)?.path ?? data.newSlot.path;
+  // Only a branch nobody has checked out can be offered: git keeps one worktree per branch, and two
+  // clones on one name would push to one branch.
+  const free = branches.filter((b) => !b.worktree);
+  const defaultBase = toClone ? (reused ? reused.trunk : data.trunk) : repo?.defaultBase;
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -83,7 +97,13 @@ function AddForm({
     setBusy(true);
     try {
       const typed = base.trim();
-      const res = await api.createWorktree({ branch: name, slot: chosen, ...(typed && !baseFixed ? { base: typed } : {}) });
+      const res = await api.createWorktree({
+        branch: name,
+        slot: chosen,
+        ...(reused ? {} : { kind: newKind }),
+        ...(toClone && fetchFirst ? { fetch: true } : {}),
+        ...(typed && !baseFixed ? { base: typed } : {}),
+      });
       setBranch('');
       setBase('');
       onDone(res, name);
@@ -124,35 +144,56 @@ function AddForm({
               ? `从 ${remotes[0]} 检出，本地分支跟踪它`
               : remotes.length
                 ? '多个 remote 都有这个分支，填写要跟踪的那一个'
-                : '新分支从这个 ref 创建'
+                : toClone
+                  ? '新分支从这个 ref 创建；留空则从远端默认分支创建'
+                  : '新分支从这个 ref 创建'
         }
       >
         基于
         <input
           value={baseFixed ? '' : base}
           onChange={(e) => setBase(e.target.value)}
-          placeholder={local ? '直接检出现有分支' : remotes.length ? remotes.join(' 或 ') : (repo?.defaultBase ?? 'HEAD')}
+          placeholder={local ? '直接检出现有分支' : remotes.length ? remotes.join(' 或 ') : (defaultBase ?? (toClone ? '远端默认分支' : 'HEAD'))}
           disabled={baseFixed}
           spellCheck={false}
           aria-label="base"
         />
       </label>
-      <label className="field" title="空闲工位复用它的目录和装好的依赖；新工位是一个新目录，依赖要重新安装">
+      <label
+        className="field"
+        title="空闲工位复用它的目录和装好的依赖；新工位是一个新目录，依赖要重新安装。clone 有自己的 .git 和 hooks，直接与服务器通信；worktree 共用主仓库的 .git"
+      >
         工位
-        <select value={chosen} onChange={(e) => onSlot(Number(e.target.value))} aria-label="工位">
+        <select
+          value={reused ? String(chosen) : `new:${newKind}`}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v.startsWith('new:')) {
+              setNewKind(v === 'new:clone' ? 'clone' : 'worktree');
+              onSlot(data.newSlot.slot);
+            } else onSlot(Number(v));
+          }}
+          aria-label="工位"
+        >
           {freeSlots.map((w) => (
             <option key={w.slot} value={w.slot}>
-              {dirName(w.path)}（空闲，复用依赖）
+              {dirName(w.path)}（空闲{w.clone ? ' clone' : ''}，复用依赖）
             </option>
           ))}
-          <option value={data.newSlot.slot}>{dirName(data.newSlot.path)}（新目录，需装依赖）</option>
+          <option value="new:clone">{dirName(data.newSlot.path)}（新 clone，需装依赖和 hooks）</option>
+          <option value="new:worktree">{dirName(data.newSlot.path)}（新 worktree，需装依赖）</option>
         </select>
       </label>
       <div className="wt-path muted mono" title={chosenPath}>
         {chosenPath}
       </div>
+      {toClone && (
+        <label className="check" title="检出前在这个 clone 里运行 git fetch --all，用你自己的 git 凭据访问服务器；失败就不检出">
+          <input type="checkbox" checked={fetchFirst} onChange={(e) => setFetchFirst(e.target.checked)} />先 fetch 远端
+        </label>
+      )}
       <button type="submit" disabled={busy || !name}>
-        {busy ? '检出中…' : local ? '检出' : remotes.length ? '检出远程分支' : '新建分支并检出'}
+        {busy ? (toClone && fetchFirst ? 'fetch 并检出中…' : '检出中…') : local ? '检出' : remotes.length ? '检出远程分支' : '新建分支并检出'}
       </button>
     </form>
   );
@@ -216,7 +257,13 @@ export function WorktreesPanel() {
 
   const checkedOut = async (res: CreateWorktreeResponse, branch: string) => {
     const name = dirName(res.worktree.path);
-    showToast(res.reused ? `已在 ${name} 检出 ${branch}，目录和依赖复用` : `已新建 ${name} 并检出 ${branch}，依赖需要安装`);
+    showToast(
+      res.reused
+        ? `已在 ${name} 检出 ${branch}，目录和依赖复用`
+        : res.worktree.clone
+          ? `已新建 clone ${name} 并检出 ${branch}，依赖和 hooks 需要安装`
+          : `已新建 ${name} 并检出 ${branch}，依赖需要安装`,
+    );
     setSlot(null);
     await Promise.all([load(), reloadRepo()]);
   };
@@ -267,7 +314,7 @@ export function WorktreesPanel() {
         <div className="muted empty">加载中…</div>
       )}
       <div className="side-form-status muted small">
-        {data ? `${data.worktrees.length} 个 worktree${freeCount ? `，${freeCount} 个空闲工位` : ''}` : ''}
+        {data ? `${data.worktrees.length} 个检出目录${freeCount ? `，${freeCount} 个空闲工位` : ''}` : ''}
         <button className="link" onClick={() => void load()}>
           刷新
         </button>
@@ -298,6 +345,11 @@ export function WorktreesPanel() {
                   ) : (
                     <span className="badge" title={wt.path}>
                       {name}
+                    </span>
+                  )}
+                  {wt.clone && (
+                    <span className="badge" title="独立的 clone：自己的 .git、分支和 hooks，直接与服务器 fetch 和 push，不和主仓库交换分支">
+                      clone
                     </span>
                   )}
                   {wt.prunable ? (
@@ -341,23 +393,32 @@ export function WorktreesPanel() {
                       {confirming.forced === 'dirty'
                         ? `${wt.dirty > 0 ? `有 ${wt.dirty} 处未提交的改动` : '有未提交的改动'}，${releases(wt) ? '释放' : '删除'}会把它们一起丢掉。`
                         : confirming.forced === 'other'
-                          ? `git 拒绝了：${confirming.message}。要强制删除吗？`
+                          ? wt.clone
+                            ? `只有这个 clone 里有的东西会随目录一起丢掉：${confirming.message}。仍要删除吗？`
+                            : `git 拒绝了：${confirming.message}。要强制删除吗？`
                           : wt.prunable
                             ? `清理 ${name} 的记录；它的目录已经不在了。`
                             : wt.free
                               ? `删除 ${name} 的目录。下次检出到新目录时依赖要重新安装。`
                               : releases(wt)
-                                ? `释放 ${name}：目录和装好的依赖留给下一个分支。`
-                                : `删除 ${name}，连同它的目录。`}
+                                ? wt.clone
+                                  ? `释放 ${name}：目录和装好的依赖留给下一个分支；不删的分支留在这个 clone 里。`
+                                  : `释放 ${name}：目录和装好的依赖留给下一个分支。`
+                                : wt.clone
+                                  ? `删除 ${name}，连同整个 clone：它的分支也一起删掉。`
+                                  : `删除 ${name}，连同它的目录。`}
                     </span>
-                    {wt.branch && !wt.isMain && !wt.free && (
-                      <label className="check" title="git branch -d：没合并的分支会保留">
+                    {wt.branch && !wt.isMain && !wt.free && !(wt.clone && !releases(wt)) && (
+                      <label className="check" title={wt.clone ? '只在分支有上游、且已全部推送时删除；否则保留' : 'git branch -d：没合并的分支会保留'}>
                         <input type="checkbox" checked={deleteBranch} onChange={(e) => setDeleteBranch(e.target.checked)} />
                         一并删除分支 {wt.branch}
                       </label>
                     )}
                     {isSlot && !wt.free && !wt.prunable && confirming.forced !== 'other' && (
-                      <label className="check" title="git worktree remove：目录连同依赖一起删掉">
+                      <label
+                        className="check"
+                        title={wt.clone ? '整个 clone 目录连同依赖一起删掉；有未推送的提交或 stash 会先问' : 'git worktree remove：目录连同依赖一起删掉'}
+                      >
                         <input type="checkbox" checked={deleteDir} onChange={(e) => setDeleteDir(e.target.checked)} />
                         连目录一起删除
                       </label>

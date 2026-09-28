@@ -128,7 +128,16 @@ export interface Prefs {
    * count a file whose only changes left unstaged are debug code as still to review.
    */
   ignoreDebug: boolean;
+  /** How the last new slot was made; the checkout form offers the same kind first next time. */
+  slotKind?: SlotKind;
 }
+
+/**
+ * What a slot is. `clone`: a repository of its own beside the main checkout — its own `.git`,
+ * hooks and refs, talking to the server by itself — for repositories whose tooling does not cope
+ * with linked worktrees. `worktree`: a linked worktree sharing the main checkout's `.git`.
+ */
+export type SlotKind = 'clone' | 'worktree';
 
 export interface TargetState {
   /** filePath -> contentHash at the time it was marked viewed */
@@ -202,6 +211,14 @@ export interface WorktreeInfo {
   isMain: boolean;
   detached: boolean;
   bare: boolean;
+  /**
+   * A slot that is a clone of its own rather than a linked worktree (see `SlotKind`). Its branches
+   * are its own: nothing is exchanged with the main checkout or the other slots, each one fetches
+   * from and pushes to the server by itself.
+   */
+  clone?: boolean;
+  /** A clone's remote default branch (`origin/main`): what it is compared with, and where a new branch starts. */
+  trunk?: string;
 }
 
 /**
@@ -209,10 +226,13 @@ export interface WorktreeInfo {
  * `upstream`: `base` is the branch's upstream, so the two are what is not pushed and what is not
  * pulled yet. `base`: the checkout has no upstream, or one that is gone, and `base` is the branch
  * the main worktree has checked out right now — the base a sibling worktree is reviewed against,
- * which need not be `main`; nothing ahead there means merged.
+ * which need not be `main`; nothing ahead there means merged. `trunk`: a clone with no upstream, or
+ * one that is gone, counted against its remote's default branch (`origin/main`, as `origin/HEAD`
+ * names it), the branch its work goes into — a clone shares nothing with the main worktree to be
+ * compared with; nothing ahead means merged there.
  */
 export interface WorktreeComparison {
-  kind: 'upstream' | 'base';
+  kind: 'upstream' | 'base' | 'trunk';
   /** As git abbreviates it (`origin/topic`, `develop`), or `HEAD abc1234` for a detached main worktree. */
   base: string;
   ahead: number;
@@ -246,6 +266,8 @@ export interface WorktreeDetail extends WorktreeInfo {
   comparisonError?: string;
   /** Where the comments on its code stand in the loop with its agent, across all their pools. */
   review?: WorktreeReview;
+  /** A free clone's own local branches, which the checkout form offers for it instead of the main worktree's. */
+  branches?: BranchInfo[];
 }
 
 export interface WorktreeReview {
@@ -291,6 +313,10 @@ export interface WorktreesResponse {
   branches: BranchInfo[];
   /** The slot a checkout makes when it takes no free one: the lowest number with no directory yet. */
   newSlot: WorktreeSlot;
+  /** How the form offers to make that slot: the kind made last time, a clone until then. */
+  slotKind: SlotKind;
+  /** The main worktree's remote default branch, which a new clone starts a branch from unless told otherwise. */
+  trunk?: string;
 }
 
 export interface CreateWorktreeRequest {
@@ -306,6 +332,14 @@ export interface CreateWorktreeRequest {
    * the lowest free slot, else a new one. Never a path — the server composes those.
    */
   slot?: number;
+  /** How a new slot is made; a slot that exists is what it is. Omitted, a worktree. */
+  kind?: SlotKind;
+  /**
+   * Into a clone: `git fetch --all` there first, so the branch and its base are read as the server
+   * has them now rather than as of the clone's last fetch. Reaches the server with the user's own
+   * credentials; a fetch that fails stops the checkout.
+   */
+  fetch?: boolean;
 }
 
 /** `GET /api/worktrees/remotes?branch=`: `<remote>/<branch>` for each remote that has the branch. */
@@ -324,7 +358,11 @@ export interface ReleaseWorktreeRequest {
   path: string;
   /** Discard the uncommitted changes; only ever sent after the reviewer confirmed a 409 (`worktree_dirty`). */
   force?: boolean;
-  /** Also `git branch -d` the branch it held; one that is not merged is kept and reported. */
+  /**
+   * Also `git branch -d` the branch it held; one that is not merged is kept and reported. In a
+   * clone, only a branch whose upstream is there and has all of it: without one, `-d` would check
+   * the detached HEAD, which is the branch itself.
+   */
   deleteBranch?: boolean;
 }
 
@@ -333,9 +371,12 @@ export type ReleaseWorktreeResponse = RemoveWorktreeResponse;
 
 export interface RemoveWorktreeRequest {
   path: string;
-  /** `--force`: only ever sent after the reviewer confirmed a 409 (`worktree_dirty`, `needs_force`). */
+  /**
+   * `--force`: only ever sent after the reviewer confirmed a 409 (`worktree_dirty`, `needs_force`).
+   * For a clone, the confirmation that what the directory alone holds may go with it.
+   */
   force?: boolean;
-  /** Also `git branch -d` the worktree's branch; a branch that is not merged is kept and reported. */
+  /** Also `git branch -d` the worktree's branch; a branch that is not merged is kept and reported. A clone's branches go with it. */
   deleteBranch?: boolean;
 }
 

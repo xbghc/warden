@@ -26,8 +26,9 @@ first time the file is read, and the 已读 marks those views used to keep are d
 
 Single user, local only. The server binds to `127.0.0.1` and executes git only through
 `execFile('git', [...])`. Reads go through an argument whitelist (`rev-parse`, `diff`, `show`, `log`,
-`worktree list`, `ls-files`, `status`, `merge-base`, `rev-list`, `grep` without `-O` /
-`--open-files-in-pager`) that refuses option-looking refs and any write-capable
+`worktree list`, `ls-files`, `status`, `merge-base`, `rev-list`, `for-each-ref`, `check-ref-format`,
+`grep` without `-O` / `--open-files-in-pager`, and `config` only as `--get`, `--get-all` or
+`--get-regexp` of one name or pattern) that refuses option-looking refs and any write-capable
 flag; requests that would need anything else get HTTP 400. The writes are few and each composes its
 own arguments. `POST /api/targets/:key/stage` runs `git apply --cached` (with `--reverse` for the
 Staged view) on a patch the server itself builds from the diff it just produced — the patch is never
@@ -39,7 +40,14 @@ number — `<repo>-<n>` beside the main worktree; no request names a directory. 
 HEAD of an existing checkout are written only inside such a slot: `git switch <branch>` into a free
 one (detached, clean) when a branch is checked out there, `git switch --detach` when it is released,
 and `git reset --hard` plus `git clean -fd` only on the forced release the reviewer confirmed after
-a 409. Refs change only when a branch is made for a checkout (plus its upstream setting when it comes
+a 409. A clone slot (see [Clone slots](worktrees.md#clone-slots)) is made at such a path by
+`git clone --local --no-checkout` with `warden.main` set, then `git remote remove` / `add` /
+`set-url` / `set-head` with the names and URLs read from the main worktree's config, and a `git fetch`
+of the main worktree's remote-tracking branches; after that it is written like any slot, in the
+clone, plus a `git fetch --all` there when the checkout asks for one. A clone made for a checkout
+that then fails is deleted again, and a clone's directory is deleted — the one write outside git —
+only on a removal the reviewer confirmed after being told what only it holds, and only while it is
+still a clone of this repository. Refs change only when a branch is made for a checkout (plus its upstream setting when it comes
 from a remote) — undone with `branch -D` should the switch into the slot then fail — or deleted on
 request after a release or removal (`-d`, so only a merged one), and the review state lives outside
 the repository. A checkpoint writes only there: `git add --all [--intent-to-add]` and
@@ -55,7 +63,9 @@ from another origin (`Sec-Fetch-Site: cross-site`, or an `Origin` that is not th
 refused with 403 as well, so a page from elsewhere cannot drive the server through the browser it
 is open in.
 
-The only request warden makes off the machine is the update check: a `GET` of
+warden itself makes one request off the machine, the update check: a `GET` of
 `https://registry.npmjs.org/@xbghc%2fwarden/latest`, no more than once a day, carrying nothing about
-the repository or the review. `--no-update-check` (or the environment switches under [Install / run](../README.md#install--run))
+the repository or the review. The other way out is git's own: a checkout into a clone slot with
+*先 fetch 远端* ticked runs `git fetch --all` in that clone, which reaches its remotes with your git
+configuration and credentials, as running it yourself would. `--no-update-check` (or the environment switches under [Install / run](../README.md#install--run))
 removes it.

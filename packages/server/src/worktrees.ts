@@ -7,34 +7,18 @@ import type {
   ReleaseWorktreeRequest,
   RemoveWorktreeRequest,
   RemoveWorktreeResponse,
+  SlotKind,
   WorktreeDetail,
   WorktreeInfo,
   WorktreeSlot,
 } from '@warden/shared';
 import { isValidRef } from '@warden/shared';
 import { badRequest, HttpError } from './errors.js';
-import { GitError, refExists, runGit, runGitWrite } from './git.js';
-import { detectDefaultBase, listWorktrees, listWorktreesAll, type RepoContext } from './repo.js';
+import { GitError, LONG_GIT_TIMEOUT_MS, refExists, runGit, runGitWrite } from './git.js';
+import { detectDefaultBase, isCloneOf, listWorktrees, listWorktreesAll, remoteDefault, slotOf, slotPath, type RepoContext } from './repo.js';
+import { clonedBranch, discardClone, dropCloneBranch, fetchClone, makeClone, removeClone } from './clones.js';
 
-/**
- * The directories warden makes are numbered slots beside the main worktree — `<repo>-1`,
- * `<repo>-2`, … — not one directory per branch. A directory is where the dependencies get
- * installed, and a fresh one for every branch meant installing them for every branch. A slot
- * outlives its branch: released, it stays behind, node_modules and all, for the next branch to be
- * checked out into.
- */
-export function slotPath(ctx: RepoContext, slot: number): string {
-  return path.join(path.dirname(ctx.commonRoot), `${path.basename(ctx.commonRoot)}-${slot}`);
-}
-
-/** The number of the slot at `p`; undefined for a worktree made anywhere else, or named otherwise. */
-export function slotOf(ctx: RepoContext, p: string): number | undefined {
-  if (path.dirname(p) !== path.dirname(ctx.commonRoot)) return undefined;
-  const prefix = `${path.basename(ctx.commonRoot)}-`;
-  const name = path.basename(p);
-  const n = name.startsWith(prefix) ? name.slice(prefix.length) : '';
-  return /^[1-9]\d*$/.test(n) ? Number(n) : undefined;
-}
+export { slotOf, slotPath } from './repo.js';
 
 /** Entries `git status` reports, renames counted once: what a worktree would lose if removed. */
 async function dirtyCount(cwd: string): Promise<number> {
@@ -61,8 +45,8 @@ interface Upstream {
  * `for-each-ref` for all of them. runGit's `LC_ALL=C` keeps `%(upstream:track)` in the English form
  * parsed here — `[ahead 1, behind 2]`, `[gone]`, or empty when the two are level.
  */
-async function listUpstreams(ctx: RepoContext): Promise<Map<string, Upstream>> {
-  const r = await runGit(['for-each-ref', '--format=%(refname)%09%(upstream:short)%09%(upstream:track)', 'refs/heads'], { cwd: ctx.commonRoot });
+async function listUpstreams(cwd: string): Promise<Map<string, Upstream>> {
+  const r = await runGit(['for-each-ref', '--format=%(refname)%09%(upstream:short)%09%(upstream:track)', 'refs/heads'], { cwd });
   const out = new Map<string, Upstream>();
   for (const line of r.stdout.split('\n')) {
     const [ref = '', name = '', track = ''] = line.split('\t');
@@ -102,12 +86,18 @@ const IN_PROGRESS: [string, string][] = [
 /**
  * Whether the directory at a slot's path may be written: it has to be a checkout of this repository
  * — git lists an entry as long as `<dir>/.git` exists, so a repository cloned where a deleted slot
- * was still passes for the slot — and nothing may be stopped halfway in it, since a release, a
- * reuse or a removal would throw the half-done rebase or merge away.
+ * was still passes for the slot; a clone slot has to be a clone of this repository still — and
+ * nothing may be stopped halfway in it, since a release, a reuse or a removal would throw the
+ * half-done rebase or merge away.
  */
-async function checkoutState(ctx: RepoContext, dir: string): Promise<{ foreign: boolean; busy?: string }> {
-  const [ours, theirs] = await Promise.all([commonDirOf(ctx.commonRoot), commonDirOf(dir)]);
-  if (!ours || ours !== theirs) return { foreign: true };
+async function checkoutState(ctx: RepoContext, wt: WorktreeInfo): Promise<{ foreign: boolean; busy?: string }> {
+  const dir = wt.path;
+  if (wt.clone) {
+    if (!(await isCloneOf(ctx.commonRoot, dir))) return { foreign: true };
+  } else {
+    const [ours, theirs] = await Promise.all([commonDirOf(ctx.commonRoot), commonDirOf(dir)]);
+    if (!ours || ours !== theirs) return { foreign: true };
+  }
   const r = await runGit(['rev-parse', ...IN_PROGRESS.flatMap(([f]) => ['--git-path', f])], { cwd: dir });
   const paths = r.stdout.trim().split('\n');
   for (const [i, [, what]] of IN_PROGRESS.entries()) {
@@ -124,14 +114,22 @@ async function checkoutState(ctx: RepoContext, dir: string): Promise<{ foreign: 
   return { foreign: false };
 }
 
+/** Main worktree first, then the slots by number, whichever kind, then worktrees made anywhere else. */
+function listingOrder(a: WorktreeDetail, b: WorktreeDetail): number {
+  const rank = (w: WorktreeDetail) => (w.isMain ? 0 : w.slot !== undefined ? 1 : 2);
+  return rank(a) - rank(b) || (a.slot ?? 0) - (b.slot ?? 0);
+}
+
 export async function listWorktreesDetailed(ctx: RepoContext): Promise<WorktreeDetail[]> {
-  const [all, upstreams] = await Promise.all([listWorktreesAll(ctx), listUpstreams(ctx)]);
+  const [all, upstreams] = await Promise.all([listWorktreesAll(ctx), listUpstreams(ctx.commonRoot)]);
   const main = all.find((w) => w.isMain);
-  return Promise.all(
+  const held = new Map<string, string>();
+  for (const w of all) if (w.branch) held.set(w.branch, w.path);
+  const details = await Promise.all(
     all.map(async (w) => {
       const slot = w.isMain || w.bare ? undefined : slotOf(ctx, w.path);
       const dirty = w.prunable || w.bare ? 0 : await dirtyCount(w.path);
-      const state = slot === undefined || w.prunable ? { foreign: false } : await checkoutState(ctx, w.path);
+      const state = slot === undefined || w.prunable ? { foreign: false } : await checkoutState(ctx, w);
       const detail: WorktreeDetail = {
         ...w,
         dirty,
@@ -142,6 +140,7 @@ export async function listWorktreesDetailed(ctx: RepoContext): Promise<WorktreeD
         // nothing stopped halfway, and a checkout that is this repository's own.
         free: slot !== undefined && !w.prunable && w.detached && dirty === 0 && !state.foreign && !state.busy,
       };
+      if (w.clone) return describeClone(detail, held);
       // A free slot holds no branch: there is nothing to compare.
       if (detail.free) return detail;
       // A branch that has an upstream is counted against it, the main worktree's included: what is
@@ -166,6 +165,48 @@ export async function listWorktreesDetailed(ctx: RepoContext): Promise<WorktreeD
       return detail;
     }),
   );
+  return details.sort(listingOrder);
+}
+
+/**
+ * What the panel shows of a clone, read in the clone: its branches are its own. A branch with an
+ * upstream is counted against it; any other, or one whose upstream is gone, against the clone's remote
+ * default branch — the main worktree's HEAD is in another repository, one this clone shares nothing
+ * with. A free clone lists its local branches, which the checkout form offers for it, each marked
+ * with the checkout that has a branch of that name: two checkouts on one name would push to one
+ * branch on the server.
+ */
+async function describeClone(detail: WorktreeDetail, held: Map<string, string>): Promise<WorktreeDetail> {
+  if (detail.foreign) return detail;
+  const cwd = detail.path;
+  const trunk = detail.trunk;
+  if (detail.free) {
+    const r = await runGit(['for-each-ref', '--format=%(refname:lstrip=2)%09%(objectname:short)', 'refs/heads'], { cwd });
+    detail.branches = r.stdout
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => {
+        const [name = '', sha = ''] = line.split('\t');
+        const worktree = held.get(name);
+        return { name, sha, ...(worktree ? { worktree } : {}) };
+      });
+    return detail;
+  }
+  const upstream = detail.branch ? (await listUpstreams(cwd)).get(detail.branch) : undefined;
+  if (upstream && !upstream.gone) {
+    detail.comparison = { kind: 'upstream', base: upstream.name, ahead: upstream.ahead, behind: upstream.behind };
+    return detail;
+  }
+  if (upstream) detail.upstreamGone = upstream.name;
+  if (!trunk) return detail;
+  try {
+    const result = await runGit(['rev-list', '--left-right', '--count', `${trunk}...HEAD`, '--'], { cwd });
+    const [behind, ahead] = result.stdout.trim().split(/\s+/).map(Number);
+    detail.comparison = { kind: 'trunk', base: trunk, ahead: ahead!, behind: behind! };
+  } catch {
+    detail.comparisonError = '无法比较提交历史';
+  }
+  return detail;
 }
 
 /**
@@ -190,13 +231,16 @@ export async function listBranches(ctx: RepoContext, worktrees: WorktreeInfo[]):
 
 /**
  * `<remote>/<branch>` for each remote that has the branch named in the form, so the form can say it
- * will be checked out tracking one rather than started from the base.
+ * will be checked out tracking one rather than started from the base. Looked up where the checkout
+ * would read it: in the clone, for a slot that is one — its remote-tracking branches are its own —
+ * and in the main worktree otherwise, whose are what a new clone starts with.
  */
-export async function lookupRemoteBranches(ctx: RepoContext, name: string): Promise<string[]> {
+export async function lookupRemoteBranches(ctx: RepoContext, name: string, slot?: number): Promise<string[]> {
   const branch = name.trim();
   // The name becomes a `for-each-ref` pattern, where a `*` would match every remote branch there is.
   await assertBranchName(ctx, branch);
-  return remoteBranches(ctx.commonRoot, branch);
+  const clone = slot === undefined ? undefined : (await listWorktreesAll(ctx)).find((w) => w.clone && w.path === slotPath(ctx, slot));
+  return remoteBranches(clone?.path ?? ctx.commonRoot, branch);
 }
 
 /** A branch name git would accept, and one that is only ever a name: no `@{-1}`-style expansion. */
@@ -235,25 +279,31 @@ export async function nextSlot(ctx: RepoContext, worktrees: WorktreeInfo[]): Pro
  * Where the branch goes. Unasked, the lowest free slot, else a new one at the next number. Asked
  * for by number, a slot that exists has to be free — one holding a branch is never switched from
  * under whoever is working in it, and one whose directory is gone has to be cleared first — and a
- * number no slot has yet is made. Either way the path is composed here: nothing in a request names
- * a directory, so a checkout cannot land anywhere but beside the main worktree.
+ * number no slot has yet is made, as `kind` says. A slot that exists is what it was made as. Either
+ * way the path is composed here: nothing in a request names a directory, so a checkout cannot land
+ * anywhere but beside the main worktree.
  */
-async function pickSlot(ctx: RepoContext, worktrees: WorktreeDetail[], wanted: number | undefined): Promise<WorktreeSlot & { reuse: boolean }> {
+async function pickSlot(
+  ctx: RepoContext,
+  worktrees: WorktreeDetail[],
+  wanted: number | undefined,
+  kind: SlotKind,
+): Promise<WorktreeSlot & { reuse: boolean; clone: boolean }> {
   const slots = worktrees.filter((w) => w.slot !== undefined);
   if (wanted === undefined) {
     const free = slots.filter((w) => w.free).sort((a, b) => a.slot! - b.slot!)[0];
-    if (free) return { slot: free.slot!, path: free.path, reuse: true };
-    return { ...(await nextSlot(ctx, worktrees)), reuse: false };
+    if (free) return { slot: free.slot!, path: free.path, reuse: true, clone: !!free.clone };
+    return { ...(await nextSlot(ctx, worktrees)), reuse: false, clone: kind === 'clone' };
   }
   const have = slots.find((w) => w.slot === wanted);
   if (have?.prunable) throw new HttpError(409, `the directory of slot ${wanted} is gone; remove its entry first`, 'slot_gone');
   if (have?.foreign) throw new HttpError(409, `${have.path} is not a checkout of this repository`, 'not_our_checkout');
   if (have?.busy) throw new HttpError(409, `a ${have.busy} is in progress in slot ${wanted}`, 'operation_in_progress');
   if (have && !have.free) throw new HttpError(409, `slot ${wanted} is in use${have.branch ? ` by ${have.branch}` : ''}`, 'slot_in_use');
-  if (have) return { slot: wanted, path: have.path, reuse: true };
+  if (have) return { slot: wanted, path: have.path, reuse: true, clone: !!have.clone };
   const p = slotPath(ctx, wanted);
   if (!(await dirUsable(p))) throw badRequest(`${p} already exists`, 'path_exists');
-  return { slot: wanted, path: p, reuse: false };
+  return { slot: wanted, path: p, reuse: false, clone: kind === 'clone' };
 }
 
 /** `<remote>/<branch>` for each remote that has the branch; `*` spans one path segment, the remote's name. */
@@ -263,50 +313,85 @@ async function remoteBranches(cwd: string, branch: string): Promise<string[]> {
 }
 
 /**
- * Checks a branch out into a slot, deciding what the branch name refers to when the request arrives
- * rather than trusting the page's list, which may predate a fetch or a branch an agent just made. A
- * local branch is checked out as it is, which git allows in one worktree at a time. A branch only a
- * remote has becomes a local one tracking it (`--track`), as `git worktree add <path> <branch>`
- * guesses: starting it from the default base would give the name a second history without the
- * remote's commits, so a base is refused unless it says which remote — the one choice left when
- * several have the branch. Any other name is a new branch from `base`, or from `main`/`master` when
- * there is none.
+ * What a branch name refers to in the repository at `cwd`, decided when the request arrives rather
+ * than from the page's list, which may predate a fetch or a branch an agent just made. A local
+ * branch is checked out as it is: undefined. A branch only a remote has becomes a local one
+ * tracking it (`--track`), as `git worktree add <path> <branch>` guesses: starting it from the
+ * default base would give the name a second history without the remote's commits, so a base is
+ * refused unless it says which remote — the one choice left when several have the branch. Any other
+ * name is a new branch from `base`, or from `fallback()` when there is none.
+ */
+async function resolveBranch(
+  cwd: string,
+  branch: string,
+  base: string | undefined,
+  fallback: () => Promise<string>,
+): Promise<{ start: string; track: boolean } | undefined> {
+  if (base && !(await refExists(cwd, base))) throw badRequest(`unknown ref: ${base}`, 'unknown_ref');
+  if (await refExists(cwd, `refs/heads/${branch}`)) {
+    if (base) throw new HttpError(409, `branch ${branch} already exists`, 'branch_exists');
+    return undefined;
+  }
+  // A local `origin/x` would leave every later `origin/x` ambiguous, and it is never what was meant.
+  if (await refExists(cwd, `refs/remotes/${branch}`)) {
+    throw new HttpError(409, `${branch} is a remote branch; enter ${branch.slice(branch.indexOf('/') + 1)} to check it out`, 'branch_exists');
+  }
+  const remote = await remoteBranches(cwd, branch);
+  if (remote.length > 1 && !remote.includes(base ?? '')) {
+    throw new HttpError(409, `branch ${branch} exists on several remotes; enter ${remote.join(' or ')} as the base`, 'ambiguous_branch');
+  }
+  if (remote.length === 1 && base && base !== remote[0]) {
+    throw new HttpError(409, `branch ${branch} already exists as ${remote[0]}; leave the base empty to check it out`, 'branch_exists');
+  }
+  return remote.length ? { start: base || remote[0]!, track: true } : { start: base || (await fallback()), track: false };
+}
+
+/** Refuses a name some checkout has on: git keeps a branch in one worktree, and two clones on one name would push to one branch. */
+function assertBranchFree(worktrees: WorktreeDetail[], branch: string): void {
+  const holder = worktrees.find((w) => w.branch === branch);
+  if (holder) throw new HttpError(409, `${branch} is already checked out at ${holder.path}`, 'branch_in_use');
+}
+
+/**
+ * Checks a branch out into a slot (see `resolveBranch` for what the name becomes).
  *
- * Into a free slot that is `git branch` in the main worktree — where a base such as `HEAD` means what
- * it would to `worktree add` — followed by `git switch` in the slot, which rewrites the files there as
- * any checkout does and leaves the ignored ones alone. Into a new slot it is `git worktree add`, with
- * the same choices as options.
+ * A worktree slot reads the name in the main worktree, whose refs it shares. Into a free one that is
+ * `git branch` in the main worktree — where a base such as `HEAD` means what it would to `worktree
+ * add` — followed by `git switch` in the slot, which rewrites the files there as any checkout does and
+ * leaves the ignored ones alone. Into a new slot it is `git worktree add`, with the same choices as
+ * options; the default base is `main`/`master`.
+ *
+ * A clone slot reads it in the clone, after `git fetch --all` there when asked: its branches and its
+ * view of the server are its own. A new one is made first (`makeClone`), and dropped again should
+ * the checkout then fail. The branch is made and switched to in the clone; the default base is its
+ * remote's default branch. The branch `git clone` made for the main worktree's HEAD goes once the
+ * clone is on its own branch.
  */
 export async function checkoutWorktree(ctx: RepoContext, req: CreateWorktreeRequest): Promise<CreateWorktreeResponse> {
   const branch = req.branch.trim();
-  const base = req.base?.trim();
+  const base = req.base?.trim() || undefined;
   await assertBranchName(ctx, branch);
-  const cwd = ctx.commonRoot;
-  if (base) {
-    if (!isValidRef(base)) throw badRequest(`invalid base ref: ${base}`, 'invalid_ref');
-    if (!(await refExists(cwd, base))) throw badRequest(`unknown ref: ${base}`, 'unknown_ref');
-  }
+  if (base && !isValidRef(base)) throw badRequest(`invalid base ref: ${base}`, 'invalid_ref');
   const existing = await listWorktreesDetailed(ctx);
-  /** Unset for a branch that exists; otherwise where the new one starts, and whether it tracks that. */
-  let create: { start: string; track: boolean } | undefined;
-  if (await refExists(cwd, `refs/heads/${branch}`)) {
-    if (base) throw new HttpError(409, `branch ${branch} already exists`, 'branch_exists');
-    const holder = existing.find((w) => w.branch === branch);
-    if (holder) throw new HttpError(409, `${branch} is already checked out at ${holder.path}`, 'branch_in_use');
-  } else if (await refExists(cwd, `refs/remotes/${branch}`)) {
-    // A local `origin/x` would leave every later `origin/x` ambiguous, and it is never what was meant.
-    throw new HttpError(409, `${branch} is a remote branch; enter ${branch.slice(branch.indexOf('/') + 1)} to check it out`, 'branch_exists');
-  } else {
-    const remote = await remoteBranches(cwd, branch);
-    if (remote.length > 1 && !remote.includes(base ?? '')) {
-      throw new HttpError(409, `branch ${branch} exists on several remotes; enter ${remote.join(' or ')} as the base`, 'ambiguous_branch');
-    }
-    if (remote.length === 1 && base && base !== remote[0]) {
-      throw new HttpError(409, `branch ${branch} already exists as ${remote[0]}; leave the base empty to check it out`, 'branch_exists');
-    }
-    create = remote.length ? { start: base || remote[0]!, track: true } : { start: base || (await detectDefaultBase(cwd)) || 'HEAD', track: false };
-  }
-  const target = await pickSlot(ctx, existing, req.slot);
+  const target = await pickSlot(ctx, existing, req.slot, req.kind ?? 'worktree');
+  if (target.clone) await checkoutClone(ctx, existing, target, branch, base, !!req.fetch);
+  else await checkoutLinked(ctx, existing, target, branch, base);
+  const real = await realpath(target.path).catch(() => target.path);
+  const worktree = (await listWorktrees(ctx)).find((w) => w.path === real);
+  if (!worktree) throw new HttpError(500, `git checked ${branch} out at ${target.path} but does not list it`, 'git_failed');
+  return { worktree, slot: target.slot, reused: target.reuse };
+}
+
+async function checkoutLinked(
+  ctx: RepoContext,
+  existing: WorktreeDetail[],
+  target: WorktreeSlot & { reuse: boolean },
+  branch: string,
+  base?: string,
+): Promise<void> {
+  const cwd = ctx.commonRoot;
+  const create = await resolveBranch(cwd, branch, base, async () => (await detectDefaultBase(cwd)) || 'HEAD');
+  assertBranchFree(existing, branch);
   // A branch made for a slot that then refuses the switch would stay behind, taken; `-D` undoes
   // it, and only it — the branch has nothing of its own yet.
   let made = false;
@@ -327,10 +412,43 @@ export async function checkoutWorktree(ctx: RepoContext, req: CreateWorktreeRequ
     if (e instanceof GitError && /already (checked out|used by worktree)/.test(e.stderr)) throw new HttpError(409, e.message, 'branch_in_use');
     throw e;
   }
-  const real = await realpath(target.path).catch(() => target.path);
-  const worktree = (await listWorktrees(ctx)).find((w) => w.path === real);
-  if (!worktree) throw new HttpError(500, `git checked ${branch} out at ${target.path} but does not list it`, 'git_failed');
-  return { worktree, slot: target.slot, reused: target.reuse };
+}
+
+async function checkoutClone(
+  ctx: RepoContext,
+  existing: WorktreeDetail[],
+  target: WorktreeSlot & { reuse: boolean },
+  branch: string,
+  base: string | undefined,
+  fetch: boolean,
+): Promise<void> {
+  // Before anything is cloned or fetched: a name some checkout has on is refused wherever it lives.
+  assertBranchFree(existing, branch);
+  const cwd = target.path;
+  if (!target.reuse) await makeClone(ctx, cwd);
+  try {
+    if (fetch) await fetchClone(cwd);
+    const create = await resolveBranch(cwd, branch, base, async () => (await remoteDefault(cwd)) ?? (await detectDefaultBase(cwd)) ?? 'HEAD');
+    const cloned = target.reuse ? undefined : await clonedBranch(cwd);
+    let made = false;
+    try {
+      if (create) {
+        await runGitWrite(['branch', ...(create.track ? ['--track'] : []), branch, create.start], { cwd });
+        made = true;
+      }
+      // A new clone has every file still to write, and a large repository takes a while.
+      await runGitWrite(['switch', '--no-guess', branch], { cwd, timeoutMs: LONG_GIT_TIMEOUT_MS });
+    } catch (e) {
+      if (made) await runGitWrite(['branch', '-D', branch], { cwd }).catch(() => undefined);
+      throw e;
+    }
+    // A copy of the main worktree's branch as the clone found it: the main worktree still has it,
+    // and a clone keeps the branches that were checked out in it, not one that never was.
+    if (cloned && cloned !== branch) await runGitWrite(['branch', '-D', cloned], { cwd });
+  } catch (e) {
+    if (!target.reuse) await discardClone(cwd);
+    throw e;
+  }
 }
 
 /** `git branch -d` on request. A branch that is not merged is kept, and the response says why. */
@@ -349,7 +467,8 @@ async function dropBranch(ctx: RepoContext, wt: WorktreeInfo, asked: boolean | u
 
 /**
  * Lets a slot go of its branch and keeps the directory: `git switch --detach` in it leaves HEAD's
- * commit checked out with no branch on it and touches no file. Uncommitted changes are refused as
+ * commit checked out with no branch on it and touches no file. A clone keeps the branch as well,
+ * unless deleting it is asked for and its upstream has all of it (`dropCloneBranch`). Uncommitted changes are refused as
  * 409 `worktree_dirty`, and only the request that carries `force` after that — the reviewer's
  * confirmation — discards them: `reset --hard` for the tracked files, `clean -fd` for the untracked
  * ones, never `-x`, so what is ignored (the installed dependencies, above all) stays. The branch
@@ -365,7 +484,7 @@ export async function releaseWorktree(ctx: RepoContext, req: ReleaseWorktreeRequ
   if (wt.bare || slotOf(ctx, wt.path) === undefined) throw badRequest(`${wt.path} is not a slot; remove it instead`, 'not_a_slot');
   if (wt.prunable) throw badRequest(`the directory of ${wt.path} is gone; remove its entry instead`, 'worktree_gone');
   // Checked before anything else touches the directory: a forced release runs reset --hard and clean.
-  const state = await checkoutState(ctx, wt.path);
+  const state = await checkoutState(ctx, wt);
   if (state.foreign) throw new HttpError(409, `${wt.path} is not a checkout of this repository; warden will not write in it`, 'not_our_checkout');
   if (state.busy) throw new HttpError(409, `a ${state.busy} is in progress in ${wt.path}; finish or abort it first`, 'operation_in_progress');
   const dirty = await dirtyCount(wt.path);
@@ -376,11 +495,12 @@ export async function releaseWorktree(ctx: RepoContext, req: ReleaseWorktreeRequ
     await runGitWrite(['clean', '-fdq'], { cwd: wt.path });
   }
   if (!wt.detached) await runGitWrite(['switch', '--detach'], { cwd: wt.path });
-  return dropBranch(ctx, wt, req.deleteBranch);
+  return wt.clone ? dropCloneBranch(wt, req.deleteBranch) : dropBranch(ctx, wt, req.deleteBranch);
 }
 
 /**
- * `git worktree remove`. `--force` is passed only when the request carries it, which the UI sends
+ * `git worktree remove`, or for a clone the deletion of its directory (`removeClone`), which takes
+ * its branches with it. `--force` is passed only when the request carries it, which the UI sends
  * only after the reviewer confirmed: git's refusals come back as 409 — `worktree_dirty` for
  * uncommitted changes, `needs_force` for anything else git wants forced (an older git validating
  * that a directory that is gone exists, say) — and the second request is the confirmation. An entry
@@ -393,9 +513,14 @@ export async function removeWorktree(ctx: RepoContext, req: RemoveWorktreeReques
   const wt = (await listWorktreesAll(ctx)).find((w) => w.path === p || (p && w.path === path.resolve(p)));
   if (!wt) throw badRequest(`unknown worktree: ${p}`, 'unknown_worktree');
   if (wt.isMain) throw badRequest('the main worktree cannot be removed', 'main_worktree');
+  if (wt.clone) {
+    const state = await checkoutState(ctx, wt);
+    await removeClone(ctx, wt.path, { dirty: await dirtyCount(wt.path), busy: state.busy, force: req.force });
+    return { ok: true, branchDeleted: false };
+  }
   // git removes a clean checkout with a rebase stopped in it without a word; that is asked first.
   if (!wt.prunable && !req.force) {
-    const state = await checkoutState(ctx, wt.path);
+    const state = await checkoutState(ctx, wt);
     if (state.busy) throw new HttpError(409, `a ${state.busy} is in progress in ${wt.path}; removing it throws that away`, 'needs_force');
   }
   const args = ['worktree', 'remove'];

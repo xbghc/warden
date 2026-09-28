@@ -110,13 +110,14 @@ function BranchTodos({ branch }: { branch: string }) {
 /**
  * Ahead and behind, with what they are counted against named beside them, since the two read
  * differently: against the branch's upstream they are what is not pushed and not pulled yet; against
- * what the main worktree has checked out, nothing ahead means merged.
+ * what the main worktree has checked out, or a clone's remote default branch, nothing ahead means merged.
  */
 function Comparison({ comparison: c }: { comparison: WorktreeComparison }) {
   const upstream = c.kind === 'upstream';
+  const against = upstream ? `与上游 ${c.base} 比较` : c.kind === 'trunk' ? `与远端默认分支 ${c.base} 比较` : `与主仓库当前检出的 ${c.base} 比较`;
   return (
     <div className="wt-comparison">
-      <span className="ref" title={upstream ? `与上游 ${c.base} 比较` : `与主仓库当前检出的 ${c.base} 比较`}>
+      <span className="ref" title={against}>
         {c.base}
       </span>
       <span className="wt-commit-count" title={upstream ? `${c.ahead} 个提交未推送到 ${c.base}` : `领先 ${c.base} ${c.ahead} 个提交`}>

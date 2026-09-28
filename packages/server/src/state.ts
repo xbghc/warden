@@ -94,6 +94,8 @@ function normalise(raw: unknown, repoRoot: string, file: string): ReviewState {
     prefs: {
       ...defaultPrefs(),
       ...(r.prefs ?? {}),
+      slotKind: undefined,
+      ...(r.prefs?.slotKind === 'clone' || r.prefs?.slotKind === 'worktree' ? { slotKind: r.prefs.slotKind } : {}),
       nvimSocketByRoot: r.prefs?.nvimSocketByRoot ?? {},
       autoRefresh: typeof r.prefs?.autoRefresh === 'boolean' ? r.prefs.autoRefresh : true,
       railOpen: typeof r.prefs?.railOpen === 'boolean' ? r.prefs.railOpen : false,

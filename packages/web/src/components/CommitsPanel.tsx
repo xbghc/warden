@@ -106,10 +106,12 @@ export function CommitsPanel({ active }: { active: boolean }) {
   const currentSha = target.kind === 'commit' ? target.sha : null;
 
   // The two history targets a click on a row cannot express. Where the branch under review most
-  // likely forked off: the main worktree's branch when a sibling worktree is in view, otherwise
+  // likely forked off: a clone's remote default branch when a clone is in view — it has no branch
+  // of the main worktree's — the main worktree's branch when a sibling worktree is, otherwise
   // main / master if the repository has one.
   const mainWorktree = repo?.worktrees.find((w) => w.isMain);
-  const suggestedBase = (root !== mainWorktree?.path && mainWorktree?.branch) || repo?.defaultBase || 'main';
+  const inView = repo?.worktrees.find((w) => w.path === root);
+  const suggestedBase = (inView?.clone && inView.trunk) || (root !== mainWorktree?.path && mainWorktree?.branch) || repo?.defaultBase || 'main';
   const [baseRef, setBaseRef] = useState(target.kind === 'base' ? target.ref : '');
   const [rangeBase, setRangeBase] = useState(target.kind === 'range' ? target.base : '@');
   const [rangeHead, setRangeHead] = useState(target.kind === 'range' ? target.head : '');

@@ -29,6 +29,21 @@ describe('git whitelist', () => {
     expect(() => assertAllowedGitArgs(['log', '--output', '/tmp/x'])).toThrow(GitError);
     expect(() => assertAllowedGitArgs(['diff', '-c', 'core.pager=evil'])).toThrow(GitError);
   });
+  it('lets config look a key up and nothing else', () => {
+    expect(() => assertAllowedGitArgs(['config', '--get', 'warden.main'])).not.toThrow();
+    expect(() => assertAllowedGitArgs(['config', '--get-regexp', '^remote\\..*\\.url$'])).not.toThrow();
+    for (const args of [
+      ['config', 'core.hooksPath', '/tmp/evil'],
+      ['config', '--get', 'a', 'b'],
+      ['config', '--unset', 'remote.origin.url'],
+      ['config', '--get', '--file=/etc/passwd'],
+      ['config', '--global', '--get', 'user.name'],
+      ['config', '--edit'],
+      ['config'],
+    ]) {
+      expect(() => assertAllowedGitArgs(args)).toThrow(GitError);
+    }
+  });
   it('lets grep search but never open its matches in a program', () => {
     expect(() => assertAllowedGitArgs(['grep', '-l', '-z', '-i', '-F', '-e', 'x', '--cached', '--', ':(literal)-Oops'])).not.toThrow();
     for (const opt of ['-O', '-Ovim', '--open-files-in-pager', '--open-files-in-pager=vim', '--open', '--op=vim']) {

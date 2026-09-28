@@ -77,7 +77,7 @@ export function TopBar() {
             <option value="">主仓库 ({main?.branch ?? repo.branch})</option>
             {otherWorktrees.map((w) => (
               <option key={w.path} value={w.path}>
-                worktree: {dirName(w.path)} ({w.branch ?? w.head.slice(0, 7)})
+                {w.clone ? 'clone' : 'worktree'}: {dirName(w.path)} ({w.branch ?? w.head.slice(0, 7)})
               </option>
             ))}
           </select>
