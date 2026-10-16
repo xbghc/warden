@@ -34,6 +34,9 @@ export async function makeFixtureRepo(prefix = 'warden-fixture-'): Promise<Fixtu
     await writeFile(full, content);
   };
   git('init', '-q', '-b', 'main');
+  // Server-side commits do not inherit the fixture helper's identity environment.
+  git('config', 'user.name', 'Fixture');
+  git('config', 'user.email', 'fixture@example.com');
   await write('src/a.ts', ['export function a() {', '  return 1;', '}', ''].join('\n'));
   await write('src/b.ts', ['export const b = 2;', ''].join('\n'));
   await write('README.md', '# fixture\n');
