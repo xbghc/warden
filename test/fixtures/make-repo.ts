@@ -1,7 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 
 export interface FixtureRepo {
   root: string;
@@ -16,7 +16,8 @@ export interface FixtureRepo {
  *  c2: modifies src/a.ts, adds src/util/c.ts
  */
 export async function makeFixtureRepo(prefix = 'warden-fixture-'): Promise<FixtureRepo> {
-  const root = await mkdtemp(path.join(os.tmpdir(), prefix));
+  // macOS exposes its temporary directory through a symlink; Git resolves it.
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), prefix)));
   const env = {
     ...process.env,
     GIT_AUTHOR_NAME: 'Fixture',

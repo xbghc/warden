@@ -26,6 +26,7 @@ import { ensureTarget, forgetWorktreeTargets, type StateStore } from './state.js
 import { checkoutState, checkoutWorktree, dirtyCount, listWorktreesDetailed, nextSlot } from './worktrees.js';
 import { applyPatch, GitSandbox, oid, patchBetween, gitOid, deliveryBase } from './git-sandbox.js';
 import { PreviewService } from './preview.js';
+import { assertSafetyBackupCurrent, createSafetyBackup } from './backups.js';
 
 function fail(message: string, code: string): never {
   throw new HttpError(409, message, code);
@@ -306,15 +307,27 @@ export class WorkflowService {
     const boundary = await deliveryBase(change, before, target);
     if (!(await this.ancestor(checkout.path, boundary, before))) fail('工作区历史已改变，请手动确认同步基点', 'base_changed');
     await this.importCommit(this.repo.commonRoot, checkout.path, target);
-    try {
-      await runGitWrite(['-c', 'rebase.updateRefs=false', 'rebase', '--no-autostash', '--onto', target, boundary], {
-        cwd: checkout.path,
-        timeoutMs: LONG_GIT_TIMEOUT_MS,
-      });
-    } catch (error) {
-      change.sync = { status: 'conflict', target, message: 'rebase 未完成，请在此工作区手动处理；已保留现场。' };
-      await this.save(change);
-      throw error;
+    // A completed rebase can outlive its state write. An explicit retry only repairs the
+    // bookkeeping when the target is already an ancestor; it must not run hooks again.
+    if (boundary !== target) {
+      await this.assertRebaseIgnoredFiles(checkout.path, boundary, before, target);
+      const backup = await createSafetyBackup(this.store, checkout.path, 'rebase');
+      await this.checkout(change);
+      await this.assertClean(checkout.path);
+      if ((await revParse(checkout.path, 'HEAD')) !== before || (await this.developmentHead(change.developmentBranch)) !== target)
+        fail('备份期间代码或主开发分支已变化，请重新检查', 'review_changed');
+      await this.assertRebaseIgnoredFiles(checkout.path, boundary, before, target);
+      await assertSafetyBackupCurrent(backup);
+      try {
+        await runGitWrite(['-c', 'rebase.updateRefs=false', 'rebase', '--no-autostash', '--onto', target, boundary], {
+          cwd: checkout.path,
+          timeoutMs: LONG_GIT_TIMEOUT_MS,
+        });
+      } catch (error) {
+        change.sync = { status: 'conflict', target, message: 'rebase 未完成，请在此工作区手动处理；已保留现场和操作前备份。' };
+        await this.save(change);
+        throw error;
+      }
     }
     change.base = target;
     delete change.sourceBase;
@@ -325,6 +338,36 @@ export class WorkflowService {
     delete change.submittedHead;
     await this.save(change);
     return change;
+  }
+
+  private async assertRebaseIgnoredFiles(cwd: string, boundary: string, source: string, target: string) {
+    const ignored = (await runGit(['ls-files', '--others', '--ignored', '--exclude-standard', '-z'], { cwd })).stdout.split('\0').filter(Boolean);
+    if (!ignored.length) return;
+    const [tracked, replayed, casing] = await Promise.all([
+      runGit(['ls-files', '--cached', `--with-tree=${target}`, '-z'], { cwd }),
+      runGit(['log', '--format=', '--name-only', '--no-renames', '-z', `${boundary}..${source}`, '--'], { cwd }),
+      runGit(['config', '--get', 'core.ignorecase'], { cwd, okCodes: [0, 1] }),
+    ]);
+    // Git detects the checkout filesystem, which can ignore case on macOS or mounted
+    // volumes as well as Windows. Match its setting rather than guessing from the OS.
+    const value = casing.stdout.trim().toLowerCase();
+    const ignoreCase = (casing.code === 0 && value === '') || ['true', 'yes', 'on'].includes(value) || (/^-?\d+$/.test(value) && Number(value) !== 0);
+    const normalized = (file: string) => (ignoreCase ? file.toLowerCase() : file);
+    const paths = new Set((tracked.stdout + replayed.stdout).split('\0').filter(Boolean).map(normalized));
+    const parents = new Set<string>();
+    for (const file of paths) {
+      const parts = file.split('/');
+      for (let i = 1; i < parts.length; i++) parents.add(parts.slice(0, i).join('/'));
+    }
+    const collisions = ignored.filter((file) => {
+      const name = normalized(file);
+      if (paths.has(name) || parents.has(name)) return true;
+      const parts = name.split('/');
+      return parts.some((_part, i) => i > 0 && paths.has(parts.slice(0, i).join('/')));
+    });
+    // Git considers ignored files disposable during rebase's checkout, even with a clean
+    // status. Include intermediate replay paths and file/directory collisions as well.
+    if (collisions.length) fail(`同步可能覆盖被 Git 忽略的本地文件，请先移走或保存：${collisions.slice(0, 10).join('、')}`, 'rebase_ignored_collision');
   }
 
   async rebaseChecks() {

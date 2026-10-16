@@ -18,6 +18,9 @@ let history: HistoryService;
 const sourceHead = (c: DevelopmentChange) => fx.git('-C', c.worktree, 'rev-parse', 'HEAD').trim();
 const head = () => fx.git('rev-parse', 'HEAD').trim();
 const file = (root: string, name: string) => readFile(path.join(root, name), 'utf8');
+// Complete delivery and replay scenarios repeatedly start Git in several repositories.
+// Keep their Windows startup allowance local so other failures are still detected quickly.
+const longGitTimeout = process.platform === 'win32' ? 90_000 : 30_000;
 
 beforeEach(async () => {
   fx = await makeFixtureRepo('warden-workbench-');
@@ -52,7 +55,7 @@ async function deliver(c: DevelopmentChange, message: string) {
 }
 
 describe('continuous workspace delivery and passive synchronization', () => {
-  it('delivers A1, B1, A2 without rebasing either source or including A1 twice', async () => {
+  it('delivers A1, B1, A2 without rebasing either source or including A1 twice', { timeout: longGitTimeout }, async () => {
     const a = await task('A');
     const b = await task('B');
     await edit(a, 'a.txt', 'A1\n', true);
@@ -79,7 +82,7 @@ describe('continuous workspace delivery and passive synchronization', () => {
     expect((await workflow.get()).workflow!.changes.find((c) => c.id === a.id)).toMatchObject({ base: head(), status: 'working' });
   });
 
-  it('keeps rebase checks read-only and returns separate results for stale and clean items', async () => {
+  it('keeps rebase checks read-only and returns separate results for stale and clean items', { timeout: longGitTimeout }, async () => {
     const a = await task('A');
     const b = await task('B');
     const c = await task('C');
@@ -139,7 +142,7 @@ describe('temporary primary-directory connections', () => {
     await expect(file(fx.root, 'image.bin')).rejects.toMatchObject({ code: 'ENOENT' });
     expect(fx.git('status', '--porcelain').trim()).toBe('');
   });
-  it('composes live edits, updates them, and disconnects contributions without touching HEAD or index', async () => {
+  it('composes live edits, updates them, and disconnects contributions without touching HEAD or index', { timeout: longGitTimeout }, async () => {
     const a = await task('A');
     const b = await task('B');
     await edit(a, 'a.txt', 'A\n');
@@ -161,7 +164,7 @@ describe('temporary primary-directory connections', () => {
     expect(await readFile(path.join(fx.root, '.git/index'))).toEqual(index);
   });
 
-  it('fails a conflicting connection unchanged and keeps the last coherent preview on later conflicts', async () => {
+  it('fails a conflicting connection unchanged and keeps the last coherent preview on later conflicts', { timeout: longGitTimeout }, async () => {
     const a = await task('A');
     const b = await task('B');
     await edit(a, 'src/b.ts', 'export const b = 10;\n');
@@ -190,7 +193,7 @@ describe('temporary primary-directory connections', () => {
     expect((await preview.get()).connectedIds).toEqual([a.id]);
   });
 
-  it('isolates delivery from other connections and resumes remaining live edits afterwards', async () => {
+  it('isolates delivery from other connections and resumes remaining live edits afterwards', { timeout: longGitTimeout }, async () => {
     const a = await task('A');
     const b = await task('B');
     await edit(a, 'src/b.ts', 'export const b = 10;\n', true);
@@ -220,7 +223,7 @@ describe('commit history arrangement', () => {
     await deliver(a, 'A2');
     return { a, b };
   }
-  it('previews and applies A1,A2,B1 with a new message while keeping files and agent checkouts unchanged', async () => {
+  it('previews and applies A1,A2,B1 with a new message while keeping files and agent checkouts unchanged', { timeout: longGitTimeout }, async () => {
     const { a, b } = await three();
     const current = await history.get();
     const entries = current.commits.slice(-3);
@@ -248,7 +251,7 @@ describe('commit history arrangement', () => {
     expect((await workflow.rebaseBatch({ items: [check] })).results[0]?.status).toBe('updated');
   });
 
-  it('rejects invalid ranges, stale previews and conflicting reorder without changing history', async () => {
+  it('rejects invalid ranges, stale previews and conflicting reorder without changing history', { timeout: longGitTimeout }, async () => {
     await three();
     const current = await history.get();
     const entries = current.commits.slice(-3);
@@ -265,7 +268,7 @@ describe('commit history arrangement', () => {
     expect(fx.git('log', '-1', '--format=%s').trim()).toBe('External update');
   });
 
-  it('finishes a published history mapping after an interrupted state write without rewriting twice', async () => {
+  it('finishes a published history mapping after an interrupted state write without rewriting twice', { timeout: longGitTimeout }, async () => {
     await three();
     const current = await history.get();
     const last = current.commits.at(-1)!;

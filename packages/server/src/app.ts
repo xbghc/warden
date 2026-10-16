@@ -72,6 +72,7 @@ import { TmuxService } from './tmux.js';
 import { WorkflowService } from './workflow.js';
 import { PreviewService } from './preview.js';
 import { HistoryService } from './history.js';
+import { listSafetyBackups } from './backups.js';
 import { workspaceConfig } from './workspace.js';
 import { DEFAULT_POLL_INTERVAL_MS, RepoWatcher } from './watcher.js';
 import { serveStaticFile } from './static.js';
@@ -104,9 +105,31 @@ interface ListingCache {
 
 const LISTING_HINT_TTL_MS = 5 * 60_000;
 
-export function createApp(opts: AppOptions): Hono {
+export type WardenApp = Hono & { close(): Promise<void> };
+
+export function createApp(opts: AppOptions): WardenApp {
   const { repo, store } = opts;
-  const app = new Hono();
+  const app = new Hono() as WardenApp;
+  let stopped = false;
+  let closing: Promise<void> | undefined;
+  const requests = new Set<Promise<void>>();
+  const stateReads = new Set<Promise<number>>();
+  const backgroundCheckpoints = new Set<Promise<unknown>>();
+  const stopStreams = new Set<() => void>();
+  app.use('*', async (c, next) => {
+    if (stopped) return c.json({ error: 'Server is closing', code: 'server_closing' }, 503);
+    let finish!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    requests.add(pending);
+    try {
+      await next();
+    } finally {
+      requests.delete(pending);
+      finish();
+    }
+  });
 
   /** Last listing per target: only used to recover rename/untracked hints for single-file requests. */
   const listings = new Map<string, ListingCache>();
@@ -122,6 +145,21 @@ export function createApp(opts: AppOptions): Hono {
     }
     return w;
   };
+  app.close = () => {
+    if (closing) return closing;
+    stopped = true;
+    for (const stop of stopStreams) stop();
+    closing = (async () => {
+      // An export already in flight can schedule its checkpoint after shutdown
+      // starts. Finish those requests before capturing the background work to drain.
+      const results: PromiseSettledResult<unknown>[] = await Promise.allSettled([...requests]);
+      for (const stop of stopStreams) stop();
+      results.push(...(await Promise.allSettled([...backgroundCheckpoints, ...stateReads, ...[...watchers.values()].map((watcher) => watcher.close())])));
+      const errors = results.filter((result) => result.status === 'rejected').map((result) => result.reason);
+      if (errors.length) throw new AggregateError(errors, 'Failed to close repository activity');
+    })();
+    return closing;
+  };
 
   let worktreeCache: { at: number; list: WorktreeInfo[] } | null = null;
   const worktrees = async (force = false): Promise<WorktreeInfo[]> => {
@@ -133,11 +171,16 @@ export function createApp(opts: AppOptions): Hono {
 
   const checkpoints = checkpointStore(store.file);
 
-  const stateStamp = (): Promise<number> =>
-    stat(store.file).then(
-      (st) => st.mtimeMs,
-      () => 0,
-    );
+  const stateStamp = (): Promise<number> => {
+    const reading = stat(store.file)
+      .then(
+        (st) => st.mtimeMs,
+        () => 0,
+      )
+      .finally(() => stateReads.delete(reading));
+    stateReads.add(reading);
+    return reading;
+  };
 
   /** The target and the directory it is read in; a checkpoint is not looked up (see `targetCtx`). */
   const worktreeCtx = async (key: string): Promise<TargetContext> => {
@@ -178,9 +221,12 @@ export function createApp(opts: AppOptions): Hono {
   const checkpointHandoff = (comments: Comment[]): void => {
     const worktrees = new Set(comments.map((x) => tryParseTargetKey(x.targetKey)?.worktree));
     for (const wt of worktrees) {
-      takeCheckpoint(store, wt ?? repo.commonRoot, wt, { handoff: true }).catch((e) => {
-        console.error(`warden: no checkpoint for the comments handed over in ${wt ?? repo.commonRoot}: ${e instanceof Error ? e.message : e}`);
-      });
+      const pending = takeCheckpoint(store, wt ?? repo.commonRoot, wt, { handoff: true })
+        .catch((e) => {
+          console.error(`warden: no checkpoint for the comments handed over in ${wt ?? repo.commonRoot}: ${e instanceof Error ? e.message : e}`);
+        })
+        .finally(() => backgroundCheckpoints.delete(pending));
+      backgroundCheckpoints.add(pending);
     }
   };
 
@@ -1104,7 +1150,7 @@ export function createApp(opts: AppOptions): Hono {
     if (typeof body.path !== 'string') throw badRequest('path is required');
     const res = await oneAtATime(async () => {
       await assertUnassigned(path.resolve(body.path));
-      return releaseWorktree(repo, body);
+      return releaseWorktree(repo, body, store);
     });
     worktreeCache = null;
     return c.json(res);
@@ -1115,11 +1161,13 @@ export function createApp(opts: AppOptions): Hono {
     if (typeof body.path !== 'string') throw badRequest('path is required');
     const res = await oneAtATime(async () => {
       await assertUnassigned(path.resolve(body.path));
-      return removeWorktree(repo, body);
+      return removeWorktree(repo, body, store);
     });
     worktreeCache = null;
     return c.json(res);
   });
+
+  api.get('/backups', async (c) => c.json({ backups: await listSafetyBackups(store) }));
 
   // ---- change events -------------------------------------------------------
 
@@ -1127,6 +1175,7 @@ export function createApp(opts: AppOptions): Hono {
     const root = c.req.query('root') || repo.root;
     const known = root === repo.root || root === repo.commonRoot || (await worktrees()).some((w) => w.path === root);
     if (!known) throw badRequest(`unknown root: ${root}`, 'unknown_worktree');
+    if (stopped) return c.json({ error: 'Server is closing', code: 'server_closing' }, 503);
     return streamSSE(c, async (stream) => {
       const watcher = watcherFor(root);
       // Writes are chained so an event arriving mid-heartbeat cannot interleave with it.
@@ -1139,30 +1188,56 @@ export function createApp(opts: AppOptions): Hono {
         const event: ChangeEvent = { type: 'changed', ...change };
         void enqueue(() => stream.writeSSE({ event: 'changed', data: JSON.stringify(event) }));
       });
+      let ended = false;
+      let statePoll: ReturnType<typeof setInterval> | undefined;
+      let heartbeat: ReturnType<typeof setTimeout> | undefined;
+      let wake: (() => void) | undefined;
+      const stop = () => {
+        if (ended) return;
+        ended = true;
+        clearInterval(statePoll);
+        clearTimeout(heartbeat);
+        wake?.();
+        release();
+        stream.abort();
+        stopStreams.delete(stop);
+      };
+      stopStreams.add(stop);
+      stream.onAbort(stop);
       // The page's own writes land here too; the agent's `warden reply` only lands here, since the
       // CLI writes the state file without a server. mtime is enough: every write is a rename.
-      let stamp = await stateStamp();
-      const statePoll = setInterval(() => {
-        void stateStamp().then((next) => {
-          if (next === stamp) return;
-          stamp = next;
-          const event: StateEvent = { type: 'state', at: new Date().toISOString() };
-          void enqueue(() => stream.writeSSE({ event: 'state', data: JSON.stringify(event) }));
-        });
-      }, opts.watchIntervalMs ?? DEFAULT_POLL_INTERVAL_MS);
-      stream.onAbort(() => {
-        clearInterval(statePoll);
-        release();
-      });
       try {
-        while (!stream.aborted && !stream.closed) {
-          await stream.sleep(SSE_HEARTBEAT_MS);
-          if (stream.aborted || stream.closed) break;
+        let stamp = await stateStamp();
+        if (ended) return;
+        // A connected client can now write the state without racing the initial
+        // baseline and having its first update silently absorbed into that baseline.
+        void enqueue(() => stream.write(': connected\n\n'));
+        let reading = false;
+        statePoll = setInterval(() => {
+          if (reading || ended) return;
+          reading = true;
+          void stateStamp()
+            .then((next) => {
+              if (ended || next === stamp) return;
+              stamp = next;
+              const event: StateEvent = { type: 'state', at: new Date().toISOString() };
+              void enqueue(() => stream.writeSSE({ event: 'state', data: JSON.stringify(event) }));
+            })
+            .finally(() => {
+              reading = false;
+            });
+        }, opts.watchIntervalMs ?? DEFAULT_POLL_INTERVAL_MS);
+        while (!ended && !stream.closed) {
+          await new Promise<void>((resolve) => {
+            wake = resolve;
+            heartbeat = setTimeout(resolve, SSE_HEARTBEAT_MS);
+          });
+          wake = undefined;
+          if (ended || stream.closed) break;
           await enqueue(() => stream.write(': ping\n\n'));
         }
       } finally {
-        clearInterval(statePoll);
-        release();
+        stop();
       }
     });
   });

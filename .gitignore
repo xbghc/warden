@@ -3,6 +3,7 @@ dist/
 *.tsbuildinfo
 .vite/
 coverage/
+test-results/
 storybook-static/
 *.log
 .DS_Store

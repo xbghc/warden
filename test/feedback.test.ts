@@ -1,14 +1,15 @@
 import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp, rm } from 'node:fs/promises';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { Hono } from 'hono';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Comment, ExportResponse, ReanchorResponse, ReviewState, WorktreesResponse } from '@warden/shared';
 import { addReply, createApp, formatCommentsExport, resolveRepo, shortId, StateStore, takeFeedback } from '@warden/server';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
+import * as checkpoints from '../packages/server/src/checkpoints.js';
 
 let fx: FixtureRepo;
-let app: Hono;
+let app: ReturnType<typeof createApp>;
+let appOptions: Parameters<typeof createApp>[0];
 let store: StateStore;
 let dataDir: string;
 
@@ -29,13 +30,52 @@ const find = async (id: string): Promise<Comment | undefined> =>
     .flatMap((t) => t.comments)
     .find((c) => c.id === id);
 
+function signal() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((finish) => {
+    resolve = finish;
+  });
+  return { promise, resolve };
+}
+
+async function bounded<T>(operation: Promise<T>, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), 5000);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function restartApp() {
+  await app.close();
+  app = createApp(appOptions);
+}
+
 beforeAll(async () => {
   fx = await makeFixtureRepo('warden-feedback-');
   dataDir = await mkdtemp(path.join(os.tmpdir(), 'warden-feedback-data-'));
   const repo = await resolveRepo(fx.root);
   store = new StateStore(path.join(dataDir, 'state.json'), repo.commonRoot);
-  app = createApp({ repo, store, watchIntervalMs: 50, replyCommand: 'warden' });
+  appOptions = { repo, store, watchIntervalMs: 50, replyCommand: 'warden' };
   await fx.write('src/a.ts', ['export function a() {', '  return 1;', '}', 'export const z = 9;', ''].join('\n'));
+});
+
+beforeEach(() => {
+  app = createApp(appOptions);
+});
+
+afterEach(async () => {
+  try {
+    await app.close();
+  } finally {
+    vi.restoreAllMocks();
+  }
 });
 
 afterAll(async () => {
@@ -142,28 +182,34 @@ describe('GET /api/events', () => {
     const res = await app.request('/api/events', { signal: ac.signal });
     const reader = res.body!.getReader();
     const decoder = new TextDecoder();
-    // Let the stream take its first reading of the file before anything changes it.
-    await new Promise((r) => setTimeout(r, 100));
-    await store.update(() => undefined);
-    let seen = '';
-    const deadline = Date.now() + 3000;
-    while (!seen.includes('event: state') && Date.now() < deadline) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      seen += decoder.decode(value);
+    const readUntil = async (marker: string) => {
+      let seen = '';
+      await bounded(
+        (async () => {
+          while (!seen.includes(marker)) {
+            const { value, done } = await reader.read();
+            if (done) throw new Error(`Event stream ended before ${marker}`);
+            seen += decoder.decode(value, { stream: true });
+          }
+        })(),
+        `Event stream did not emit ${marker}`,
+      );
+    };
+    try {
+      // The connected marker is emitted only after the state baseline is captured.
+      await readUntil(': connected');
+      await store.update(() => undefined);
+      await readUntil('event: state');
+    } finally {
+      ac.abort();
+      await reader.cancel().catch(() => undefined);
+      reader.releaseLock();
     }
-    ac.abort();
-    await reader.cancel().catch(() => undefined);
-    expect(seen).toContain('event: state');
   });
 });
 
 describe('a hand-off notes the working tree', () => {
   const handoffs = async () => (await store.load()).checkpoints.filter((c) => c.handoff);
-  const settle = async (want: number) => {
-    const deadline = Date.now() + 5000;
-    while ((await handoffs()).length < want && Date.now() < deadline) await new Promise((r) => setTimeout(r, 25));
-  };
 
   it('marks nothing and notes nothing for a preview, which is how the page reads the text before copying it', async () => {
     await fx.write('src/b.ts', 'export const b = 4;\n');
@@ -173,13 +219,14 @@ describe('a hand-off notes the working tree', () => {
     const before = (await handoffs()).length;
     const preview = await json<ExportResponse>(await send('POST', '/api/comments/export', { commentIds: [c.id], preview: true }));
     expect(preview.text).toContain('why 4?');
-    await new Promise((r) => setTimeout(r, 300));
+    await restartApp();
     expect((await find(c.id))?.exportedAt).toBeUndefined();
     expect(await handoffs()).toHaveLength(before);
     await json<ExportResponse>(await send('POST', '/api/comments/export', { commentIds: [c.id] }));
     expect((await find(c.id))?.exportedAt).toBeTruthy();
-    // The confirmed hand-off's checkpoint lands in the background; let it, so the next test counts from after it.
-    await settle(before + 1);
+    // Closing drains the checkpoint before a restarted app observes the stored state.
+    await restartApp();
+    expect(await handoffs()).toHaveLength(before + 1);
     await send('DELETE', `/api/targets/${k('working')}/comments/${c.id}`);
   });
 
@@ -190,7 +237,7 @@ describe('a hand-off notes the working tree', () => {
     );
     const before = (await handoffs()).length;
     await json<ExportResponse>(await send('POST', '/api/comments/export', { commentIds: [c.id] }));
-    await settle(before + 1);
+    await restartApp();
     const taken = await handoffs();
     expect(taken).toHaveLength(before + 1);
     expect(taken.at(-1)!.worktree).toBeUndefined();
@@ -198,8 +245,56 @@ describe('a hand-off notes the working tree', () => {
     // Nothing handed over, nothing noted; and the same tree is not noted twice.
     await json<ExportResponse>(await send('POST', '/api/comments/export', { commentIds: ['missing'] }));
     await json<ExportResponse>(await send('POST', '/api/comments/export', { commentIds: [c.id] }));
-    await new Promise((r) => setTimeout(r, 300));
+    await restartApp();
     expect(await handoffs()).toHaveLength(before + 1);
+  });
+
+  it('closes only after an in-flight export schedules and finishes its checkpoint', async () => {
+    await fx.write('src/b.ts', 'export const b = 12;\n');
+    const comment = await json<Comment>(
+      await send('POST', `/api/targets/${k('working')}/comments`, { filePath: 'src/b.ts', side: 'new', startLine: 1, endLine: 1, body: 'close safely' }),
+    );
+    const before = (await handoffs()).length;
+    const requestStarted = signal();
+    const finishRequest = signal();
+    const checkpointStarted = signal();
+    const finishCheckpoint = signal();
+    const update = store.update.bind(store);
+    vi.spyOn(store, 'update').mockImplementationOnce(async (mutate) => {
+      requestStarted.resolve();
+      await finishRequest.promise;
+      return update(mutate);
+    });
+    const takeCheckpoint = checkpoints.takeCheckpoint;
+    let checkpointFinished = false;
+    let pendingCheckpoint: ReturnType<typeof takeCheckpoint> | undefined;
+    vi.spyOn(checkpoints, 'takeCheckpoint').mockImplementation((...args) => {
+      pendingCheckpoint = (async () => {
+        checkpointStarted.resolve();
+        await finishCheckpoint.promise;
+        const result = await takeCheckpoint(...args);
+        checkpointFinished = true;
+        return result;
+      })();
+      return pendingCheckpoint;
+    });
+    const exporting = Promise.resolve(send('POST', '/api/comments/export', { commentIds: [comment.id] }));
+    let closing: Promise<boolean> | undefined;
+    try {
+      await bounded(requestStarted.promise, 'Export did not reach its state write');
+      closing = app.close().then(() => checkpointFinished);
+      expect((await app.request('/api/state')).status).toBe(503);
+      finishRequest.resolve();
+      expect((await bounded(exporting, 'Export did not finish')).status).toBe(200);
+      await bounded(checkpointStarted.promise, 'Export did not schedule its checkpoint');
+      finishCheckpoint.resolve();
+      expect(await bounded(closing, 'Close did not drain its checkpoint')).toBe(true);
+      expect(await handoffs()).toHaveLength(before + 1);
+    } finally {
+      finishRequest.resolve();
+      finishCheckpoint.resolve();
+      await Promise.allSettled([exporting, closing, pendingCheckpoint]);
+    }
   });
 });
 

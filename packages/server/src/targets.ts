@@ -67,9 +67,24 @@ export function resolveTargetContext(repo: RepoContext, worktrees: WorktreeInfo[
   return { key, target, cwd };
 }
 
-/** Rejects anything that could reach outside the worktree; the rest is taken as one literal name. */
-function assertRepoPath(p: string): void {
-  if (!p || p.startsWith('/') || p.split('/').includes('..')) throw badRequest(`invalid path: ${p}`, 'invalid_path');
+/** Validate with the filesystem's syntax before passing a literal path to Git or Node. */
+export function assertRepoPath(p: string, platform: NodeJS.Platform = process.platform): void {
+  const windows = platform === 'win32';
+  const parts = p.split(windows ? /[\\/]/ : '/');
+  // On POSIX a backslash or colon can be an ordinary filename character. On Windows
+  // they can introduce traversal, a drive or an alternate stream instead of that file.
+  const invalidWindows =
+    windows &&
+    (p.startsWith('\\') ||
+      p.includes(':') ||
+      parts.some(
+        (part) =>
+          /[<>"|?*]/.test(part) ||
+          [...part].some((character) => character.charCodeAt(0) < 32) ||
+          /[ .]$/.test(part) ||
+          /^(?:con|prn|aux|nul|conin\$|conout\$|com[0-9¹²³]|lpt[0-9¹²³])$/i.test(part.split('.')[0]!.replace(/ +$/, '')),
+      ));
+  if (!p || p.includes('\0') || p.startsWith('/') || parts.includes('..') || invalidWindows) throw badRequest(`invalid path: ${p}`, 'invalid_path');
 }
 
 /** Pathspec for exactly this file: without the magic, a name starting with `:` is read as pathspec syntax. */

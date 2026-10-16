@@ -1,6 +1,8 @@
 import path from 'node:path';
 import { rm } from 'node:fs/promises';
-import type { RemoveWorktreeResponse, WorktreeInfo } from '@warden/shared';
+import type { RemoveWorktreeResponse, SafetyBackup, WorktreeInfo } from '@warden/shared';
+import { assertSafetyBackupCurrent, createSafetyBackup } from './backups.js';
+import type { StateStore } from './state.js';
 import { HttpError } from './errors.js';
 import { GitError, LONG_GIT_TIMEOUT_MS, refExists, runGit, runGitWrite } from './git.js';
 import { CLONE_MARK, isCloneOf, readRemotes, remoteHeads, type RepoContext } from './repo.js';
@@ -142,7 +144,12 @@ async function wouldLose(dir: string, dirty: number, busy: string | undefined): 
  * a 409 — `worktree_dirty` when uncommitted changes are all of it, `needs_force` naming everything
  * otherwise, so that confirming the one question never discards what the other would have asked about.
  */
-export async function removeClone(ctx: RepoContext, dir: string, opts: { dirty: number; busy?: string; force?: boolean }): Promise<void> {
+export async function removeClone(
+  ctx: RepoContext,
+  dir: string,
+  opts: { dirty: number; busy?: string; force?: boolean },
+  store: StateStore,
+): Promise<SafetyBackup> {
   if (!(await isCloneOf(ctx.commonRoot, dir)))
     throw new HttpError(409, `${dir} is not a clone of this repository; warden will not delete it`, 'not_our_checkout');
   if (!opts.force) {
@@ -150,5 +157,9 @@ export async function removeClone(ctx: RepoContext, dir: string, opts: { dirty: 
     if (lost.length === 1 && opts.dirty) throw new HttpError(409, `${dir} has uncommitted changes`, 'worktree_dirty');
     if (lost.length) throw new HttpError(409, `${dir} has ${lost.join(', ')}, which only it holds`, 'needs_force');
   }
+  const backup = await createSafetyBackup(store, dir, 'remove');
+  if (!(await isCloneOf(ctx.commonRoot, dir))) throw new HttpError(409, '备份后工作区身份已变化，请刷新重试', 'not_our_checkout');
+  await assertSafetyBackupCurrent(backup);
   await rm(dir, { recursive: true });
+  return backup;
 }

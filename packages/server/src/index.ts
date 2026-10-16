@@ -111,7 +111,13 @@ export async function startServer(opts: StartOptions): Promise<RunningServer> {
       port = await findFreePort(start);
       server = await listen(port);
       if (!probe) break;
-      windowsReachable = await probe(port, instanceToken);
+      try {
+        windowsReachable = await probe(port, instanceToken);
+      } catch (error) {
+        await stop(server);
+        await app.close();
+        throw error;
+      }
       // undefined is "could not ask", not "no": stop probing rather than walk the port range blind.
       if (windowsReachable !== false || attempt >= PROBE_ATTEMPTS) break;
       await stop(server);
@@ -132,6 +138,7 @@ export async function startServer(opts: StartOptions): Promise<RunningServer> {
       });
   }, 1800);
   timer.unref();
+  let closing: Promise<void> | undefined;
 
   return {
     url: `http://${HOST}:${port}/`,
@@ -140,10 +147,17 @@ export async function startServer(opts: StartOptions): Promise<RunningServer> {
     stateFile,
     skippedPorts,
     windowsReachable,
-    close: async () => {
+    close: () => {
+      if (closing) return closing;
       clearInterval(timer);
-      await refreshing;
-      await stop(server);
+      // Stop accepting work immediately, then drain every owner of repository activity.
+      // Closing sockets alone does not await the Git reads started by an SSE subscriber.
+      closing = (async () => {
+        const results = await Promise.allSettled([stop(server), app.close(), refreshing]);
+        const errors = results.filter((result) => result.status === 'rejected').map((result) => result.reason);
+        if (errors.length) throw new AggregateError(errors, 'Failed to close server');
+      })();
+      return closing;
     },
   };
 }

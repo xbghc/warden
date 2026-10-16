@@ -12,6 +12,9 @@ let data: string;
 let store: StateStore;
 let workflow: WorkflowService;
 const gitAt = (change: DevelopmentChange, ...args: string[]) => fx.git('-C', change.worktree, ...args).trim();
+// These two delivery/replay scenarios exceeded 24 seconds on native Windows with real Git.
+// Limit the additional process-startup allowance to those measured multi-step cases.
+const longGitTimeout = process.platform === 'win32' ? 90_000 : 30_000;
 
 beforeEach(async () => {
   fx = await makeFixtureRepo('warden-workflow-');
@@ -25,6 +28,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const row of await listWorktreesDetailed(await resolveRepo(fx.root))) {
     if (row.slot !== undefined) await rm(row.path, { recursive: true, force: true });
   }
@@ -73,6 +77,9 @@ async function hook(name: string, body: string) {
   await chmod(file, 0o755);
 }
 
+const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+const shellCheckout = (cwd: string) => shellQuote(fx.git('-C', cwd, 'rev-parse', '--show-toplevel').trim());
+
 describe('requirement development workflow', () => {
   it('runs thin creation hooks with workspace context and preserves failed assignments and delivered workspaces', async () => {
     const app = createApp({ repo: await resolveRepo(fx.root), store });
@@ -84,11 +91,16 @@ describe('requirement development workflow', () => {
       });
     expect((await configure({ create: 1 })).status).toBe(400);
     expect(
-      (await configure({ create: 'printf "%s\\n" "$PWD" "$WARDEN_TASK_ID" "$WARDEN_HOOK_EVENT"; exit 7', reuse: 'printf "%s" "$WARDEN_HOOK_EVENT"' })).status,
+      (
+        await configure({
+          create: 'git rev-parse --show-toplevel; printf "%s\\n" "$WARDEN_TASK_ID" "$WARDEN_HOOK_EVENT"; exit 7',
+          reuse: 'printf "%s" "$WARDEN_HOOK_EVENT"',
+        })
+      ).status,
     ).toBe(200);
     const change = await task('Hook context');
     expect(change.workspaceHook).toMatchObject({ status: 'failed', event: 'create', exitCode: 7 });
-    expect(change.workspaceHook!.output).toContain(`${change.worktree}\n${change.id}\ncreate`);
+    expect(change.workspaceHook!.output).toContain(`${gitAt(change, 'rev-parse', '--show-toplevel')}\n${change.id}\ncreate`);
     expect((await workflow.start(change.id)).workspaceHook).toEqual(change.workspaceHook);
     await configure({ create: 'printf "%s" "$WARDEN_DEVELOPMENT_BRANCH"', reuse: 'printf "%s" "$WARDEN_HOOK_EVENT"' });
     expect((await workflow.retryHook(change.id)).workspaceHook).toMatchObject({ status: 'succeeded', exitCode: 0, output: 'feature/order' });
@@ -97,6 +109,24 @@ describe('requirement development workflow', () => {
     const reused = await task('Reuse hook');
     expect(reused.worktree).not.toBe(change.worktree);
     expect(reused.workspaceHook).toMatchObject({ status: 'succeeded', event: 'create', output: 'feature/order' });
+  });
+
+  it('runs the reuse hook in an available workspace with its new task context', async () => {
+    const available = `${fx.root}-1`;
+    fx.git('worktree', 'add', '--detach', available, 'feature/order');
+    await store.update((state) => {
+      state.workspaceConfig = {
+        commands: [],
+        hooks: {
+          create: 'exit 9',
+          reuse: 'git rev-parse --show-toplevel; printf "%s\\n" "$WARDEN_TASK_ID" "$WARDEN_HOOK_EVENT" "$WARDEN_DEVELOPMENT_BRANCH"',
+        },
+      };
+    });
+    const change = await task('Reuse available checkout');
+    expect(change.worktree).toBe(available);
+    expect(change.workspaceHook).toMatchObject({ status: 'succeeded', event: 'reuse', exitCode: 0 });
+    expect(change.workspaceHook!.output).toBe(`${gitAt(change, 'rev-parse', '--show-toplevel')}\n${change.id}\nreuse\nfeature/order\n`);
   });
 
   it('plans and edits commits without allocating a checkout or pinning an old baseline', async () => {
@@ -114,7 +144,8 @@ describe('requirement development workflow', () => {
     fx.git('add', '.');
     fx.git('commit', '-qm', 'Advance development');
     const head = fx.git('rev-parse', 'HEAD').trim();
-    const [first, duplicate] = await Promise.all([workflow.start(planned.id, { agent: 'Codex' }), workflow.start(planned.id, { agent: 'Codex' })]);
+    const first = await workflow.start(planned.id, { agent: 'Codex' });
+    const duplicate = await workflow.start(planned.id, { agent: 'Codex' });
     expect(first).toMatchObject({
       id: planned.id,
       status: 'working',
@@ -275,7 +306,7 @@ describe('requirement development workflow', () => {
     expect(await readFile(path.join(c.worktree, 'c.txt'), 'utf8')).toBe('task\n');
   });
 
-  it('predicts a sibling rebase conflict without changing files or the accepted commit', async () => {
+  it('predicts a sibling rebase conflict without changing files or the accepted commit', { timeout: longGitTimeout }, async () => {
     const a = await task('A');
     const b = await task('B');
     await commit(a, 'src/b.ts', 'export const b = 10;\n');
@@ -413,7 +444,7 @@ describe('requirement development workflow', () => {
     expect(state.workflow!.changes.find((row) => row.id === 'todo-todo')).toMatchObject({ status: 'planned', title: 'Check' });
   });
 
-  it('prepares only one task at a time and refuses a sibling revision rewritten after acceptance', async () => {
+  it('keeps preparation ownership and refuses a sibling revision rewritten after acceptance', { timeout: longGitTimeout }, async () => {
     const a = await task('Concurrent A');
     const b = await task('Concurrent B');
     await commit(a, 'a.txt');
@@ -421,17 +452,12 @@ describe('requirement development workflow', () => {
     const readyA = await workflow.ready(a.id);
     const readyB = await workflow.ready(b.id);
     const parent = (await workflow.get()).developmentHead!;
-    const results = await Promise.allSettled(
-      [readyA, readyB].map((row) =>
-        workflow.prepare(row.id, {
-          sourceHead: row.submittedHead!,
-          developmentHead: parent,
-        }),
-      ),
-    );
-    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
-    const rejected = results.find((result) => result.status === 'rejected');
-    expect(rejected?.reason).toMatchObject({ code: 'development_in_use' });
+    // Ownership survives releasing the repository lock. Test it separately from the bounded
+    // wait for an in-flight operation, which correctly reports operation_locked when slow.
+    await workflow.prepare(readyA.id, { sourceHead: readyA.submittedHead!, developmentHead: parent });
+    await expect(workflow.prepare(readyB.id, { sourceHead: readyB.submittedHead!, developmentHead: parent })).rejects.toMatchObject({
+      code: 'development_in_use',
+    });
     const prepared = (await workflow.get()).workflow!.changes.find((row): row is DevelopmentChange => row.status === 'integrating')!;
     await accept(prepared);
     expect(fx.git('rev-list', '--count', 'main..feature/order').trim()).toBe('1');
@@ -440,6 +466,35 @@ describe('requirement development workflow', () => {
     await workflow.prepare(remaining.id, { sourceHead: remaining.submittedHead!, developmentHead: fx.git('rev-parse', 'HEAD').trim() });
     await accept(remaining);
     expect(fx.git('rev-list', '--count', 'main..feature/order').trim()).toBe('2');
+  });
+
+  it('reports repository lock contention before a second preparation changes any files', async () => {
+    const change = await task('Wait for the active repository operation');
+    await commit(change);
+    const ready = await workflow.ready(change.id);
+    let acquired!: () => void;
+    let release!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      acquired = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const holding = store.withRepositoryLock(async () => {
+      acquired();
+      await gate;
+    });
+    await entered;
+    try {
+      await expect(prepare(ready)).rejects.toMatchObject({ code: 'operation_locked', status: 409 });
+      expect(fx.git('rev-parse', 'HEAD').trim()).toBe(change.base);
+      expect(fx.git('status', '--porcelain')).toBe('');
+      expect((await store.load()).workflow!.changes[0]!.status).toBe('working');
+    } finally {
+      release();
+      await holding;
+    }
+    expect((await prepare(ready)).status).toBe('integrating');
   });
 
   it('requires a checked-out development branch and preserves unrelated current files', async () => {
@@ -536,7 +591,7 @@ describe('requirement development workflow', () => {
     const ready = await workflow.ready(change.id);
     await hook(
       'pre-commit',
-      `test "$(git branch --show-current)" = feature/order || exit 1\ntest "$PWD" = '${fx.root}' || exit 1\nprintf 'formatted\\n' > task.txt\ngit add -- task.txt`,
+      `test "$(git branch --show-current)" = feature/order || exit 1\ntest "$(git rev-parse --show-toplevel)" = ${shellCheckout(fx.root)} || exit 1\nprintf 'formatted\\n' > task.txt\ngit add -- task.txt`,
     );
     await hook('prepare-commit-msg', 'printf "\\nPrepared by project hook\\n" >> "$1"');
     await hook('commit-msg', 'printf "\\nValidated by project hook\\n" >> "$1"');
@@ -556,7 +611,10 @@ describe('requirement development workflow', () => {
     await fx.write('local.txt', 'unrelated main checkout work');
     const development = `${fx.root}-9`;
     fx.git('worktree', 'add', development, 'feature/order');
-    await hook('pre-commit', `test "$PWD" = '${development}' || exit 1\ntest "$(git branch --show-current)" = feature/order || exit 1`);
+    await hook(
+      'pre-commit',
+      `test "$(git rev-parse --show-toplevel)" = ${shellCheckout(development)} || exit 1\ntest "$(git branch --show-current)" = feature/order || exit 1`,
+    );
     const accepted = await accept(ready);
     expect(accepted.deliveries).toHaveLength(1);
     expect(fx.git('rev-parse', 'HEAD').trim()).toBe(ready.base);

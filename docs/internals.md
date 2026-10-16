@@ -2,6 +2,9 @@
 
 Where the review state lives, and what warden will and will not do to the repository.
 
+High-risk operations also create [verified independent backups](backups.md) before changing Git
+history or discarding a checkout. These are separate from review checkpoints and retained Git refs.
+
 ## State
 
 `~/.local/share/warden/<sha1(repoRoot)[:12]>/state.json` (respects `XDG_DATA_HOME`). Plain JSON with a
@@ -59,6 +62,16 @@ the repository. A checkpoint writes only there: `git add --all [--intent-to-add]
 `git write-tree --missing-ok`, with `GIT_INDEX_FILE` and `GIT_OBJECT_DIRECTORY` set to files in
 warden's data directory and no alternates (see [Checkpoints](reviewing.md#checkpoints)).
 
+All Git runners discard inherited repository-location, namespace, index, object-store and temporary
+configuration environment variables. `cwd` and explicitly supplied snapshot locations select the
+repository; a surrounding Git hook or shell cannot redirect writes into a different repository.
+Normal user/system configuration, commit identity, hooks and signing remain enabled.
+Release/removal copies the validated checkout and its Git metadata to the external backup directory
+before any reset, clean, switch, branch deletion or filesystem removal. An incomplete/failed backup
+blocks the mutation. Backup creation copies files without running repository filters or hooks.
+Switching branches in a reused slot passes `--no-overwrite-ignore`, so Git refuses to overwrite
+ignored local configuration even when status reports the slot clean.
+
 Task notes and ordering write only Warden state. Explicit allocation creates/adopts a validated
 numbered workspace from the selected primary baseline, without dependency enforcement.
 `workflow.changes[].deliveries` stores stable delivery IDs, source ranges, primary commits and
@@ -69,6 +82,11 @@ review records. `sourceBase` distinguishes a delivered source tip from its squas
 primary HEADs and clean checkout state, then explicitly rebases selected workspaces with
 `rebase --no-autostash --onto`. Actual conflicts remain for manual handling. There is no background
 rebase or workspace recycling.
+
+Before an actual rebase, Warden rejects ignored local paths that could be overwritten by the target
+or intermediate replay commits, creates an independent backup, then rechecks the observed heads
+and checkout state. A retry after successful rebase but failed state persistence recognizes an
+already-incorporated target and repairs bookkeeping without executing rebase hooks again.
 
 `PUT /preview` and the server refresh timer snapshot selected workspaces into Warden's checkpoint
 object store. Server-generated binary patches are composed with `apply --index --3way` in an
@@ -92,6 +110,7 @@ workspace and resumes connections. No `reset`, `clean`, `commit-tree` or hook by
 History preview uses isolated `cherry-pick` and message amendments. Applying a validated linear
 candidate requires the same final tree and original HEAD. The candidate is fetched locally, a
 backup `refs/warden/history/<id>` is retained, and `update-ref <branch> <new> <old>` publishes it.
+An independent filesystem backup is also required before fetching/publishing the candidate.
 The real files/index need no change. `historyDraft` journals publication and subsequent delivery-SHA
 mapping. No remote push or user-facing undo/restore operation is provided.
 
@@ -101,9 +120,12 @@ delivery commits are retained under generated `refs/warden/changes/` refs. Workf
 a cross-process repository-operation lock; short JSON updates have their own lock. Git and file
 checks reduce stale-write risks but do not stop external editors/agents from writing concurrently.
 
-User-configured workspace hooks are the deliberate shell interface (`/bin/sh -c` with cwd/env and
-bounded output/timeout). Tmux commands send literal text plus separately validated keys. Neither
+User-configured workspace hooks are the deliberate shell interface (`/bin/sh -c`, or Git for
+Windows' bundled `sh.exe -c`, with cwd/env and bounded output/timeout). They use the same Git
+environment isolation as server Git calls. Tmux commands send literal text plus separately validated keys. Neither
 interface infers agent readiness or automatically runs commands merely because a task was planned.
+Windows shell discovery uses a fixed `git --exec-path` invocation with a five-second timeout and
+removes inherited `GIT_EXEC_PATH`; this installation lookup does not read or change the repository.
 
 Binding to `127.0.0.1` keeps other machines out but not other web pages, which reach the server
 through the browser. Every request whose `Host` is not `127.0.0.1` or `localhost` is refused with

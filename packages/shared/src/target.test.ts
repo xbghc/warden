@@ -49,6 +49,24 @@ describe('target keys', () => {
     });
     expect(parseTargetKey('worktree:/x/y:commit:deadbeef')).toEqual({ kind: 'commit', sha: 'deadbeef', worktree: '/x/y' });
   });
+
+  it.each([String.raw`C:\Workspaces\中文 project`, 'D:/Workspaces/project', String.raw`\\server\share\project`])(
+    'round-trips every target kind for the Windows absolute path %s',
+    (worktree) => {
+      for (const suffix of ['working', 'staged', 'all', 'commit:abc123', 'range:main..HEAD', 'base:main', 'checkpoint:1']) {
+        const key = `worktree:${worktree}:${suffix}`;
+        expect(parseTargetKey(key).worktree).toBe(worktree);
+        expect(formatTargetKey(parseTargetKey(key))).toBe(key);
+      }
+      const name = worktree.endsWith('中文 project') ? '中文 project' : 'project';
+      expect(targetLabel(parseTargetKey(`worktree:${worktree}:working`))).toBe(`[${name}] Working tree`);
+    },
+  );
+
+  it.each(['C:relative', String.raw`\relative`, String.raw`\\server`, String.raw`\\.\device`, '/path\0invalid'])(
+    'rejects relative, incomplete and device paths: %s',
+    (worktree) => expect(() => parseTargetKey(`worktree:${worktree}:working`)).toThrow(TargetKeyError),
+  );
   it('rejects option-looking refs and garbage', () => {
     expect(() => parseTargetKey('commit:--output=/tmp/x')).toThrow(TargetKeyError);
     expect(() => parseTargetKey('range:-x..HEAD')).toThrow(TargetKeyError);

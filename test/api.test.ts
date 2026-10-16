@@ -1,9 +1,8 @@
 import os from 'node:os';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, realpath, rm, unlink, writeFile } from 'node:fs/promises';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { Hono } from 'hono';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type {
   Comment,
   CommitsResponse,
@@ -29,7 +28,7 @@ import { createApp, resolveRepo, StateStore } from '@warden/server';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
 let fx: FixtureRepo;
-let app: Hono;
+let app: ReturnType<typeof createApp>;
 let dataDir: string;
 let stateFile: string;
 
@@ -46,7 +45,7 @@ const send = (method: string, p: string, body?: unknown) =>
   app.request(p, { method, headers: { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
 const k = (key: string) => encodeURIComponent(key);
 
-beforeAll(async () => {
+beforeEach(async () => {
   fx = await makeFixtureRepo();
   dataDir = await mkdtemp(path.join(os.tmpdir(), 'warden-data-'));
   stateFile = path.join(dataDir, 'state.json');
@@ -55,10 +54,29 @@ beforeAll(async () => {
   app = createApp({ repo, store });
 });
 
-afterAll(async () => {
-  await fx.cleanup();
-  await rm(dataDir, { recursive: true, force: true });
+afterEach(async () => {
+  try {
+    await app.close();
+    // Check after the actual API operations, not in a test with a fresh index.
+    expect(existsSync(path.join(fx.root, '.git', 'index.lock'))).toBe(false);
+  } finally {
+    // Slot directories are siblings of this test's unique repository, including
+    // slots left behind when an assertion fails halfway through an operation.
+    for (const suffix of ['-1', '-2', '-3', '-4', '-5', '-feature']) {
+      await rm(`${fx.root}${suffix}`, { recursive: true, force: true });
+    }
+    await fx.cleanup();
+    await rm(dataDir, { recursive: true, force: true });
+  }
 });
+
+async function prepareLocalChanges() {
+  await fx.write('src/b.ts', 'export const b = 20;\n');
+  await fx.write('src/new.ts', 'export const fresh = 1;\n');
+  await fx.write('bin.dat', Buffer.from([0, 1, 2, 3, 255]));
+  fx.git('add', 'src/b.ts');
+  await fx.write('src/b.ts', 'export const b = 21;\n');
+}
 
 describe('repo & targets', () => {
   it('GET /api/repo describes the repository', async () => {
@@ -71,11 +89,7 @@ describe('repo & targets', () => {
   });
 
   it('working target lists unstaged + untracked files; staged lists index', async () => {
-    await fx.write('src/b.ts', 'export const b = 20;\n');
-    await fx.write('src/new.ts', 'export const fresh = 1;\n');
-    await fx.write('bin.dat', Buffer.from([0, 1, 2, 3, 255]));
-    fx.git('add', 'src/b.ts');
-    await fx.write('src/b.ts', 'export const b = 21;\n');
+    await prepareLocalChanges();
 
     const working = await json<FilesResponse>(await get(`/api/targets/${k('working')}/files`));
     expect(working.root).toBe(fx.root);
@@ -92,6 +106,7 @@ describe('repo & targets', () => {
   });
 
   it('serves a single file diff and full contents', async () => {
+    await prepareLocalChanges();
     const diff = await json<FileDiff>(await get(`/api/targets/${k('working')}/file?path=${k('src/b.ts')}`));
     expect(diff.hunks).toHaveLength(1);
     expect(diff.hunks[0]!.lines.map((l) => l.type)).toEqual(['del', 'add']);
@@ -142,6 +157,19 @@ describe('repo & targets', () => {
     expect((await get(`/api/targets/${k('working')}/file?path=${k('../etc/passwd')}`)).status).toBe(400);
     expect((await get(`/api/targets/${k('working')}/file?path=${k('src/b.ts')}&old=${k('../x')}`)).status).toBe(400);
     expect((await get(`/api/targets/${k('working')}/file?path=${k('src/b.ts')}&old=${k('/etc/hostname')}`)).status).toBe(400);
+    const outside = `${fx.root}.private.txt`;
+    await writeFile(outside, 'private sibling contents\n');
+    try {
+      const invalid = [`../${path.basename(outside)}`];
+      if (process.platform === 'win32') invalid.push(`..\\${path.basename(outside)}`, 'C:\\outside.txt', '\\\\server\\share\\file', 'src/b.ts:secret');
+      for (const file of invalid) {
+        const result = await get(`/api/targets/${k('working')}/file/full?path=${k(file)}&side=new`);
+        expect(result.status).toBe(400);
+        expect(await json<{ code: string }>(result)).toMatchObject({ code: 'invalid_path' });
+      }
+    } finally {
+      await rm(outside, { force: true });
+    }
   });
 
   it('a range whose ends share no history is a 400, like base', async () => {
@@ -166,21 +194,25 @@ describe('repo & targets', () => {
     }
   });
 
-  it('keeps names with spaces, quotes and a leading colon intact end to end', async () => {
-    const names = ['docs/my notes.md', 'sp "q.ts', ':colon.ts'];
+  it('keeps supported special filenames intact end to end', async () => {
+    // Windows forbids double quotes and colons in filenames. All platforms still
+    // exercise literal pathspecs, URL escaping, spaces and Unicode end to end.
+    const names = ['docs/my notes 文档.md', "sp 'q.ts", '[literal]%.ts'];
+    if (process.platform !== 'win32') names.push('sp "q.ts', ':colon.ts');
+    const untrackedName = process.platform === 'win32' ? '[untracked]%.ts' : ':untracked.ts';
     const spec = (p: string) => `:(literal)${p}`;
     for (const p of names) await fx.write(p, 'one\n');
     fx.git('add', '--', ...names.map(spec));
     for (const p of names) await fx.write(p, 'two\n');
-    await fx.write(':untracked.ts', 'new\n');
+    await fx.write(untrackedName, 'new\n');
     try {
       const staged = await json<FilesResponse>(await get(`/api/targets/${k('staged')}/files`));
       const added = staged.files.filter((f) => names.includes(f.path));
       expect(added.map((f) => f.path).sort()).toEqual([...names].sort());
       expect(added.every((f) => f.status === 'added')).toBe(true);
       const working = await json<FilesResponse>(await get(`/api/targets/${k('working')}/files`));
-      expect(working.files.map((f) => f.path)).toEqual(expect.arrayContaining([...names, ':untracked.ts']));
-      for (const p of [...names, ':untracked.ts']) {
+      expect(working.files.map((f) => f.path)).toEqual(expect.arrayContaining([...names, untrackedName]));
+      for (const p of [...names, untrackedName]) {
         const diff = await json<FileDiff>(await get(`/api/targets/${k('working')}/file?path=${k(p)}`));
         expect(diff.path).toBe(p);
         expect(diff.hunks[0]!.lines.some((l) => l.type === 'add')).toBe(true);
@@ -191,7 +223,7 @@ describe('repo & targets', () => {
       }
     } finally {
       fx.git('rm', '-q', '-f', '--cached', '--', ...names.map(spec));
-      for (const p of [...names, ':untracked.ts']) await rm(path.join(fx.root, p), { force: true });
+      for (const p of [...names, untrackedName]) await rm(path.join(fx.root, p), { force: true });
       await rm(path.join(fx.root, 'docs'), { recursive: true, force: true });
     }
   });
@@ -269,17 +301,32 @@ describe('repo & targets', () => {
       await send('PATCH', '/api/prefs', { lastTarget: 'bogus' });
       expect((await json<RepoInfo>(await get('/api/repo'))).defaultTarget).toBe('working');
     } finally {
+      await rm(wtPath, { recursive: true, force: true });
       fx.git('worktree', 'prune');
     }
   });
 });
 
 describe('viewed, comments, export, todos', () => {
-  let comment: Comment;
+  async function createComment(shifted = false) {
+    const lines = ['export function a() {', shifted ? '  return 4;' : '  return 3;', '}', '', 'export const extra = true;', 'export const more = 1;', ''];
+    if (shifted) lines.unshift('// header');
+    await fx.write('src/a.ts', lines.join('\n'));
+    const res = await send('POST', `/api/targets/${k('working')}/comments`, {
+      filePath: 'src/a.ts',
+      side: 'new',
+      startLine: shifted ? 3 : 2,
+      endLine: shifted ? 3 : 2,
+      body: 'why 3?',
+    });
+    expect(res.status).toBe(201);
+    return json<Comment>(res);
+  }
 
   // `base:main` on main is HEAD against the working tree: a target that tracks the mark and whose
   // diff an edit can still change.
   it('viewed state is bound to the content hash', async () => {
+    await prepareLocalChanges();
     const files = await json<FilesResponse>(await get(`/api/targets/${k('base:main')}/files`));
     const b = files.files.find((f) => f.path === 'src/b.ts')!;
     expect(b.viewed).toBe(false);
@@ -313,16 +360,7 @@ describe('viewed, comments, export, todos', () => {
   });
 
   it('creates a comment with anchor + snippet', async () => {
-    await fx.write('src/a.ts', ['export function a() {', '  return 3;', '}', '', 'export const extra = true;', 'export const more = 1;', ''].join('\n'));
-    const res = await send('POST', `/api/targets/${k('working')}/comments`, {
-      filePath: 'src/a.ts',
-      side: 'new',
-      startLine: 2,
-      endLine: 2,
-      body: 'why 3?',
-    });
-    expect(res.status).toBe(201);
-    comment = await json<Comment>(res);
+    const comment = await createComment();
     expect(comment.codeSnippet).toEqual(['  return 3;']);
     expect(comment.status).toBe('active');
     expect(comment.anchor.lineHashes).toHaveLength(1);
@@ -333,6 +371,7 @@ describe('viewed, comments, export, todos', () => {
   });
 
   it('reanchors after unrelated edits and orphans after edits to the commented line', async () => {
+    const comment = await createComment();
     // unrelated edit at top of file (same hunk, shifted)
     await fx.write(
       'src/a.ts',
@@ -352,10 +391,10 @@ describe('viewed, comments, export, todos', () => {
     const patched = await json<Comment>(await send('PATCH', `/api/targets/${k('working')}/comments/${comment.id}`, { side: 'new', startLine: 3, endLine: 3 }));
     expect(patched.status).toBe('active');
     expect(patched.codeSnippet).toEqual(['  return 4;']);
-    comment = patched;
   });
 
   it('exports comments and marks them exported', async () => {
+    const comment = await createComment(true);
     const res = await json<ExportResponse>(await send('POST', '/api/comments/export', { commentIds: [comment.id, 'missing'] }));
     expect(res.count).toBe(1);
     expect(res.text).toContain(
@@ -377,6 +416,7 @@ describe('viewed, comments, export, todos', () => {
   });
 
   it('todos link comments, hand them over when copied, and survive a store reload', async () => {
+    const comment = await createComment(true);
     const created = await json<Todo>(await send('POST', '/api/todos', { title: 'Totals', body: 'desc', commentIds: [comment.id, comment.id] }));
     expect(created.commentIds).toEqual([comment.id]);
     expect((await send('POST', '/api/todos', { title: 'x', commentIds: ['missing'] })).status).toBe(404);
@@ -430,23 +470,24 @@ describe('staging', () => {
   const lib = 'stage/lib.ts';
   const base = Array.from({ length: 30 }, (_, i) => L(i + 1));
 
-  beforeAll(async () => {
-    // A 30-line file in the index, edited in three places in the working tree: three hunks.
-    await fx.write(lib, base.join('\n') + '\n');
+  async function prepareStage(indexed = base) {
+    await fx.write(lib, indexed.join('\n') + '\n');
     fx.git('add', lib);
     const edited = [...base];
     edited[2] = 'line 3 changed';
     edited.splice(15, 0, 'inserted after 15', 'inserted after 15 (b)');
     edited.splice(edited.length - 2, 1);
     await fx.write(lib, edited.join('\n') + '\n');
-  });
+  }
 
-  afterAll(async () => {
-    fx.git('rm', '-q', '-f', '--cached', '--', lib);
-    await rm(path.join(fx.root, 'stage'), { recursive: true, force: true });
-  });
+  const withInsertion = () => [...base.slice(0, 15), 'inserted after 15', ...base.slice(15)];
+  const withHunks = () =>
+    withInsertion()
+      .map((line) => (line === L(3) ? 'line 3 changed' : line))
+      .filter((line) => line !== L(29));
 
   it('stages a few lines of one hunk and leaves the rest unstaged', async () => {
+    await prepareStage();
     const diff = await fileDiff('working', lib);
     expect(diff.hunks).toHaveLength(3);
     const h1 = diff.hunks[1]!;
@@ -475,6 +516,7 @@ describe('staging', () => {
   });
 
   it('stages whole hunks, with later hunks placed by what earlier ones did', async () => {
+    await prepareStage(withInsertion());
     const diff = await fileDiff('working', lib);
     const res = await stage('working', { path: lib, contentHash: diff.contentHash, hunks: [{ index: 0 }, { index: 2 }] });
     expect(res.status).toBe(200);
@@ -488,6 +530,7 @@ describe('staging', () => {
   });
 
   it('unstages a line from the staged view', async () => {
+    await prepareStage(withHunks());
     const staged = await fileDiff('staged', lib);
     const hunk = staged.hunks.findIndex((h) => h.lines.some((l) => l.content === 'line 3 changed'));
     const line = staged.hunks[hunk]!.lines.findIndex((l) => l.content === 'line 3 changed');
@@ -501,6 +544,7 @@ describe('staging', () => {
   });
 
   it('refuses a stale selection, a view that cannot be staged from and a file outside the view', async () => {
+    await prepareStage(withHunks().filter((line) => line !== 'line 3 changed'));
     const diff = await fileDiff('working', lib);
     const stale = await stage('working', { path: lib, contentHash: 'nope', hunks: [{ index: 0 }] });
     expect(stale.status).toBe(409);
@@ -514,7 +558,7 @@ describe('staging', () => {
     expect((await stage('working', { path: lib, contentHash: diff.contentHash, hunks: [{ index: 9 }] })).status).toBe(400);
     expect((await stage('working', { path: lib, contentHash: diff.contentHash, hunks: 'all' })).status).toBe(400);
     expect((await stage('working', { path: '../x', contentHash: 'x' })).status).toBe(400);
-    // The index is exactly as the last successful call left it.
+    // Every rejected request leaves the index exactly as this test prepared it.
     expect(indexOf(lib).split('\n').slice(0, 4)).toEqual([L(1), L(2), L(4), L(5)]);
   });
 
@@ -586,10 +630,6 @@ describe('staging', () => {
     fx.git('rm', '-q', '-f', '--cached', '--', p);
     await rm(path.join(fx.root, p));
   });
-
-  it('leaves no lock behind', async () => {
-    await expect(unlink(path.join(fx.root, '.git', 'index.lock'))).rejects.toThrow();
-  });
 });
 
 describe('debug code', () => {
@@ -604,7 +644,7 @@ describe('debug code', () => {
   base[4] = mark('debug:start');
   base[29] = mark('debug:end');
 
-  beforeAll(async () => {
+  beforeEach(async () => {
     // The block's markers are far from both edits: no hunk shows them.
     await fx.write(file, base.join('\n') + '\n');
     fx.git('add', file);
@@ -613,11 +653,6 @@ describe('debug code', () => {
     edited[39] = 'line 40 outside';
     await fx.write(file, edited.join('\n') + '\n');
     await fx.write(loose, `keep()\nprobe() ${mark('nocommit')}\n`);
-  });
-
-  afterAll(async () => {
-    fx.git('rm', '-q', '-f', '--cached', '--', file);
-    await rm(path.join(fx.root, 'dbg'), { recursive: true, force: true });
   });
 
   it('flags lines inside a block whose markers lie outside the hunk, on both sides', async () => {
@@ -659,9 +694,10 @@ describe('commit log', () => {
   const log = async (query: string) => json<CommitsResponse>(await get(`/api/commits?${query}`));
   const subjects = (r: CommitsResponse) => r.commits.map((c) => c.subject.slice(0, 2)).sort();
 
-  beforeAll(async () => {
-    // Settle whatever the earlier tests left in the working tree, then merge a topic branch, so the
-    // history has a tag, a side branch and a merge commit: c5 (merge) → c4 (topic) + c3 (tag) → c2 → c1.
+  beforeEach(async () => {
+    // Build the same history independently for each test, with a tag, side branch
+    // and merge commit: c5 (merge) → c4 (topic) + c3 (tag) → c2 → c1.
+    await fx.write('settled.txt', 'settled\n');
     fx.git('add', '-A');
     fx.git('commit', '-q', '-m', 'c3: settle the tree');
     fx.git('tag', 'v1.0');
@@ -758,24 +794,20 @@ describe('worktree management', () => {
   const remove = (body: RemoveWorktreeRequest) => send('POST', '/api/worktrees/remove', body);
   const code = async (res: Response) => (await json<{ code: string }>(res)).code;
 
-  afterAll(async () => {
-    // Whatever a failing test left beside the fixture.
-    for (const dir of [slotDir(1), slotDir(2), slotDir(3), byHand()]) {
-      try {
-        fx.git('worktree', 'remove', '--force', dir);
-      } catch {
-        /* not there */
-      }
-      await rm(dir, { recursive: true, force: true });
-    }
-    fx.git('worktree', 'prune');
-  });
+  const freeSlot = (n: number, ref = 'main') => fx.git('worktree', 'add', '-q', '--detach', slotDir(n), ref);
+  const topicSlot = () => {
+    fx.git('branch', 'topic', 'HEAD~1');
+    freeSlot(1, 'topic');
+  };
 
   it('lists the checkouts, the local branches and the slot a checkout would make', async () => {
+    fx.git('branch', 'topic');
     const res = await list();
     expect(res.worktrees.map((w) => [w.isMain, w.branch, w.prunable, w.slot, w.free])).toEqual([[true, 'main', false, undefined, false]]);
     expect(res.branches.find((b) => b.name === 'main')).toMatchObject({ worktree: fx.root });
-    expect(res.branches.find((b) => b.name === 'topic')?.worktree).toBeUndefined();
+    const topic = res.branches.find((b) => b.name === 'topic');
+    expect(topic).toMatchObject({ name: 'topic' });
+    expect(topic).not.toHaveProperty('worktree');
     expect(res.newSlot).toEqual({ slot: 1, path: slotDir(1) });
   });
 
@@ -806,9 +838,10 @@ describe('worktree management', () => {
     expect(fx.git('-C', slotDir(1), 'rev-parse', '--abbrev-ref', 'HEAD').trim()).toBe('agent/one');
     // Forced: the changes go, the directory and what is ignored in it stay, and the branch is
     // deleted with them — nothing was committed on it, so `-d` agrees.
-    expect(await json<ReleaseWorktreeResponse>(await release({ path: made.worktree.path, force: true, deleteBranch: true }))).toEqual({
+    expect(await json<ReleaseWorktreeResponse>(await release({ path: made.worktree.path, force: true, deleteBranch: true }))).toMatchObject({
       ok: true,
       branchDeleted: true,
+      backup: { reason: 'release' },
     });
     expect((await list()).branches.map((b) => b.name)).not.toContain('agent/one');
     expect(await slot(1)).toMatchObject({ slot: 1, free: true, detached: true, dirty: 0 });
@@ -818,6 +851,10 @@ describe('worktree management', () => {
   });
 
   it('reuses the free slot for an existing branch, and keeps the branch on release when it is not merged', async () => {
+    topicSlot();
+    await writeFile(path.join(fx.root, '.git', 'info', 'exclude'), 'node_modules/\n');
+    await mkdir(path.join(slotDir(1), 'node_modules'), { recursive: true });
+    await writeFile(path.join(slotDir(1), 'node_modules', 'keep'), 'installed\n');
     const made = await json<CreateWorktreeResponse>(await create({ branch: 'topic' }));
     expect(made).toMatchObject({ slot: 1, reused: true, worktree: { path: await realpath(slotDir(1)), branch: 'topic' } });
     // The install survived the switch.
@@ -836,6 +873,7 @@ describe('worktree management', () => {
   });
 
   it('takes the slot asked for: a free one is switched, a new number is made, and a base is read in the main worktree', async () => {
+    topicSlot();
     // Slot 2 does not exist yet: made, and the free slot 1 stays free.
     const two = await json<CreateWorktreeResponse>(await create({ branch: 'agent/two', base: 'main', slot: 2 }));
     expect(two).toMatchObject({ slot: 2, reused: false, worktree: { path: await realpath(slotDir(2)), branch: 'agent/two' } });
@@ -848,15 +886,24 @@ describe('worktree management', () => {
     expect(await code(await create({ branch: 'agent/four', slot: 1 }))).toBe('slot_in_use');
     for (const bad of [0, -1, 1.5, '1']) expect(await code(await create({ branch: 'agent/four', slot: bad }))).toBe('invalid_slot');
     for (const made of [one, two]) {
-      expect(await json<ReleaseWorktreeResponse>(await release({ path: made.worktree.path, deleteBranch: true }))).toEqual({ ok: true, branchDeleted: true });
+      expect(await json<ReleaseWorktreeResponse>(await release({ path: made.worktree.path, deleteBranch: true }))).toMatchObject({
+        ok: true,
+        branchDeleted: true,
+        backup: { reason: 'release' },
+      });
     }
     // Unasked, the lowest free slot is taken.
     const five = await json<CreateWorktreeResponse>(await create({ branch: 'agent/five', base: 'main' }));
     expect(five).toMatchObject({ slot: 1, reused: true });
-    expect(await json<ReleaseWorktreeResponse>(await release({ path: five.worktree.path, deleteBranch: true }))).toEqual({ ok: true, branchDeleted: true });
+    expect(await json<ReleaseWorktreeResponse>(await release({ path: five.worktree.path, deleteBranch: true }))).toMatchObject({
+      ok: true,
+      branchDeleted: true,
+      backup: { reason: 'release' },
+    });
   });
 
   it('forgets the review state kept under a slot when a branch is checked out into it', async () => {
+    freeSlot(1);
     const slotPath = (await slot(1))!.path;
     const state = await json<ReviewState>(await get('/api/state'));
     state.targets[`worktree:${slotPath}:base:main`] = { viewed: { 'src/a.ts': 'h' }, comments: [] };
@@ -868,16 +915,25 @@ describe('worktree management', () => {
     const keys = Object.keys((await json<ReviewState>(await get('/api/state'))).targets);
     expect(keys.filter((k) => k.startsWith(`worktree:${slotPath}:`))).toEqual([]);
     expect(keys).toContain('base:main');
-    expect(await json<ReleaseWorktreeResponse>(await release({ path: made.worktree.path, deleteBranch: true }))).toEqual({ ok: true, branchDeleted: true });
+    expect(await json<ReleaseWorktreeResponse>(await release({ path: made.worktree.path, deleteBranch: true }))).toMatchObject({
+      ok: true,
+      branchDeleted: true,
+      backup: { reason: 'release' },
+    });
   });
 
   it('starts a name no branch has from main when the request gives no base', async () => {
     const made = await json<CreateWorktreeResponse>(await create({ branch: 'agent/fresh' }));
     expect(made.worktree).toMatchObject({ branch: 'agent/fresh', head: fx.git('rev-parse', 'main').trim() });
-    expect(await json<ReleaseWorktreeResponse>(await release({ path: made.worktree.path, deleteBranch: true }))).toEqual({ ok: true, branchDeleted: true });
+    expect(await json<ReleaseWorktreeResponse>(await release({ path: made.worktree.path, deleteBranch: true }))).toMatchObject({
+      ok: true,
+      branchDeleted: true,
+      backup: { reason: 'release' },
+    });
   });
 
   it('checks out a branch only a remote has as a local branch tracking it, never from main', async () => {
+    topicSlot();
     const tip = fx.git('rev-parse', 'topic').trim();
     fx.git('remote', 'add', 'origin', 'https://example.invalid/origin.git');
     fx.git('remote', 'add', 'upstream', 'https://example.invalid/upstream.git');
@@ -931,6 +987,8 @@ describe('worktree management', () => {
   });
 
   it('refuses bad names and refs, and releases nothing but a slot', async () => {
+    freeSlot(1);
+    freeSlot(2);
     expect(await code(await create({ branch: 'x', base: 'nope' }))).toBe('unknown_ref');
     for (const branch of ['-b', 'bad..name', 'a b', 'x@{-1}', 'refs/heads/x', 'x.lock', '']) {
       expect(await code(await create({ branch, base: 'main' }))).toBe('invalid_branch');
@@ -949,11 +1007,17 @@ describe('worktree management', () => {
     expect(hand.slot).toBeUndefined();
     expect((await list()).newSlot).toEqual({ slot: 3, path: slotDir(3) });
     expect(await code(await release({ path: hand.path }))).toBe('not_a_slot');
-    expect(await json<RemoveWorktreeResponse>(await remove({ path: hand.path }))).toEqual({ ok: true, branchDeleted: false });
+    expect(await json<RemoveWorktreeResponse>(await remove({ path: hand.path }))).toMatchObject({
+      ok: true,
+      branchDeleted: false,
+      backup: { reason: 'remove' },
+    });
     expect(existsSync(byHand())).toBe(false);
   });
 
   it('drops the entry of a slot whose directory is gone, branch included, and skips its number meanwhile', async () => {
+    freeSlot(1);
+    freeSlot(2);
     const made = await json<CreateWorktreeResponse>(await create({ branch: 'agent/gone', base: 'main', slot: 3 }));
     await rm(made.worktree.path, { recursive: true, force: true });
     // Not offered for review any more, but still listed here, and its branch is still taken.
@@ -973,9 +1037,15 @@ describe('worktree management', () => {
   });
 
   it('removes a free slot outright when asked, directory and all', async () => {
+    freeSlot(1);
+    freeSlot(2);
     const two = (await slot(2))!;
     expect(two).toMatchObject({ free: true });
-    expect(await json<RemoveWorktreeResponse>(await remove({ path: two.path }))).toEqual({ ok: true, branchDeleted: false });
+    expect(await json<RemoveWorktreeResponse>(await remove({ path: two.path }))).toMatchObject({
+      ok: true,
+      branchDeleted: false,
+      backup: { reason: 'remove' },
+    });
     expect(existsSync(slotDir(2))).toBe(false);
     expect((await list()).newSlot).toEqual({ slot: 2, path: slotDir(2) });
   });
@@ -1019,7 +1089,11 @@ describe('update notice', () => {
     const repo = await resolveRepo(fx.root);
     const notice: UpdateNotice = { current: '0.11.1', latest: '0.12.0', command: 'npm i -g @xbghc/warden@latest' };
     const withUpdate = createApp({ repo, store: new StateStore(stateFile, repo.commonRoot), update: Promise.resolve(notice) });
-    expect(await json<UpdateNotice | null>(await withUpdate.request('/api/update'))).toEqual(notice);
+    try {
+      expect(await json<UpdateNotice | null>(await withUpdate.request('/api/update'))).toEqual(notice);
+    } finally {
+      await withUpdate.close();
+    }
   });
 });
 
@@ -1028,9 +1102,5 @@ describe('static + unknown routes', () => {
     const res = await get('/api/nope');
     expect(res.status).toBe(404);
     expect(await json<{ code: string }>(res)).toMatchObject({ code: 'not_found' });
-  });
-  it('cleans up nothing in the repo (no writes)', async () => {
-    // The fixture's .git must not contain a lock file left by us.
-    await expect(unlink(path.join(fx.root, '.git', 'index.lock'))).rejects.toThrow();
   });
 });

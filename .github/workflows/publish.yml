@@ -21,13 +21,19 @@ on:
 
 permissions:
   contents: read
-  # Lets the runner mint the OIDC token that the registry exchanges for a
-  # short-lived publish credential. Trusted publishing does not work without it.
-  id-token: write
 
 jobs:
+  verify:
+    uses: ./.github/workflows/ci.yml
+
   publish:
+    needs: verify
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      # Only the publishing job needs to request a registry credential.
+      id-token: write
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -48,7 +54,9 @@ jobs:
             echo "tag v$TAG_VERSION does not match package.json version $PKG_VERSION" >&2
             exit 1
           fi
-      # prepublishOnly runs `pnpm build && pnpm test` before anything is uploaded.
+      # The reusable CI workflow verifies this exact tag across the supported matrix
+      # before this job can request an npm credential. prepublishOnly also verifies
+      # lint, types, build and tests in the publishing checkout.
       # `--provenance` is explicit on purpose: npm generates an attestation on its own for a
       # trusted publish, but that did not happen through `pnpm publish` (0.2.0 shipped without
       # one). pnpm's own release workflow passes the flag for the same reason.

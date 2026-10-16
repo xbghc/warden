@@ -28,8 +28,9 @@ the text first, then keys, to the active pane of the workspace's validated tmux 
 not append Enter implicitly. The task page also supports direct text input with an explicit Enter
 option. The page reports the send result; it does not infer the state of the agent.
 
-`hooks.create` and `hooks.reuse` are optional `/bin/sh -c` commands executed after the assignment is
-saved, with the workspace as cwd. They expose stdout/stderr, exit code and failure. A failed hook
+`hooks.create` and `hooks.reuse` are optional POSIX shell commands executed after the assignment is
+saved, with the workspace as cwd. Linux and macOS use `/bin/sh -c`; native Windows uses Git for
+Windows' bundled `sh.exe -c`. They expose stdout/stderr, exit code and failure. A failed hook
 leaves the workspace intact; retry it explicitly. Hooks have a 60-second timeout and bounded output.
 Warden does not provide a dependency installer or a process supervisor.
 
@@ -37,6 +38,8 @@ Environment: `WARDEN_REPO`, `WARDEN_WORKTREE`, `WARDEN_BRANCH`, `WARDEN_DEVELOPM
 `WARDEN_TASK_ID`, `WARDEN_HOOK_EVENT` (`create` or `reuse`). These scripts are distinct from Git's
 normal commit hooks. Reuse applies only to a genuinely unassigned available slot, never to a task
 whose most recent delivery happened to succeed.
+Inherited Git repository/index/object-store overrides are removed before running a hook, so a Git
+command in it operates on the assigned workspace. Normal identity and configuration still apply.
 
 ## Connected previews
 
@@ -113,6 +116,10 @@ remain associated with the rewritten commits, and workspaces remain unchanged un
 There is no history undo/restore UI, automatic remote push or merge-commit arrangement.
 
 ## Slots
+
+Release/removal, explicit rebase and history application require an automatic verified local backup.
+Backup failure stops the operation. See [Safety backups](backups.md) for contents, storage costs,
+supported layouts and recovery. Rebase also refuses to overwrite ignored local files.
 
 Numbered directories (`<repo>-1`, `<repo>-2`, ...) remain available to their tasks across deliveries.
 A reusable slot is detached, clean, valid, unassigned and not inside a Git operation; this is a Git

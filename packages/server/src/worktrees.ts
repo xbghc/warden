@@ -17,6 +17,8 @@ import { badRequest, HttpError } from './errors.js';
 import { GitError, LONG_GIT_TIMEOUT_MS, refExists, runGit, runGitWrite } from './git.js';
 import { detectDefaultBase, isCloneOf, listWorktrees, listWorktreesAll, remoteDefault, slotOf, slotPath, type RepoContext } from './repo.js';
 import { clonedBranch, discardClone, dropCloneBranch, fetchClone, makeClone, removeClone } from './clones.js';
+import { assertSafetyBackupCurrent, createSafetyBackup } from './backups.js';
+import type { StateStore } from './state.js';
 
 export { slotOf, slotPath } from './repo.js';
 
@@ -397,7 +399,8 @@ async function checkoutLinked(
         await runGitWrite(['branch', ...(create.track ? ['--track'] : []), branch, create.start], { cwd });
         made = true;
       }
-      await runGitWrite(['switch', '--no-guess', branch], { cwd: target.path });
+      // A clean status can still hide ignored local configuration that the next branch tracks.
+      await runGitWrite(['switch', '--no-guess', '--no-overwrite-ignore', branch], { cwd: target.path });
     } else if (create) {
       await runGitWrite(['worktree', 'add', ...(create.track ? ['--track'] : []), '-b', branch, target.path, create.start], { cwd });
     } else {
@@ -433,7 +436,7 @@ async function checkoutClone(
         made = true;
       }
       // A new clone has every file still to write, and a large repository takes a while.
-      await runGitWrite(['switch', '--no-guess', branch], { cwd, timeoutMs: LONG_GIT_TIMEOUT_MS });
+      await runGitWrite(['switch', '--no-guess', '--no-overwrite-ignore', branch], { cwd, timeoutMs: LONG_GIT_TIMEOUT_MS });
     } catch (e) {
       if (made) await runGitWrite(['branch', '-D', branch], { cwd }).catch(() => undefined);
       throw e;
@@ -472,7 +475,7 @@ async function dropBranch(ctx: RepoContext, wt: WorktreeInfo, asked: boolean | u
  * worktree that is not a slot is not released, since nothing would reuse it, and one whose
  * directory is gone has nothing to keep; both are for removal.
  */
-export async function releaseWorktree(ctx: RepoContext, req: ReleaseWorktreeRequest): Promise<RemoveWorktreeResponse> {
+export async function releaseWorktree(ctx: RepoContext, req: ReleaseWorktreeRequest, store: StateStore): Promise<RemoveWorktreeResponse> {
   const p = req.path.trim();
   const wt = (await listWorktreesAll(ctx)).find((w) => w.path === p || (p && w.path === path.resolve(p)));
   if (!wt) throw badRequest(`unknown worktree: ${p}`, 'unknown_worktree');
@@ -485,13 +488,18 @@ export async function releaseWorktree(ctx: RepoContext, req: ReleaseWorktreeRequ
   if (state.busy) throw new HttpError(409, `a ${state.busy} is in progress in ${wt.path}; finish or abort it first`, 'operation_in_progress');
   const dirty = await dirtyCount(wt.path);
   if (dirty > 0 && !req.force) throw new HttpError(409, `${wt.path} has uncommitted changes`, 'worktree_dirty');
+  const backup = await createSafetyBackup(store, wt.path, 'release');
+  const current = await checkoutState(ctx, wt);
+  if (current.foreign || current.busy) throw new HttpError(409, '备份后工作区状态已变化，请刷新重试', 'worktree_changed');
+  await assertSafetyBackupCurrent(backup);
   if (dirty > 0) {
     // Not `switch --discard-changes`: with no start point it leaves a modified file alone.
     await runGitWrite(['reset', '-q', '--hard'], { cwd: wt.path });
     await runGitWrite(['clean', '-fdq'], { cwd: wt.path });
   }
   if (!wt.detached) await runGitWrite(['switch', '--detach'], { cwd: wt.path });
-  return wt.clone ? dropCloneBranch(wt, req.deleteBranch) : dropBranch(ctx, wt, req.deleteBranch);
+  const result = await (wt.clone ? dropCloneBranch(wt, req.deleteBranch) : dropBranch(ctx, wt, req.deleteBranch));
+  return { ...result, backup };
 }
 
 /**
@@ -504,21 +512,26 @@ export async function releaseWorktree(ctx: RepoContext, req: ReleaseWorktreeRequ
  * such entry at once. The branch is deleted only on request and only with `-d`, so one that is not
  * merged stays and the response says why.
  */
-export async function removeWorktree(ctx: RepoContext, req: RemoveWorktreeRequest): Promise<RemoveWorktreeResponse> {
+export async function removeWorktree(ctx: RepoContext, req: RemoveWorktreeRequest, store: StateStore): Promise<RemoveWorktreeResponse> {
   const p = req.path.trim();
   const wt = (await listWorktreesAll(ctx)).find((w) => w.path === p || (p && w.path === path.resolve(p)));
   if (!wt) throw badRequest(`unknown worktree: ${p}`, 'unknown_worktree');
   if (wt.isMain) throw badRequest('the main worktree cannot be removed', 'main_worktree');
   if (wt.clone) {
     const state = await checkoutState(ctx, wt);
-    await removeClone(ctx, wt.path, { dirty: await dirtyCount(wt.path), busy: state.busy, force: req.force });
-    return { ok: true, branchDeleted: false };
+    const backup = await removeClone(ctx, wt.path, { dirty: await dirtyCount(wt.path), busy: state.busy, force: req.force }, store);
+    return { ok: true, branchDeleted: false, backup };
   }
   // git removes a clean checkout with a rebase stopped in it without a word; that is asked first.
-  if (!wt.prunable && !req.force) {
+  if (!wt.prunable) {
     const state = await checkoutState(ctx, wt);
-    if (state.busy) throw new HttpError(409, `a ${state.busy} is in progress in ${wt.path}; removing it throws that away`, 'needs_force');
+    if (state.foreign) throw new HttpError(409, `${wt.path} is not a checkout of this repository`, 'not_our_checkout');
+    if (state.busy && !req.force) throw new HttpError(409, `a ${state.busy} is in progress in ${wt.path}; removing it throws that away`, 'needs_force');
+    if (!req.force && (await dirtyCount(wt.path))) throw new HttpError(409, `${wt.path} has uncommitted changes`, 'worktree_dirty');
   }
+  const backup = wt.prunable ? undefined : await createSafetyBackup(store, wt.path, 'remove');
+  if (!wt.prunable && (await checkoutState(ctx, wt)).foreign) throw new HttpError(409, '备份后工作区身份已变化，请刷新重试', 'not_our_checkout');
+  if (backup) await assertSafetyBackupCurrent(backup);
   const args = ['worktree', 'remove'];
   if (req.force) args.push('--force');
   args.push(wt.path);
@@ -533,5 +546,5 @@ export async function removeWorktree(ctx: RepoContext, req: RemoveWorktreeReques
     }
     throw e;
   }
-  return dropBranch(ctx, wt, req.deleteBranch);
+  return { ...(await dropBranch(ctx, wt, req.deleteBranch)), ...(backup ? { backup } : {}) };
 }

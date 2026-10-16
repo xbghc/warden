@@ -196,7 +196,11 @@ describe('a clone slot', () => {
     expect(branches(dir)).toContain('agent/loose');
 
     const pushed = await checkout({ branch: 'agent/remote', slot: 1 });
-    expect(await json<ReleaseWorktreeResponse>(await release({ path: pushed.worktree.path, deleteBranch: true }))).toEqual({ ok: true, branchDeleted: true });
+    expect(await json<ReleaseWorktreeResponse>(await release({ path: pushed.worktree.path, deleteBranch: true }))).toMatchObject({
+      ok: true,
+      branchDeleted: true,
+      backup: { reason: 'release' },
+    });
 
     const ahead = await checkout({ branch: 'agent/remote', slot: 1 });
     git(dir, 'commit', '-q', '--allow-empty', '-m', 'not pushed yet');
@@ -229,7 +233,7 @@ describe('a clone slot', () => {
     await writeFile(path.join(dir, 'more.txt'), 'y\n');
     expect(await code(await remove({ path: dir }))).toBe('needs_force');
     expect(existsSync(dir)).toBe(true);
-    expect(await json(await remove({ path: dir, force: true }))).toEqual({ ok: true, branchDeleted: false });
+    expect(await json(await remove({ path: dir, force: true }))).toMatchObject({ ok: true, branchDeleted: false, backup: { reason: 'remove' } });
     expect(existsSync(dir)).toBe(false);
     expect((await list()).worktrees.map((w) => w.path)).not.toContain(dir);
 

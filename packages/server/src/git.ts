@@ -53,6 +53,43 @@ export interface SnapshotEnv {
   index?: string;
 }
 
+// Git exports repository-local variables to hooks and other child processes. A server started
+// there must still operate on its validated cwd, never the caller's repository, index or objects.
+// Keep normal user/system configuration and identity/signing settings for real delivery commits.
+const REPOSITORY_ENV = new Set([
+  'GIT_DIR',
+  'GIT_WORK_TREE',
+  'GIT_COMMON_DIR',
+  'GIT_INDEX_FILE',
+  'GIT_OBJECT_DIRECTORY',
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+  'GIT_QUARANTINE_PATH',
+  'GIT_NAMESPACE',
+  'GIT_PREFIX',
+  'GIT_SUPER_PREFIX',
+  'GIT_INTERNAL_SUPER_PREFIX',
+  'GIT_IMPLICIT_WORK_TREE',
+  'GIT_CEILING_DIRECTORIES',
+  'GIT_DISCOVERY_ACROSS_FILESYSTEM',
+  'GIT_GRAFT_FILE',
+  'GIT_SHALLOW_FILE',
+  'GIT_NO_REPLACE_OBJECTS',
+  'GIT_REPLACE_REF_BASE',
+  'GIT_CONFIG',
+  'GIT_CONFIG_PARAMETERS',
+  'GIT_CONFIG_COUNT',
+]);
+
+export function gitEnvironment(overrides: Record<string, string> = {}): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) {
+    // Environment names are case-insensitive on Windows, including when the server runs in a worker.
+    const name = key.toUpperCase();
+    if (REPOSITORY_ENV.has(name) || /^GIT_CONFIG_(KEY|VALUE)_\d+$/.test(name)) delete env[key];
+  }
+  return { ...env, LC_ALL: 'C', GIT_PAGER: 'cat', PAGER: 'cat', GIT_TERMINAL_PROMPT: '0', ...overrides };
+}
+
 function snapshotVars(snapshot: SnapshotEnv | undefined): Record<string, string> {
   if (!snapshot) return {};
   return {
@@ -126,16 +163,11 @@ export async function runGit(args: readonly string[], opts: GitRunOptions): Prom
         timeout: opts.timeoutMs ?? DEFAULT_GIT_TIMEOUT_MS,
         maxBuffer: opts.maxBuffer ?? 256 * 1024 * 1024,
         encoding: 'utf8',
-        env: {
-          ...process.env,
+        env: gitEnvironment({
           // Never take the index lock / refresh the index as a side effect of diff/status.
           GIT_OPTIONAL_LOCKS: '0',
-          LC_ALL: 'C',
-          GIT_PAGER: 'cat',
-          PAGER: 'cat',
-          GIT_TERMINAL_PROMPT: '0',
           ...snapshotVars(opts.snapshot),
-        },
+        }),
         windowsHide: true,
       },
       (error, stdout, stderr) => {
@@ -202,7 +234,7 @@ async function applyOnce(cwd: string, patch: string, opts: { reverse?: boolean; 
         timeout: opts.timeoutMs ?? DEFAULT_GIT_TIMEOUT_MS,
         maxBuffer: 16 * 1024 * 1024,
         encoding: 'utf8',
-        env: { ...process.env, LC_ALL: 'C', GIT_PAGER: 'cat', PAGER: 'cat', GIT_TERMINAL_PROMPT: '0' },
+        env: gitEnvironment(),
         windowsHide: true,
       },
       (error, _stdout, stderr) => {
@@ -355,7 +387,7 @@ function execWrite(
       const first = stderr.split('\n').find((l) => l.trim()) ?? err.message;
       reject(new GitError(first.trim().replace(/^(fatal|error): /, ''), code, stderr, 500, 'git_failed'));
     };
-    const env = { ...process.env, LC_ALL: 'C', GIT_PAGER: 'cat', PAGER: 'cat', GIT_TERMINAL_PROMPT: '0', ...extraEnv };
+    const env = gitEnvironment(extraEnv);
     if (opts.network) {
       execDetached(args, { cwd: opts.cwd, timeout: opts.timeoutMs ?? LONG_GIT_TIMEOUT_MS, env }, done);
       return;

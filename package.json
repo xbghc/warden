@@ -44,7 +44,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json && pnpm --filter @warden/web typecheck",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepublishOnly": "pnpm build && pnpm test"
+    "prepublishOnly": "pnpm lint && pnpm typecheck && pnpm build && pnpm test"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.12",

@@ -22,6 +22,11 @@ export class TargetKeyError extends Error {
   }
 }
 
+// Shared with the browser: Node's host-specific path parser is not available here.
+export function isWindowsAbsolutePath(value: string): boolean {
+  return /^[a-zA-Z]:[\\/]/.test(value) || /^\\\\(?![.?][\\/])[^\\/]+[\\/][^\\/]+(?:[\\/]|$)/.test(value);
+}
+
 /** A ref is acceptable when it can't be mistaken for a git option or contain shell-ish junk. */
 export function isValidRef(ref: string): boolean {
   if (!ref || ref.length > 256) return false;
@@ -67,7 +72,8 @@ export function parseTargetKey(key: TargetKey): Target {
     const m = /^(.+):(working|staged|all|commit:.+|range:.+|base:.+|checkpoint:[0-9]+)$/.exec(rest);
     if (!m?.[1] || !m[2]) throw new TargetKeyError(`invalid worktree target key: ${key}`);
     const worktree = m[1];
-    if (!worktree.startsWith('/')) throw new TargetKeyError(`worktree path must be absolute: ${worktree}`);
+    if (worktree.includes('\0') || (!worktree.startsWith('/') && !isWindowsAbsolutePath(worktree)))
+      throw new TargetKeyError(`worktree path must be absolute: ${worktree}`);
     return { ...parseSuffix(m[2]), worktree };
   }
   return parseSuffix(key);
@@ -123,7 +129,11 @@ export function targetLabel(t: Target): string {
       break;
   }
   if (t.worktree) {
-    const name = t.worktree.split('/').filter(Boolean).pop() ?? t.worktree;
+    const name =
+      t.worktree
+        .split(isWindowsAbsolutePath(t.worktree) ? /[\\/]/ : '/')
+        .filter(Boolean)
+        .pop() ?? t.worktree;
     return `[${name}] ${label}`;
   }
   return label;

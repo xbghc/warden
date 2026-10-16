@@ -1,14 +1,23 @@
 import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp, rm } from 'node:fs/promises';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { Hono } from 'hono';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createApp, resolveRepo, RepoWatcher, statusPaths, StateStore } from '@warden/server';
+import * as git from '../packages/server/src/git.js';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
 let fx: FixtureRepo;
-let app: Hono;
+let app: ReturnType<typeof createApp>;
 let dataDir: string;
+const watching = new Set<RepoWatcher>();
+
+function signal() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((finish) => {
+    resolve = finish;
+  });
+  return { promise, resolve };
+}
 
 beforeAll(async () => {
   fx = await makeFixtureRepo('warden-watch-');
@@ -19,8 +28,15 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await app.close();
   await fx.cleanup();
   await rm(dataDir, { recursive: true, force: true });
+});
+
+afterEach(async () => {
+  await Promise.all([...watching].map((watcher) => watcher.close()));
+  watching.clear();
+  vi.restoreAllMocks();
 });
 
 describe('statusPaths', () => {
@@ -33,7 +49,11 @@ describe('statusPaths', () => {
 
 describe('RepoWatcher', () => {
   // A long interval keeps the timer out of the way; poll() is stepped by hand instead.
-  const watcher = () => new RepoWatcher(fx.root, 60_000);
+  const watcher = () => {
+    const instance = new RepoWatcher(fx.root, 60_000);
+    watching.add(instance);
+    return instance;
+  };
 
   it('sees edits inside an untracked directory, not only its creation', async () => {
     const w = watcher();
@@ -90,18 +110,130 @@ describe('RepoWatcher', () => {
     const w = watcher();
     const seen: string[] = [];
     const release = w.subscribe((e) => seen.push(e.head));
-    // subscribe() kicks off a baseline poll of its own; let it land before making a change.
-    await new Promise((r) => setTimeout(r, 50));
-    expect(w.subscriberCount).toBe(1);
+    try {
+      // poll joins the baseline already started by subscribe, regardless of Git latency.
+      await w.poll();
+      expect(w.subscriberCount).toBe(1);
+      await fx.write('src/b.ts', 'export const b = 2;\n');
+      await w.poll();
+      expect(seen).toHaveLength(1);
+      release();
+      expect(w.subscriberCount).toBe(0);
+      release(); // releasing twice must not throw or double-remove
+      expect(w.subscriberCount).toBe(0);
+    } finally {
+      release();
+      await w.close();
+    }
+  });
 
-    await fx.write('src/b.ts', 'export const b = 2;\n');
-    await w.poll();
-    expect(seen).toHaveLength(1);
+  it('waits for a slow subscription baseline instead of dropping a concurrent poll', async () => {
+    const w = watcher();
+    const started = signal();
+    const proceed = signal();
+    const read = git.runGit;
+    let hold = true;
+    vi.spyOn(git, 'runGit').mockImplementation(async (args, options) => {
+      const result = await read(args, options);
+      if (args[0] === 'status' && hold) {
+        hold = false;
+        started.resolve();
+        await proceed.promise;
+      }
+      return result;
+    });
+    const seen: string[] = [];
+    const release = w.subscribe((event) => seen.push(event.head));
+    try {
+      await started.promise;
+      let finished = false;
+      const baseline = w.poll().then(() => {
+        finished = true;
+      });
+      await Promise.resolve();
+      expect(finished).toBe(false);
+      proceed.resolve();
+      await baseline;
+      await fx.write('slow-baseline.txt', 'observable after the baseline\n');
+      await w.poll();
+      expect(seen).toHaveLength(1);
+    } finally {
+      proceed.resolve();
+      release();
+      await w.close();
+    }
+  });
 
-    release();
-    expect(w.subscriberCount).toBe(0);
-    release(); // releasing twice must not throw or double-remove
-    expect(w.subscriberCount).toBe(0);
+  it('does not reuse a departed subscriber snapshot as the next subscriber baseline', async () => {
+    const w = watcher();
+    const started = signal();
+    const proceed = signal();
+    const read = git.runGit;
+    let hold = true;
+    vi.spyOn(git, 'runGit').mockImplementation(async (args, options) => {
+      const result = await read(args, options);
+      if (args[0] === 'status' && hold) {
+        hold = false;
+        started.resolve();
+        await proceed.promise;
+      }
+      return result;
+    });
+    const first = w.subscribe(() => {});
+    let second = () => {};
+    const seen: string[] = [];
+    try {
+      await started.promise;
+      first();
+      await fx.write('subscription-boundary.txt', 'before the second subscription\n');
+      second = w.subscribe((event) => seen.push(event.head));
+      const baseline = w.poll();
+      proceed.resolve();
+      await baseline;
+      expect(seen).toEqual([]);
+      await fx.write('subscription-boundary.txt', 'a later and longer observable edit\n');
+      await w.poll();
+      expect(seen).toHaveLength(1);
+    } finally {
+      proceed.resolve();
+      first();
+      second();
+      await w.close();
+    }
+  });
+
+  it('drains parallel Git reads on close even when one snapshot read fails', async () => {
+    const w = watcher();
+    const started = signal();
+    const proceed = signal();
+    const read = git.runGit;
+    vi.spyOn(git, 'runGit').mockImplementation(async (args, options) => {
+      if (args[0] === 'status') throw new Error('Simulated status failure');
+      const result = await read(args, options);
+      if (args[0] === 'rev-parse' && args[1] === 'HEAD') {
+        started.resolve();
+        await proceed.promise;
+      }
+      return result;
+    });
+    const pending = w.poll();
+    try {
+      await started.promise;
+      let closed = false;
+      const closing = w.close().then(() => {
+        closed = true;
+      });
+      await Promise.resolve();
+      expect(closed).toBe(false);
+      proceed.resolve();
+      await closing;
+      await expect(pending).resolves.toBeUndefined();
+      expect(w.subscriberCount).toBe(0);
+      expect(() => w.subscribe(() => {})).toThrow('closed');
+    } finally {
+      proceed.resolve();
+      await w.close();
+    }
   });
 });
 

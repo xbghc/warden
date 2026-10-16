@@ -47,7 +47,10 @@ export class RepoWatcher {
   private readonly listeners = new Set<ChangeListener>();
   private timer: ReturnType<typeof setInterval> | null = null;
   private signature: string | null = null;
-  private polling = false;
+  private polling: Promise<RepoChange | undefined> | null = null;
+  private pollingGeneration = 0;
+  private generation = 0;
+  private closed = false;
 
   constructor(
     private readonly root: string,
@@ -59,6 +62,7 @@ export class RepoWatcher {
   }
 
   subscribe(listener: ChangeListener): () => void {
+    if (this.closed) throw new Error('Repository watcher is closed');
     this.listeners.add(listener);
     this.start();
     let released = false;
@@ -82,17 +86,38 @@ export class RepoWatcher {
     this.timer = null;
     // The next subscriber re-baselines rather than being handed a change it never saw.
     this.signature = null;
+    this.generation++;
+  }
+
+  /** Drain already-started Git reads before callers remove or release the repository. */
+  async close(): Promise<void> {
+    this.closed = true;
+    this.listeners.clear();
+    this.stop();
+    await this.polling;
   }
 
   /**
    * Runs one comparison. Returns the change that was broadcast, or undefined when nothing moved.
    * The first poll of a watch only records the baseline. Public so tests can step it deterministically.
    */
-  async poll(): Promise<RepoChange | undefined> {
-    if (this.polling) return undefined;
-    this.polling = true;
+  poll(): Promise<RepoChange | undefined> {
+    if (this.closed) return Promise.resolve(undefined);
+    if (this.polling) {
+      // A new subscription must baseline after the previous subscription's pending read.
+      return this.pollingGeneration === this.generation ? this.polling : this.polling.then(() => this.poll());
+    }
+    this.pollingGeneration = this.generation;
+    this.polling = this.compare(this.generation).finally(() => {
+      this.polling = null;
+    });
+    return this.polling;
+  }
+
+  private async compare(generation: number): Promise<RepoChange | undefined> {
     try {
       const snap = await this.snapshot();
+      if (this.closed || generation !== this.generation) return undefined;
       const baseline = this.signature === null;
       if (this.signature === snap.signature) return undefined;
       this.signature = snap.signature;
@@ -109,13 +134,13 @@ export class RepoWatcher {
     } catch {
       // A transient git failure (index.lock held by another process) is not a change.
       return undefined;
-    } finally {
-      this.polling = false;
     }
   }
 
   private async snapshot(): Promise<{ signature: string; head: string; branch: string }> {
-    const [statusRes, headRes, branch] = await Promise.all([
+    // A failed status read must still drain the parallel Git children before poll/close
+    // settles. Promise.all would leave the other reads running against a released checkout.
+    const results = await Promise.allSettled([
       // Untracked files one by one: folded into their directory, an edit inside a directory the
       // agent just created would leave the directory's own mtime and size untouched.
       runGit(['status', '--porcelain', '-z', '--untracked-files=all'], { cwd: this.root }),
@@ -124,6 +149,13 @@ export class RepoWatcher {
       // never flips between `HEAD` and a short sha depending on which of the two spoke last.
       currentBranch(this.root),
     ]);
+    const [status, headResult, branchResult] = results;
+    if (status.status === 'rejected') throw status.reason;
+    if (headResult.status === 'rejected') throw headResult.reason;
+    if (branchResult.status === 'rejected') throw branchResult.reason;
+    const statusRes = status.value;
+    const headRes = headResult.value;
+    const branch = branchResult.value;
     const head = headRes.stdout.trim();
     const stats = await Promise.all(
       statusPaths(statusRes.stdout).map(async (rel) => {

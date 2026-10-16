@@ -1,19 +1,31 @@
 import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp, rm } from 'node:fs/promises';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { PROBE_ATTEMPTS, startServer, type RunningServer } from '@warden/server';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { isPortFree, PROBE_ATTEMPTS, startServer, type RunningServer, type StartOptions } from '@warden/server';
+import * as git from '../packages/server/src/git.js';
+import { PreviewService } from '../packages/server/src/preview.js';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
 let fx: FixtureRepo;
 let dataDir: string;
 let stateFile: string;
-const running: RunningServer[] = [];
 
-async function start(probeWindows?: (port: number, token: string) => Promise<boolean | undefined>): Promise<RunningServer> {
-  const server = await startServer({ repoPath: fx.root, stateFile, probeWindows });
-  running.push(server);
-  return server;
+function signal() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((finish) => {
+    resolve = finish;
+  });
+  return { promise, resolve };
+}
+
+async function usingServer(run: (server: RunningServer) => Promise<void>, options: Partial<StartOptions> = {}) {
+  const server = await startServer({ repoPath: fx.root, stateFile, ...options });
+  try {
+    await run(server);
+  } finally {
+    await server.close();
+  }
 }
 
 beforeAll(async () => {
@@ -22,96 +34,183 @@ beforeAll(async () => {
   stateFile = path.join(dataDir, 'state.json');
 });
 
+afterEach(() => vi.restoreAllMocks());
+
 afterAll(async () => {
-  await Promise.all(running.map((s) => s.close().catch(() => undefined)));
   await fx.cleanup();
   await rm(dataDir, { recursive: true, force: true });
 });
 
 describe('startServer port selection', () => {
   it('serves the token the probe checks for', async () => {
-    const server = await start();
-    const res = await fetch(`${server.url}api/ping`);
-    expect(res.status).toBe(200);
-    expect((await res.text()).length).toBeGreaterThan(0);
-    expect(server.skippedPorts).toEqual([]);
-    expect(server.windowsReachable).toBeUndefined();
+    await usingServer(async (server) => {
+      const res = await fetch(`${server.url}api/ping`);
+      expect(res.status).toBe(200);
+      expect((await res.text()).length).toBeGreaterThan(0);
+      expect(server.skippedPorts).toEqual([]);
+      expect(server.windowsReachable).toBeUndefined();
+    });
   });
 
   it('moves on from ports the other side cannot reach, and keeps the one it can', async () => {
     const offered: number[] = [];
-    const server = await start(async (port) => {
-      offered.push(port);
-      return offered.length >= 3;
-    });
-    expect(offered).toHaveLength(3);
-    expect(server.skippedPorts).toEqual(offered.slice(0, 2));
-    expect(server.port).toBe(offered[2]);
-    expect(server.windowsReachable).toBe(true);
-    // The port it settled on is the one actually listening.
-    expect((await fetch(`${server.url}api/ping`)).status).toBe(200);
+    await usingServer(
+      async (server) => {
+        expect(offered).toHaveLength(3);
+        expect(server.skippedPorts).toEqual(offered.slice(0, 2));
+        expect(server.port).toBe(offered[2]);
+        expect(server.windowsReachable).toBe(true);
+        expect((await fetch(`${server.url}api/ping`)).status).toBe(200);
+      },
+      {
+        probeWindows: async (port) => {
+          offered.push(port);
+          return offered.length >= 3;
+        },
+      },
+    );
   });
 
   it('gives up after a bounded number of tries and still serves, saying it is unreachable', async () => {
     const offered: number[] = [];
-    const server = await start(async (port) => {
-      offered.push(port);
-      return false;
-    });
-    expect(offered).toHaveLength(PROBE_ATTEMPTS);
-    expect(server.skippedPorts).toHaveLength(PROBE_ATTEMPTS - 1);
-    expect(server.windowsReachable).toBe(false);
-    expect((await fetch(`${server.url}api/ping`)).status).toBe(200);
+    await usingServer(
+      async (server) => {
+        expect(offered).toHaveLength(PROBE_ATTEMPTS);
+        expect(server.skippedPorts).toHaveLength(PROBE_ATTEMPTS - 1);
+        expect(server.windowsReachable).toBe(false);
+        expect((await fetch(`${server.url}api/ping`)).status).toBe(200);
+      },
+      {
+        probeWindows: async (port) => {
+          offered.push(port);
+          return false;
+        },
+      },
+    );
   });
 
   it('stops probing when the probe itself cannot run, rather than walking the port range', async () => {
     const offered: number[] = [];
-    const server = await start(async (port) => {
-      offered.push(port);
-      return undefined;
-    });
-    expect(offered).toHaveLength(1);
-    expect(server.skippedPorts).toEqual([]);
-    expect(server.windowsReachable).toBeUndefined();
+    await usingServer(
+      async (server) => {
+        expect(offered).toHaveLength(1);
+        expect(server.skippedPorts).toEqual([]);
+        expect(server.windowsReachable).toBeUndefined();
+      },
+      {
+        probeWindows: async (port) => {
+          offered.push(port);
+          return undefined;
+        },
+      },
+    );
   });
 
   it('never swaps out a port the user named', async () => {
-    const first = await start();
-    const offered: number[] = [];
-    const server = await startServer({
-      repoPath: fx.root,
-      stateFile,
-      port: first.port + 500,
-      probeWindows: async (port) => {
-        offered.push(port);
-        return false;
-      },
+    await usingServer(async (first) => {
+      const offered: number[] = [];
+      await usingServer(
+        async (server) => {
+          expect(offered).toEqual([]);
+          expect(server.port).toBe(first.port + 500);
+          expect(server.skippedPorts).toEqual([]);
+        },
+        {
+          port: first.port + 500,
+          probeWindows: async (port) => {
+            offered.push(port);
+            return false;
+          },
+        },
+      );
     });
-    running.push(server);
-    expect(offered).toEqual([]);
-    expect(server.port).toBe(first.port + 500);
-    expect(server.skippedPorts).toEqual([]);
+  });
+
+  it('releases the listening socket if the reachability probe throws', async () => {
+    let port = 0;
+    await expect(
+      startServer({
+        repoPath: fx.root,
+        stateFile,
+        probeWindows: async (offered) => {
+          port = offered;
+          throw new Error('Probe failed');
+        },
+      }),
+    ).rejects.toThrow('Probe failed');
+    expect(port).toBeGreaterThan(0);
+    expect(await isPortFree(port)).toBe(true);
   });
 });
 
 describe('startServer().close()', () => {
-  it('resolves while an /api/events stream is still open', async () => {
-    const server = await startServer({ repoPath: fx.root, stateFile });
+  it('closes an open event stream and drains its in-flight Git poll before resolving', async () => {
+    const started = signal();
+    const proceed = signal();
+    const read = git.runGit;
+    vi.spyOn(git, 'runGit').mockImplementation(async (args, options) => {
+      const result = await read(args, options);
+      if (args[0] === 'status' && args.includes('--untracked-files=all')) {
+        started.resolve();
+        await proceed.promise;
+      }
+      return result;
+    });
+    await usingServer(async (server) => {
+      const controller = new AbortController();
+      try {
+        const res = await fetch(`${server.url}api/events`, { signal: controller.signal });
+        expect(res.status).toBe(200);
+        expect(res.headers.get('content-type')).toContain('text/event-stream');
+        const reader = res.body!.getReader();
+        expect(new TextDecoder().decode((await reader.read()).value)).toContain(': connected');
+        const drained = reader.read().then(
+          (result) => result.done,
+          (error: unknown) => error instanceof Error,
+        );
+        await started.promise;
+        let closed = false;
+        const closing = server.close().then(() => {
+          closed = true;
+        });
+        await Promise.resolve();
+        expect(closed).toBe(false);
+        proceed.resolve();
+        await closing;
+        expect(await drained).toBe(true);
+        reader.releaseLock();
+        await server.close();
+      } finally {
+        proceed.resolve();
+        controller.abort();
+        await server.close();
+      }
+    });
+  });
 
-    // A browser tab keeps this stream open indefinitely; the server must not wait for it.
-    const res = await fetch(`${server.url}api/events`);
-    expect(res.status).toBe(200);
-    expect(res.headers.get('content-type')).toContain('text/event-stream');
-    const drained = res
-      .body!.getReader()
-      .read()
-      .catch(() => undefined);
-
-    const closed = server.close().then(() => 'closed' as const);
-    const timeout = new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), 2_000));
-    expect(await Promise.race([closed, timeout])).toBe('closed');
-
-    // The client sees the connection go away rather than hanging on a half-open socket.
-    await drained;
+  it('waits for an active preview refresh before closing', async () => {
+    const started = signal();
+    const proceed = signal();
+    const tick = vi.spyOn(PreviewService.prototype, 'tick').mockImplementation(async () => {
+      started.resolve();
+      await proceed.promise;
+    });
+    await usingServer(async (server) => {
+      try {
+        await started.promise;
+        let closed = false;
+        const closing = server.close().then(() => {
+          closed = true;
+        });
+        await Promise.resolve();
+        expect(closed).toBe(false);
+        proceed.resolve();
+        await closing;
+        expect(tick).toHaveBeenCalledOnce();
+      } finally {
+        proceed.resolve();
+        await server.close();
+      }
+    });
   });
 });

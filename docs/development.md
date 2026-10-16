@@ -32,12 +32,35 @@ Only `dist/`, `README.md`, `LICENSE` and `package.json` are published.
 
 Releasing: bump `version` in the root `package.json`, commit it as `Release X.Y.Z`, tag `vX.Y.Z`, and
 push `main` and the tag (`/release` in Claude Code does all of it). Never `npm publish` from a
-machine. The `Publish to npm` workflow checks the tag against the version, runs build + tests through
+machine. The `Publish to npm` workflow first runs the reusable CI workflow against the exact tag,
+then checks the tag against the version, runs lint, typecheck, build and tests through
 `prepublishOnly`, and publishes over OIDC trusted publishing — no `NPM_TOKEN` secret to store or
 rotate. It relies on a trusted publisher configured on the package's npmjs.com settings page (user
 `xbghc`, repo `warden`, workflow `publish.yml`), and passes `--provenance` explicitly, because npm's
 automatic attestation does not fire through `pnpm publish` (0.2.0 shipped without one). CI runs lint,
-typecheck, tests, build and a `publish --dry-run` on every push to `main` and every pull request.
+typecheck, tests, build, Storybook build and a package dry run on every push to `main` and every pull
+request. Publishing waits for every CI job to succeed; only the publishing job receives OIDC permission.
+
+The full test suite runs on Linux with Node 20, 22 and 24, and on native Windows and macOS with
+Node 22. All platforms run the real Git workflow, workspace hooks, backups and failure recovery;
+there is no reduced Windows suite. Publishing requires every platform job to pass. CI retains a
+JUnit report for each OS/Node combination, including failed runs.
+
+Vitest separates fast unit tests (5 seconds) from real Git integration tests (30 seconds).
+Windows uses at most two file workers to avoid overwhelming process startup. Only the measured
+long, multi-delivery and history workflows have a 90-second Windows budget; checks are not retried
+to hide failures. Use `pnpm exec vitest run --project=unit` or `--project=integration` to narrow a run.
+API cases each prepare an independent repository, index and review state, so they can run by name
+or in a different order. Asynchronous tests await observable completion rather than fixed sleeps;
+server cleanup drains requests, watchers and preview refreshes before deleting fixtures.
+
+Every test worker clears inherited `GIT_*` variables before creating fixtures, so a developer's
+`GIT_DIR`, index, object-store or tracing settings cannot redirect test writes into another repository.
+Global and system Git configuration are disabled; identities and any hooks needed by a test must be
+configured in its temporary repository. Fixtures resolve their real paths to match Git on macOS.
+Filename cases use spaces, Unicode and literal pathspec characters on every platform, with colons
+and double quotes additionally covered where the host filesystem permits them. Windows workspace
+hooks use Git for Windows' bundled shell; see [Platform](environment.md) for prerequisites.
 
 ## Storybook
 

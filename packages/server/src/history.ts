@@ -8,6 +8,7 @@ import { PreviewService, primaryCheckout } from './preview.js';
 import type { RepoContext } from './repo.js';
 import { ensureTarget, type StateStore } from './state.js';
 import { dirtyCount } from './worktrees.js';
+import { assertSafetyBackupCurrent, createSafetyBackup } from './backups.js';
 
 function fail(message: string, code = 'history_changed'): never {
   throw new HttpError(409, message, code);
@@ -129,6 +130,9 @@ export class HistoryService {
         if (await dirtyCount(primary.path)) fail('主目录有其他改动，请自行处理后重试', 'development_dirty');
         const sandbox = GitSandbox.open(this.store, draft.sandbox);
         if ((await oid(sandbox.path, `${draft.newHead}^{tree}`)) !== (await oid(primary.path, 'HEAD^{tree}'))) fail('预览结果与当前内容不一致，请重新编排');
+        const backup = await createSafetyBackup(this.store, primary.path, 'history');
+        if ((await oid(primary.path, 'HEAD')) !== draft.head || (await dirtyCount(primary.path))) fail('备份期间主目录已变化，请重新编排');
+        await assertSafetyBackupCurrent(backup);
         await runGitWrite(['fetch', '--quiet', '--no-tags', '--no-write-fetch-head', '--', sandbox.path, draft.newHead], { cwd: primary.path });
         await runGitWrite(['update-ref', `refs/warden/history/${draft.id}`, draft.head], { cwd: primary.path });
         await this.store.update((s) => {

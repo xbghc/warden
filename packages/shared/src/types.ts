@@ -622,8 +622,19 @@ export interface RemoveWorktreeRequest {
 export interface RemoveWorktreeResponse {
   ok: true;
   branchDeleted: boolean;
+  /** Verified local copy retained before the operation. */
+  backup?: SafetyBackup;
   /** Why the branch was kept, when deleting it was asked for. */
   branchError?: string;
+}
+
+export interface SafetyBackup {
+  id: string;
+  path: string;
+  reason: 'release' | 'remove' | 'rebase' | 'history';
+  createdAt: string;
+  worktree: string;
+  head: string;
 }
 
 export interface RepoInfo {
