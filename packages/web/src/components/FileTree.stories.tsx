@@ -128,13 +128,15 @@ export const ReviewedDirectories: Story = {
 };
 export const MarkViewed: Story = {
   beforeEach: () => {
-    useStore.setState({ targetKey: 'commit:abc1234', files: commitFiles });
+    useStore.setState({ targetKey: 'commit:abc1234', files: commitFiles, activeFile: null });
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    const checkboxes = canvas.getAllByRole('checkbox');
-    await userEvent.click(checkboxes[0]!);
-    await expect(checkboxes[0]!).toBeChecked();
+    await userEvent.click(canvas.getByRole('button', { name: '展开全部目录' }));
+    const viewed = await canvas.findByRole('checkbox', { name: '标记 src/App.tsx 为已读' });
+    await userEvent.click(viewed);
+    await expect(viewed).toBeChecked();
     await expect(useStore.getState().toggleViewed).toHaveBeenCalledOnce();
+    await expect(useStore.getState().toggleViewed).toHaveBeenCalledWith('src/App.tsx');
   },
 };

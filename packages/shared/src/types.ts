@@ -110,12 +110,13 @@ export interface CommentReply {
 }
 
 export type ViewMode = 'unified' | 'split';
+export type Panel = 'orchestration' | 'diff' | 'commits';
 
 export interface Prefs {
   viewMode: ViewMode;
   lastTarget?: TargetKey;
-  /** repo/worktree root -> nvim socket path */
-  nvimSocketByRoot: Record<string, string>;
+  /** The content last opened; selecting a target or file opens its diff directly. */
+  lastPanel?: Panel;
   /** Re-run the refresh cycle when the watcher reports a repository change. */
   autoRefresh: boolean;
   /**
@@ -198,7 +199,245 @@ export interface ReviewState {
   /** Oldest first. */
   checkpoints: Checkpoint[];
   prefs: Prefs;
+  /** A requirement branch and the small changes that are integrated into it. */
+  workflow?: DevelopmentWorkflow;
+  workspaceConfig?: WorkspaceConfig;
+  /** Durable ownership record for temporary primary-directory files. */
+  connectionPreview?: PreviewResponse & {
+    tree?: string;
+    sandbox?: string;
+    snapshot?: string;
+    pending?: { tree: string; sandbox: string; snapshot: string; response: PreviewResponse };
+  };
+  historyDraft?: HistoryPreviewResponse & {
+    sandbox: string;
+    branch: string;
+    applying?: boolean;
+  };
 }
+
+export interface WorkspaceCommand {
+  id: string;
+  label: string;
+  /** Literal input; Enter is sent only when explicitly present in keys. */
+  text?: string;
+  keys?: string[];
+}
+
+export interface WorkspaceConfig {
+  commands: WorkspaceCommand[];
+  hooks: { create?: string; reuse?: string };
+}
+
+export interface WorkspaceHookResult {
+  event: 'create' | 'reuse';
+  command: string;
+  status: 'running' | 'succeeded' | 'failed';
+  exitCode?: number | null;
+  output?: string;
+}
+
+export interface DevelopmentWorkflow {
+  developmentBranch: string;
+  changes: WorkflowTask[];
+}
+
+export interface ChangePlan {
+  id: string;
+  title: string;
+  developmentBranch: string;
+  body?: string;
+  acceptance?: string;
+  /** Legacy planning metadata; never blocks allocation. */
+  dependsOn?: string[];
+  agent?: string;
+  commentIds?: string[];
+  /** Kept when importing old checklists; a checked box is not evidence of a Git commit. */
+  legacyTodo?: { branch: string; status: TodoStatus };
+  createdAt: string;
+}
+
+export interface PlannedChange extends ChangePlan {
+  status: 'planned' | 'archived';
+  branch?: never;
+  worktree?: never;
+  base?: never;
+  submittedHead?: never;
+  integration?: never;
+  sync?: never;
+  review?: never;
+  cleanupError?: never;
+}
+
+export type WorkflowTask = PlannedChange | DevelopmentChange;
+
+export interface DevelopmentChange extends ChangePlan {
+  branch: string;
+  worktree: string;
+  /** The exact development commit this task last incorporated. */
+  base: string;
+  /** Source tip of the last delivery; excludes already delivered commits until the next rebase. */
+  sourceBase?: string;
+  deliveries?: ChangeDelivery[];
+  status: 'working' | 'ready' | 'integrating' | 'accepted';
+  createdAt: string;
+  /** An explicit handoff: the agent must stop writing until it resumes the task. */
+  submittedHead?: string;
+  sync?: { status: 'pending' | 'conflict' | 'error'; message: string; target: string };
+  /** Recorded before staging on the development checkout. A commit exists only after validation. */
+  integration?: {
+    id?: string;
+    source: string;
+    sourceBase?: string;
+    tree?: string;
+    parent: string;
+    worktree?: string;
+    prepared?: boolean;
+    commit?: string;
+    message: string;
+    error?: string;
+  };
+  acceptedAt?: string;
+  cleanupError?: string;
+  workspaceHook?: WorkspaceHookResult;
+  /** Review history survives reuse of the checkout directory. */
+  review?: Comment[];
+}
+
+export interface ChangeDelivery {
+  id: string;
+  source: string;
+  sourceBase: string;
+  parent: string;
+  commit: string;
+  message: string;
+  createdAt: string;
+  review?: Comment[];
+}
+
+export interface RebaseCheck {
+  changeId: string;
+  sourceHead: string;
+  developmentHead: string;
+  status: 'current' | 'ready' | 'conflict' | 'blocked' | 'unknown';
+  checkedAt: string;
+  message?: string;
+  files?: string[];
+}
+
+export interface RebaseResponse {
+  checks: RebaseCheck[];
+}
+
+export interface RebaseBatchRequest {
+  items: { changeId: string; sourceHead: string; developmentHead: string }[];
+}
+
+export interface RebaseBatchResponse {
+  results: { changeId: string; status: 'updated' | 'skipped' | 'failed'; message?: string }[];
+}
+
+export interface PreviewResponse {
+  developmentBranch?: string;
+  developmentHead?: string;
+  worktree?: string;
+  connectedIds: string[];
+  status: 'disconnected' | 'current' | 'stale' | 'paused';
+  updatedAt?: string;
+  message?: string;
+  files: { path: string; changeIds: string[] }[];
+  conflicts?: string[];
+}
+
+export interface HistoryEntry {
+  sha: string;
+  parents: string[];
+  message: string;
+  author: string;
+  date: string;
+  changeId?: string;
+  deliveryId?: string;
+}
+
+export interface HistoryResponse {
+  branch: string;
+  head: string;
+  /** Oldest first; only the latest 100 commits are offered for selection. */
+  commits: HistoryEntry[];
+}
+
+export interface HistoryPreviewRequest {
+  head: string;
+  start: string;
+  commits: { sha: string; message: string }[];
+}
+
+export interface HistoryPreviewResponse {
+  id?: string;
+  head: string;
+  newHead?: string;
+  canApply: boolean;
+  contentChanged: boolean;
+  conflicts: string[];
+  message?: string;
+  commits: { source: string; sha: string; message: string }[];
+}
+
+export interface WorkflowResponse {
+  workflow: DevelopmentWorkflow | null;
+  workspaceConfig?: WorkspaceConfig;
+  developmentHead?: string;
+  preparation?: DevelopmentPreparation;
+  error?: string;
+  /** Notes on other branches can be explicitly brought into this requirement's plan. */
+  legacyTodos?: Todo[];
+}
+
+/** Live, read-only inspection of the one task being validated on the development branch. */
+export interface DevelopmentPreparation {
+  changeId: string;
+  worktree?: string;
+  state: 'testing' | 'committed' | 'blocked';
+  head?: string;
+  indexFingerprint?: string;
+  canCommit?: boolean;
+  canRecord?: boolean;
+  changed?: boolean;
+  message?: string;
+}
+
+export interface CreateChangeRequest {
+  title: string;
+  body?: string;
+  acceptance?: string;
+  /** Legacy planning metadata; never blocks allocation. */
+  dependsOn?: string[];
+  commentIds?: string[];
+  /** Adopt an existing numbered checkout instead of creating a task branch. */
+  worktree?: string;
+}
+
+export interface UpdateChangeRequest {
+  title?: string;
+  body?: string;
+  acceptance?: string;
+  /** Legacy planning metadata; never blocks allocation. */
+  dependsOn?: string[];
+  status?: 'planned' | 'archived';
+}
+
+export interface StartChangeRequest {
+  agent?: string;
+  kind?: SlotKind;
+  worktree?: string;
+}
+
+export interface PrepareChangeRequest {
+  sourceHead: string;
+  developmentHead: string;
+}
+
+export type AcceptChangeRequest = { mode: 'commit'; developmentHead: string; indexFingerprint: string; message: string } | { mode: 'record'; commit: string };
 
 // ---------------------------------------------------------------------------
 // API payloads
@@ -241,7 +480,7 @@ export interface WorktreeComparison {
 
 /** A worktree as the management panel lists it: the review-time fields plus what removing it needs. */
 export interface WorktreeDetail extends WorktreeInfo {
-  /** Entries `git status` reports: modified, staged and untracked paths together. */
+  /** Entries `git status` reports; -1 means status could not be read and the slot is not reusable. */
   dirty: number;
   /** git still lists it but its directory is gone; removing it drops the entry, nothing else. */
   prunable: boolean;
@@ -467,21 +706,6 @@ export interface ForkPointResponse {
   behind: number;
 }
 
-export interface NvimInstance {
-  socket: string;
-  cwd: string;
-  pid?: number;
-}
-
-export interface NvimInstancesResponse {
-  root: string;
-  nvimAvailable: boolean;
-  instances: NvimInstance[];
-  /** Socket currently selected for this root (persisted preference, validated). */
-  selected?: string;
-  scannedAt: string;
-}
-
 /** The checkpoints of the worktree a target key names, oldest first. */
 export interface CheckpointsResponse {
   checkpoints: Checkpoint[];
@@ -565,21 +789,6 @@ export interface ExportRequest {
 /** Reorder: put the item right before `before`, or last when null. */
 export interface MoveRequest {
   before: string | null;
-}
-
-export interface NvimOpenRequest {
-  /** The worktree the file is in: the nvim to use is one whose cwd is inside it. */
-  root: string;
-  /** The instance the page has selected, if any. Used while it is alive; the server picks otherwise. */
-  socket?: string;
-  absPath: string;
-  line: number;
-}
-
-export interface NvimOpenResponse {
-  ok: true;
-  /** The instance the file went to, which the page shows as selected from then on. */
-  socket: string;
 }
 
 export interface CreateTodoRequest {

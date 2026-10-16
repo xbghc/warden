@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Hono } from 'hono';
 import type { Comment, ReanchorResponse } from '@warden/shared';
-import { createApp, NvimService, resolveRepo, StateStore } from '@warden/server';
+import { createApp, resolveRepo, StateStore } from '@warden/server';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
 // A comment is deleted with its code only when that code went into a commit. Everything else that
@@ -29,7 +29,7 @@ beforeEach(async () => {
   fx = await makeFixtureRepo('warden-drop-');
   dataDir = await mkdtemp(path.join(os.tmpdir(), 'warden-drop-data-'));
   const repo = await resolveRepo(fx.root);
-  app = createApp({ repo, store: new StateStore(path.join(dataDir, 'state.json'), repo.commonRoot), nvim: new NvimService([path.join(dataDir, 'none')]) });
+  app = createApp({ repo, store: new StateStore(path.join(dataDir, 'state.json'), repo.commonRoot) });
 });
 
 afterEach(async () => {

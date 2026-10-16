@@ -241,8 +241,8 @@ async function applyOnce(cwd: string, patch: string, opts: { reverse?: boolean; 
 }
 
 /**
- * Runs a git command that writes to the repository, without the read whitelist. Only worktrees.ts
- * and clones.ts call it — `worktree add`, `worktree remove`, `branch` (with `-d`, or `-D` to undo a
+ * Runs a git command that writes to the repository, without the read whitelist. worktrees.ts
+ * and clones.ts call it for `worktree add`, `worktree remove`, `branch` (with `-d`, or `-D` to undo a
  * branch it made moments before), and in a slot it owns `switch`, `reset --hard` and `clean -fd`;
  * for a clone slot also `clone --local`, `remote add` / `remove` / `set-url` / `set-head` and
  * `fetch` — each with an argument list it composes itself from a branch name and a ref that were
@@ -250,6 +250,8 @@ async function applyOnce(cwd: string, patch: string, opts: { reverse?: boolean; 
  * worktree's config, so nothing from a request reaches git as an option. A failure carries git's
  * first stderr line, and `stderr` whole, so the caller can tell a refusal (dirty worktree, branch in
  * use) from a crash.
+ * workflow.ts also composes local fetch, rebase/abort, recovery update-ref, squash merge without
+ * committing, and ordinary commit commands in the selected development checkout after validation.
  *
  * `network` is for the one command that reaches the server, a clone's `fetch`: it gets minutes
  * rather than seconds, and runs in a session of its own, without the terminal warden was started

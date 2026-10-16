@@ -1,3 +1,5 @@
+import { Textarea } from './ui/textarea';
+import { Button } from './ui/button';
 import { useEffect, useRef, useState } from 'react';
 import { ActionIcon } from './ActionIcon';
 
@@ -28,7 +30,7 @@ export function CommentEditor({ title, initial = '', submitLabel = '保存评论
   return (
     <div className="comment-editor" onMouseDown={(e) => e.stopPropagation()}>
       <div className="comment-editor-head">{title}</div>
-      <textarea
+      <Textarea
         ref={ref}
         value={body}
         onChange={(e) => setBody(e.target.value)}
@@ -46,12 +48,12 @@ export function CommentEditor({ title, initial = '', submitLabel = '保存评论
         }}
       />
       <div className="comment-editor-actions">
-        <button className="primary" onClick={() => void submit()} disabled={!body.trim() || busy}>
+        <Button variant="default" size="sm" className="primary" onClick={() => void submit()} disabled={!body.trim() || busy}>
           <ActionIcon name={busy ? 'loading' : 'save'} label={submitLabel} />
-        </button>
-        <button onClick={onCancel}>
+        </Button>
+        <Button variant="outline" size="sm" onClick={onCancel}>
           <ActionIcon name="close" label="取消" />
-        </button>
+        </Button>
       </div>
     </div>
   );

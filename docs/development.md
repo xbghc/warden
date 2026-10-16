@@ -2,6 +2,11 @@
 
 Working on warden itself.
 
+Use the [workflow contract](workflow.md) as the product design reference. Its
+[alignment plan](workflow.md#implementation-alignment) distinguishes agreed changes from current
+behavior. Keep user decisions with the user; do not build scheduling, agent handoff requirements
+or a separate requirement approval system around implementation details being removed.
+
 ## Building and testing
 
 ```sh
@@ -18,8 +23,8 @@ Layout:
 ```
 bin/cli.ts           argument parsing, start server, open browser
 packages/shared      types + target key / comment scope helpers (bundled into both sides)
-packages/server      Hono API, git wrapper, diff parser, staging patches, targets, worktrees, anchoring, watcher, state, export, nvim
-packages/web         React + Vite UI (shiki highlighting, @tanstack/react-virtual, react-markdown)
+packages/server      Hono API, git wrapper, diff parser, staging patches, targets, worktrees, anchoring, watcher, state, export
+packages/web         React + Vite + Tailwind v4 UI (shadcn/ui, shiki highlighting, @tanstack/react-virtual, react-markdown)
 test/                API integration tests on a generated git repository
 ```
 
@@ -40,4 +45,25 @@ typecheck, tests, build and a `publish --dry-run` on every push to `main` and ev
 
 Run `pnpm storybook` for isolated review and layout components at http://127.0.0.1:6006. Stories use in-memory fixtures and include interaction checks. Run `pnpm build:storybook` to build the static preview.
 
-The sidebar uses a view selector for 工作区, 提交历史 and Worktree. The `Layout/Sidebar` stories demonstrate the selector together with each view’s real sidebar controls and content.
+The new application uses one left navigation: *主目录预览*, *提交历史*, the ordered work plan,
+and bottom *同步工作区* / *设置* actions. A selected task contains its workspace controls,
+notes, files and diff. There is no second review-mode switch or task-completion declaration.
+
+`Workspace/Workspace` stories cover connection previews, initial conflicts, stale previews,
+task review, plans, settings, batch rebase, Web commits, rejected hooks and history arrangement.
+Their API/event fixtures are independent of the running Git server. `UI/Primitives` shows the
+shared shadcn controls. Stories demonstrate interaction states; real Git behavior is covered by
+`test/workflow.test.ts` and `test/workbench.test.ts` and verified in a throwaway browser fixture.
+
+## UI components
+
+The shared primitives in `packages/web/src/components/ui` are adapted from the official
+[shadcn/ui New York registry](https://ui.shadcn.com/docs/components) for React 18 (`forwardRef`
+on controls that receive refs). They use Radix, Tailwind v4, `class-variance-authority`, and the
+`cn` helper in `src/lib/utils.ts`. `packages/web/components.json` configures the shadcn CLI;
+run it from `packages/web` when adding a component and retain React 18 ref support.
+
+`src/styles.css` defines the neutral theme and application layouts. Use component variants for
+common controls; keep custom styles for the diff, file tree and task editor. `--feedback` is the
+violet comment accent; `--accent` and `--muted` are shadcn surface colors. Interface text uses the
+system sans-serif font, while code retains IBM Plex Mono. Vite and Storybook share the same theme.

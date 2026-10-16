@@ -14,7 +14,6 @@
     "review",
     "code-review",
     "agent",
-    "nvim",
     "wsl"
   ],
   "bin": {

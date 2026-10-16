@@ -9,7 +9,7 @@ import type {
   FileDiff,
   FileEntry,
   HunkSelection,
-  NvimInstancesResponse,
+  Panel,
   Prefs,
   RepoInfo,
   TargetKey,
@@ -42,8 +42,6 @@ export function branchOf(repo: RepoInfo | null, root: string): string {
 }
 
 export type DiffState = { status: 'loading' } | { status: 'ok'; diff: FileDiff } | { status: 'error'; message: string };
-/** What the middle of the window is showing. */
-export type Panel = 'diff' | 'commits' | 'worktrees';
 
 /** The one thing a toast can offer besides its text: the way back (撤消). */
 export interface ToastAction {
@@ -71,8 +69,6 @@ export interface EditorTarget {
 }
 
 export type RailFilter = 'file' | 'all' | 'unexported' | 'replied';
-/** The three notebooks of the right-hand rail — everything the reviewer writes. */
-export type RailTab = 'comments' | 'todos';
 
 /**
  * Rows picked for staging in the open diff: a drag over one hunk, kept as the positions it
@@ -91,6 +87,7 @@ export interface StageSelection {
 /** Whether the view in front stages, unstages, or neither (a commit, a range, `all`). */
 export function useStageMode(): StageMode | undefined {
   return useStore((s) => {
+    if (s.reviewReadOnly) return undefined;
     const t = tryParseTargetKey(s.targetKey);
     return t ? stageModeFor(t) : undefined;
   });
@@ -112,6 +109,7 @@ export interface JumpTarget {
 }
 
 export interface AppStore {
+  reviewReadOnly: boolean;
   repo: RepoInfo | null;
   /** A newer warden on npm, once the server's check has come back with one. */
   update: UpdateNotice | null;
@@ -137,8 +135,6 @@ export interface AppStore {
   todos: Todo[];
   /** All comments across targets (loaded with the todo tab, for the comments todos link). */
   allComments: Comment[];
-  nvim: NvimInstancesResponse | null;
-  nvimScanning: boolean;
   panel: Panel;
   includeExported: boolean;
   selectedCommentIds: string[];
@@ -157,21 +153,21 @@ export interface AppStore {
   /** Comment highlighted in both the rail and the diff. */
   focusedCommentId: string | null;
   railFilter: RailFilter;
-  railTab: RailTab;
   stageSel: StageSelection | null;
   /** Width the sidebar was dragged to, in px; kept here so it survives a panel switch. */
   sidebarWidth: number;
   /**
-   * The sidebar's slot element. The commit and worktree panels render their own controls into it
-   * through a portal: the controls belong in the left column, but their state is bound up with
-   * the list in the middle, and splitting the two would mean lifting a dozen fields.
+   * The review sidebar's slot element. The commit panel renders its controls through a portal:
+   * they belong in the left column, but their state stays with the list in the middle.
    */
   sideSlot: HTMLElement | null;
+  /** Portal host for the legacy checkout management preview. */
+  worktreeSlot: HTMLElement | null;
   /** A stage request is in flight; the controls wait for it rather than queue a second one. */
   staging: boolean;
 
   init(): Promise<void>;
-  setTarget(key: TargetKey): Promise<void>;
+  setTarget(key: TargetKey, options?: { reveal?: boolean }): Promise<void>;
   /** Re-reads /api/repo after a worktree was made or removed; the target is left alone. */
   reloadRepo(): Promise<void>;
   copyUpdateCommand(): Promise<void>;
@@ -206,9 +202,6 @@ export interface AppStore {
   /** Link a comment to a todo, or to a new one titled after the comment when `todoId` is null. */
   linkComment(commentId: string, todoId: string | null): Promise<void>;
   unlinkComment(todoId: string, commentId: string): Promise<void>;
-  scanNvim(force?: boolean): Promise<void>;
-  selectNvim(socket: string): Promise<void>;
-  openInNvim(filePath: string, line: number): Promise<void>;
   setPanel(panel: Panel): void;
   setIncludeExported(v: boolean): void;
   toggleSelectComment(id: string): void;
@@ -222,11 +215,10 @@ export interface AppStore {
   showComments(filter: RailFilter): void;
   /** Bumped on every state event, for views that summarise the state file and have no other cue. */
   stateSeq: number;
-  /** Picking a tab also opens the rail; shutting it is the ✕, the top bar's switch or Esc. */
-  setRailTab(tab: RailTab): void;
   setRailOpen(open: boolean): void;
   setSidebarWidth(px: number): void;
   setSideSlot(el: HTMLElement | null): void;
+  setWorktreeSlot(el: HTMLElement | null): void;
   loadTodos(): Promise<void>;
   createTodo(body: CreateTodoRequest): Promise<Todo | undefined>;
   updateTodo(id: string, body: UpdateTodoRequest): Promise<void>;
@@ -262,12 +254,11 @@ export const useStore = create<AppStore>((set, get) => {
   const fail = (e: unknown) => get().showToast(errMsg(e), 'error');
 
   /**
-   * Bring the rail out on the tab that is about to have something in it. Everything that writes a
+   * Bring out the review rail when it has something to show. Everything that writes a
    * comment goes through here, because the editor and the cards only exist inside the rail: with
    * it shut, clicking + on a line would otherwise do nothing visible.
    */
-  const openRail = (tab: RailTab) => {
-    set({ railTab: tab });
+  const openRail = () => {
     get().setRailOpen(true);
   };
 
@@ -308,10 +299,11 @@ export const useStore = create<AppStore>((set, get) => {
   };
 
   return {
+    reviewReadOnly: false,
     repo: null,
     update: null,
     initError: null,
-    prefs: { viewMode: 'unified', nvimSocketByRoot: {}, autoRefresh: true, railOpen: false, ignoreDebug: true },
+    prefs: { viewMode: 'unified', autoRefresh: true, railOpen: false, ignoreDebug: true },
     targetKey: 'working',
     root: '',
     files: [],
@@ -326,9 +318,7 @@ export const useStore = create<AppStore>((set, get) => {
     comments: [],
     todos: [],
     allComments: [],
-    nvim: null,
-    nvimScanning: false,
-    panel: 'diff',
+    panel: 'orchestration',
     includeExported: false,
     selectedCommentIds: [],
     jumpTo: null,
@@ -343,11 +333,11 @@ export const useStore = create<AppStore>((set, get) => {
     focusedCommentId: null,
     railFilter: 'file',
     stateSeq: 0,
-    railTab: 'comments',
     stageSel: null,
     staging: false,
     sidebarWidth: 280,
     sideSlot: null,
+    worktreeSlot: null,
 
     async init() {
       // Nothing waits on this: the server holds the answer until its registry request settles, and a
@@ -358,8 +348,16 @@ export const useStore = create<AppStore>((set, get) => {
       );
       try {
         const [repo, state] = await Promise.all([api.repo(), api.state()]);
-        set({ repo, prefs: state.prefs, todos: state.todos, allComments: Object.values(state.targets).flatMap((t) => t.comments), root: repo.root });
-        await get().setTarget(repo.defaultTarget || 'working');
+        set({
+          repo,
+          prefs: state.prefs,
+          panel: state.prefs.lastPanel ?? 'orchestration',
+          todos: state.todos,
+          allComments: Object.values(state.targets).flatMap((t) => t.comments),
+          root: repo.root,
+          initError: null,
+        });
+        await get().setTarget(repo.defaultTarget || 'working', { reveal: false });
       } catch (e) {
         set({ initError: errMsg(e) });
       }
@@ -384,7 +382,8 @@ export const useStore = create<AppStore>((set, get) => {
       }
     },
 
-    async setTarget(key) {
+    async setTarget(key, options) {
+      if (options?.reveal !== false) get().setPanel('diff');
       // The checkpoints are the worktree's, not the target's: moving between its targets keeps them.
       const sameWorktree = tryParseTargetKey(key)?.worktree === tryParseTargetKey(get().targetKey)?.worktree;
       set({
@@ -400,17 +399,18 @@ export const useStore = create<AppStore>((set, get) => {
         filesError: null,
         selectedCommentIds: [],
         reattaching: null,
-        panel: 'diff',
         editor: null,
         focusedCommentId: null,
         stageSel: null,
       });
       api.patchPrefs({ lastTarget: key }).catch(() => undefined);
       await get().loadFiles();
+      if (get().targetKey !== key) return;
       // A review starts by reading, so the diff opens on the first file rather than on a page
       // that explains how to open one. Refreshes keep whatever is already in front.
       const first = get().files[0];
-      if (first && !get().activeFile) await get().openFile(first.path);
+      // A slow listing must not reopen the diff after the user has left for another panel.
+      if (first && !get().activeFile && get().panel === 'diff') await get().openFile(first.path);
     },
 
     async switchView(key, nextActiveFile) {
@@ -466,7 +466,6 @@ export const useStore = create<AppStore>((set, get) => {
             filesLoading: false,
             activeFile: keep(files),
           });
-          if (listing.root !== get().nvim?.root) void get().scanNvim();
           return;
         }
 
@@ -482,7 +481,6 @@ export const useStore = create<AppStore>((set, get) => {
           filesLoading: false,
           activeFile: keep(res.files),
         });
-        if (res.root !== get().nvim?.root) void get().scanNvim();
       } catch (e) {
         if (get().targetKey !== key) return;
         set({ filesLoading: false, filesError: errMsg(e), files: [] });
@@ -603,7 +601,8 @@ export const useStore = create<AppStore>((set, get) => {
     },
 
     async openFile(path, force = false) {
-      set((s) => ({ activeFile: path, panel: 'diff', stageSel: s.stageSel?.filePath === path ? s.stageSel : null }));
+      get().setPanel('diff');
+      set((s) => ({ activeFile: path, stageSel: s.stageSel?.filePath === path ? s.stageSel : null }));
       const cur = get().diffs[path];
       if (!force && cur && cur.status !== 'error') return;
       await loadDiff(path);
@@ -693,7 +692,10 @@ export const useStore = create<AppStore>((set, get) => {
       const key = get().targetKey;
       set((s) => ({ stateSeq: s.stateSeq + 1 }));
       void get().loadCheckpoints();
-      if (get().railTab === 'todos') void get().loadAllComments();
+      if (get().panel === 'orchestration') {
+        void get().loadAllComments();
+        void get().loadTodos();
+      }
       try {
         const res = await api.comments(key);
         if (get().targetKey === key) set({ comments: res.comments });
@@ -762,47 +764,10 @@ export const useStore = create<AppStore>((set, get) => {
       await get().updateTodo(todoId, { commentIds: (todo.commentIds ?? []).filter((x) => x !== commentId) });
     },
 
-    async scanNvim(force = false) {
-      const root = get().root || get().repo?.root;
-      if (!root) return;
-      set({ nvimScanning: true });
-      try {
-        const res = await api.nvimInstances(root, force);
-        set({ nvim: res, nvimScanning: false });
-      } catch (e) {
-        set({ nvimScanning: false });
-        fail(e);
-      }
-    },
-
-    async selectNvim(socket) {
-      const root = get().root;
-      set((s) => (s.nvim ? { nvim: { ...s.nvim, selected: socket } } : {}));
-      try {
-        await api.nvimSelect(root, socket);
-      } catch (e) {
-        fail(e);
-      }
-    },
-
-    async openInNvim(filePath, line) {
-      // No check against the last scan: nvim comes and goes while the page stays open, so the
-      // server finds the instance when the click arrives, and the header catches up afterwards.
-      const { nvim, root } = get();
-      const absPath = `${root.replace(/\/+$/, '')}/${filePath}`;
-      try {
-        const res = await api.nvimOpen({ root, socket: nvim?.selected, absPath, line });
-        if (res.socket !== nvim?.selected) void get().scanNvim();
-      } catch (e) {
-        if (e instanceof ApiError && e.code === 'nvim_none') get().showToast('没有在这个仓库里打开的 nvim', 'error');
-        else if (e instanceof ApiError && e.code === 'nvim_ambiguous') get().showToast('这个仓库里开着多个 nvim，在顶栏的 nvim 设置里选一个', 'error');
-        else fail(e);
-        void get().scanNvim();
-      }
-    },
-
     setPanel(panel) {
-      set({ panel });
+      if (panel === get().panel) return;
+      set((s) => ({ panel, prefs: { ...s.prefs, lastPanel: panel } }));
+      api.patchPrefs({ lastPanel: panel }).catch(fail);
     },
 
     setIncludeExported(v) {
@@ -825,9 +790,13 @@ export const useStore = create<AppStore>((set, get) => {
       if (comment.targetKey !== get().targetKey) {
         await get().switchView(comment.targetKey);
       }
-      set({ panel: 'diff' });
       await get().openFile(comment.filePath);
-      set({ jumpTo: { file: comment.filePath, side: comment.side, line: comment.endLine, nonce: Date.now() } });
+      openRail();
+      set({
+        railFilter: 'all',
+        focusedCommentId: comment.id,
+        jumpTo: { file: comment.filePath, side: comment.side, line: comment.endLine, nonce: Date.now() },
+      });
     },
 
     setReattaching(id) {
@@ -838,12 +807,12 @@ export const useStore = create<AppStore>((set, get) => {
     setEditor(editor) {
       set({ editor, focusedCommentId: editor ? null : get().focusedCommentId });
       // The editor is a card in the rail, so writing a comment has to bring the rail out.
-      if (editor) openRail('comments');
+      if (editor) openRail();
     },
 
     async focusComment(id, scroll = true) {
       set({ focusedCommentId: id });
-      if (id) openRail('comments');
+      if (id) openRail();
       if (!id || !scroll) return;
       const c = get().comments.find((x) => x.id === id) ?? get().allComments.find((x) => x.id === id);
       if (!c || c.status === 'orphaned') return;
@@ -854,16 +823,9 @@ export const useStore = create<AppStore>((set, get) => {
       set({ railFilter: filter });
     },
     showComments(filter) {
+      get().setPanel('diff');
       set({ railFilter: filter });
-      openRail('comments');
-    },
-    setRailTab(tab) {
-      set({ railTab: tab });
-      get().setRailOpen(true);
-      if (tab === 'todos') {
-        void get().loadTodos();
-        void get().loadAllComments();
-      }
+      openRail();
     },
     setRailOpen(open) {
       if (get().prefs.railOpen === open) return;
@@ -875,6 +837,9 @@ export const useStore = create<AppStore>((set, get) => {
     },
     setSideSlot(el) {
       set({ sideSlot: el });
+    },
+    setWorktreeSlot(el) {
+      set({ worktreeSlot: el });
     },
 
     async loadTodos() {
@@ -1025,7 +990,7 @@ export const useStore = create<AppStore>((set, get) => {
       if (active && active === path && key === get().targetKey && !get().files.some((f) => f.path === active)) {
         const files = get().files;
         const next = files[Math.min(Math.max(before.indexOf(active), 0), files.length - 1)];
-        if (next) void get().openFile(next.path);
+        if (next && get().panel === 'diff') void get().openFile(next.path);
       }
       return true;
     },

@@ -29,7 +29,7 @@ describe('StateStore', () => {
       targets: {},
       todos: [],
       checkpoints: [],
-      prefs: { viewMode: 'unified', nvimSocketByRoot: {}, autoRefresh: true, railOpen: false, ignoreDebug: true },
+      prefs: { viewMode: 'unified', autoRefresh: true, railOpen: false, ignoreDebug: true },
     });
   });
 
@@ -80,6 +80,24 @@ describe('StateStore', () => {
     const files = await readdir(path.dirname(file));
     expect(files).toEqual(['state.json']);
     expect(JSON.parse(await readFile(file, 'utf8')).schemaVersion).toBe(1);
+  });
+
+  it.each([
+    [{ lastArea: 'review' }, 'diff'],
+    [{ lastArea: 'orchestration' }, 'orchestration'],
+    [{ lastArea: 'review', lastPanel: 'commits' }, 'commits'],
+  ])('migrates area preferences %j into the content destination', async (prefs, panel) => {
+    const file = path.join(dir, 'state.json');
+    await writeFile(file, JSON.stringify({ ...defaultState('/repo'), prefs: { ...prefs, lastTarget: 'commit:abc1234' } }));
+    const store = new StateStore(file, '/repo');
+    await store.update((state) => {
+      expect(state.prefs.lastPanel).toBe(panel);
+      expect(state.prefs.lastTarget).toBe('commit:abc1234');
+      expect(state.prefs).not.toHaveProperty('lastArea');
+    });
+    const saved = JSON.parse(await readFile(file, 'utf8'));
+    expect(saved.prefs.lastPanel).toBe(panel);
+    expect(saved.prefs).not.toHaveProperty('lastArea');
   });
 
   it('merges concurrent updates from two instances (read-before-write)', async () => {

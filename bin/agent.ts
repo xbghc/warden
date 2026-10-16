@@ -79,7 +79,7 @@ export async function runAgentCommand(argv: string[], replyCommand: string): Pro
   if (!cmd || !(AGENT_COMMANDS as readonly string[]).includes(cmd)) return undefined;
   try {
     if (cmd === 'feedback') await feedback(rest, replyCommand);
-    else await reply(rest);
+    else if (cmd === 'reply') await reply(rest);
     return 0;
   } catch (e) {
     console.error(`warden ${cmd}: ${e instanceof HttpError || e instanceof Error ? e.message : String(e)}`);

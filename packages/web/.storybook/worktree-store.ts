@@ -2,6 +2,7 @@ import { fn } from 'storybook/test';
 import type { WorktreeDetail } from '@warden/shared';
 import { setupDemoStore } from './demo-store';
 import { api } from '../src/api';
+import { useStore } from '../src/store';
 const root = '/workspace/warden';
 const topic = '/workspace/warden-1';
 const worktrees: WorktreeDetail[] = [
@@ -91,6 +92,7 @@ const worktrees: WorktreeDetail[] = [
 
 export function setupWorktreeStore() {
   setupDemoStore();
+  useStore.setState({ panel: 'orchestration' });
   const original = { ...api };
   api.worktrees = fn(async () => ({
     worktrees,
@@ -122,6 +124,7 @@ export function setupWorktreeStore() {
         : [],
   }));
   api.openTmuxSession = fn(async () => ({ session: 'warden-1', created: true }));
+  api.remoteBranches = fn(async () => ({ remotes: [] }));
   api.createWorktree = fn(async ({ slot }) => ({ worktree: worktrees[1]!, slot: slot ?? 2, reused: slot !== 5 }));
   api.releaseWorktree = fn(async () => ({ ok: true as const, branchDeleted: true }));
   api.removeWorktree = fn(async () => ({ ok: true as const, branchDeleted: false }));

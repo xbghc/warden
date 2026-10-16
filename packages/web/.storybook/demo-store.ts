@@ -44,10 +44,15 @@ export function setupDemoStore() {
     { id: 'todo-3', branch: 'feature/review', title: '完善评论导出', body: '保留文件名和行号。', status: 'open', createdAt: timestamp, updatedAt: timestamp },
   ];
   let sequence = 0;
-  const changeTarget = async (targetKey: string) => {
-    useStore.setState({ targetKey, root: parseTargetKey(targetKey).worktree ?? '/workspace/warden' });
+  const changeTarget = async (targetKey: string, options?: { reveal?: boolean }) => {
+    useStore.setState({
+      targetKey,
+      root: parseTargetKey(targetKey).worktree ?? '/workspace/warden',
+      ...(options?.reveal === false ? {} : { panel: 'diff' as const }),
+    });
   };
   useStore.setState({
+    panel: 'diff',
     root: '/workspace/warden',
     activeFile: 'src/App.tsx',
     comments,
@@ -64,28 +69,17 @@ export function setupDemoStore() {
         { path: '/workspace/warden-review', head: 'def5678', branch: 'feature/review', isMain: false, detached: false, bare: false },
       ],
     },
-    nvim: {
-      root: '/workspace/warden',
-      nvimAvailable: true,
-      selected: '/tmp/nvim.42.0',
-      instances: [{ socket: '/tmp/nvim.42.0', cwd: '/workspace/warden', pid: 42 }],
-      scannedAt: timestamp,
-    },
     lastRefreshAt: timestamp,
     deleteTodos: fn(async () => {}),
     moveTodo: fn(async () => {}),
     stageLines: fn(async () => true),
     setTarget: fn(changeTarget),
-    switchView: fn(changeTarget),
+    switchView: fn(async (targetKey) => changeTarget(targetKey)),
     setPanel: fn<AppStore['setPanel']>((panel) => useStore.setState({ panel })),
     setViewMode: fn<AppStore['setViewMode']>((viewMode) => useStore.setState((s) => ({ prefs: { ...s.prefs, viewMode } }))),
     setAutoRefresh: fn<AppStore['setAutoRefresh']>((autoRefresh) => useStore.setState((s) => ({ prefs: { ...s.prefs, autoRefresh } }))),
     refresh: fn(async () => {
       useStore.setState({ lastRefreshAt: new Date().toISOString() });
-    }),
-    scanNvim: fn(async () => {}),
-    selectNvim: fn<AppStore['selectNvim']>(async (selected) => {
-      useStore.setState((s) => ({ nvim: s.nvim ? { ...s.nvim, selected } : null }));
     }),
     focusComment: fn<AppStore['focusComment']>(async (focusedCommentId) => {
       useStore.setState({ focusedCommentId });

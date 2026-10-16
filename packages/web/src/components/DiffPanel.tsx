@@ -1,3 +1,5 @@
+import { Button } from './ui/button';
+import { Checkbox } from './ui/checkbox';
 import { useMemo, useState } from 'react';
 import type { FileEntry } from '@warden/shared';
 import { useStageMode, useStore, useTracksViewed } from '../store';
@@ -21,9 +23,7 @@ function PathParts({ path }: { path: string }) {
 
 function FileHeader({ entry }: { entry: FileEntry }) {
   const toggleViewed = useStore((s) => s.toggleViewed);
-  const openInNvim = useStore((s) => s.openInNvim);
   const copyToClipboard = useStore((s) => s.copyToClipboard);
-  const nvimReady = useStore((s) => !!s.nvim?.selected);
   const stageLines = useStore((s) => s.stageLines);
   const staging = useStore((s) => s.staging);
   const mode = useStageMode();
@@ -48,9 +48,9 @@ function FileHeader({ entry }: { entry: FileEntry }) {
         )}
         <PathParts path={entry.path} />
       </span>
-      <button className="icon quiet copy-path" onClick={() => void copyToClipboard(entry.path)} title={`复制路径 ${entry.path}`}>
+      <Button variant="ghost" size="icon-sm" className="icon quiet copy-path" onClick={() => void copyToClipboard(entry.path)} title={`复制路径 ${entry.path}`}>
         <ActionIcon name="copy" label="复制路径" />
-      </button>
+      </Button>
       {entry.oldMode && entry.newMode && (
         <span className="muted mono">
           mode {entry.oldMode} → {entry.newMode}
@@ -61,15 +61,10 @@ function FileHeader({ entry }: { entry: FileEntry }) {
       </span>
       {marks && entry.changed && <span className="changed">文件已变化，“已读”标记已取消</span>}
       <span className="spacer" />
-      {/* Only when there is an nvim to open it in: a permanently greyed-out button is a control
-          that never does anything, priced at full width in the busiest row of the panel. */}
-      {nvimReady && (
-        <button className="link" onClick={() => void openInNvim(entry.path, 1)} title="在 nvim 中打开这个文件">
-          在 nvim 中打开
-        </button>
-      )}
       {mode && (
-        <button
+        <Button
+          variant="outline"
+          size="sm"
           disabled={staging || entry.binary}
           onClick={() => void stageLines(entry.path)}
           title={
@@ -81,13 +76,13 @@ function FileHeader({ entry }: { entry: FileEntry }) {
           }
         >
           {mode === 'stage' ? '暂存文件' : '取消暂存文件'}
-        </button>
+        </Button>
       )}
       {/* Where a file can be staged that is how it is marked done, by the button above; a second
           tick beside it only ever disagreed with the first. */}
       {marks && (
         <label className="check">
-          <input type="checkbox" checked={entry.viewed} onChange={() => void toggleViewed(entry.path)} />
+          <Checkbox checked={entry.viewed} onCheckedChange={() => void toggleViewed(entry.path)} />
           已读
         </label>
       )}
@@ -109,14 +104,14 @@ function StageBar({ filePath }: { filePath: string }) {
       <span className="stage-bar-count">
         已选 <b>{n}</b> 行
       </span>
-      <button className="primary" disabled={staging || n === 0} onClick={() => void stageSelection()} title="s">
+      <Button variant="default" size="sm" className="primary" disabled={staging || n === 0} onClick={() => void stageSelection()} title="s">
         {staging ? '处理中…' : mode === 'stage' ? '暂存所选' : '取消暂存所选'}
         <kbd>s</kbd>
-      </button>
-      <button onClick={() => setStageSel(null)} title="Esc">
+      </Button>
+      <Button variant="outline" size="sm" onClick={() => setStageSel(null)} title="Esc">
         放弃
         <kbd>Esc</kbd>
-      </button>
+      </Button>
     </div>
   );
 }
@@ -157,9 +152,9 @@ export function DiffPanel() {
     body = (
       <div className="placeholder error-box">
         {diffState.message}{' '}
-        <button className="link" onClick={() => void openFile(activeFile, true)}>
+        <Button variant="ghost" size="sm" className="link" onClick={() => void openFile(activeFile, true)}>
           重试
-        </button>
+        </Button>
       </div>
     );
   else if (diffState.diff.binary) body = <div className="placeholder">二进制文件，不展示 diff</div>;
@@ -177,9 +172,9 @@ export function DiffPanel() {
     body = (
       <div className="placeholder">
         <p>该文件 diff 有 {lineCount} 行，默认不渲染。</p>
-        <button className="primary" onClick={() => setForceBig(activeFile)}>
+        <Button variant="default" size="sm" className="primary" onClick={() => setForceBig(activeFile)}>
           仍然渲染
-        </button>
+        </Button>
       </div>
     );
   else body = <DiffView key={activeFile + ':' + diffState.diff.contentHash} diff={diffState.diff} />;

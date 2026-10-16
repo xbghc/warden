@@ -1,3 +1,6 @@
+import { Checkbox } from './ui/checkbox';
+import { Button } from './ui/button';
+import { NativeSelect } from './ui/native-select';
 import { ActionIcon } from './ActionIcon';
 import { useEffect, useMemo, useState } from 'react';
 import { FileIcon } from '@react-symbols/icons/utils';
@@ -59,7 +62,7 @@ interface RowProps {
 
 function FileRow({ node, depth, view, marks }: RowProps & { node: Extract<TreeNode, { kind: 'file' }> }) {
   // A file staged halfway appears in both blocks; only the one in the view in front is highlighted.
-  const active = useStore((s) => s.activeFile === node.path && s.targetKey === view);
+  const active = useStore((s) => s.panel === 'diff' && s.activeFile === node.path && s.targetKey === view);
   const inView = useStore((s) => s.targetKey === view);
   const openFile = useStore((s) => s.openFile);
   const switchView = useStore((s) => s.switchView);
@@ -83,17 +86,18 @@ function FileRow({ node, depth, view, marks }: RowProps & { node: Extract<TreeNo
       title={e.oldPath ? `${e.oldPath} → ${e.path}` : e.path}
     >
       {marks && (
-        <input
-          type="checkbox"
+        <Checkbox
           className="viewed-box"
           checked={e.viewed}
           onClick={(ev) => ev.stopPropagation()}
-          onChange={() => void toggleViewed(node.path)}
+          onCheckedChange={() => void toggleViewed(node.path)}
           title="标记为已读"
           aria-label={`标记 ${node.path} 为已读`}
         />
       )}
-      <button
+      <Button
+        variant="ghost"
+        size="sm"
         className="tree-file-open"
         onClick={() => void open()}
         aria-current={active ? 'true' : undefined}
@@ -121,9 +125,11 @@ function FileRow({ node, depth, view, marks }: RowProps & { node: Extract<TreeNo
             </>
           )}
         </span>
-      </button>
+      </Button>
       {mode && !e.binary && (
-        <button
+        <Button
+          variant="ghost"
+          size="icon-sm"
           className="link stage-file"
           disabled={staging}
           onClick={(event) => {
@@ -132,7 +138,7 @@ function FileRow({ node, depth, view, marks }: RowProps & { node: Extract<TreeNo
           }}
         >
           <ActionIcon name={mode === 'stage' ? 'add' : 'back'} label={mode === 'stage' ? '暂存文件' : '取消暂存文件'} />
-        </button>
+        </Button>
       )}
     </div>
   );
@@ -145,7 +151,9 @@ function DirRow({ node, depth, view, marks, open, toggle }: RowProps & { node: D
   const done = marks && node.viewedCount === node.fileCount;
   return (
     <>
-      <button
+      <Button
+        variant="ghost"
+        size="sm"
         className={`tree-row dir ${done ? 'viewed' : ''}`}
         style={{ paddingLeft: 10 + depth * 14 }}
         onClick={() => toggle(node.path)}
@@ -161,7 +169,7 @@ function DirRow({ node, depth, view, marks, open, toggle }: RowProps & { node: D
           {done && <TreeIcon kind="check" />}
           {node.fileCount}
         </span>
-      </button>
+      </Button>
       {isOpen &&
         node.children.map((c) =>
           c.kind === 'dir' ? (
@@ -239,14 +247,16 @@ function TreeBlock({ title, view, files, empty }: { title: string; view: TargetK
           {target?.kind === 'staged' && <StagedDebugMark files={files} />}
           <span className="spacer" />
           <span className="tree-tools">
-            <button
+            <Button
+              variant="outline"
+              size="sm"
               onClick={() => setOpen(new Set(hasExpandedDirectory ? [] : directories))}
               title={toggleLabel}
               aria-label={toggleLabel}
               disabled={directories.length === 0}
             >
               <TreeIcon kind={hasExpandedDirectory ? 'collapse' : 'expand'} />
-            </button>
+            </Button>
           </span>
         </div>
         {files.length > 0 && (
@@ -300,7 +310,7 @@ function DebugToggle({ local }: { local: boolean }) {
   const title = local ? '折叠调试块和标了 nocommit 的行；整个文件或整个 hunk 暂存时跳过它们；只剩调试代码的文件不算未审' : '折叠调试块和标了 nocommit 的行';
   return (
     <label className="side-toggle" title={title}>
-      <input type="checkbox" checked={on} onChange={() => setIgnoreDebug(!on)} />
+      <Checkbox checked={on} onCheckedChange={() => setIgnoreDebug(!on)} />
       忽略调试代码
     </label>
   );
@@ -332,9 +342,14 @@ function CheckpointBar({ target }: { target: Target }) {
   const wt = target.worktree ? { worktree: target.worktree } : {};
   const open = (id: number) => void setTarget(formatTargetKey({ kind: 'checkpoint', id, ...wt }));
   const take = (
-    <button onClick={() => void createCheckpoint()} title="记下工作区现在的样子（含未跟踪的文件），之后只看这以后的改动。不会写入仓库">
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={() => void createCheckpoint()}
+      title="记下工作区现在的样子（含未跟踪的文件），之后只看这以后的改动。不会写入仓库"
+    >
       新建检查点
-    </button>
+    </Button>
   );
 
   if (target.kind === 'checkpoint') {
@@ -343,7 +358,7 @@ function CheckpointBar({ target }: { target: Target }) {
     };
     return (
       <div className="checkpoint-bar">
-        <select className="checkpoint-select" aria-label="对比的检查点" value={target.id} onChange={(e) => open(Number(e.target.value))}>
+        <NativeSelect className="checkpoint-select" aria-label="对比的检查点" value={target.id} onChange={(e) => open(Number(e.target.value))}>
           {/* Listed before the checkpoints arrive, so the control never reads blank. */}
           {!checkpoints.some((c) => c.id === target.id) && <option value={target.id}>#{target.id}</option>}
           {checkpoints.map((c) => (
@@ -351,11 +366,11 @@ function CheckpointBar({ target }: { target: Target }) {
               {checkpointName(c)}
             </option>
           ))}
-        </select>
+        </NativeSelect>
         {take}
-        <button className="link" onClick={remove} title="删除这个检查点">
+        <Button variant="ghost" size="sm" className="link" onClick={remove} title="删除这个检查点">
           删除
-        </button>
+        </Button>
       </div>
     );
   }
@@ -364,13 +379,15 @@ function CheckpointBar({ target }: { target: Target }) {
   return (
     <div className="checkpoint-bar">
       {newest ? (
-        <button
+        <Button
+          variant="outline"
+          size="sm"
           className="checkpoint-open"
           onClick={() => open(newest.id)}
           title={`只看检查点 ${checkpointName(newest)} 以后的改动${newest.handoff ? '：评论交给 agent 时自动记下的' : ''}`}
         >
           对比检查点 #{newest.id} · {checkpointTime(newest.createdAt)}
-        </button>
+        </Button>
       ) : (
         <span className="checkpoint-none">还没有检查点</span>
       )}
@@ -412,9 +429,9 @@ export function FileTree() {
               {targetLabel(target)}
             </span>
             <span className="spacer" />
-            <button className="link" onClick={() => void setTarget(formatTargetKey({ kind: 'working' }))} title="回到主仓库的工作区">
+            <Button variant="ghost" size="sm" className="link" onClick={() => void setTarget(formatTargetKey({ kind: 'working' }))} title="回到主仓库的工作区">
               ← 回到主仓库
-            </button>
+            </Button>
           </div>
         )}
         <div className="error-box">{error}</div>

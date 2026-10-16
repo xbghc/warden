@@ -3,7 +3,7 @@ import path from 'node:path';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Hono } from 'hono';
-import { createApp, resolveRepo, RepoWatcher, statusPaths, StateStore, NvimService } from '@warden/server';
+import { createApp, resolveRepo, RepoWatcher, statusPaths, StateStore } from '@warden/server';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
 let fx: FixtureRepo;
@@ -15,7 +15,7 @@ beforeAll(async () => {
   dataDir = await mkdtemp(path.join(os.tmpdir(), 'warden-watch-data-'));
   const repo = await resolveRepo(fx.root);
   const store = new StateStore(path.join(dataDir, 'state.json'), repo.commonRoot);
-  app = createApp({ repo, store, nvim: new NvimService([path.join(dataDir, 'no-sockets')]), watchIntervalMs: 60_000 });
+  app = createApp({ repo, store, watchIntervalMs: 60_000 });
 });
 
 afterAll(async () => {

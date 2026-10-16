@@ -3,16 +3,15 @@ import { randomUUID } from 'node:crypto';
 import { serve, type ServerType } from '@hono/node-server';
 import type { UpdateNotice } from '@warden/shared';
 import { createApp } from './app.js';
+import { PreviewService } from './preview.js';
 import { resolveRepo, type RepoContext } from './repo.js';
 import { StateStore, stateFilePath } from './state.js';
-import { NvimService } from './nvim.js';
 import { isWsl, reachableFromWindows } from './wsl.js';
 
 export { createApp } from './app.js';
 export { isWsl, reachableFromWindows } from './wsl.js';
 export { resolveRepo } from './repo.js';
 export { StateStore, stateFilePath } from './state.js';
-export { NvimService } from './nvim.js';
 export { checkForUpdate, updateCheckEnabled } from './update.js';
 export { RepoWatcher, statusPaths, DEFAULT_POLL_INTERVAL_MS } from './watcher.js';
 export { HttpError } from './errors.js';
@@ -23,6 +22,7 @@ export { buildAnchor, reanchorComment } from './anchor.js';
 export { formatCommentsExport, formatTodoExport, replyFooter, shortId } from './export.js';
 export { addReply, markHandedOver, takeFeedback } from './feedback.js';
 export { takeCheckpoint } from './checkpoints.js';
+export { WorkflowService } from './workflow.js';
 
 export const HOST = '127.0.0.1';
 export const DEFAULT_PORT_START = 4100;
@@ -77,7 +77,7 @@ export async function startServer(opts: StartOptions): Promise<RunningServer> {
   const stateFile = opts.stateFile ?? stateFilePath(repo.commonRoot);
   const store = new StateStore(stateFile, repo.commonRoot);
   const instanceToken = randomUUID();
-  const app = createApp({ repo, store, nvim: new NvimService(), webDir: opts.webDir, instanceToken, update: opts.update, replyCommand: opts.replyCommand });
+  const app = createApp({ repo, store, webDir: opts.webDir, instanceToken, update: opts.update, replyCommand: opts.replyCommand });
 
   const listen = (p: number): Promise<ServerType> =>
     new Promise((resolve, reject) => {
@@ -120,6 +120,19 @@ export async function startServer(opts: StartOptions): Promise<RunningServer> {
     }
   }
 
+  const preview = new PreviewService(repo, store);
+  let refreshing: Promise<void> | undefined;
+  const timer = setInterval(() => {
+    if (refreshing) return;
+    refreshing = preview
+      .tick()
+      .catch(() => {})
+      .finally(() => {
+        refreshing = undefined;
+      });
+  }, 1800);
+  timer.unref();
+
   return {
     url: `http://${HOST}:${port}/`,
     port,
@@ -127,6 +140,10 @@ export async function startServer(opts: StartOptions): Promise<RunningServer> {
     stateFile,
     skippedPorts,
     windowsReachable,
-    close: () => stop(server),
+    close: async () => {
+      clearInterval(timer);
+      await refreshing;
+      await stop(server);
+    },
   };
 }

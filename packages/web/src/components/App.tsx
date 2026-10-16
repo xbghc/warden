@@ -1,165 +1,162 @@
-import { useEffect, useState } from 'react';
-import type { ChangeEvent, TargetKey } from '@warden/shared';
-import { formatTargetKey, isLocalTarget, tryParseTargetKey } from '@warden/shared';
-import { useStore } from '../store';
+import { useEffect } from 'react';
+import { Menu, X } from 'lucide-react';
+import type { ChangeEvent } from '@warden/shared';
 import { api } from '../api';
+import { useStore } from '../store';
+import { useWorkflow } from '../workflow-store';
+import { useWorkbench } from '../workbench-store';
+import { useWorkbenchData } from '../workbench-data';
 import { dirName } from '../lib/paths';
-import { TopBar } from './TopBar';
-import { Sidebar } from './Sidebar';
-import { DiffPanel } from './DiffPanel';
-import { CommitsPanel } from './CommitsPanel';
-import { WorktreesPanel } from './WorktreesPanel';
-import { Rail } from './Rail';
+import { Button } from './ui/button';
+import { WorkbenchNav } from './WorkbenchNav';
+import { TaskWorkspace } from './TaskWorkspace';
+import { PreviewPage } from './PreviewPage';
+import { HistoryPage } from './HistoryPage';
+import { RebaseSheet } from './RebaseSheet';
+import { WorkbenchSheets } from './WorkbenchSheets';
 import { Toast } from './Toast';
 
-function isEditable(el: EventTarget | null): boolean {
-  if (!(el instanceof HTMLElement)) return false;
-  const tag = el.tagName;
-  if (tag === 'INPUT') return (el as HTMLInputElement).type !== 'checkbox';
-  return tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
-}
-
-/** The sidebar order j/k walks: the Unstaged block, then the Staged one. */
-function navigableFiles(s: ReturnType<typeof useStore.getState>): { view: TargetKey; path: string }[] {
-  const target = tryParseTargetKey(s.targetKey);
-  if (!target || !isLocalTarget(target)) return s.files.map((f) => ({ view: s.targetKey, path: f.path }));
-  const wt = target.worktree ? { worktree: target.worktree } : {};
-  const working = formatTargetKey({ kind: 'working', ...wt });
-  const staged = formatTargetKey({ kind: 'staged', ...wt });
-  return [...s.unstaged.map((f) => ({ view: working, path: f.path })), ...s.staged.map((f) => ({ view: staged, path: f.path }))];
-}
-
 export function App() {
-  const init = useStore((s) => s.init);
-  const initError = useStore((s) => s.initError);
-  const repo = useStore((s) => s.repo);
-  const panel = useStore((s) => s.panel);
-  const root = useStore((s) => s.root);
-
-  // Once opened, the commit list stays mounted behind the diff: picking a commit switches to its
-  // diff, and coming back should land on the same page and scroll position, not at the top.
-  const [commitsOpened, setCommitsOpened] = useState(panel === 'commits');
-  if (panel === 'commits' && !commitsOpened) setCommitsOpened(true);
+  const repo = useStore((state) => state.repo);
+  const root = useStore((state) => state.root);
+  const initError = useStore((state) => state.initError);
+  const { data, error, actionError } = useWorkflow();
+  const { view, taskId } = useWorkbench();
+  const { preview, checks } = useWorkbenchData();
+  const task = data?.workflow?.changes.find((row) => row.id === taskId && row.developmentBranch === data.workflow?.developmentBranch);
 
   useEffect(() => {
-    void init();
-  }, [init]);
-
-  // One warden runs per project and they all sit side by side in the tab strip. The name leads
-  // because a narrow tab keeps only the first few characters: a shared "warden" prefix would leave
-  // every tab reading the same.
-  const repoRoot = repo?.root;
-  useEffect(() => {
-    if (repoRoot) document.title = `${dirName(repoRoot)} · warden`;
-  }, [repoRoot]);
-
-  // Coming back to the page is the usual sign an nvim was just started or quit in the terminal, so
-  // the header's nvim status is refreshed then, at most every few seconds. Clicks do not wait on it:
-  // the server finds the instance when a line number is clicked.
-  useEffect(() => {
-    let last = 0;
-    const onFocus = () => {
-      if (Date.now() - last < 5_000) return;
-      last = Date.now();
-      void useStore.getState().scanNvim(true);
-    };
-    window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
+    void useStore.getState().init();
+    void useWorkflow.getState().refresh();
+    void useWorkbenchData.getState().refresh();
+    useStore.setState({ reviewReadOnly: true });
+    const interval = window.setInterval(() => {
+      void useWorkflow.getState().refresh();
+      void useWorkbenchData.getState().refresh();
+    }, 5000);
+    return () => window.clearInterval(interval);
   }, []);
 
-  // Live repository changes. Reconnects are handled by EventSource itself; a successful reconnect
-  // catches up on whatever was missed while the stream was down.
   useEffect(() => {
-    if (!root) return;
-    const source = api.events(root);
-    let wasDown = false;
-    const onChanged = (ev: Event) => {
-      try {
-        useStore.getState().onRepoChanged(JSON.parse((ev as MessageEvent).data) as ChangeEvent);
-      } catch {
-        /* a malformed frame is not worth surfacing */
-      }
-    };
-    source.addEventListener('changed', onChanged);
-    const onState = () => void useStore.getState().onStateChanged();
-    source.addEventListener('state', onState);
-    source.onopen = () => {
-      if (!wasDown) return;
-      wasDown = false;
-      void useStore.getState().refresh();
-    };
-    source.onerror = () => {
-      wasDown = true;
-    };
-    return () => {
-      source.removeEventListener('changed', onChanged);
-      source.removeEventListener('state', onState);
-      source.close();
-    };
-  }, [root]);
+    if (data?.workflow && view === 'task' && taskId && !task) useWorkbench.getState().openView('preview');
+    void useWorkbenchData.getState().refresh();
+  }, [data?.workflow?.developmentBranch]);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.ctrlKey || e.metaKey || e.altKey || isEditable(e.target)) return;
-      const s = useStore.getState();
-      if (e.key === 'r') {
-        e.preventDefault();
-        void s.refresh();
-      } else if (e.key === 's') {
-        if (s.panel !== 'diff' || !s.stageSel || s.staging) return;
-        e.preventDefault();
-        void s.stageSelection();
-      } else if (e.key === 'j' || e.key === 'k') {
-        if (s.panel !== 'diff') return;
-        const seq = navigableFiles(s);
-        if (seq.length === 0) return;
-        e.preventDefault();
-        let idx = seq.findIndex((x) => x.path === s.activeFile && x.view === s.targetKey);
-        if (idx < 0) idx = seq.findIndex((x) => x.path === s.activeFile);
-        const next = e.key === 'j' ? Math.min(seq.length - 1, idx + 1) : Math.max(0, idx - 1);
-        const item = seq[next];
-        if (!item) return;
-        void (async () => {
-          // Crossing from one block to the other changes the view along with the file.
-          if (item.view !== s.targetKey) await s.switchView(item.view, item.path);
-          await s.openFile(item.path);
-        })();
-      } else if (e.key === 'Escape') {
-        if (s.stageSel) s.setStageSel(null);
-        else if (s.reattaching) s.setReattaching(null);
-        else if (s.editor) s.setEditor(null);
-        else if (s.focusedCommentId) void s.focusComment(null);
-        else if (s.prefs.railOpen) s.setRailOpen(false);
-        else if (s.panel !== 'diff') s.setPanel('diff');
+    if (repo?.root) document.title = `${dirName(repo.root)} · Warden`;
+  }, [repo?.root]);
+
+  useEffect(() => {
+    if (!repo) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const refresh = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        void useWorkflow.getState().refresh();
+        void useWorkbenchData.getState().refresh();
+        void useStore.getState().refresh();
+      }, 200);
+    };
+    const sources = [...new Set([repo.commonRoot, repo.root, root].filter(Boolean))].map((path) => {
+      const source = api.events(path);
+      source.addEventListener('changed', (event) => {
+        try {
+          useStore.getState().onRepoChanged(JSON.parse((event as MessageEvent).data) as ChangeEvent);
+        } catch {
+          /* Ignore malformed event frames. */
+        }
+        refresh();
+      });
+      source.addEventListener('state', refresh);
+      source.onopen = refresh;
+      return source;
+    });
+    return () => {
+      clearTimeout(timer);
+      for (const source of sources) source.close();
+    };
+  }, [repo?.commonRoot, repo?.root, root]);
+
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 640px)');
+    const update = () => {
+      if (media.matches) useStore.getState().setViewMode('unified');
+    };
+    update();
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const element = event.target as HTMLElement;
+      if (event.ctrlKey || event.metaKey || event.altKey || ['INPUT', 'TEXTAREA', 'SELECT'].includes(element.tagName) || element.isContentEditable) return;
+      if (useWorkbench.getState().sheet) return;
+      const store = useStore.getState();
+      if (event.key === 'r') {
+        event.preventDefault();
+        void store.refresh();
+        void useWorkflow.getState().refresh();
+        void useWorkbenchData.getState().refresh();
+      }
+      if (useWorkbench.getState().view !== 'task') return;
+      if (event.key === 'j' || event.key === 'k') {
+        const index = store.files.findIndex((file) => file.path === store.activeFile);
+        const next = store.files[Math.max(0, Math.min(store.files.length - 1, index + (event.key === 'j' ? 1 : -1)))];
+        if (next) {
+          event.preventDefault();
+          void store.openFile(next.path);
+        }
+      }
+      if (event.key === 'Escape') {
+        if (store.editor) store.setEditor(null);
+        else if (store.focusedCommentId) void store.focusComment(null);
+        else store.setRailOpen(false);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  if (initError) {
+  if (initError)
     return (
       <div className="fatal">
-        <h1>warden</h1>
+        <h1>Warden</h1>
         <p>无法连接服务端：{initError}</p>
-        <button onClick={() => void init()}>重试</button>
+        <Button variant="outline" onClick={() => void useStore.getState().init()}>
+          重试
+        </Button>
       </div>
     );
-  }
-  if (!repo) return <div className="loading-screen">加载中…</div>;
-
+  if (!repo) return <div className="loading-screen">正在读取仓库…</div>;
   return (
-    <div className="app">
-      <TopBar />
-      <div className="body">
-        <Sidebar />
-        <main className="main">
-          {commitsOpened && <CommitsPanel active={panel === 'commits'} />}
-          {panel === 'worktrees' && <WorktreesPanel />}
-          {panel !== 'commits' && panel !== 'worktrees' && <DiffPanel />}
+    <div className="wb-app">
+      <WorkbenchNav connected={preview?.connectedIds.length ?? 0} behind={checks.filter((check) => check.status !== 'current').length} />
+      <div className="wb-content">
+        <div className="wb-mobile-header">
+          <Button variant="ghost" size="sm" onClick={() => useWorkbench.setState({ navigationOpen: true })}>
+            <Menu size={17} />
+            工作导航
+          </Button>
+          <span>{data?.workflow?.developmentBranch ?? 'Warden'}</span>
+        </div>
+        {(actionError || error) && (
+          <div className="wb-global-error" role="alert">
+            <span>{actionError ?? error}</span>
+            <Button variant="ghost" size="icon-xs" aria-label="关闭操作提示" onClick={() => useWorkflow.setState({ actionError: null, error: null })}>
+              <X size={14} />
+            </Button>
+          </div>
+        )}
+        <main className="wb-main">
+          <PreviewPage active={view === 'preview'} />
+          <HistoryPage active={view === 'history'} />
+          {task && <TaskWorkspace key={task.id} task={task} active={view === 'task'} />}
+          {view === 'task' && !task && <div className="wb-empty-inline">在工作计划中选择任务。</div>}
         </main>
-        <Rail />
       </div>
+      <WorkbenchSheets />
+      <RebaseSheet />
       <Toast />
     </div>
   );

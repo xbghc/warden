@@ -25,7 +25,7 @@ import type {
   UpdateNotice,
   WorktreesResponse,
 } from '@warden/shared';
-import { createApp, resolveRepo, StateStore, NvimService } from '@warden/server';
+import { createApp, resolveRepo, StateStore } from '@warden/server';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
 let fx: FixtureRepo;
@@ -52,7 +52,7 @@ beforeAll(async () => {
   stateFile = path.join(dataDir, 'state.json');
   const repo = await resolveRepo(fx.root);
   const store = new StateStore(stateFile, repo.commonRoot);
-  app = createApp({ repo, store, nvim: new NvimService([path.join(dataDir, 'no-sockets')]) });
+  app = createApp({ repo, store });
 });
 
 afterAll(async () => {
@@ -410,13 +410,15 @@ describe('viewed, comments, export, todos', () => {
     expect(state.prefs.viewMode).toBe('split');
   });
 
-  it('nvim endpoints degrade gracefully without instances', async () => {
-    const res = await json<{ instances: unknown[]; selected?: string }>(await get(`/api/nvim/instances?root=${k(fx.root)}`));
-    expect(res.instances).toEqual([]);
-    expect(res.selected).toBeUndefined();
-    const open = await send('POST', '/api/nvim/open', { root: fx.root, socket: '/nope.sock', absPath: '/x', line: 1 });
-    expect(open.status).toBe(404);
-    expect(((await open.json()) as { code?: string }).code).toBe('nvim_none');
+  it('remembers content navigation without losing the review target and ignores unknown panels', async () => {
+    await send('PATCH', '/api/prefs', { lastTarget: 'staged', lastPanel: 'diff' });
+    await send('PATCH', '/api/prefs', { lastPanel: 'orchestration' });
+    await send('PATCH', '/api/prefs', { lastPanel: 'unknown' });
+    const state = await json<ReviewState>(await get('/api/state'));
+    expect(state.prefs.lastPanel).toBe('orchestration');
+    expect((await json<RepoInfo>(await get('/api/repo'))).defaultTarget).toBe('staged');
+    await send('PATCH', '/api/prefs', { lastPanel: 'commits' });
+    expect((await json<ReviewState>(await get('/api/state'))).prefs.lastPanel).toBe('commits');
   });
 });
 

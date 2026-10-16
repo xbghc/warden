@@ -1,7 +1,8 @@
+import { Button } from './ui/button';
 import { type MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActionIcon } from './ActionIcon';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import type { CommentSide, DiffLine, FileDiff, Hunk } from '@warden/shared';
+import type { CommentSide, DiffLine, FileDiff } from '@warden/shared';
 import { useStageMode, useStore } from '../store';
 import { api } from '../api';
 import { type Block, buildRows, findRowIndex, hides, hunkRowIndices, pickedLineIndices, type Expansion, type Gap, type Row } from '../lib/rows';
@@ -53,23 +54,7 @@ function CodeLine({ content, tokens }: { content: string; tokens: Token[] | unde
   );
 }
 
-/** Line to jump to in nvim for a diff line (nearest new-side line for deleted lines). */
-const GUTTER_TITLE = '点击：在 nvim 中打开此行\nAlt+点击：复制 文件:行号\nAlt+Shift+点击：复制从上次复制的行到这一行的范围';
-
-function nvimLine(line: DiffLine, hunk: Hunk | undefined): number {
-  if (line.newLineNo !== undefined) return line.newLineNo;
-  if (!hunk) return line.oldLineNo ?? 1;
-  const idx = hunk.lines.indexOf(line);
-  for (let i = idx + 1; i < hunk.lines.length; i++) {
-    const n = hunk.lines[i]!.newLineNo;
-    if (n !== undefined) return n;
-  }
-  for (let i = idx - 1; i >= 0; i--) {
-    const n = hunk.lines[i]!.newLineNo;
-    if (n !== undefined) return n;
-  }
-  return hunk.newStart;
-}
+const GUTTER_TITLE = '点击：复制 文件:行号\nShift+点击：复制从上次复制的行到这一行的范围';
 
 function estimateRow(row: Row): number {
   switch (row.kind) {
@@ -95,7 +80,6 @@ export function DiffView({ diff }: { diff: FileDiff }) {
   const focusComment = useStore((s) => s.focusComment);
   const editor = useStore((s) => s.editor);
   const focusedCommentId = useStore((s) => s.focusedCommentId);
-  const openInNvim = useStore((s) => s.openInNvim);
   const copyToClipboard = useStore((s) => s.copyToClipboard);
   const showToast = useStore((s) => s.showToast);
   const reattaching = useStore((s) => s.reattaching);
@@ -285,6 +269,7 @@ export function DiffView({ diff }: { diff: FileDiff }) {
   // ---- hunk navigation (n / p) -------------------------------------------------
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (useStore.getState().panel !== 'diff') return;
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       const t = e.target as HTMLElement | null;
       if (
@@ -377,7 +362,9 @@ export function DiffView({ diff }: { diff: FileDiff }) {
   const renderPickBox = (row: Extract<Row, { kind: 'line' | 'pair' }>, line: DiffLine | undefined, picked: boolean) => (
     <span className="stagec">
       {mode && !row.expanded && line && line.type !== 'context' && (
-        <button
+        <Button
+          variant="outline"
+          size="sm"
           className={`stage-box ${picked ? 'on' : ''}`}
           onMouseDown={(e) => startPick(e, row.hunkIndex, row.pos)}
           title={mode === 'stage' ? '选中要暂存的行（可拖选）' : '选中要取消暂存的行（可拖选）'}
@@ -417,9 +404,15 @@ export function DiffView({ diff }: { diff: FileDiff }) {
     if (!m) return null;
     return (
       <>
-        <button className={`pill ${m.active ? '' : 'muted'}`} title="查看评论" onClick={() => void focusComment(m.ids[0] ?? null, false)}>
+        <Button
+          variant="ghost"
+          size="sm"
+          className={`pill ${m.active ? '' : 'muted'}`}
+          title="查看评论"
+          onClick={() => void focusComment(m.ids[0] ?? null, false)}
+        >
           {m.count}
-        </button>
+        </Button>
         <span className={`pin ${m.active ? '' : 'muted'}`} />
       </>
     );
@@ -467,17 +460,8 @@ export function DiffView({ diff }: { diff: FileDiff }) {
   /** Where the last Alt-click copied from, so that Alt+Shift-click can copy the range up to another line. */
   const copyAnchor = useRef<{ side: CommentSide; line: number } | null>(null);
 
-  /**
-   * A click on a line number opens it in nvim; with Alt it copies the place instead, as
-   * `path:line`, and with Alt+Shift the range from the last one copied. The number copied is the one
-   * in the column clicked — unified view shows both sides — falling back to the other side where
-   * that column is blank. A line of the old side says so: the same number is other code after.
-   */
-  const gutterClick = (e: ReactMouseEvent, line: DiffLine, hunkIndex: number, column: CommentSide) => {
-    if (!e.altKey) {
-      void openInNvim(diff.path, nvimLine(line, diff.hunks[hunkIndex]));
-      return;
-    }
+  /** Copy a review location; Shift extends the last copied range on the same side. */
+  const gutterClick = (e: ReactMouseEvent, line: DiffLine, _hunkIndex: number, column: CommentSide) => {
     const side: CommentSide = column === 'old' ? (line.oldLineNo !== undefined ? 'old' : 'new') : line.newLineNo !== undefined ? 'new' : 'old';
     const no = side === 'old' ? line.oldLineNo : line.newLineNo;
     if (no === undefined) return;
@@ -495,17 +479,17 @@ export function DiffView({ diff }: { diff: FileDiff }) {
     return (
       <div className="row gap-row">
         {!isFirst && (
-          <button className="link" onClick={() => void expand(gap, 'top')} title="展开紧接上一个 hunk 之后的 20 行">
+          <Button variant="ghost" size="icon-sm" className="link" onClick={() => void expand(gap, 'top')} title="展开紧接上一个 hunk 之后的 20 行">
             <ActionIcon name="up" label={`展开上方 ${EXPAND_STEP} 行`} />
-          </button>
+          </Button>
         )}
-        <button className="link" onClick={() => void expand(gap, 'all')}>
+        <Button variant="ghost" size="icon-sm" className="link" onClick={() => void expand(gap, 'all')}>
           <ActionIcon name="expand" label={`展开全部${hidden !== null ? ` (${hidden} 行)` : ''}`} count={hidden ?? undefined} />
-        </button>
+        </Button>
         {!isLast && (
-          <button className="link" onClick={() => void expand(gap, 'bottom')} title="展开紧接下一个 hunk 之前的 20 行">
+          <Button variant="ghost" size="icon-sm" className="link" onClick={() => void expand(gap, 'bottom')} title="展开紧接下一个 hunk 之前的 20 行">
             <ActionIcon name="down" label={`展开下方 ${EXPAND_STEP} 行`} />
-          </button>
+          </Button>
         )}
       </div>
     );
@@ -515,7 +499,9 @@ export function DiffView({ diff }: { diff: FileDiff }) {
   const renderFoldToggle = (block: Block | undefined) => (
     <span className="foldc">
       {block && (
-        <button
+        <Button
+          variant="outline"
+          size="sm"
           className={`fold-btn ${block.open ? '' : 'shut'}`}
           onClick={() => toggleBlock(block.id)}
           aria-expanded={block.open}
@@ -524,14 +510,14 @@ export function DiffView({ diff }: { diff: FileDiff }) {
           <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
             <path d="M3 2l4 3-4 3" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
-        </button>
+        </Button>
       )}
     </span>
   );
   // What a shut block holds, changes first: a pick dragged across it takes none of them.
   const renderFoldChip = (block: Block | undefined) =>
     block && !block.open ? (
-      <button className="fold-chip" onClick={() => toggleBlock(block.id)} title="展开这段代码">
+      <Button variant="ghost" size="sm" className="fold-chip" onClick={() => toggleBlock(block.id)} title="展开这段代码">
         ⋯ {block.lines.length} 行
         {(block.adds > 0 || block.dels > 0) && (
           <>
@@ -539,7 +525,7 @@ export function DiffView({ diff }: { diff: FileDiff }) {
             {block.dels > 0 && <span className="del"> −{block.dels}</span>}
           </>
         )}
-      </button>
+      </Button>
     ) : null;
 
   const renderUnified = (row: Extract<Row, { kind: 'line' }>) => {
@@ -566,9 +552,9 @@ export function DiffView({ diff }: { diff: FileDiff }) {
         {renderFoldToggle(row.block)}
         <span className="addc">
           {!row.expanded && no !== undefined && (
-            <button className="add-btn" onMouseDown={(e) => startSel(e, side, row.hunkIndex, no)} title="添加评论（可拖选多行）">
+            <Button variant="ghost" size="sm" className="add-btn" onMouseDown={(e) => startSel(e, side, row.hunkIndex, no)} title="添加评论（可拖选多行）">
               +
-            </button>
+            </Button>
           )}
         </span>
         <span className="marker">{l.type === 'add' ? '+' : l.type === 'del' ? '-' : ' '}</span>
@@ -607,9 +593,9 @@ export function DiffView({ diff }: { diff: FileDiff }) {
         {renderFoldToggle(block)}
         <span className="addc">
           {!expanded && no !== undefined && (
-            <button className="add-btn" onMouseDown={(e) => startSel(e, side, hunkIndex, no)} title="添加评论（可拖选多行）">
+            <Button variant="ghost" size="sm" className="add-btn" onMouseDown={(e) => startSel(e, side, hunkIndex, no)} title="添加评论（可拖选多行）">
               +
-            </button>
+            </Button>
           )}
         </span>
         <span className="code">
@@ -626,14 +612,16 @@ export function DiffView({ diff }: { diff: FileDiff }) {
     const what = changed === row.lines.length ? `${changed} 行调试代码改动` : `${row.lines.length} 行调试代码（${changed} 行改动）`;
     return (
       <div className={`row debug-row ${row.open ? 'open' : ''}`}>
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           className="link"
           onClick={() => toggleDebug(row.id)}
           aria-expanded={row.open}
           title="调试块或标了 nocommit 的行；整个文件或整个 hunk 暂存时会跳过"
         >
           {row.open ? `收起 ${what}` : `已折叠 ${what}`}
-        </button>
+        </Button>
       </div>
     );
   };
@@ -651,7 +639,9 @@ export function DiffView({ diff }: { diff: FileDiff }) {
               @@ -{row.hunk.oldStart},{row.hunk.oldLines} +{row.hunk.newStart},{row.hunk.newLines} @@ <span className="muted">{row.hunk.header}</span>
             </span>
             {mode && (
-              <button
+              <Button
+                variant="ghost"
+                size="sm"
                 className="link hunk-stage"
                 disabled={staging}
                 onClick={() => void stageLines(diff.path, [{ index: row.hunkIndex }])}
@@ -662,7 +652,7 @@ export function DiffView({ diff }: { diff: FileDiff }) {
                 }
               >
                 {mode === 'stage' ? '暂存此 hunk' : '取消暂存此 hunk'}
-              </button>
+              </Button>
             )}
           </div>
         );

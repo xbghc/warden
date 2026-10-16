@@ -6,7 +6,7 @@ import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Hono } from 'hono';
 import type { Comment, CreateWorktreeResponse, FilesResponse, ReleaseWorktreeResponse, RepoInfo, WorktreeDetail, WorktreesResponse } from '@warden/shared';
-import { createApp, NvimService, resolveRepo, StateStore, takeFeedback } from '@warden/server';
+import { createApp, resolveRepo, StateStore, takeFeedback } from '@warden/server';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
 // Clone slots: a repository of its own beside the main worktree, made from it on this machine and
@@ -79,7 +79,7 @@ beforeEach(async () => {
   git(fx.root, 'switch', '-q', 'main');
   const repo = await resolveRepo(fx.root);
   store = new StateStore(path.join(dataDir, 'state.json'), repo.commonRoot);
-  app = createApp({ repo, store, nvim: new NvimService([path.join(dataDir, 'none')]) });
+  app = createApp({ repo, store });
 });
 
 afterEach(async () => {
@@ -265,7 +265,7 @@ describe('a clone slot', () => {
     const dir = made.worktree.path;
     const inClone = await resolveRepo(dir);
     expect(inClone).toEqual({ root: dir, commonRoot: await realpath(fx.root) });
-    const there = createApp({ repo: inClone, store: new StateStore(path.join(dataDir, 'state.json'), inClone.commonRoot), nvim: new NvimService([]) });
+    const there = createApp({ repo: inClone, store: new StateStore(path.join(dataDir, 'state.json'), inClone.commonRoot) });
     expect((await json<RepoInfo>(await there.request('/api/repo'))).defaultTarget).toBe(`worktree:${dir}:working`);
 
     await writeFile(path.join(dir, 'src/b.ts'), 'export const b = 3;\n');

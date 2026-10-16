@@ -10,6 +10,42 @@ import { resolveRepo } from './repo.js';
 import { makeFixtureRepo } from '../../../test/fixtures/make-repo.js';
 
 describe('tmux integration', () => {
+  it('sends configured literal text and explicit keys only to a validated workspace pane', async () => {
+    const fx = await makeFixtureRepo();
+    const data = await mkdtemp(path.join(os.tmpdir(), 'warden-command-'));
+    try {
+      const repo = await resolveRepo(fx.root);
+      const store = new StateStore(path.join(data, 'state.json'), repo.commonRoot);
+      let panes = '%3\t1\t1\n%4\t1\t0\n';
+      const run = vi.fn(async (args: string[]) => (args[0] === 'list-panes' ? panes : ''));
+      const app = createApp({ repo, store, tmux: new TmuxService(run) });
+      const request = (method: string, route: string, body: unknown) =>
+        app.request(`/api/workspace/${route}`, {
+          method,
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+      const text = 'review $(literal) and `literal`';
+      const config = { commands: [{ id: 'prompt', label: 'Fill prompt', text }], hooks: {} };
+      expect((await request('PUT', 'config', { ...config, commands: [{ ...config.commands[0], keys: ['-t %8'] }] })).status).toBe(400);
+      expect((await request('PUT', 'config', { ...config, commands: [...config.commands, ...config.commands] })).status).toBe(400);
+      expect((await request('PUT', 'config', config)).status).toBe(200);
+      expect((await request('POST', 'commands/missing', { path: repo.root })).status).toBe(404);
+      expect((await request('POST', 'commands/prompt', { path: data })).status).toBe(400);
+      expect(run).not.toHaveBeenCalled();
+      expect((await request('POST', 'commands/prompt', { path: repo.root })).status).toBe(200);
+      expect(run.mock.calls.filter(([args]) => args[0] === 'send-keys')).toEqual([[['send-keys', '-t', '%3', '-l', '--', text]]]);
+      await request('PUT', 'config', { commands: [{ id: 'submit', label: 'Submit', keys: ['Enter'] }], hooks: {} });
+      await request('POST', 'commands/submit', { path: repo.root });
+      expect(run).toHaveBeenLastCalledWith(['send-keys', '-t', '%3', '--', 'Enter']);
+      panes = '';
+      expect((await request('POST', 'commands/submit', { path: repo.root })).status).toBe(409);
+    } finally {
+      await fx.cleanup();
+      await rm(data, { recursive: true, force: true });
+    }
+  });
+
   it('only opens sessions for registered worktrees through the API', async () => {
     const fx = await makeFixtureRepo();
     try {

@@ -20,9 +20,6 @@ import type {
   FilesResponse,
   FullFileResponse,
   MoveRequest,
-  NvimInstancesResponse,
-  NvimOpenRequest,
-  NvimOpenResponse,
   Prefs,
   ReanchorRequest,
   ReanchorResponse,
@@ -62,7 +59,7 @@ import {
 import { badRequest, HttpError, notFound } from './errors.js';
 import { COMMIT_FORMAT, parseCommitLog } from './commits.js';
 import { applyToIndex, mergeBase, refExists, revParse, runGit } from './git.js';
-import { currentBranch, getRepoInfo, listWorktrees, remoteDefault, type RepoContext } from './repo.js';
+import { currentBranch, getRepoInfo, listWorktrees, remoteDefault, slotPath, type RepoContext } from './repo.js';
 import { annotateDebug, getFileDiff, getFullFile, listTargetDiffs, literal, resolveTargetContext, toSummary, type TargetContext } from './targets.js';
 import { buildAnchor, reanchorComment } from './anchor.js';
 import { buildStagePatch } from './patch.js';
@@ -71,15 +68,17 @@ import { checkoutWorktree, listBranches, listWorktreesDetailed, lookupRemoteBran
 import { ensureTarget, forgetWorktreeTargets, type StateStore, unlinkComments } from './state.js';
 import { formatCommentsExport, formatTodoExport } from './export.js';
 import { addReply } from './feedback.js';
-import { chooseNvim, NvimService } from './nvim.js';
 import { TmuxService } from './tmux.js';
+import { WorkflowService } from './workflow.js';
+import { PreviewService } from './preview.js';
+import { HistoryService } from './history.js';
+import { workspaceConfig } from './workspace.js';
 import { DEFAULT_POLL_INTERVAL_MS, RepoWatcher } from './watcher.js';
 import { serveStaticFile } from './static.js';
 
 export interface AppOptions {
   repo: RepoContext;
   store: StateStore;
-  nvim?: NvimService;
   tmux?: TmuxService;
   /** Directory of the built web app; when omitted only /api is served. */
   webDir?: string;
@@ -107,7 +106,6 @@ const LISTING_HINT_TTL_MS = 5 * 60_000;
 
 export function createApp(opts: AppOptions): Hono {
   const { repo, store } = opts;
-  const nvim = opts.nvim ?? new NvimService();
   const app = new Hono();
 
   /** Last listing per target: only used to recover rename/untracked hints for single-file requests. */
@@ -283,12 +281,10 @@ export function createApp(opts: AppOptions): Hono {
     const prefs = await store.update((s) => {
       if (body.viewMode === 'unified' || body.viewMode === 'split') s.prefs.viewMode = body.viewMode;
       if (typeof body.lastTarget === 'string') s.prefs.lastTarget = body.lastTarget;
+      if (body.lastPanel === 'orchestration' || body.lastPanel === 'diff' || body.lastPanel === 'commits') s.prefs.lastPanel = body.lastPanel;
       if (typeof body.autoRefresh === 'boolean') s.prefs.autoRefresh = body.autoRefresh;
       if (typeof body.railOpen === 'boolean') s.prefs.railOpen = body.railOpen;
       if (typeof body.ignoreDebug === 'boolean') s.prefs.ignoreDebug = body.ignoreDebug;
-      if (body.nvimSocketByRoot && typeof body.nvimSocketByRoot === 'object') {
-        s.prefs.nvimSocketByRoot = { ...s.prefs.nvimSocketByRoot, ...body.nvimSocketByRoot };
-      }
       return s.prefs;
     });
     return c.json(prefs);
@@ -905,6 +901,83 @@ export function createApp(opts: AppOptions): Hono {
 
   // ---- worktrees -----------------------------------------------------------
 
+  const workflow = new WorkflowService(repo, store);
+  const preview = new PreviewService(repo, store);
+  const history = new HistoryService(repo, store);
+  api.get('/preview', async (c) => c.json(await preview.get()));
+  api.put('/preview', async (c) => c.json(await preview.set((await c.req.json())?.connectedIds)));
+  api.post('/preview/refresh', async (c) => c.json(await preview.refresh()));
+  api.get('/workflow/rebase-checks', async (c) => c.json(await workflow.rebaseChecks()));
+  api.post('/workflow/rebase', async (c) => {
+    const result = await workflow.rebaseBatch(await c.req.json());
+    worktreeCache = null;
+    return c.json(result);
+  });
+  api.get('/history', async (c) => c.json(await history.get()));
+  api.post('/history/preview', async (c) => c.json(await history.preview(await c.req.json())));
+  api.post('/history/apply', async (c) => c.json(await history.apply(await c.req.json())));
+  api.put('/workspace/config', async (c) => {
+    const config = workspaceConfig(await c.req.json());
+    await store.update((state) => {
+      state.workspaceConfig = config;
+    });
+    return c.json(config);
+  });
+  api.post('/workflow/changes/:id/hook', async (c) => c.json(await workflow.retryHook(c.req.param('id'))));
+  api.get('/workflow', async (c) => c.json(await workflow.get()));
+  api.put('/workflow', async (c) => {
+    const body = await c.req.json();
+    if (typeof body?.developmentBranch !== 'string') throw badRequest('developmentBranch is required');
+    return c.json(await workflow.configure(body.developmentBranch));
+  });
+  api.post('/workflow/changes', async (c) => {
+    const body = await c.req.json();
+    if (!body || typeof body.title !== 'string' || (body.worktree !== undefined && typeof body.worktree !== 'string')) throw badRequest('invalid change');
+    const result = await workflow.create(body);
+    worktreeCache = null;
+    return c.json(result, 201);
+  });
+  api.patch('/workflow/changes/:id', async (c) => {
+    const body = await c.req.json();
+    if (!body || typeof body !== 'object' || Array.isArray(body)) throw badRequest('invalid change');
+    return c.json(await workflow.update(c.req.param('id'), body));
+  });
+  api.post('/workflow/changes/:id/start', async (c) => {
+    const body = await c.req.json();
+    if (!body || typeof body !== 'object' || Array.isArray(body)) throw badRequest('invalid assignment');
+    const result = await workflow.start(c.req.param('id'), body);
+    worktreeCache = null;
+    return c.json(result);
+  });
+  api.post('/workflow/changes/:id/move', async (c) => c.json(await workflow.move(c.req.param('id'), (await c.req.json())?.before)));
+  api.post('/workflow/import-todos/:id', async (c) => c.json(await workflow.importTodo(c.req.param('id'))));
+  api.post('/workflow/changes/:id/sync', async (c) => {
+    const body = await c.req.json();
+    if (typeof body?.sourceHead !== 'string') throw badRequest('sourceHead is required');
+    const result = await workflow.sync(c.req.param('id'), body.sourceHead);
+    worktreeCache = null;
+    return c.json(result);
+  });
+  api.post('/workflow/changes/:id/ready', async (c) => c.json(await workflow.ready(c.req.param('id'))));
+  api.post('/workflow/changes/:id/resume', async (c) => c.json(await workflow.resume(c.req.param('id'))));
+  api.post('/workflow/changes/:id/prepare', async (c) => {
+    const result = await workflow.prepare(c.req.param('id'), await c.req.json());
+    worktreeCache = null;
+    return c.json(result);
+  });
+  api.post('/workflow/changes/:id/accept', async (c) => {
+    const result = await workflow.accept(c.req.param('id'), await c.req.json());
+    worktreeCache = null;
+    return c.json(result);
+  });
+
+  const assertUnassigned = async (worktree: string) => {
+    const held = (await store.load()).workflow?.changes.find(
+      (row) => row.status !== 'accepted' && (row.worktree === worktree || row.integration?.worktree === worktree),
+    );
+    if (held) throw new HttpError(409, '该工位有进行中的任务，请通过任务的验证提交流程完成', 'active_change');
+  };
+
   const tmux = opts.tmux ?? new TmuxService();
   // One session per worktree, in its directory, created detached: getting into it is the reviewer's.
   api.post('/tmux/sessions', async (c) => {
@@ -914,6 +987,36 @@ export function createApp(opts: AppOptions): Hono {
     if (!wt) throw badRequest('unknown worktree', 'unknown_worktree');
     const res = await tmux.openSession(wt.path);
     return c.json(res, res.created ? 201 : 200);
+  });
+
+  api.post('/workspace/commands/:id', async (c) => {
+    const body = await c.req.json();
+    if (typeof body?.path !== 'string') throw badRequest('path is required');
+    return store.withRepositoryLock(async () => {
+      const state = await store.load();
+      const command = state.workspaceConfig?.commands.find((row) => row.id === c.req.param('id'));
+      if (!command) throw notFound('自定义命令不存在', 'unknown_command');
+      const wt = (await listWorktreesDetailed(repo)).find((row) => row.path === body.path && !row.bare && !row.prunable && !row.foreign);
+      if (!wt) throw badRequest('unknown worktree', 'unknown_worktree');
+      if (state.workflow?.changes.some((row) => row.status === 'integrating' && row.worktree === wt.path))
+        throw new HttpError(409, '此任务正在合入，完成或撤回后再发送命令', 'change_integrating');
+      return c.json(await tmux.send(wt.path, command));
+    });
+  });
+
+  api.post('/workspace/input', async (c) => {
+    const body = await c.req.json();
+    if (typeof body?.path !== 'string') throw badRequest('path is required');
+    const command = workspaceConfig({ commands: [{ id: 'input', label: '输入', text: body.text, keys: body.keys }], hooks: {} }).commands[0]!;
+    return store.withRepositoryLock(async () => {
+      const state = await store.load();
+      const wt = (await listWorktreesDetailed(repo)).find((row) => row.path === body.path && !row.bare && !row.prunable && !row.foreign);
+      if (!wt || !state.workflow?.changes.some((row) => row.worktree === wt.path && row.status !== 'accepted'))
+        throw badRequest('unknown workspace', 'unknown_worktree');
+      if (state.workflow.changes.some((row) => row.worktree === wt.path && row.status === 'integrating'))
+        throw new HttpError(409, '此工作区正在准备提交', 'change_integrating');
+      return c.json(await tmux.send(wt.path, command));
+    });
   });
 
   api.get('/worktrees', async (c) => {
@@ -962,7 +1065,10 @@ export function createApp(opts: AppOptions): Hono {
   // one after the other, each reads what the last one did.
   let worktreeWrites: Promise<unknown> = Promise.resolve();
   const oneAtATime = <T>(fn: () => Promise<T>): Promise<T> => {
-    const run = worktreeWrites.then(fn, fn);
+    const run = worktreeWrites.then(
+      () => store.withRepositoryLock(fn),
+      () => store.withRepositoryLock(fn),
+    );
     worktreeWrites = run.catch(() => undefined);
     return run;
   };
@@ -974,7 +1080,15 @@ export function createApp(opts: AppOptions): Hono {
     if (body.slot !== undefined && (!Number.isInteger(body.slot) || body.slot < 1)) throw badRequest('slot must be a positive integer', 'invalid_slot');
     if (body.kind !== undefined && body.kind !== 'clone' && body.kind !== 'worktree') throw badRequest('kind must be clone or worktree', 'invalid_kind');
     if (body.fetch !== undefined && typeof body.fetch !== 'boolean') throw badRequest('fetch must be a boolean');
-    const res = await oneAtATime(() => checkoutWorktree(repo, body));
+    const res = await oneAtATime(async () => {
+      const held = (await store.load()).workflow?.changes.filter((row) => row.status !== 'accepted') ?? [];
+      if (held.length && body.slot === undefined) {
+        const list = await listWorktreesDetailed(repo);
+        body.slot = list.find((row) => row.free && !held.some((change) => change.worktree === row.path))?.slot ?? (await nextSlot(repo, list)).slot;
+      }
+      if (body.slot !== undefined) await assertUnassigned(slotPath(repo, body.slot));
+      return checkoutWorktree(repo, body);
+    });
     worktreeCache = null;
     await store.update((s) => {
       // Whatever was reviewed in this slot before was another branch; its state does not carry over.
@@ -988,7 +1102,10 @@ export function createApp(opts: AppOptions): Hono {
   api.post('/worktrees/release', async (c) => {
     const body = (await c.req.json()) as ReleaseWorktreeRequest;
     if (typeof body.path !== 'string') throw badRequest('path is required');
-    const res = await oneAtATime(() => releaseWorktree(repo, body));
+    const res = await oneAtATime(async () => {
+      await assertUnassigned(path.resolve(body.path));
+      return releaseWorktree(repo, body);
+    });
     worktreeCache = null;
     return c.json(res);
   });
@@ -996,7 +1113,10 @@ export function createApp(opts: AppOptions): Hono {
   api.post('/worktrees/remove', async (c) => {
     const body = (await c.req.json()) as RemoveWorktreeRequest;
     if (typeof body.path !== 'string') throw badRequest('path is required');
-    const res = await oneAtATime(() => removeWorktree(repo, body));
+    const res = await oneAtATime(async () => {
+      await assertUnassigned(path.resolve(body.path));
+      return removeWorktree(repo, body);
+    });
     worktreeCache = null;
     return c.json(res);
   });
@@ -1045,72 +1165,6 @@ export function createApp(opts: AppOptions): Hono {
         release();
       }
     });
-  });
-
-  // ---- nvim --------------------------------------------------------------
-
-  api.get('/nvim/instances', async (c) => {
-    const root = c.req.query('root') || repo.root;
-    const force = c.req.query('rescan') === '1';
-    const scan = await nvim.scan(force);
-    const instances = NvimService.matching(scan.instances, root);
-    const state = await store.load();
-    const preferred = state.prefs.nvimSocketByRoot[root];
-    const choice = chooseNvim(instances, [preferred]);
-    const selected = 'socket' in choice ? choice.socket : undefined;
-    const res: NvimInstancesResponse = { root, nvimAvailable: scan.nvimAvailable, instances, selected, scannedAt: scan.scannedAt };
-    return c.json(res);
-  });
-
-  api.post('/nvim/select', async (c) => {
-    const body = (await c.req.json()) as { root?: string; socket?: string };
-    if (!body.root || !body.socket) throw badRequest('root and socket are required');
-    await store.update((s) => {
-      s.prefs.nvimSocketByRoot[body.root!] = body.socket!;
-    });
-    return c.json({ ok: true });
-  });
-
-  // The click decides which nvim, not an earlier scan: nvim is started, quit and restarted while
-  // the page stays open, and a list the page fetched at load would send the click nowhere or to a
-  // socket that is gone. The cached scan answers first, being cheap; when it cannot pick, or the
-  // instance it picked does not answer, a fresh scan settles it and the click is not lost.
-  api.post('/nvim/open', async (c) => {
-    const body = (await c.req.json()) as NvimOpenRequest;
-    if (!body.absPath) throw badRequest('absPath is required');
-    if (!path.isAbsolute(body.absPath)) throw badRequest('absPath must be absolute');
-    const root = await knownRoot(body.root);
-    const wanted = [body.socket, (await store.load()).prefs.nvimSocketByRoot[root]];
-    const line = Number(body.line) || 1;
-    const pick = async (force: boolean) => {
-      const scan = await nvim.scan(force);
-      if (!scan.nvimAvailable) throw badRequest('nvim is not on PATH', 'nvim_unavailable');
-      return { matching: NvimService.matching(scan.instances, root), choice: chooseNvim(NvimService.matching(scan.instances, root), wanted) };
-    };
-    let { choice } = await pick(false);
-    if ('error' in choice) choice = (await pick(true)).choice;
-    if ('error' in choice) {
-      if (choice.error === 'none') throw notFound(`no nvim is open inside ${root}`, 'nvim_none');
-      throw new HttpError(409, `several nvim instances are open inside ${root}; select one`, 'nvim_ambiguous');
-    }
-    try {
-      await nvim.open(choice.socket, body.absPath, line);
-      const res: NvimOpenResponse = { ok: true, socket: choice.socket };
-      return c.json(res);
-    } catch (e) {
-      const failure = new HttpError(502, e instanceof Error ? e.message : String(e), 'nvim_failed');
-      // An instance that still answers a scan refused the file itself (say, E37): that is its
-      // answer, not a reason to send the file to another editor. One that is gone is replaced.
-      const fresh = await pick(true);
-      if (fresh.matching.some((i) => i.socket === choice.socket) || 'error' in fresh.choice) throw failure;
-      try {
-        await nvim.open(fresh.choice.socket, body.absPath, line);
-      } catch (e2) {
-        throw new HttpError(502, e2 instanceof Error ? e2.message : String(e2), 'nvim_failed');
-      }
-      const res: NvimOpenResponse = { ok: true, socket: fresh.choice.socket };
-      return c.json(res);
-    }
   });
 
   app.route('/api', api);

@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Hono } from 'hono';
 import type { CommitsResponse, FilesResponse } from '@warden/shared';
-import { createApp, NvimService, resolveRepo, StateStore } from '@warden/server';
+import { createApp, resolveRepo, StateStore } from '@warden/server';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
 // The repository's own git config reaches every command warden parses. Each setting here once
@@ -35,7 +35,7 @@ beforeAll(async () => {
   fx.git('add', '.gitattributes');
   fx.git('commit', '-q', '-m', 'attributes');
   const repo = await resolveRepo(fx.root);
-  app = createApp({ repo, store: new StateStore(path.join(dataDir, 'state.json'), repo.commonRoot), nvim: new NvimService([path.join(dataDir, 'none')]) });
+  app = createApp({ repo, store: new StateStore(path.join(dataDir, 'state.json'), repo.commonRoot) });
 });
 
 afterAll(async () => {

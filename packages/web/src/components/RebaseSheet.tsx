@@ -1,0 +1,143 @@
+import { useEffect, useState } from 'react';
+import type { RebaseBatchResponse, RebaseCheck } from '@warden/shared';
+import { RefreshCw } from 'lucide-react';
+import { api } from '../api';
+import { useWorkflow } from '../workflow-store';
+import { useWorkbench } from '../workbench-store';
+import { useWorkbenchData, errorMessage } from '../workbench-data';
+import { useStore } from '../store';
+import { Button } from './ui/button';
+import { Checkbox } from './ui/checkbox';
+import { Sheet } from './ui/sheet';
+import { OperationError } from './TaskWorkspace';
+
+export const checkLabel = (check?: RebaseCheck) =>
+  check ? { current: '已是最新', ready: '预计可直接 rebase', conflict: '预计有冲突', blocked: '存在阻碍', unknown: '尚不能判断' }[check.status] : '尚未检查';
+
+export function RebaseSheet() {
+  const open = useWorkbench((state) => state.sheet === 'sync');
+  const { checks, errors, checking } = useWorkbenchData();
+  const { data, checkouts } = useWorkflow();
+  const tasks =
+    data?.workflow?.changes.filter((task) => task.worktree && task.status !== 'accepted' && task.developmentBranch === data.workflow?.developmentBranch) ?? [];
+  const [selected, setSelected] = useState<string[]>([]);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [results, setResults] = useState<RebaseBatchResponse['results']>([]);
+  useEffect(() => {
+    setSelected([]);
+    setResults([]);
+    setError(null);
+  }, [data?.workflow?.developmentBranch]);
+  const stale = (check?: RebaseCheck) =>
+    !check ||
+    !!errors.checks ||
+    check.developmentHead !== data?.developmentHead ||
+    check.sourceHead !== checkouts?.worktrees.find((row) => row.path === tasks.find((task) => task.id === check.changeId)?.worktree)?.head;
+  const run = async () => {
+    setPending(true);
+    setError(null);
+    setResults([]);
+    const items = checks.filter((check) => selected.includes(check.changeId) && check.status === 'ready' && !stale(check));
+    const skipped: RebaseBatchResponse['results'] = selected
+      .filter((id) => !items.some((check) => check.changeId === id))
+      .map((changeId) => {
+        const check = checks.find((row) => row.changeId === changeId);
+        return { changeId, status: 'skipped', message: stale(check) ? '检查未知或已过期，请重新检查' : (check?.message ?? checkLabel(check)) };
+      });
+    try {
+      const response = items.length
+        ? await api.rebaseWorkspaces({ items: items.map(({ changeId, sourceHead, developmentHead }) => ({ changeId, sourceHead, developmentHead })) })
+        : { results: [] };
+      setResults([...response.results, ...skipped]);
+      await Promise.all([useWorkflow.getState().refresh(), useWorkbenchData.getState().refresh(), useStore.getState().refresh()]);
+    } catch (error) {
+      setError(errorMessage(error));
+      setResults(skipped);
+    } finally {
+      setPending(false);
+    }
+  };
+  return (
+    <Sheet
+      open={open}
+      onOpenChange={(value) => {
+        if (!value) useWorkbench.getState().setSheet(null);
+      }}
+      title="同步工作区"
+      description={`基于 ${data?.workflow?.developmentBranch ?? '主开发分支'} · ${data?.developmentHead?.slice(0, 8) ?? '未知版本'}`}
+      wide
+    >
+      <div className="wb-form">
+        <div className="wb-actions">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={checking || pending}
+            onClick={() => void Promise.all([useWorkflow.getState().refresh(), useWorkbenchData.getState().refresh()])}
+          >
+            <RefreshCw size={14} />
+            {checking ? '检查中…' : '重新检查'}
+          </Button>
+          {checks[0]?.checkedAt && <span className="muted small">检查于 {new Date(checks[0].checkedAt).toLocaleTimeString('zh-CN')}</span>}
+        </div>
+        <OperationError message={error ?? errors.checks} />
+        <table className="wb-table wb-rebase-table">
+          <thead>
+            <tr>
+              <th>
+                <Checkbox
+                  aria-label="选择全部工作区"
+                  checked={tasks.length > 0 && tasks.every((task) => selected.includes(task.id))}
+                  onCheckedChange={(value) => setSelected(value === true ? tasks.map((task) => task.id) : [])}
+                />
+              </th>
+              <th>工作区</th>
+              <th>检查结论</th>
+            </tr>
+          </thead>
+          <tbody>
+            {tasks.map((task) => {
+              const check = checks.find((row) => row.changeId === task.id);
+              const result = results.find((row) => row.changeId === task.id);
+              return (
+                <tr key={task.id}>
+                  <td>
+                    <Checkbox
+                      aria-label={`选择 ${task.title}`}
+                      checked={selected.includes(task.id)}
+                      disabled={pending}
+                      onCheckedChange={(value) => setSelected(value === true ? [...selected, task.id] : selected.filter((id) => id !== task.id))}
+                    />
+                  </td>
+                  <td>
+                    <strong>{task.title}</strong>
+                    <small>{task.branch}</small>
+                  </td>
+                  <td>
+                    <span>{stale(check) ? '检查未知或已过期' : checkLabel(check)}</span>
+                    {check?.message && <small>{check.message}</small>}
+                    {check?.files?.map((path) => (
+                      <code key={path}>{path}</code>
+                    ))}
+                    {result && (
+                      <div className={`wb-batch-result${result.status === 'failed' ? ' has-error' : ''}`}>
+                        {{ updated: '已更新', skipped: '未执行', failed: '执行未成功' }[result.status]}
+                        {result.message && `：${result.message}`}
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {tasks.length === 0 && <p className="wb-empty-inline">尚无可同步的工作区。</p>}
+        <p className="muted small">执行前会复查 Git 状态。预计冲突、未知或有阻碍的工作区不会执行；已有修改会保留。</p>
+        <Button disabled={pending || !selected.some((id) => tasks.some((task) => task.id === id))} onClick={() => void run()}>
+          {pending ? '执行中…' : `Rebase 所选 ${selected.filter((id) => tasks.some((task) => task.id === id)).length} 个工作区`}
+        </Button>
+      </div>
+    </Sheet>
+  );
+}

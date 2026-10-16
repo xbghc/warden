@@ -2,6 +2,23 @@
 
 What warden can put under review, and the ways to mark it done.
 
+This guide describes the current implementation. The [workflow contract](workflow.md#review-first-then-squash)
+places user review before squash and uses commit history for requirement acceptance; it does not
+require an agent-delivery protocol or a separate final-approval flow.
+
+Select a task in the left work plan, then a file. This directly opens its undelivered diff;
+there is no separate review-mode switch. The baseline is the last delivered source tip, or the
+primary baseline already incorporated by the workspace. Live uncommitted edits remain visible;
+formal delivery in this version requires a clean committed source.
+
+The task page is read-only for source files. Comments and viewed marks support review. Preparation
+isolates this delivery in the primary index; the page supports a message and ordinary Git commit
+with hooks. No validation checkbox or readiness declaration is required. Failed hooks preserve
+files; successful delivery preserves the workspace. See [Squash acceptance](worktrees.md#squash-acceptance).
+
+The target APIs below remain available to older clients and underpin diff rendering. Some legacy
+staging/checkpoint navigation described here is not exposed in the new task-focused page.
+
 ## Targets (what is being reviewed)
 
 | Target | Key | Git equivalent |
@@ -20,18 +37,19 @@ What warden can put under review, and the ways to mark it done.
 
 Refs accept anything git can resolve (`main`, `v1.2`, `HEAD~3`, a sha). `@` is `HEAD`.
 Worktrees are discovered with `git worktree list`, and clone slots beside the main worktree (see
-[Clone slots](worktrees.md#clone-slots)); both are made in the *Worktree* view and share the review
+[Clone slots](worktrees.md#clone-slots)); both are made in *任务编排* and share the review
 state of the main repository.
 One whose directory is gone (git lists it as *prunable*) is not offered, and a remembered target
 inside a removed worktree falls back to the working tree on the next load. The comments and viewed
 flags kept under a worktree's key stay in the state file until a branch is checked out into that
 slot again, which drops them: they were about another branch.
 
-The sidebar is the navigation, and the only navigation: the picker at its top — *工作区*, *提交历史*,
-*Worktree* — fills the left column with the controls for what the middle is showing, and the top bar
-carries none of it. There is no separate target switcher: *工作区*'s two blocks *are* the working
-tree, a commit is picked from the *提交历史* list, and the *审阅整条分支* and *对比两个 ref* forms below
-its filters open the other two. While a commit, range or branch is under review the picker gains an
+Navigation stays together in the left sidebar: *主目录预览*, *提交历史*, ordered tasks and the
+synchronization/settings sheets. Within a task, its file list selects the diff directly. Connection
+selection is independent and belongs to the primary preview page.
+
+*工作区*'s two blocks are the working tree, a commit is picked from the *提交历史* list, and the
+*审阅整条分支* and *对比两个 ref* forms below its filters open the other two. While a commit, range or branch is under review the picker gains an
 entry naming it — *提交 89d8ba2*, *main..feature*, *分支 vs main* — and reads that while its files are
 in front, so the control at the top of the column says what the files below belong to; *工作区* is
 then the way back.
@@ -136,7 +154,7 @@ working tree now — whatever was staged or committed in between does not show, 
 - *新建检查点*, under the progress figure in 工作区, takes one: tracked and untracked files as they are
   on disk, ignored ones left out. *对比检查点 #n* beside it opens the newest. A checkpoint of a working
   tree that has not changed since the newest one is not taken twice; that one is handed back.
-- Handing comments to the agent takes one by itself — *复制评论*, *复制此条*, a todo's *复制* when it carries comments, or
+- Handing comments to the agent takes one by itself — *复制评论*, *复制此条*, a task's *复制任务给 agent* when it carries comments, or
   the agent's own `warden feedback` — in each worktree the comments are about, marked *交付反馈* in
   the list. A round is the reviewer's, not the agent's: it ends when feedback goes out, however many
   turns the agent then takes, so *对比检查点* afterwards shows what it did about that feedback and

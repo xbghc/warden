@@ -21,13 +21,9 @@ import { clonedBranch, discardClone, dropCloneBranch, fetchClone, makeClone, rem
 export { slotOf, slotPath } from './repo.js';
 
 /** Entries `git status` reports, renames counted once: what a worktree would lose if removed. */
-async function dirtyCount(cwd: string): Promise<number> {
-  try {
-    const r = await runGit(['status', '--porcelain', '--untracked-files=all'], { cwd });
-    return r.stdout.split('\n').filter((l) => l.trim()).length;
-  } catch {
-    return 0;
-  }
+export async function dirtyCount(cwd: string): Promise<number> {
+  const r = await runGit(['status', '--porcelain', '--untracked-files=all'], { cwd });
+  return r.stdout.split('\n').filter((l) => l.trim()).length;
 }
 
 /** A local branch's upstream, as `git branch -vv` shows it. */
@@ -90,7 +86,7 @@ const IN_PROGRESS: [string, string][] = [
  * nothing may be stopped halfway in it, since a release, a reuse or a removal would throw the
  * half-done rebase or merge away.
  */
-async function checkoutState(ctx: RepoContext, wt: WorktreeInfo): Promise<{ foreign: boolean; busy?: string }> {
+export async function checkoutState(ctx: RepoContext, wt: WorktreeInfo): Promise<{ foreign: boolean; busy?: string }> {
   const dir = wt.path;
   if (wt.clone) {
     if (!(await isCloneOf(ctx.commonRoot, dir))) return { foreign: true };
@@ -128,7 +124,7 @@ export async function listWorktreesDetailed(ctx: RepoContext): Promise<WorktreeD
   const details = await Promise.all(
     all.map(async (w) => {
       const slot = w.isMain || w.bare ? undefined : slotOf(ctx, w.path);
-      const dirty = w.prunable || w.bare ? 0 : await dirtyCount(w.path);
+      const dirty = w.prunable || w.bare ? 0 : await dirtyCount(w.path).catch(() => -1);
       const state = slot === undefined || w.prunable ? { foreign: false } : await checkoutState(ctx, w);
       const detail: WorktreeDetail = {
         ...w,

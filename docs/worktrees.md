@@ -1,132 +1,130 @@
-# Worktrees
+# Worktrees and tasks
 
-One checkout per agent — a clone of its own or a linked worktree — in numbered slots that keep their
-dependencies.
+Warden follows the [workflow contract](workflow.md). Choose an explicit local **primary development
+branch** (主开发分支), such as `feature/order`, for one requirement. All edits belong in task
+worktrees; dependencies, development servers and user-run validation belong in its primary directory.
+Workspace creation does not install dependencies or launch an agent.
+
+## Development workflow
+
+The left navigation holds the ordered work plan. Add a task and its notes, reorder it, and select
+*创建工作区* when needed. Planning does not create a Git branch or pin a baseline. A task can use
+a new numbered worktree, an available detached slot, or a validated existing numbered checkout.
+The default is a linked Git worktree. Ordering never enforces dependencies.
+
+A workspace corresponds to one linear task. It can contain multiple local commits and make multiple
+deliveries without being recycled. There is no task-complete declaration or release step. Editing
+notes and ordering remain available while work is in progress. Historical TODO descriptions and
+comment links are retained; old checked items migrate as archived notes, not accepted commits.
+
+The primary branch can change when no integration or connection is using the primary directory.
+Tasks remain associated with the branch for which they were created.
+
+## Workspace commands and hooks
+
+Settings contain local repository configuration, outside task branches. A command has an `id`,
+`label`, optional literal `text` and optional tmux `keys` such as `Enter` or `C-c`. Invocation sends
+the text first, then keys, to the active pane of the workspace's validated tmux session. Text does
+not append Enter implicitly. The task page also supports direct text input with an explicit Enter
+option. The page reports the send result; it does not infer the state of the agent.
+
+`hooks.create` and `hooks.reuse` are optional `/bin/sh -c` commands executed after the assignment is
+saved, with the workspace as cwd. They expose stdout/stderr, exit code and failure. A failed hook
+leaves the workspace intact; retry it explicitly. Hooks have a 60-second timeout and bounded output.
+Warden does not provide a dependency installer or a process supervisor.
+
+Environment: `WARDEN_REPO`, `WARDEN_WORKTREE`, `WARDEN_BRANCH`, `WARDEN_DEVELOPMENT_BRANCH`,
+`WARDEN_TASK_ID`, `WARDEN_HOOK_EVENT` (`create` or `reuse`). These scripts are distinct from Git's
+normal commit hooks. Reuse applies only to a genuinely unassigned available slot, never to a task
+whose most recent delivery happened to succeed.
+
+## Connected previews
+
+In *主目录预览*, select one or more task workspaces. Warden snapshots their live committed and
+uncommitted changes relative to each workspace's undelivered baseline. It composes them with
+three-way patch application in an independent temporary repository. Only a complete, successful
+composition is applied to primary working files. Its real index and HEAD are unchanged.
+
+The running server refreshes connections approximately every two seconds. Initial conflicts fail
+the connection attempt and preserve the previous set and files. A later conflict preserves the last
+coherent preview and marks it stale. Adjust the source edits or selection, then refresh. Disconnecting
+recomposes the remaining contributions; it does not discard unexpected user or tool edits.
+
+Before replacing files, Warden verifies the primary HEAD, index and complete nonignored working
+snapshot against its ownership record. Unexpected modifications block synchronization and identify
+why. The user handles those changes. Primary dependency directories remain outside the preview
+when ignored by Git. This version conservatively blocks unrelated nonignored files too.
+
+## Squash acceptance
+
+Select a task and file to review directly. *准备合入…* accepts all current undelivered changes from
+a **clean committed source**, pinned to the reviewed source and primary HEAD. Source commits may
+continue from the previous delivery without first rebasing. `sourceBase` records that previous
+source tip so A1 is excluded when delivering A2.
+
+Preparation first composes the delivery in an isolated repository. It pauses connections, removes
+only their owned temporary contribution, then stages the delivery in the checked-out primary branch.
+Only one preparation uses that directory at a time. Other connected workspaces cannot enter the
+resulting commit. Review takes place before preparation; the page shows the resulting staged diff.
+
+Run tests in the primary directory when needed, enter a message, and choose *提交到主开发分支*.
+There is no test-passed checkbox. Warden runs ordinary `git commit -m` with the checkout's identity,
+signing, `core.hooksPath`, `pre-commit`, `prepare-commit-msg`, `commit-msg` and `post-commit` behavior.
+It never uses `--no-verify` or `commit-tree` for delivery. The server checks the current HEAD and
+staged-diff fingerprint again before committing.
+
+Hook failure preserves files/index and displays the output. Handle any hook edits and retry.
+A successful commit with uncommitted leftovers stays pending until those files are handled.
+A manual terminal commit can be recorded from the page after checking its exact SHA; it must be a
+single child of the prepared parent. Interrupted preparation can be retried only against its known
+snapshot. Unexpected changes are preserved. No reset/clean or undo action is involved.
+
+A completed delivery appends a stable record containing its source range, primary parent, commit,
+message and review comments. It leaves the task worktree and branch in place. Connections resume
+against the new primary baseline; if their current contributions conflict, the page reports that
+separately from the successful commit. New plans do not inherit the occupied workspace.
+
+## Synchronization
+
+Warden checks workspaces in isolated repositories and shows **已是最新**, **预计可直接 rebase**,
+**预计有冲突**, **存在阻碍**, or **尚不能判断**. Checking does not modify an agent's files, index or refs.
+Dirty/busy workspaces are blocked; a changed revision invalidates a check. Git state is not proof
+that an agent has stopped.
+
+Open *同步工作区* and select one, several or all workspaces. The page skips unknown/blocked/conflicting
+checks; the server rechecks both observed heads and actual checkout conditions. Explicit execution
+uses `rebase --no-autostash --onto <primary> <last-delivered-source-or-base>`, avoiding duplicate
+squashed work. Each workspace has its own result. An actual conflict remains in that workspace for
+the user to resolve manually. There is no automatic stash, background rebase or forced continuation.
+Manual synchronization that incorporates the current primary HEAD is recognized on refresh.
+
+## History arrangement
+
+*提交历史* shows the most recent 100 primary commits, oldest first. Select a start, then reorder or
+edit messages from that commit through HEAD. The draft does not change Git. Preview cherry-picks
+in an independent temporary repository with hooks and signing disabled. Current delivery commits
+still use their ordinary hooks; history preview is not another validation run.
+
+The first version accepts only consecutive linear commits with one parent and the same final tree
+as the original tip. Conflicts or different final content require changing the draft. Apply checks
+that the original HEAD still matches, retains a backup ref, imports the candidate and updates the
+primary ref with an expected-old-value check. The final files/index stay identical. Delivery IDs
+remain associated with the rewritten commits, and workspaces remain unchanged until explicit rebase.
+There is no history undo/restore UI, automatic remote push or merge-commit arrangement.
 
 ## Slots
 
-Agents do their best work each in a worktree of its own, and the sidebar's *Worktree* view is
-where those are made and taken down without a trip to the terminal. The directories are numbered
-**slots** beside the main worktree — `<repo>-1`, `<repo>-2`, … (工位 in the UI) — rather than one
-directory per branch: a directory is where the dependencies get installed, and a fresh one for every
-branch meant installing them for every branch. A slot outlives its branch. Releasing it leaves the
-directory behind, `node_modules` and all, and the next branch is checked out into it.
+Numbered directories (`<repo>-1`, `<repo>-2`, ...) remain available to their tasks across deliveries.
+A reusable slot is detached, clean, valid, unassigned and not inside a Git operation; this is a Git
+fact, not an agent-idle status. Normal delivery never releases or deletes a branch.
 
-- *检出分支*, the form in the sidebar, takes a branch, a base and a slot. An existing branch is
-  checked out as it is, unless another worktree already has it. A branch only a remote has is
-  checked out tracking the remote one (what `git worktree add` itself guesses) rather than started
-  afresh; when several remotes have it, the base says which. The branch list offers local branches
-  only, since a remote can carry thousands: the name typed is looked up on its own
-  (`GET /api/worktrees/remotes`), so the form says it is a remote branch before you submit. Any
-  other name becomes a branch from the base (`main` or `master` unless you say otherwise; any ref
-  goes). The server looks the name up when the request arrives, so a branch fetched or made after the page
-  loaded its list is still found, and a base typed for a name that already exists is refused.
-- The slot picker lists the free slots, lowest first, then the next number twice: *新 clone* and
-  *新 worktree* (see [Clone slots](#clone-slots)), the kind made last time in this repository first.
-  A new worktree is made with `git worktree add [--track] [-b <branch>] <repo>-<n> [<base>]`. Into a
-  free worktree slot the checkout is `git branch [--track] <branch> <base>` in the main worktree — so a base such as `HEAD` means what
-  it would to `worktree add` — followed by `git switch <branch>` in the slot, which rewrites the
-  tracked files and leaves the ignored ones alone; the toast says which of the two happened. Nothing
-  in the request names a directory: the server composes the path from the number, so a checkout
-  cannot land anywhere but beside the main worktree. Whatever review state was kept under the slot's
-  key (comments, viewed flags, its `base` pool included) is dropped: it was about another branch.
-- Each row names the branch, its directory, and whether it is clean or how many paths `git status`
-  reports. *查看* switches the review to it (the kind of target carries over), *复制路径* is for the
-  agent's prompt. A free slot is a row of its own, marked *空闲*, and its *检出到这里* points the form
-  at it.
-- A row also says where its agent stands with the review, in violet: *N 条未交付* for comments on
-  that worktree's code the agent has not had yet, *N 条待确认* for those it has answered and you
-  have not resolved — every pool counted, local views, `base`, commits and checkpoints alike. Each
-  opens the pool its latest such comment sits in, with the rail filtered to that kind. The counts
-  follow the state file, so an agent's `warden feedback` or `warden reply` moves them while you watch.
-- *释放* is what a slot's row offers, and it always asks first, in the row: `git switch --detach` in
-  the slot leaves the last commit checked out with no branch on it and touches no file, and the slot
-  is free for the next checkout. A slot with uncommitted changes is not released until you confirm
-  again, since those changes go: only that second request discards them — `git reset --hard`, then
-  `git clean -fd` for the untracked files, never `-x`, so the ignored ones, the installed
-  dependencies above all, stay. *一并删除分支* is offered in the same confirmation,
-  ticked by default, and takes the branch by `git branch -d`: one that is not merged is kept and the
-  toast says why. *连目录一起删除* turns the release into a removal.
-- *删除* is for a worktree that is not a slot (one made by hand, wherever it is) and for a free slot
-  whose directory you no longer want; a slot on a branch gets it through *连目录一起删除*. For a
-  worktree it runs `git worktree remove` without `--force`: uncommitted changes are put to you first, as with a
-  release, and so is whatever else git refuses without `--force`.
-- A slot is written — released, reset, cleaned, checked out into — only while its directory is still
-  this repository's own checkout. git keeps listing an entry as long as `<dir>/.git` exists, so a
-  repository cloned or initialised where a deleted slot was passes for the slot; warden marks it
-  *不属于本仓库* and refuses every write to it, forced or not. A slot with a rebase, merge,
-  cherry-pick, revert or bisect stopped in it is marked *… 进行中*: it is not free, cannot be
-  released, and removing it asks first, since each would throw the half-done operation away.
-- A worktree whose directory was deleted behind git's back is listed struck through; *清理* drops that
-  one entry (`git worktree remove` handles it; nothing is pruned wholesale). A slot in that state
-  cannot be released or checked out into, and its number is skipped until the entry is gone.
-
-`git switch` needs git 2.23 or newer.
+Legacy checkout/release/remove HTTP APIs remain for older clients. They refuse to release or reuse
+an assigned task's slot and are not part of the new page navigation. Legacy ready/resume HTTP APIs
+also remain; ready no longer rebases, and no readiness protocol is exposed by the agent CLI.
 
 ## Clone slots
 
-Some repositories do not get along with linked worktrees: hooks installed per `.git` directory,
-scripts and editor plugins that read `.git` as a directory, tooling that has to be set up again in
-each one. For those a slot can be a **clone** instead — a repository of its own at the same
-`<repo>-<n>` path, with its own `.git`, hooks and refs — and the form makes one unless told
-otherwise: the kind picked for a new slot is remembered per repository, and a clone is the default.
-A free slot is reused as whatever it was made as. Clone rows are marked *clone*.
-
-A clone talks to the server by itself. No branch is exchanged with the main worktree or another
-slot: each fetches and pushes on its own, as a clone made by hand would.
-
-- **Making one** is `git clone --local --no-checkout` from the main worktree — hard links to its
-  objects, so even a large repository is there in moments — with `warden.main` in its config naming
-  the main worktree. The main worktree's remotes then replace the `origin` that points back at it,
-  URLs and push URLs as they are, and their remote-tracking branches are copied from the main
-  worktree, so the clone knows the server as the main worktree last saw it without downloading
-  anything. The main worktree's local branches are not copied, and the one `git clone` made for its
-  HEAD is deleted once the clone is on its own branch. A repository with no remote keeps the `origin`
-  that is the main worktree: there is no other server. Hooks are not copied — one written for the
-  main worktree may name its paths — so set them up the way your project does, once per slot, like
-  the dependencies.
-- **Checking out** reads the name in the clone: a branch it has is checked out as it is, one only a
-  remote-tracking branch has is checked out tracking it, and any other name starts from the base — by
-  default the remote's default branch (`origin/main`, as `origin/HEAD` names it), not a local `main`
-  that moves only when someone checks it out there. The branch list and the remote lookup in the form
-  follow the slot picked. *先 fetch 远端*, ticked by default for a clone, runs `git fetch --all` in it
-  first, so a slot kept for weeks does not start a branch from where the server was weeks ago; a
-  fetch that fails stops the checkout and says why.
-- That fetch is the one time warden reaches a server, with your own git and its credentials. It runs
-  without a terminal, so ssh that wants a passphrase fails at once instead of waiting on a prompt no
-  one sees — keep the key in an agent — and it gets ten minutes.
-- A name is on in one checkout at a time, clones and worktrees alike: two clones on one branch would
-  push to the same branch of the server.
-- **Releasing** is `git switch --detach`, as for any slot, and the branch stays in the clone.
-  *一并删除分支* takes it only when its upstream is there and has all of it (`git branch -d`, which
-  then checks the upstream). With no upstream, or one that is gone, git would check the detached HEAD
-  instead — after a release, the branch itself — and pass every branch, so warden keeps it and the
-  toast says why.
-- **Deleting** the directory — *删除目录* on a free clone, *连目录一起删除* on one with a branch — takes
-  its branches with it, since nothing else has them. It is asked about first, naming everything only
-  the clone holds: uncommitted changes, commits on no remote-tracking branch, a stash, an operation
-  stopped halfway. Only a directory that is still a clone of this repository is deleted, forced or not.
-- A clone warden did not make is taken for a slot when it sits at a slot's path and shares a remote
-  URL with the main worktree: a clone of the same server, made by hand. Any other repository at a
-  slot's path is left out of the list and never written in; its number is skipped.
-- `warden`, `warden feedback` and `warden reply` run inside a clone slot find the main worktree
-  beside it and share its review state, as they do in a linked worktree.
-
-## Commit counts and tmux
-
-Each checkout reports how many commits it is ahead of and behind a base, named beside the counts. A branch with an upstream, the main checkout's included, is counted against it (`origin/topic`): what is not pushed and what is not pulled yet, as `git status` counts them. Any other checkout, or one whose upstream is gone (`[origin/topic: gone]`, which the row notes), is counted against the branch currently checked out in the main repository; “已合并” there means its HEAD is reachable from the main checkout HEAD, which squash merges and cherry-picks do not imply. Either way the base is the ref `git branch -d` checks, so a branch with nothing ahead is one *一并删除分支* will take. A clone is counted in the clone, which shares nothing with the main repository: against its branch's upstream, and otherwise against its remote's default branch (`origin/main`), where “已合并” means reachable from it. Expand a row to browse its paginated commit history (including shared commits) or view that branch’s todos.
-
-The *tmux session* button on a row gives that worktree a tmux session of its own: detached, started
-in the worktree's directory, with a shell and nothing run in it, named after the directory —
-`<repo>-<n>` for a slot, which keeps its session when the next branch is checked out into it (tmux
-does not allow `.` or `:` in a name, and reads `#` as the start of a format — `#()` would run a
-command — so all three become `_`). Getting into it is yours:
-`tmux attach -t <repo>-<n>`, or `switch-client` from inside tmux. Pressing it again for a worktree
-that already has its session hands that one back rather than making a second; a session of the same
-name in another directory is left alone and reported. No tmux server running yet is fine: the
-session starts one. It runs `tmux new-session -d -s <name> -c <dir>` without a shell, and touches no
-repository file. Run warden in the same user and tmux environment as your terminals (Linux, macOS or
-WSL); see the [tmux manual](https://man.openbsd.org/tmux.1).
-
-`POST /api/tmux/sessions` takes a registered worktree `path`; the server checks it against
-`git worktree list` before running anything.
+Linked worktrees are the default. An independent clone remains available for tooling that needs its
+own `.git` directory. Delivery and explicit rebase exchange exact commits with validated local
+repositories, without remote fetches or remote-tracking ref updates. Clone ownership and branch
+validation use the same rules as other task workspaces.

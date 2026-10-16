@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Hono } from 'hono';
 import type { Todo, TodosResponse } from '@warden/shared';
-import { createApp, resolveRepo, StateStore, NvimService } from '@warden/server';
+import { createApp, resolveRepo, StateStore } from '@warden/server';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
 let fx: FixtureRepo;
@@ -28,7 +28,7 @@ beforeAll(async () => {
   dataDir = await mkdtemp(path.join(os.tmpdir(), 'warden-todos-data-'));
   const repo = await resolveRepo(fx.root);
   const store = new StateStore(path.join(dataDir, 'state.json'), repo.commonRoot);
-  app = createApp({ repo, store, nvim: new NvimService([path.join(dataDir, 'no-sockets')]) });
+  app = createApp({ repo, store });
 });
 
 afterAll(async () => {

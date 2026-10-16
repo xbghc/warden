@@ -1,3 +1,5 @@
+import { Button } from './ui/button';
+import { Checkbox } from './ui/checkbox';
 import { useMemo, useRef } from 'react';
 import { ActionIcon } from './ActionIcon';
 import type { Comment } from '@warden/shared';
@@ -90,9 +92,16 @@ export function CommentRail() {
       <div className="rail-tools">
         <div className="seg small">
           {filters.map(([key, label, n]) => (
-            <button key={key} className={filter === key ? 'active' : ''} aria-pressed={filter === key} onClick={() => setFilter(key)}>
+            <Button
+              variant="outline"
+              size="sm"
+              key={key}
+              className={filter === key ? 'active' : ''}
+              aria-pressed={filter === key}
+              onClick={() => setFilter(key)}
+            >
               {label} {n}
-            </button>
+            </Button>
           ))}
         </div>
         <span className="spacer" />
@@ -115,11 +124,11 @@ export function CommentRail() {
       </div>
       <div className="rail-foot">
         <div className="rail-foot-row">
-          <button className="primary" onClick={() => void copyAll()} disabled={unexported === 0}>
+          <Button variant="default" size="sm" className="primary" onClick={() => void copyAll()} disabled={unexported === 0}>
             <ActionIcon name="copy" label={`复制评论${counts.unexported > 0 ? ` (${counts.unexported} 未导出)` : ''}`} count={counts.unexported} />
-          </button>
+          </Button>
           <label className="check">
-            <input type="checkbox" checked={includeExported} onChange={(e) => setIncludeExported(e.target.checked)} />
+            <Checkbox checked={includeExported} onCheckedChange={(checked) => setIncludeExported(checked === true)} />
             <ActionIcon name="checked" label="含已导出" />
           </label>
         </div>

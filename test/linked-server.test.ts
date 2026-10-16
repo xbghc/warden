@@ -4,7 +4,7 @@ import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Hono } from 'hono';
 import type { Comment, ReanchorResponse, RepoInfo, ReviewState } from '@warden/shared';
-import { createApp, NvimService, resolveRepo, StateStore } from '@warden/server';
+import { createApp, resolveRepo, StateStore } from '@warden/server';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
 // Two servers on one repository — one started in the main worktree, one inside a linked worktree —
@@ -30,10 +30,9 @@ beforeAll(async () => {
   const stateFile = path.join(dataDir, 'state.json');
   const mainRepo = await resolveRepo(fx.root);
   store = new StateStore(stateFile, mainRepo.commonRoot);
-  const nvim = new NvimService([path.join(dataDir, 'none')]);
-  main = createApp({ repo: mainRepo, store, nvim });
+  main = createApp({ repo: mainRepo, store });
   const linkedRepo = await resolveRepo(linked);
-  inLinked = createApp({ repo: linkedRepo, store: new StateStore(stateFile, linkedRepo.commonRoot), nvim });
+  inLinked = createApp({ repo: linkedRepo, store: new StateStore(stateFile, linkedRepo.commonRoot) });
 });
 
 afterAll(async () => {

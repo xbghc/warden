@@ -22,7 +22,7 @@ export function stateFilePath(repoRoot: string, baseDir = dataDir()): string {
 }
 
 export function defaultPrefs(): Prefs {
-  return { viewMode: 'unified', nvimSocketByRoot: {}, autoRefresh: true, railOpen: false, ignoreDebug: true };
+  return { viewMode: 'unified', autoRefresh: true, railOpen: false, ignoreDebug: true };
 }
 
 export function defaultState(repoRoot: string): ReviewState {
@@ -82,7 +82,10 @@ function normalise(raw: unknown, repoRoot: string, file: string): ReviewState {
     };
   }
   migrateLocalViews(targets);
-  return {
+  // Older builds remembered a separate review area. Fold it into the content destination and
+  // leave the selected target intact; there is no longer an extra mode to enter before reading.
+  const { lastArea, ...prefs } = (r.prefs ?? {}) as Partial<Prefs> & { lastArea?: unknown };
+  const state: ReviewState = {
     ...extra,
     schemaVersion: SCHEMA_VERSION,
     repoRoot: r.repoRoot ?? repoRoot,
@@ -93,15 +96,47 @@ function normalise(raw: unknown, repoRoot: string, file: string): ReviewState {
     checkpoints: Array.isArray(r.checkpoints) ? r.checkpoints.filter(usableCheckpoint) : [],
     prefs: {
       ...defaultPrefs(),
-      ...(r.prefs ?? {}),
+      ...prefs,
+      lastPanel:
+        prefs.lastPanel === 'orchestration' || prefs.lastPanel === 'diff' || prefs.lastPanel === 'commits'
+          ? prefs.lastPanel
+          : lastArea === 'review'
+            ? 'diff'
+            : 'orchestration',
       slotKind: undefined,
       ...(r.prefs?.slotKind === 'clone' || r.prefs?.slotKind === 'worktree' ? { slotKind: r.prefs.slotKind } : {}),
-      nvimSocketByRoot: r.prefs?.nvimSocketByRoot ?? {},
       autoRefresh: typeof r.prefs?.autoRefresh === 'boolean' ? r.prefs.autoRefresh : true,
       railOpen: typeof r.prefs?.railOpen === 'boolean' ? r.prefs.railOpen : false,
       ignoreDebug: typeof r.prefs?.ignoreDebug === 'boolean' ? r.prefs.ignoreDebug : true,
     },
   };
+  migrateTodoPlans(state);
+  return state;
+}
+
+/** Stable IDs make migration repeatable across readers and preserve ordering and comment links. */
+function migrateTodoPlans(state: ReviewState): void {
+  const workflow = state.workflow;
+  if (!workflow) return;
+  state.todos = state.todos.filter((todo) => {
+    const owner = workflow.changes.find((change) => change.branch === todo.branch);
+    const branch = owner?.developmentBranch ?? todo.branch;
+    if (branch !== workflow.developmentBranch) return true;
+    const id = `todo-${todo.id}`;
+    if (!workflow.changes.some((change) => change.id === id)) {
+      workflow.changes.push({
+        id,
+        title: todo.title,
+        body: todo.body,
+        commentIds: todo.commentIds,
+        developmentBranch: branch,
+        status: todo.status === 'done' ? 'archived' : 'planned',
+        createdAt: todo.createdAt,
+        legacyTodo: { branch: todo.branch, status: todo.status },
+      });
+    }
+    return false;
+  });
 }
 
 /**
@@ -146,6 +181,17 @@ export class StateStore {
     public readonly file: string,
     public readonly repoRoot: string,
   ) {}
+
+  /** Shared by HTTP and agent CLI operations; independent of the short state-file lock. */
+  async withRepositoryLock<T>(fn: () => Promise<T>): Promise<T> {
+    await mkdir(path.dirname(this.file), { recursive: true });
+    const lock = await this.acquireLock(`${this.file}.repository`);
+    try {
+      return await fn();
+    } finally {
+      await lock.release();
+    }
+  }
 
   async load(): Promise<ReviewState> {
     try {
@@ -209,8 +255,8 @@ export class StateStore {
    * is refreshed while held: a lock left by a process that died goes stale and is taken over, one
    * whose holder is merely slow does not.
    */
-  private async acquireLock(): Promise<{ held(): Promise<boolean>; release(): Promise<void> }> {
-    const lock = `${this.file}.lock`;
+  private async acquireLock(file = this.file): Promise<{ held(): Promise<boolean>; release(): Promise<void> }> {
+    const lock = `${file}.lock`;
     const token = `${process.pid}:${randomUUID()}`;
     const started = Date.now();
     for (;;) {
@@ -238,7 +284,7 @@ export class StateStore {
           continue; // lock vanished between calls
         }
         if (Date.now() - started > LOCK_WAIT_MS) {
-          throw new Error(`timed out waiting for state lock ${lock}`);
+          throw new HttpError(409, '另一个 Warden 操作正在进行，请稍后重试', 'operation_locked');
         }
         await sleep(20);
       }
@@ -282,7 +328,7 @@ export function forgetWorktreeTargets(state: ReviewState, worktreePath: string):
 export function unlinkComments(state: ReviewState, ids: Iterable<string>): void {
   const gone = new Set(ids);
   if (gone.size === 0) return;
-  for (const todo of state.todos) {
+  for (const todo of [...state.todos, ...(state.workflow?.changes ?? [])]) {
     if (!todo.commentIds?.some((id) => gone.has(id))) continue;
     const kept = todo.commentIds.filter((id) => !gone.has(id));
     if (kept.length) todo.commentIds = kept;

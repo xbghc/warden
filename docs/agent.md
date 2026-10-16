@@ -1,6 +1,17 @@
 # Comments and the agent
 
-Writing comments, handing them to the agent, and what becomes of them as the code moves.
+Warden uses user-configured tmux text/key commands and user-driven delivery. Creating a workspace,
+starting an agent and sending a prompt are separate actions. See [workspace commands and hooks](worktrees.md#workspace-commands-and-hooks).
+
+Work happens in the assigned task worktree. The user runs tests in the primary directory and reviews
+changes before squash. Warden does not require an agent test command, structured delivery report or
+readiness signal. Feedback commands below are optional conveniences.
+
+## Workspace control
+
+Users invoke configured tmux text/keys or free text from the task page. Warden does not require
+an agent to declare ready, stop, resume or task completion. `warden feedback` and `warden reply`
+remain the comment interface; workspace creation and command invocation are separate user actions.
 
 ## Comments and export
 
@@ -51,8 +62,7 @@ When you have dealt with a comment, answer it with `warden reply <id> "<what you
 
 A comment with a thread carries it whole, so a follow-up arrives with what it follows up on. The last
 line tells whatever agent the text is pasted into how to answer; it names `npx @xbghc/warden` instead
-when warden itself was started through npx. A [todo](#todos) that carries comments is copied the
-same way, under its title and body.
+when warden itself was started through npx. A [task](#todos) that carries comments copies them with its execution brief.
 
 ## Handing comments to the agent
 
@@ -110,7 +120,7 @@ them — the comment's current view first, then `working`, `staged`, `all`. So:
   at the top of the rail with its original snippet, ready to be deleted or re-attached to a new selection.
 - `git commit` → re-anchoring notices HEAD moved forward. A comment that no longer has a home
   anywhere, and whose lines are in the commits since the last pass, is **deleted** (and unlinked
-  from any todo): the code it was about is now history. Anything still visible in Unstaged or Staged
+  from any task): the code it was about is now history. Anything still visible in Unstaged or Staged
   survives, including as a context line, and so does a comment with replies under it, orphaned,
   until you resolve it.
 - Anything else that moves HEAD — a branch switch, `reset`, a stash and checkout, an amend or rebase,
@@ -126,42 +136,20 @@ Comment markers in the diff belong to one view; the rail's *全部* tab lists th
 
 ## Todos
 
-Notes attached to a branch rather than to a line of code, for the things you notice while reviewing
-that do not belong in a comment. They are not deleted when you commit. They sit in the right-hand
-rail next to the comments, under the *待办* tab, as a task list that works the way Google Tasks does:
+TODOs are now planned commits in *任务编排*. Each task describes one small change, its acceptance
+notes; ordering expresses a sequence, not enforced prerequisites. Start a task to allocate its worktree, then copy the task brief
+to the assigned agent. See the [development workflow](worktrees.md#development-workflow).
 
-- *添加待办* opens an empty row at the top; type the title and press Enter, and the next row opens
-  right under it. Esc or Backspace on an empty row drops it.
-- Titles and details are edited where they are: click into the text. Enter at the end of a title
-  starts the next todo under it; Backspace on an emptied title deletes the todo. The details field
-  (Markdown) appears while the row is open, and is rendered under the title otherwise.
-- The circle strikes the todo through and files it under *已完成 (N)* at the bottom, collapsed;
-  open it to tick one back or *全部删除*.
-- Rows are dragged into your own order by the handle at their left edge. That order is what the state
-  file keeps, and new todos go on top.
-- Delete asks nothing; the toast offers *撤消* for a few seconds.
-- The list is the branch checked out where the review is (the main worktree, or the worktree under
-  review), and a new todo goes to that branch.
+The right rail contains review comments only. *规划为任务* on a comment creates a planned task
+from its text, preserves the comment link and offers *查看计划*. Use this for an independent
+follow-up commit; feedback on the current task remains in its review thread. No checkout is
+allocated until the new task is started.
 
-A todo can carry comments: a task and the review notes it is about, handed over together. *加入待办*
-on a comment card offers *新建待办* — titled after the comment's first line — or any open todo of
-the branch. A todo that carries comments says how many beside its title, and lists them under its
-open row, each with *跳转* and *解除关联*. Deleting a comment, or a commit that finishes one, takes it
-off the todo as well.
+A task's *目标、验收与评论* shows linked review notes and their locations. *复制任务给 agent* includes
+its goal, acceptance criteria, assignment, checkout and development instructions, followed by linked
+comments in the [export format](#comments-and-export). After a successful clipboard write those
+comments are marked exported and a checkpoint is taken, as for ordinary feedback.
 
-Each row has its own *复制* button, and there is deliberately no "copy all": a todo is one task to
-hand to an agent, and the agent it goes to is already working in that branch. So the clipboard gets
-the title and the body — no branch, repo, count or numbering:
-
-```markdown
-补充 OrderList 的空状态
-
-描述正文（Markdown）…
-```
-
-and after them, when the todo carries comments, those comments in the
-[export format](#comments-and-export), reply line included. Such a copy is a hand-off like any
-other: the comments are marked exported and a checkpoint is taken.
-
-Versions before 0.16 had a separate *Issue* tab; a todo that carries comments is what an issue was,
-and the issues an older state file holds are dropped on upgrade.
+Existing TODO text and comment associations migrate without inventing completed commits. Old
+checked items are archived and can be restored; notes on unrelated branches are available for
+explicit import in orchestration. No duplicate task checklist appears on the worktree cards.

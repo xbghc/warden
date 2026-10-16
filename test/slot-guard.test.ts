@@ -6,7 +6,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Hono } from 'hono';
 import type { WorktreesResponse } from '@warden/shared';
-import { createApp, NvimService, resolveRepo, StateStore } from '@warden/server';
+import { createApp, resolveRepo, StateStore } from '@warden/server';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
 // A slot is written — reset, clean, switch, removed — only while it is this repository's own
@@ -28,7 +28,7 @@ beforeEach(async () => {
   fx = await makeFixtureRepo('warden-guard-');
   dataDir = await mkdtemp(path.join(os.tmpdir(), 'warden-guard-data-'));
   const repo = await resolveRepo(fx.root);
-  app = createApp({ repo, store: new StateStore(path.join(dataDir, 'state.json'), repo.commonRoot), nvim: new NvimService([path.join(dataDir, 'none')]) });
+  app = createApp({ repo, store: new StateStore(path.join(dataDir, 'state.json'), repo.commonRoot) });
   expect((await send('POST', '/api/worktrees', { branch: 'agent/one', base: 'main' })).status).toBe(201);
 });
 

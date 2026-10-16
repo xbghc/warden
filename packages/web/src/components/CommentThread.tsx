@@ -1,8 +1,12 @@
+import { Badge } from './ui/badge';
+import { Button } from './ui/button';
 import { useState } from 'react';
 import { ActionIcon } from './ActionIcon';
 import type { Comment, TargetKey } from '@warden/shared';
 import { awaitsReviewer, targetLabel, tryParseTargetKey } from '@warden/shared';
-import { branchOf, useStore } from '../store';
+import { useStore } from '../store';
+import { api } from '../api';
+import { revealTask, useWorkflow, workflowAction } from '../workflow-store';
 import { Markdown } from './Markdown';
 import { CommentEditor } from './CommentEditor';
 
@@ -41,14 +45,8 @@ export function CommentCard({ comment, showSnippet = false, showFile = false }: 
   const targetKey = useStore((s) => s.targetKey);
   const [editing, setEditing] = useState(false);
   const [replying, setReplying] = useState(false);
-  const [picking, setPicking] = useState(false);
-  const linkComment = useStore((s) => s.linkComment);
-  const repo = useStore((s) => s.repo);
-  const root = useStore((s) => s.root);
-  const todos = useStore((s) => s.todos);
-  const branch = branchOf(repo, root);
-  // Open todos of the branch in front that do not carry this comment yet: where it can still go.
-  const openTodos = todos.filter((t) => t.branch === branch && t.status === 'open' && !t.commentIds?.includes(comment.id));
+  const workflow = useWorkflow((s) => s.data?.workflow);
+  const busy = useWorkflow((s) => s.busy);
   const answered = awaitsReviewer(comment);
 
   const range = comment.startLine === comment.endLine ? `${comment.startLine}` : `${comment.startLine}–${comment.endLine}`;
@@ -71,22 +69,26 @@ export function CommentCard({ comment, showSnippet = false, showFile = false }: 
             {range}
           </span>
         </span>
-        {comment.side === 'old' && <span className="badge">修改前</span>}
+        {comment.side === 'old' && (
+          <Badge variant="secondary" className="badge">
+            修改前
+          </Badge>
+        )}
         {answered ? (
-          <span className="badge badge-active" title="agent 已回复，等你确认或追问">
+          <Badge variant="secondary" className="badge badge-active" title="agent 已回复，等你确认或追问">
             待确认
-          </span>
+          </Badge>
         ) : (
           comment.status === 'exported' && (
-            <span className="badge badge-exported" title="这条评论已复制，或已由 agent 通过 warden feedback 取走">
+            <Badge variant="secondary" className="badge badge-exported" title="这条评论已复制，或已由 agent 通过 warden feedback 取走">
               已导出
-            </span>
+            </Badge>
           )
         )}
         {elsewhere && (
-          <span className="badge" title={`这条评论现在位于 ${comment.targetKey}，点击卡片可跳转`}>
+          <Badge variant="secondary" className="badge" title={`这条评论现在位于 ${comment.targetKey}，点击卡片可跳转`}>
             {elsewhere}
-          </span>
+          </Badge>
         )}
         <span className="muted time" title={`created ${fmtTime(comment.createdAt)}${comment.exportedAt ? `\nexported ${fmtTime(comment.exportedAt)}` : ''}`}>
           {shortTime(comment.updatedAt)}
@@ -95,7 +97,9 @@ export function CommentCard({ comment, showSnippet = false, showFile = false }: 
           {/* Accepting the answer ends the conversation, and the comment with it: there is
               nothing left for it to ask. */}
           {answered && (
-            <button
+            <Button
+              variant="ghost"
+              size="icon-sm"
               className="link"
               onClick={(e) => {
                 e.stopPropagation();
@@ -104,10 +108,12 @@ export function CommentCard({ comment, showSnippet = false, showFile = false }: 
               title="接受 agent 的回复并删除这条评论"
             >
               <ActionIcon name="check" label="解决" />
-            </button>
+            </Button>
           )}
           {comment.replies?.length ? (
-            <button
+            <Button
+              variant="ghost"
+              size="icon-sm"
               className="link"
               onClick={(e) => {
                 e.stopPropagation();
@@ -116,20 +122,37 @@ export function CommentCard({ comment, showSnippet = false, showFile = false }: 
               title="追问：回复会在下次导出时交给 agent"
             >
               <ActionIcon name="reply" label="回复" />
-            </button>
+            </Button>
           ) : null}
-          <button
+          <Button
+            variant="ghost"
+            size="icon-sm"
             className="link"
-            aria-expanded={picking}
-            onClick={(e) => {
-              e.stopPropagation();
-              setPicking((v) => !v);
+            disabled={!workflow || busy}
+            onClick={(event) => {
+              event.stopPropagation();
+              void workflowAction(() =>
+                api.createChange({
+                  title:
+                    comment.body
+                      .split('\n')
+                      .find((line) => line.trim())
+                      ?.trim()
+                      .slice(0, 200) || comment.filePath,
+                  body: comment.body,
+                  commentIds: [comment.id],
+                }),
+              ).then((task) => {
+                if (task) useStore.getState().showToast('已将独立改动加入任务计划', 'info', { label: '查看计划', run: () => revealTask(task.id) });
+              });
             }}
-            title="让这条评论随一条待办交给 agent"
+            title={workflow ? '将独立改动规划为新的 commit，保留评论关联' : '先在任务编排中选择需求主开发分支'}
           >
-            <ActionIcon name="todos" label="加入待办" />
-          </button>
-          <button
+            <ActionIcon name="todos" label="规划为任务" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-sm"
             className="link"
             onClick={(e) => {
               e.stopPropagation();
@@ -138,8 +161,10 @@ export function CommentCard({ comment, showSnippet = false, showFile = false }: 
             title="复制此条评论"
           >
             <ActionIcon name="copy" label="复制" />
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-sm"
             className="link"
             onClick={(e) => {
               e.stopPropagation();
@@ -147,8 +172,10 @@ export function CommentCard({ comment, showSnippet = false, showFile = false }: 
             }}
           >
             <ActionIcon name="edit" label="编辑" />
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-sm"
             className="link danger"
             onClick={(e) => {
               e.stopPropagation();
@@ -156,38 +183,9 @@ export function CommentCard({ comment, showSnippet = false, showFile = false }: 
             }}
           >
             <ActionIcon name="delete" label="删除" />
-          </button>
+          </Button>
         </span>
       </div>
-      {picking && (
-        // Stops here so picking a todo does not also focus the card, which would scroll the diff to it.
-        <div className="todo-pick" onClick={(e) => e.stopPropagation()}>
-          <button
-            type="button"
-            className="link"
-            onClick={() => {
-              setPicking(false);
-              void linkComment(comment.id, null);
-            }}
-          >
-            <ActionIcon name="add" label="新建待办" />
-          </button>
-          {openTodos.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              className="link todo-pick-item"
-              onClick={() => {
-                setPicking(false);
-                void linkComment(comment.id, t.id);
-              }}
-              title={`加入「${t.title}」`}
-            >
-              {t.title}
-            </button>
-          ))}
-        </div>
-      )}
       {showSnippet && comment.codeSnippet.length > 0 && (
         <pre className="snippet">
           {comment.codeSnippet.map((l, i) => (

@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Hono } from 'hono';
 import type { Comment, ExportResponse, ReanchorResponse, ReviewState, WorktreesResponse } from '@warden/shared';
-import { addReply, createApp, formatCommentsExport, NvimService, resolveRepo, shortId, StateStore, takeFeedback } from '@warden/server';
+import { addReply, createApp, formatCommentsExport, resolveRepo, shortId, StateStore, takeFeedback } from '@warden/server';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
 let fx: FixtureRepo;
@@ -34,7 +34,7 @@ beforeAll(async () => {
   dataDir = await mkdtemp(path.join(os.tmpdir(), 'warden-feedback-data-'));
   const repo = await resolveRepo(fx.root);
   store = new StateStore(path.join(dataDir, 'state.json'), repo.commonRoot);
-  app = createApp({ repo, store, nvim: new NvimService([path.join(dataDir, 'no-sockets')]), watchIntervalMs: 50, replyCommand: 'warden' });
+  app = createApp({ repo, store, watchIntervalMs: 50, replyCommand: 'warden' });
   await fx.write('src/a.ts', ['export function a() {', '  return 1;', '}', 'export const z = 9;', ''].join('\n'));
 });
 

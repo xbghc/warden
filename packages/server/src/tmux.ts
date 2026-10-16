@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { realpath } from 'node:fs/promises';
-import type { TmuxSession, TmuxSessionResponse } from '@warden/shared';
+import type { TmuxSession, TmuxSessionResponse, WorkspaceCommand } from '@warden/shared';
 import { HttpError } from './errors.js';
 
 export type TmuxRunner = (args: string[]) => Promise<string>;
@@ -31,6 +31,22 @@ export function sessionNameFor(worktreePath: string): string {
 /** Optional tmux integration; commands never pass through a shell. */
 export class TmuxService {
   constructor(private run: TmuxRunner = runTmux) {}
+
+  async send(worktreePath: string, command: WorkspaceCommand) {
+    const session = await this.openSession(worktreePath);
+    const rows = await this.run(['list-panes', '-s', '-t', `=${session.session}`, '-F', '#{pane_id}\t#{pane_active}\t#{window_active}']);
+    const panes = rows
+      .trim()
+      .split('\n')
+      .map((row) => row.split('\t'))
+      .filter(([id, active, window]) => /^%\d+$/.test(id ?? '') && active === '1' && window === '1');
+    if (panes.length !== 1) throw new HttpError(409, '无法确定工作区当前 tmux pane，请在终端检查会话', 'tmux_pane_missing');
+    const pane = panes[0]![0]!;
+    // Literal input is never interpreted as tmux key names or shell arguments here.
+    if (command.text) await this.run(['send-keys', '-t', pane, '-l', '--', command.text]);
+    if (command.keys?.length) await this.run(['send-keys', '-t', pane, '--', ...command.keys]);
+    return { ...session, pane };
+  }
 
   private async list(): Promise<TmuxSession[]> {
     const output = await this.run(['list-sessions', '-F', '#{session_id}\t#{session_name}\t#{session_path}']).catch((e) => {

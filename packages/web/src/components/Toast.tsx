@@ -1,3 +1,4 @@
+import { Button } from './ui/button';
 import { useStore } from '../store';
 
 export function Toast() {
@@ -8,7 +9,9 @@ export function Toast() {
     <div className={`toast toast-${toast.kind}`} role="status">
       {toast.message}
       {action && (
-        <button
+        <Button
+          variant="outline"
+          size="sm"
           type="button"
           className="toast-action"
           onClick={() => {
@@ -17,7 +20,7 @@ export function Toast() {
           }}
         >
           {action.label}
-        </button>
+        </Button>
       )}
     </div>
   );
