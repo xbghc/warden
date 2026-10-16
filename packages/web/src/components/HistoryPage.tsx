@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowDown, ArrowUp, GitCommitHorizontal, GripVertical, RefreshCw } from 'lucide-react';
+import { ArrowDown, ArrowUp, GitCommitHorizontal, GripVertical, RefreshCw, Trash2 } from 'lucide-react';
 import type { HistoryEntry, HistoryPreviewRequest, HistoryPreviewResponse } from '@warden/shared';
 import { api } from '../api';
 import { useWorkflow } from '../workflow-store';
@@ -42,7 +42,7 @@ export function HistoryPage({ active }: { active: boolean }) {
     if (!draft || !history || differentBranch) return;
     const index = history.commits.findIndex((commit) => commit.sha === draft.start);
     if (index < 0) {
-      setError('原起点已不在当前历史中。请丢弃草稿后重新选择范围。');
+      setError('起点已失效，请丢弃草稿并重选范围。');
       return;
     }
     const current = history.commits.slice(index);
@@ -85,7 +85,7 @@ export function HistoryPage({ active }: { active: boolean }) {
       setDraft(null);
       setPreview(null);
       setStart('');
-      setNotice('已应用新的提交顺序与说明。');
+      setNotice('提交历史已更新');
       await Promise.all([useWorkbenchData.getState().refresh(), useWorkflow.getState().refresh()]);
     } catch (error) {
       setError(errorMessage(error));
@@ -100,11 +100,16 @@ export function HistoryPage({ active }: { active: boolean }) {
         <div>
           <span className="wb-eyebrow">{history?.branch ?? '主开发分支'}</span>
           <h1>{draft ? '历史草稿' : '提交历史'}</h1>
-          <p>{draft ? '调整提交顺序与说明。实际分支在应用前保持原样。' : '查看需求由哪些提交组成，再按需要调整真实历史。'}</p>
         </div>
-        <Button variant="outline" size="sm" disabled={checking || pending} onClick={() => void useWorkbenchData.getState().refresh()}>
-          <RefreshCw size={14} />
-          刷新历史
+        <Button
+          variant="outline"
+          size="icon-sm"
+          disabled={checking || pending}
+          onClick={() => void useWorkbenchData.getState().refresh()}
+          aria-label="刷新历史"
+          title="刷新历史"
+        >
+          <RefreshCw size={14} className={checking ? 'animate-spin' : undefined} aria-hidden="true" />
         </Button>
       </header>
       <div className="wb-page-content">
@@ -116,10 +121,7 @@ export function HistoryPage({ active }: { active: boolean }) {
         )}
         {!draft ? (
           <>
-            <div className="wb-section-heading">
-              <h2>提交顺序：早 → 晚</h2>
-              <span>{history?.commits.length ?? 0} 个提交</span>
-            </div>
+            <div className="wb-section-heading">{history && <span>{history.commits.length} 个提交 · 从早到晚</span>}</div>
             <ol className="wb-history-list">
               {history?.commits.map((commit, index) => (
                 <li key={commit.sha}>
@@ -130,7 +132,7 @@ export function HistoryPage({ active }: { active: boolean }) {
                     <strong>{commit.message.split('\n')[0]}</strong>
                     <small>
                       {commit.changeId ? (tasks.find((task) => task.id === commit.changeId)?.title ?? commit.changeId) : commit.author}
-                      {commit.deliveryId && ' · 已记录交付'} · {new Date(commit.date).toLocaleDateString('zh-CN')}
+                      {commit.deliveryId && ' · 交付'} · {new Date(commit.date).toLocaleDateString('zh-CN')}
                     </small>
                   </div>
                   <code>{commit.sha.slice(0, 8)}</code>
@@ -138,10 +140,10 @@ export function HistoryPage({ active }: { active: boolean }) {
                 </li>
               ))}
             </ol>
-            {!history?.commits.length && <div className="wb-empty-inline">主开发分支暂无可显示的提交。</div>}
+            {!history?.commits.length && <div className="wb-empty-inline">{errors.history ? '暂无法读取历史' : !history ? '加载中…' : '暂无提交'}</div>}
             <div className="wb-history-range">
               <label className="wb-field">
-                编排范围
+                起点
                 <NativeSelect aria-label="历史编排起点" value={start} onChange={(event) => setStart(event.target.value)}>
                   <option value="">选择起点提交</option>
                   {history?.commits.map((commit) => (
@@ -151,9 +153,9 @@ export function HistoryPage({ active }: { active: boolean }) {
                   ))}
                 </NativeSelect>
               </label>
-              <p className="muted small">从所选提交到当前分支末端。本版仅支持线性历史，不合并提交、不自动推送。</p>
+              <p className="muted small">从此提交到分支末端，仅支持线性历史。</p>
               <Button disabled={!start || !history || !!errors.history} onClick={create}>
-                编排所选历史
+                调整历史
               </Button>
             </div>
           </>
@@ -163,15 +165,14 @@ export function HistoryPage({ active }: { active: boolean }) {
               <span>
                 基于 <code>{draft.head.slice(0, 8)}</code>
               </span>
-              <span>{draft.commits.length} 个提交 · 不合并提交</span>
-              <span>实际分支尚未改变</span>
+              <span>{draft.commits.length} 个提交</span>
             </div>
             {stale && (
               <div className="wb-error">
-                <strong>{differentBranch ? `主开发分支已切换。此草稿属于 ${draftBranch}。` : '主开发分支已有新提交或已被改写。'}</strong>
-                <p>此草稿未包含最新历史，不能直接应用。</p>
-                <Button size="sm" variant="outline" onClick={rebuild} disabled={pending || differentBranch}>
-                  基于最新历史重建草稿
+                <strong>{differentBranch ? `此草稿属于 ${draftBranch}` : '主开发分支已更新'}</strong>
+                <p>{differentBranch ? '请切回该分支，或丢弃草稿。' : '草稿已过期，请更新后重新预览。'}</p>
+                <Button size="icon-sm" variant="outline" onClick={rebuild} disabled={pending || differentBranch} aria-label="更新草稿" title="更新草稿">
+                  <RefreshCw size={14} aria-hidden="true" />
                 </Button>
               </div>
             )}
@@ -230,6 +231,7 @@ export function HistoryPage({ active }: { active: boolean }) {
                         variant="ghost"
                         size="icon-xs"
                         aria-label={`上移提交 ${index + 1}`}
+                        title="上移提交"
                         disabled={pending || index === 0}
                         onClick={() => move(index, index - 1)}
                       >
@@ -239,6 +241,7 @@ export function HistoryPage({ active }: { active: boolean }) {
                         variant="ghost"
                         size="icon-xs"
                         aria-label={`下移提交 ${index + 1}`}
+                        title="下移提交"
                         disabled={pending || index === draft.commits.length - 1}
                         onClick={() => move(index, index + 1)}
                       >
@@ -251,8 +254,8 @@ export function HistoryPage({ active }: { active: boolean }) {
             </div>
             {preview && (
               <div className={preview.canApply ? 'wb-note wb-history-result' : 'wb-error'} role="status">
-                <strong>{preview.canApply ? '预览成功' : '此候选不能应用'}</strong>
-                <p>{preview.message ?? (preview.contentChanged ? '最终文件内容与原历史不同，本次候选不会应用。' : '最终文件内容与原历史一致。')}</p>
+                <strong>{preview.canApply ? '可应用' : '无法应用'}</strong>
+                <p>{preview.message ?? (preview.contentChanged ? '文件内容发生变化，请调整顺序后重试。' : '文件内容不变。')}</p>
                 {preview.conflicts.map((path) => (
                   <code key={path}>{path}</code>
                 ))}
@@ -270,9 +273,13 @@ export function HistoryPage({ active }: { active: boolean }) {
                 )}
               </div>
             )}
+            <p className="muted small">应用将改写 {draftBranch} 的提交历史，不自动推送。</p>
             <div className="wb-history-actions">
               <Button
                 variant="ghost"
+                size="icon"
+                aria-label="丢弃草稿"
+                title="丢弃草稿"
                 disabled={pending}
                 onClick={() => {
                   setDraft(null);
@@ -280,11 +287,11 @@ export function HistoryPage({ active }: { active: boolean }) {
                   setError(null);
                 }}
               >
-                丢弃草稿
+                <Trash2 size={16} aria-hidden="true" />
               </Button>
               <span className="spacer" />
               <Button variant="outline" disabled={pending || stale || draft.commits.some((commit) => !commit.message.trim())} onClick={() => void inspect()}>
-                {pending ? '处理中…' : '预览改写结果'}
+                {pending ? '处理中…' : '预览改写'}
               </Button>
               {preview?.canApply && (
                 <Button disabled={pending || stale || !!errors.history} onClick={() => void apply()}>

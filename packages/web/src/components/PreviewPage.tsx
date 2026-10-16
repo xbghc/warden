@@ -37,11 +37,16 @@ export function PreviewPage({ active }: { active: boolean }) {
         <div>
           <span className="wb-eyebrow">主开发分支 · {data?.workflow?.developmentBranch ?? '尚未选择'}</span>
           <h1>主目录预览</h1>
-          <p>把多个工作区的实时改动组合到主目录，沿用现有开发服务器。</p>
         </div>
-        <Button variant="outline" size="sm" disabled={pending || checking || !preview} onClick={() => void run()}>
-          <RefreshCw size={14} />
-          {pending ? '更新中…' : '刷新预览'}
+        <Button
+          variant="outline"
+          size="icon-sm"
+          disabled={pending || checking || !preview}
+          onClick={() => void run()}
+          aria-label="刷新预览"
+          title={pending ? '更新中…' : '刷新预览'}
+        >
+          <RefreshCw size={14} className={pending ? 'animate-spin' : undefined} aria-hidden="true" />
         </Button>
       </header>
       <div className="wb-page-content">
@@ -51,33 +56,37 @@ export function PreviewPage({ active }: { active: boolean }) {
           </span>
           <div>
             <strong>
-              {status === 'paused'
-                ? '预览已暂停'
-                : status === 'stale'
-                  ? '预览尚未更新'
-                  : preview?.connectedIds.length
-                    ? names(preview.connectedIds)
-                    : '尚未连接工作区'}
+              {errors.preview
+                ? '无法读取预览'
+                : !preview
+                  ? '加载预览…'
+                  : status === 'paused'
+                    ? '预览已暂停'
+                    : status === 'stale'
+                      ? '预览待更新'
+                      : preview?.connectedIds.length
+                        ? names(preview.connectedIds)
+                        : '未连接工作区'}
             </strong>
             <p>{preview?.worktree ?? '主目录尚未配置'}</p>
-            {preview?.updatedAt && <small>最近成功更新：{new Date(preview.updatedAt).toLocaleString('zh-CN')}</small>}
+            {preview?.updatedAt && <small>上次更新 {new Date(preview.updatedAt).toLocaleString('zh-CN')}</small>}
             {preview?.message && <p>{preview.message}</p>}
-            {errors.preview && <p>无法验证当前主目录内容，保留上次读取的信息。</p>}
+            {errors.preview && preview && <p>显示上次读取的预览。</p>}
           </div>
-          {status && <span className="wb-status">{{ current: '当前', disconnected: '未连接', stale: '不新鲜', paused: '暂停' }[status]}</span>}
+          {status === 'current' && <span className="wb-status">已更新</span>}
         </div>
         <OperationError message={error ?? errors.preview} />
         {!!preview?.conflicts?.length && (
           <div className="wb-error">
-            <strong>以下文件存在冲突</strong>
+            <strong>冲突文件</strong>
             {preview.conflicts.map((path) => (
               <code key={path}>{path}</code>
             ))}
           </div>
         )}
         <div className="wb-section-heading">
-          <h2>连接工作区</h2>
-          <span>连接与提交相互独立</span>
+          <h2>工作区</h2>
+          <span>连接到主目录预览，不创建提交</span>
         </div>
         <div className="wb-table-wrap">
           <table className="wb-table">
@@ -112,18 +121,18 @@ export function PreviewPage({ active }: { active: boolean }) {
               ))}
             </tbody>
           </table>
-          {tasks.length === 0 && <div className="wb-empty-inline">工作计划中的任务创建工作区后，会显示在这里。</div>}
+          {tasks.length === 0 && <div className="wb-empty-inline">请先为任务创建工作区</div>}
         </div>
         <div className="wb-section-heading">
-          <h2>主目录中的组合文件</h2>
-          <span>{preview?.files.length ?? 0} 个文件</span>
+          <h2>预览文件</h2>
+          {preview && <span>{preview.files.length}</span>}
         </div>
         {preview?.files.length ? (
           <table className="wb-table">
             <thead>
               <tr>
                 <th>文件</th>
-                <th>贡献来源</th>
+                <th>来源</th>
               </tr>
             </thead>
             <tbody>
@@ -138,7 +147,9 @@ export function PreviewPage({ active }: { active: boolean }) {
             </tbody>
           </table>
         ) : (
-          <div className="wb-empty-inline">连接成功后，在这里查看组合涉及的文件。</div>
+          <div className="wb-empty-inline">
+            {errors.preview ? '暂无法读取文件' : !preview ? '加载中…' : preview.connectedIds.length ? '暂无变更' : '连接工作区后显示变更'}
+          </div>
         )}
       </div>
     </section>

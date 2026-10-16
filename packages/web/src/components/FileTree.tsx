@@ -291,7 +291,7 @@ function TreeBlock({ title, view, files, empty }: { title: string; view: TargetK
 function ReviewProgress({ done, total, label, hint }: { done: number; total: number; label: string; hint: string }) {
   const pct = total === 0 ? 0 : (done / total) * 100;
   return (
-    <div className="progress" role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={total} aria-valuenow={done} title={hint}>
+    <div className="progress" role="progressbar" aria-label={`文件${label}进度`} aria-valuemin={0} aria-valuemax={total} aria-valuenow={done} title={hint}>
       <div className="progress-figure">
         <span className={`progress-done ${done === total && total > 0 ? 'complete' : ''}`}>{done}</span>
         <span className="progress-of">/ {total}</span>
@@ -342,12 +342,7 @@ function CheckpointBar({ target }: { target: Target }) {
   const wt = target.worktree ? { worktree: target.worktree } : {};
   const open = (id: number) => void setTarget(formatTargetKey({ kind: 'checkpoint', id, ...wt }));
   const take = (
-    <Button
-      variant="outline"
-      size="sm"
-      onClick={() => void createCheckpoint()}
-      title="记下工作区现在的样子（含未跟踪的文件），之后只看这以后的改动。不会写入仓库"
-    >
+    <Button variant="outline" size="sm" onClick={() => void createCheckpoint()} title="记录工作区快照（含未跟踪文件），用于比较后续变更；不写入仓库">
       新建检查点
     </Button>
   );
@@ -389,7 +384,7 @@ function CheckpointBar({ target }: { target: Target }) {
           对比检查点 #{newest.id} · {checkpointTime(newest.createdAt)}
         </Button>
       ) : (
-        <span className="checkpoint-none">还没有检查点</span>
+        <span className="checkpoint-none">暂无检查点</span>
       )}
       {take}
     </div>
@@ -451,7 +446,7 @@ export function FileTree() {
         <ReviewProgress
           done={done}
           total={total}
-          label="个文件已审"
+          label="已审"
           hint={`暂存即已审：一个文件的改动全部进了暂存区，就算审完了${ignoreDebug ? '（只剩调试代码的文件也算）' : ''}`}
         />
         <DebugToggle local />
@@ -462,14 +457,14 @@ export function FileTree() {
             title="未暂存"
             view={formatTargetKey({ kind: 'working', ...worktree })}
             files={unstaged}
-            empty={loading ? '加载中…' : '没有未暂存的改动'}
+            empty={loading ? '加载中…' : '暂无变更'}
           />
           <TreeBlock
             key={`${scope}:staged`}
             title="已暂存"
             view={formatTargetKey({ kind: 'staged', ...worktree })}
             files={staged}
-            empty={loading ? '加载中…' : '空'}
+            empty={loading ? '加载中…' : '暂无变更'}
           />
         </div>
       </>
@@ -478,11 +473,11 @@ export function FileTree() {
 
   return (
     <>
-      <ReviewProgress done={files.filter((f) => f.viewed).length} total={files.length} label="个文件已读" hint="勾选文件旁的框，或用文件头的“已读”标记" />
+      <ReviewProgress done={files.filter((f) => f.viewed).length} total={files.length} label="已读" hint="勾选文件旁的框，或用文件头的“已读”标记" />
       <DebugToggle local={false} />
       {target?.kind === 'checkpoint' && <CheckpointBar target={target} />}
       <div className="tree-blocks">
-        <TreeBlock key={scope} title="改动" view={targetKey} files={files} empty={loading ? '加载中…' : '没有改动'} />
+        <TreeBlock key={scope} title="变更" view={targetKey} files={files} empty={loading ? '加载中…' : '暂无变更'} />
       </div>
     </>
   );

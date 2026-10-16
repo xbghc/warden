@@ -12,7 +12,7 @@ import { Sheet } from './ui/sheet';
 import { OperationError } from './TaskWorkspace';
 
 export const checkLabel = (check?: RebaseCheck) =>
-  check ? { current: '已是最新', ready: '预计可直接 rebase', conflict: '预计有冲突', blocked: '存在阻碍', unknown: '尚不能判断' }[check.status] : '尚未检查';
+  check ? { current: '已同步', ready: '预计可同步', conflict: '预计冲突', blocked: '暂不可同步', unknown: '无法判断' }[check.status] : '未检查';
 
 export function RebaseSheet() {
   const open = useWorkbench((state) => state.sheet === 'sync');
@@ -43,7 +43,7 @@ export function RebaseSheet() {
       .filter((id) => !items.some((check) => check.changeId === id))
       .map((changeId) => {
         const check = checks.find((row) => row.changeId === changeId);
-        return { changeId, status: 'skipped', message: stale(check) ? '检查未知或已过期，请重新检查' : (check?.message ?? checkLabel(check)) };
+        return { changeId, status: 'skipped', message: stale(check) ? '请重新检查' : (check?.message ?? checkLabel(check)) };
       });
     try {
       const response = items.length
@@ -72,12 +72,13 @@ export function RebaseSheet() {
         <div className="wb-actions">
           <Button
             variant="outline"
-            size="sm"
+            size="icon-sm"
+            aria-label="重新检查"
+            title={checking ? '检查中…' : '重新检查'}
             disabled={checking || pending}
             onClick={() => void Promise.all([useWorkflow.getState().refresh(), useWorkbenchData.getState().refresh()])}
           >
-            <RefreshCw size={14} />
-            {checking ? '检查中…' : '重新检查'}
+            <RefreshCw size={14} className={checking ? 'animate-spin' : undefined} aria-hidden="true" />
           </Button>
           {checks[0]?.checkedAt && <span className="muted small">检查于 {new Date(checks[0].checkedAt).toLocaleTimeString('zh-CN')}</span>}
         </div>
@@ -93,7 +94,7 @@ export function RebaseSheet() {
                 />
               </th>
               <th>工作区</th>
-              <th>检查结论</th>
+              <th>状态</th>
             </tr>
           </thead>
           <tbody>
@@ -115,16 +116,19 @@ export function RebaseSheet() {
                     <small>{task.branch}</small>
                   </td>
                   <td>
-                    <span>{stale(check) ? '检查未知或已过期' : checkLabel(check)}</span>
-                    {check?.message && <small>{check.message}</small>}
-                    {check?.files?.map((path) => (
-                      <code key={path}>{path}</code>
-                    ))}
-                    {result && (
+                    {result ? (
                       <div className={`wb-batch-result${result.status === 'failed' ? ' has-error' : ''}`}>
-                        {{ updated: '已更新', skipped: '未执行', failed: '执行未成功' }[result.status]}
+                        {{ updated: '已同步', skipped: '已跳过', failed: '同步失败' }[result.status]}
                         {result.message && `：${result.message}`}
                       </div>
+                    ) : (
+                      <>
+                        <span>{errors.checks ? '检查失败' : check && stale(check) ? '需重新检查' : checkLabel(check)}</span>
+                        {check?.message && <small>{check.message}</small>}
+                        {check?.files?.map((path) => (
+                          <code key={path}>{path}</code>
+                        ))}
+                      </>
                     )}
                   </td>
                 </tr>
@@ -132,10 +136,10 @@ export function RebaseSheet() {
             })}
           </tbody>
         </table>
-        {tasks.length === 0 && <p className="wb-empty-inline">尚无可同步的工作区。</p>}
-        <p className="muted small">执行前会复查 Git 状态。预计冲突、未知或有阻碍的工作区不会执行；已有修改会保留。</p>
+        {tasks.length === 0 && <p className="wb-empty-inline">暂无工作区</p>}
+        <p className="muted small">通过 rebase 同步。执行前复查状态，仅同步预计可同步的工作区，保留已有修改。</p>
         <Button disabled={pending || !selected.some((id) => tasks.some((task) => task.id === id))} onClick={() => void run()}>
-          {pending ? '执行中…' : `Rebase 所选 ${selected.filter((id) => tasks.some((task) => task.id === id)).length} 个工作区`}
+          {pending ? '同步中…' : `同步所选（${selected.filter((id) => tasks.some((task) => task.id === id)).length}）`}
         </Button>
       </div>
     </Sheet>

@@ -651,7 +651,7 @@ export function DiffView({ diff }: { diff: FileDiff }) {
                     : '把这个 hunk 的全部改动移出暂存区'
                 }
               >
-                {mode === 'stage' ? '暂存此 hunk' : '取消暂存此 hunk'}
+                {mode === 'stage' ? '暂存此段' : '取消暂存此段'}
               </Button>
             )}
           </div>

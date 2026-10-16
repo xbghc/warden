@@ -66,7 +66,7 @@ export async function copyTaskBrief(change: DevelopmentChange) {
       await api.exportComments(comments.commentIds);
       await useStore.getState().loadAllComments();
     }
-    useStore.getState().showToast('已复制任务目标、验收条件与关联评论');
+    useStore.getState().showToast('任务说明已复制');
   } catch (error) {
     useStore.getState().showToast(error instanceof Error ? error.message : String(error), 'error');
   }

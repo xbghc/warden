@@ -1,5 +1,20 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, Check, ChevronDown, FileCode2, GitBranch, MessageSquare, RefreshCw, Send, Terminal } from 'lucide-react';
+import {
+  ArrowLeft,
+  ChevronDown,
+  Columns2,
+  FileCode2,
+  GitBranch,
+  LoaderCircle,
+  MessageSquare,
+  Pencil,
+  Play,
+  RefreshCw,
+  Save,
+  Send,
+  Terminal,
+  X,
+} from 'lucide-react';
 import type { DevelopmentChange, WorkflowTask, SlotKind } from '@warden/shared';
 import { tryParseTargetKey } from '@warden/shared';
 import { api } from '../api';
@@ -36,11 +51,10 @@ function WorkspaceCreation({ task }: { task: WorkflowTask }) {
     <>
       <div className="wb-empty-workspace">
         <GitBranch size={30} strokeWidth={1.3} />
-        <h2>尚无工作区</h2>
-        <p>创建工作区后，在这里查看文件差异、发送 tmux 命令。</p>
+        <h2>未创建工作区</h2>
         <Button onClick={() => setOpen(true)}>创建工作区…</Button>
       </div>
-      <Sheet open={open} onOpenChange={setOpen} title="创建工作区" description={`任务：${task.title}`}>
+      <Sheet open={open} onOpenChange={setOpen} title="创建工作区" description={task.title}>
         <form
           className="wb-form"
           onSubmit={async (event) => {
@@ -72,7 +86,6 @@ function WorkspaceCreation({ task }: { task: WorkflowTask }) {
           <div className="wb-note">
             <span>主开发分支</span>
             <code>{task.developmentBranch}</code>
-            <p>{existing || '目录由现有可用工位与新编号分配；创建结果会显示实际路径。'}</p>
           </div>
           <OperationError message={actionError} />
           <Button disabled={busy}>{busy ? '创建中…' : '创建工作区'}</Button>
@@ -111,74 +124,82 @@ function WorkspaceCommands({ task }: { task: DevelopmentChange }) {
     }
   };
   return (
-    <div className="wb-commands">
-      <div className="wb-command-row">
-        <Terminal size={15} />
-        <NativeSelect aria-label="已配置的 tmux 命令" value={commandId} onChange={(event) => setCommandId(event.target.value)}>
-          <option value="">选择配置命令</option>
-          {commands.map((item) => (
-            <option key={item.id} value={item.id}>
-              {item.label}
-            </option>
-          ))}
-        </NativeSelect>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={pending || !command}
-          onClick={() => void send(true)}
-          title={command && [command.text, command.keys?.join(' ')].filter(Boolean).join('\n')}
-        >
-          运行命令
-        </Button>
-        {commands.length === 0 && <span className="muted small">在设置中添加通用命令</span>}
-      </div>
-      <div className="wb-prompt-row">
-        <Textarea
-          rows={2}
-          aria-label="提示词"
-          placeholder="输入要发送到工作区 tmux 的文本…"
-          value={text}
-          onChange={(event) => useWorkbench.getState().setPrompt(task.id, event.target.value)}
-        />
-        <div>
-          <label className="check small">
-            <Checkbox checked={enter} onCheckedChange={(value) => setEnter(value === true)} />
-            同时发送 Enter
-          </label>
-          <Button size="sm" disabled={pending || !text} onClick={() => void send(false)}>
-            <Send size={14} />
-            发送文本
-          </Button>
+    <div className="wb-workspace-tools">
+      <details className="wb-commands">
+        <summary>
+          <Terminal size={14} aria-hidden="true" />
+          终端
+          <ChevronDown size={13} aria-hidden="true" />
+        </summary>
+        <div className="wb-command-body">
+          <div className="wb-command-row">
+            <NativeSelect aria-label="已配置的 tmux 命令" value={commandId} onChange={(event) => setCommandId(event.target.value)}>
+              <option value="">选择命令</option>
+              {commands.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.label}
+                </option>
+              ))}
+            </NativeSelect>
+            <Button
+              variant="outline"
+              size="icon-sm"
+              disabled={pending || !command}
+              onClick={() => void send(true)}
+              aria-label="运行命令"
+              title={command ? `运行命令\n${[command.text, command.keys?.join(' ')].filter(Boolean).join('\n')}` : '运行命令'}
+            >
+              {pending ? <LoaderCircle size={14} className="animate-spin" aria-hidden="true" /> : <Play size={14} aria-hidden="true" />}
+            </Button>
+            {commands.length === 0 && <span className="muted small">在设置中添加命令</span>}
+          </div>
+          <div className="wb-prompt-row">
+            <Textarea
+              rows={2}
+              aria-label="提示词"
+              placeholder="发送到终端…"
+              value={text}
+              onChange={(event) => useWorkbench.getState().setPrompt(task.id, event.target.value)}
+            />
+            <div>
+              <label className="check small">
+                <Checkbox checked={enter} onCheckedChange={(value) => setEnter(value === true)} />
+                附加 Enter
+              </label>
+              <Button size="icon-sm" disabled={pending || !text} onClick={() => void send(false)} aria-label="发送文本" title="发送文本">
+                {pending ? <LoaderCircle size={14} className="animate-spin" aria-hidden="true" /> : <Send size={14} aria-hidden="true" />}
+              </Button>
+            </div>
+          </div>
+          {result && (
+            <details className="wb-send-result">
+              <summary>已发送</summary>
+              <code>
+                {result.session} {result.pane}
+              </code>
+              <pre>{result.input}</pre>
+            </details>
+          )}
         </div>
-      </div>
-      {result && (
-        <details className="wb-send-result">
-          <summary>
-            已发送到{' '}
-            <code>
-              {result.session} {result.pane}
-            </code>{' '}
-            · 查看发送结果
-          </summary>
-          <pre>{result.input}</pre>
-        </details>
-      )}
+      </details>
       <OperationError message={error} />
       {task.workspaceHook && (
         <details className="wb-hook" open={task.workspaceHook.status === 'failed' || undefined}>
           <summary>
-            工作区 hook ·{' '}
-            {task.workspaceHook.status === 'succeeded'
-              ? `退出码 ${task.workspaceHook.exitCode ?? 0}`
-              : task.workspaceHook.status === 'failed'
-                ? '执行失败，工作区已保留'
-                : '执行中或已中断'}
+            工作区脚本 ·{' '}
+            {task.workspaceHook.status === 'succeeded' ? '已完成' : task.workspaceHook.status === 'failed' ? '执行失败，工作区已保留' : '执行中或已中断'}
           </summary>
           <code>{task.workspaceHook.command}</code>
+          {task.workspaceHook.status !== 'running' && <p>退出码 {task.workspaceHook.exitCode ?? '未知'}</p>}
           <pre>{task.workspaceHook.output}</pre>
-          <Button variant="outline" size="sm" onClick={() => void workflowAction(() => api.retryWorkspaceHook(task.id))}>
-            重跑 hook
+          <Button
+            variant="outline"
+            size="icon-sm"
+            onClick={() => void workflowAction(() => api.retryWorkspaceHook(task.id))}
+            aria-label="重试脚本"
+            title="重试脚本"
+          >
+            <RefreshCw size={14} aria-hidden="true" />
           </Button>
         </details>
       )}
@@ -225,30 +246,30 @@ function DeliveryPanel({ task, open, onOpenChange }: { task: DevelopmentChange; 
     <Sheet
       open={open}
       onOpenChange={onOpenChange}
-      title={retryPreparation ? '重试准备本次合入' : preparation ? '提交到主开发分支' : '准备本次合入'}
+      title={retryPreparation ? '重试准备' : preparation ? '提交到主开发分支' : '准备合入'}
       description={`${task.title} → ${task.developmentBranch}`}
     >
       <div className="wb-form">
         <div className="wb-note">
-          <strong>本次交付范围</strong>
-          <p>相对于已记录交付的未交付变化。{files.length} 个文件。</p>
+          <strong>交付范围</strong>
+          <p>{files.length} 个文件 · 未交付变更</p>
           <code>{preparation?.worktree ?? task.worktree}</code>
         </div>
         {!preparation && (
-          <>
-            <p className="muted">准备后，主目录只呈现本次交付。其他连接的贡献会暂时移除。</p>
-            {!!preview?.connectedIds.length && <p className="small">当前连接 {preview.connectedIds.length} 个工作区。</p>}
-          </>
+          <p className="muted">
+            变更将放入主目录暂存区。
+            {!!preview?.connectedIds.length && `${preview.connectedIds.length} 个已连接工作区的预览将暂时移除。`}
+          </p>
         )}
         {preparation && (
           <div className="wb-note">
-            <strong>{retryPreparation ? '本次准备尚未完成' : preparation.state === 'committed' ? '检测到主开发分支提交' : '本次改动已放入主目录暂存区'}</strong>
+            <strong>{retryPreparation ? '准备未完成' : preparation.state === 'committed' ? '检测到新提交' : '已暂存到主目录'}</strong>
             {retryPreparation ? (
               <p>
-                重试将继续使用已记录的源提交 {retryPreparation.source.slice(0, 8)} 与主开发分支版本 {retryPreparation.parent.slice(0, 8)}。
+                重试使用源提交 {retryPreparation.source.slice(0, 8)} 与主开发分支 {retryPreparation.parent.slice(0, 8)}。
               </p>
             ) : (
-              <p>你可以在主目录自行运行测试，再决定提交时间。正常 Git hooks 会运行。</p>
+              <p>可在主目录测试后提交，Git hooks 照常运行。</p>
             )}
             {preparation.message && <p>{preparation.message}</p>}
           </div>
@@ -261,12 +282,12 @@ function DeliveryPanel({ task, open, onOpenChange }: { task: DevelopmentChange; 
         {!preparation && !retryPreparation && !canPrepare && (
           <p className="wb-muted-note">
             {data?.preparation
-              ? '主目录已有另一批准备中的改动。'
-              : checkout?.dirty !== 0
-                ? '本次合入需要先在任务工作区保存为普通提交；实时预览仍可包含未提交变化。'
+              ? '请先完成主目录中的另一批交付。'
+              : checkout && checkout.dirty > 0
+                ? '请先在任务工作区提交变更，再准备合入。'
                 : files.length === 0
-                  ? '当前没有未交付变化。'
-                  : '当前 Git 状态或审查版本尚不支持合入，请刷新检查。'}
+                  ? '暂无未交付变更。'
+                  : '当前状态无法合入，请刷新后检查。'}
           </p>
         )}
         <div className="wb-actions">
@@ -282,7 +303,7 @@ function DeliveryPanel({ task, open, onOpenChange }: { task: DevelopmentChange; 
               disabled={pending || busy || !canPrepare}
               onClick={() => void mutate(() => api.prepareChange(task.id, { sourceHead: sourceHead!, developmentHead: data!.developmentHead! }))}
             >
-              {pending ? '准备中…' : '准备本次合入'}
+              {pending ? '准备中…' : '准备合入'}
             </Button>
           ) : preparation.state === 'committed' ? (
             <Button
@@ -291,11 +312,11 @@ function DeliveryPanel({ task, open, onOpenChange }: { task: DevelopmentChange; 
                 void mutate(async () => {
                   await api.acceptChange(task.id, { mode: 'record', commit: preparation.head! });
                   onOpenChange(false);
-                  useStore.getState().showToast('已记录本次交付，工作区继续保留');
+                  useStore.getState().showToast('交付已记录');
                 })
               }
             >
-              记录已存在的提交
+              记录现有提交
             </Button>
           ) : (
             <Button
@@ -309,15 +330,22 @@ function DeliveryPanel({ task, open, onOpenChange }: { task: DevelopmentChange; 
                     message,
                   });
                   onOpenChange(false);
-                  useStore.getState().showToast('已提交到主开发分支，工作区继续保留');
+                  useStore.getState().showToast('已提交到主开发分支');
                 })
               }
             >
               {pending ? '提交中…' : '提交到主开发分支'}
             </Button>
           )}
-          <Button variant="outline" disabled={pending} onClick={() => void Promise.all([useWorkflow.getState().refresh(), useStore.getState().refresh()])}>
-            刷新 Git 状态
+          <Button
+            variant="outline"
+            size="icon"
+            disabled={pending}
+            onClick={() => void Promise.all([useWorkflow.getState().refresh(), useStore.getState().refresh()])}
+            aria-label="刷新状态"
+            title="刷新状态"
+          >
+            <RefreshCw size={14} aria-hidden="true" />
           </Button>
         </div>
       </div>
@@ -334,12 +362,14 @@ function TaskFiles() {
   return (
     <aside className="wb-files" aria-label="本次变更文件">
       <div className="wb-files-title">
-        <strong>本次变更</strong>
-        <span>{files.length}</span>
+        <strong>文件</strong>
+        {!error && (!loading || files.length > 0) && (
+          <span>{tracks && files.length > 0 ? `已读 ${files.filter((file) => file.viewed).length}/${files.length}` : files.length}</span>
+        )}
       </div>
       <OperationError message={error} />
-      {loading && files.length === 0 && <p className="wb-muted-note">正在读取文件…</p>}
-      {!loading && !error && files.length === 0 && <p className="wb-muted-note">当前没有未交付变化。</p>}
+      {loading && files.length === 0 && <p className="wb-muted-note">加载中…</p>}
+      {!loading && !error && files.length === 0 && <p className="wb-muted-note">暂无变更</p>}
       <ul>
         {files.map((file) => (
           <li key={file.path} className={active === file.path ? 'is-active' : ''}>
@@ -356,19 +386,12 @@ function TaskFiles() {
           </li>
         ))}
       </ul>
-      {tracks && files.length > 0 && (
-        <p className="wb-file-progress">
-          <Check size={12} />
-          {files.filter((file) => file.viewed).length} / {files.length} 个文件已读
-        </p>
-      )}
     </aside>
   );
 }
 
 export function TaskWorkspace({ task, active }: { task: WorkflowTask; active: boolean }) {
-  const { data, checkouts } = useWorkflow();
-  const fileCount = useStore((state) => state.files.length);
+  const { checkouts } = useWorkflow();
   const viewMode = useStore((state) => state.prefs.viewMode);
   const railOpen = useStore((state) => state.prefs.railOpen);
   const commentCount = useStore((state) => state.comments.length);
@@ -394,12 +417,6 @@ export function TaskWorkspace({ task, active }: { task: WorkflowTask; active: bo
     <section className="wb-task" hidden={!active} aria-label={`任务：${task.title}`}>
       <header className="wb-page-header">
         <div>
-          <span className="wb-eyebrow">
-            工作计划 ·{' '}
-            {(data?.workflow?.changes
-              .filter((row) => row.developmentBranch === task.developmentBranch && row.status !== 'archived')
-              .findIndex((row) => row.id === task.id) ?? 0) + 1}
-          </span>
           <h1>{task.title}</h1>
           {task.worktree && (
             <p className="wb-task-path">
@@ -410,8 +427,8 @@ export function TaskWorkspace({ task, active }: { task: WorkflowTask; active: bo
             </p>
           )}
         </div>
-        <Button variant="outline" size="sm" onClick={() => setEditing(!editing)}>
-          编辑说明
+        <Button variant="outline" size="icon-sm" onClick={() => setEditing(!editing)} aria-label="编辑说明" title="编辑说明" aria-pressed={editing}>
+          <Pencil size={14} aria-hidden="true" />
         </Button>
       </header>
       <div className="wb-task-context">
@@ -426,9 +443,11 @@ export function TaskWorkspace({ task, active }: { task: WorkflowTask; active: bo
             <Input value={title} onChange={(event) => setTitle(event.target.value)} aria-label="任务标题" required />
             <Textarea value={body} onChange={(event) => setBody(event.target.value)} aria-label="任务说明" rows={3} />
             <div className="wb-actions">
-              <Button size="sm">保存说明</Button>
-              <Button type="button" size="sm" variant="ghost" onClick={() => setEditing(false)}>
-                取消
+              <Button size="icon-sm" aria-label="保存说明" title="保存说明">
+                <Save size={14} aria-hidden="true" />
+              </Button>
+              <Button type="button" size="icon-sm" variant="ghost" onClick={() => setEditing(false)} aria-label="取消编辑" title="取消编辑">
+                <X size={14} aria-hidden="true" />
               </Button>
             </div>
           </form>
@@ -436,7 +455,7 @@ export function TaskWorkspace({ task, active }: { task: WorkflowTask; active: bo
           task.body && (
             <details className="wb-description">
               <summary>
-                任务说明 <ChevronDown size={13} />
+                说明 <ChevronDown size={13} />
               </summary>
               <Markdown text={task.body} />
             </details>
@@ -444,15 +463,17 @@ export function TaskWorkspace({ task, active }: { task: WorkflowTask; active: bo
         )}
         {task.worktree && (
           <>
-            <div className="wb-task-facts">
-              <span>{deliveries.length ? `已记录 ${deliveries.length} 批交付` : '尚无交付记录'}</span>
-              <span>本次 {fileCount} 个变更文件</span>
-              {checkout && checkout.dirty > 0 && <span>{checkout.dirty} 项未提交变化</span>}
-              {checkout?.busy && <span>Git 操作：{checkout.busy}</span>}
-            </div>
+            {checkout && (checkout.dirty > 0 || checkout.busy) && (
+              <div className="wb-task-facts">
+                {checkout.dirty > 0 && <span>{checkout.dirty} 项未提交</span>}
+                {checkout.busy && <span>Git 操作：{checkout.busy}</span>}
+              </div>
+            )}
             {deliveries.length > 0 && (
               <details className="wb-deliveries">
-                <summary>已记录交付</summary>
+                <summary>
+                  交付 · {deliveries.length} <ChevronDown size={13} aria-hidden="true" />
+                </summary>
                 {deliveries.map((delivery, index) => (
                   <p key={delivery.id}>
                     <span>第 {index + 1} 批</span>
@@ -471,52 +492,58 @@ export function TaskWorkspace({ task, active }: { task: WorkflowTask; active: bo
       ) : (
         <>
           <div className="wb-review-toolbar">
-            <div>
-              <strong>{isPrepared ? '主目录中的本次交付' : '未交付变化'}</strong>
-              <span className="muted small">相对于已记录交付</span>
-            </div>
+            <strong title={isPrepared ? '主目录中准备提交的本次交付' : '相对于上次交付或工作区基线的变化'}>{isPrepared ? '待提交' : '未交付'}</strong>
             <div className="wb-actions">
               <Button
                 size="icon-sm"
                 variant="ghost"
                 aria-label="刷新文件"
+                title="刷新文件"
                 onClick={() => void Promise.all([useWorkflow.getState().refresh(), useStore.getState().refresh()])}
               >
                 <RefreshCw size={15} />
               </Button>
               <Button
-                size="sm"
+                size="icon-sm"
                 variant="ghost"
-                className="wb-diff-layout"
+                aria-label={viewMode === 'split' ? '切换为统一差异' : '切换为并排差异'}
+                title={viewMode === 'split' ? '切换为统一差异' : '切换为并排差异'}
                 onClick={() => useStore.getState().setViewMode(viewMode === 'split' ? 'unified' : 'split')}
               >
-                {viewMode === 'split' ? '统一差异' : '并排差异'}
+                {viewMode === 'split' ? <FileCode2 size={15} /> : <Columns2 size={15} />}
               </Button>
-              <Button size="sm" variant={railOpen ? 'secondary' : 'ghost'} onClick={() => useStore.getState().setRailOpen(!railOpen)}>
-                <MessageSquare size={14} />
-                评论{commentCount ? ` ${commentCount}` : ''}
+              <Button
+                size={commentCount ? 'sm' : 'icon-sm'}
+                variant={railOpen ? 'secondary' : 'ghost'}
+                aria-label={`评论${commentCount ? ` ${commentCount}` : ''}`}
+                aria-pressed={railOpen}
+                title="评论"
+                onClick={() => useStore.getState().setRailOpen(!railOpen)}
+              >
+                <MessageSquare size={14} aria-hidden="true" />
+                {commentCount > 0 && <span aria-hidden="true">{commentCount}</span>}
               </Button>
             </div>
           </div>
           <div className={`wb-review${mobileFileList ? ' show-file-list' : ''}`}>
             <TaskFiles />
             <div className="wb-diff">
-              <Button className="wb-mobile-only wb-back-files" size="sm" variant="ghost" onClick={() => setMobileFileList(true)}>
-                <ArrowLeft size={14} />
-                文件列表
+              <Button
+                className="wb-mobile-only wb-back-files"
+                size="icon-sm"
+                variant="ghost"
+                onClick={() => setMobileFileList(true)}
+                aria-label="返回文件列表"
+                title="返回文件列表"
+              >
+                <ArrowLeft size={14} aria-hidden="true" />
               </Button>
               <DiffPanel />
             </div>
             <Rail />
           </div>
           <footer className="wb-task-footer">
-            <span>
-              {preparationIncomplete
-                ? '本次合入准备尚未完成，可查看原因并重试。'
-                : isPrepared
-                  ? '连接预览已暂停，主目录正在准备本次交付。'
-                  : '文件选择用于审查；连接在主目录预览中管理。'}
-            </span>
+            {(preparationIncomplete || isPrepared) && <span>{preparationIncomplete ? '准备未完成' : '预览已暂停'}</span>}
             <Button size="sm" onClick={() => setDeliveryOpen(true)}>
               {preparationIncomplete ? '重试准备…' : isPrepared ? '提交到主开发分支…' : '准备合入…'}
             </Button>

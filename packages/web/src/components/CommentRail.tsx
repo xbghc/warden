@@ -79,7 +79,7 @@ export function CommentRail() {
   const editorCard = editor && (
     <CommentEditor
       key={`${editor.filePath}:${editor.side}:${editor.startLine}:${editor.endLine}`}
-      title={`${editor.filePath.split('/').pop()} ${editor.side} ${editor.startLine === editor.endLine ? editor.startLine : `${editor.startLine}-${editor.endLine}`}`}
+      title={`${editor.filePath.split('/').pop()}:${editor.startLine === editor.endLine ? editor.startLine : `${editor.startLine}–${editor.endLine}`}${editor.side === 'old' ? '（修改前）' : ''}`}
       onSave={async (body) => {
         await createComment({ filePath: editor.filePath, side: editor.side, startLine: editor.startLine, endLine: editor.endLine, body }, editor.view);
       }}
@@ -117,10 +117,10 @@ export function CommentRail() {
         {editor && editorIndex === -1 && editorCard}
         {counts.all === 0 && !editor && (
           <div className="muted empty">
-            还没有评论。在 diff 行旁点击 <span className="add-btn static">+</span> 或拖选多行开始。
+            点击行旁 <span className="add-btn static">+</span> 或拖选代码添加评论。
           </div>
         )}
-        {counts.all > 0 && shown.length === 0 && !editor && <div className="muted empty">没有符合筛选的评论</div>}
+        {counts.all > 0 && shown.length === 0 && !editor && <div className="muted empty">暂无匹配评论</div>}
       </div>
       <div className="rail-foot">
         <div className="rail-foot-row">

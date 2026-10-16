@@ -29,9 +29,9 @@ function shortTime(iso: string): string {
 function viewLabel(key: TargetKey): string {
   const t = tryParseTargetKey(key);
   if (!t) return key;
-  if (t.kind === 'working') return 'Unstaged';
-  if (t.kind === 'staged') return 'Staged';
-  if (t.kind === 'all') return 'All';
+  if (t.kind === 'working') return '未暂存';
+  if (t.kind === 'staged') return '已暂存';
+  if (t.kind === 'all') return '全部变更';
   return targetLabel(t);
 }
 
@@ -75,22 +75,22 @@ export function CommentCard({ comment, showSnippet = false, showFile = false }: 
           </Badge>
         )}
         {answered ? (
-          <Badge variant="secondary" className="badge badge-active" title="agent 已回复，等你确认或追问">
+          <Badge variant="secondary" className="badge badge-active" title="agent 已回复，可确认或追问">
             待确认
           </Badge>
         ) : (
           comment.status === 'exported' && (
-            <Badge variant="secondary" className="badge badge-exported" title="这条评论已复制，或已由 agent 通过 warden feedback 取走">
+            <Badge variant="secondary" className="badge badge-exported" title="已复制或由 agent 读取">
               已导出
             </Badge>
           )
         )}
         {elsewhere && (
-          <Badge variant="secondary" className="badge" title={`这条评论现在位于 ${comment.targetKey}，点击卡片可跳转`}>
+          <Badge variant="secondary" className="badge" title={`点击跳转到 ${comment.targetKey}`}>
             {elsewhere}
           </Badge>
         )}
-        <span className="muted time" title={`created ${fmtTime(comment.createdAt)}${comment.exportedAt ? `\nexported ${fmtTime(comment.exportedAt)}` : ''}`}>
+        <span className="muted time" title={`创建于 ${fmtTime(comment.createdAt)}${comment.exportedAt ? `\n导出于 ${fmtTime(comment.exportedAt)}` : ''}`}>
           {shortTime(comment.updatedAt)}
         </span>
         <span className="card-actions">
@@ -143,12 +143,12 @@ export function CommentCard({ comment, showSnippet = false, showFile = false }: 
                   commentIds: [comment.id],
                 }),
               ).then((task) => {
-                if (task) useStore.getState().showToast('已将独立改动加入任务计划', 'info', { label: '查看计划', run: () => revealTask(task.id) });
+                if (task) useStore.getState().showToast('任务已添加', 'info', { label: '查看任务', run: () => revealTask(task.id) });
               });
             }}
-            title={workflow ? '将独立改动规划为新的 commit，保留评论关联' : '先在任务编排中选择需求主开发分支'}
+            title={workflow ? '创建任务并关联此评论' : '先在设置中选择主开发分支'}
           >
-            <ActionIcon name="todos" label="规划为任务" />
+            <ActionIcon name="todos" label="创建任务" />
           </Button>
           <Button
             variant="ghost"

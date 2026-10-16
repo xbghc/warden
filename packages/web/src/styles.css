@@ -3488,12 +3488,6 @@ button.link.danger:has(> .action-icon):hover:not(:disabled) {
   width: 23px;
   height: 23px;
 }
-.wb-plan-hint {
-  padding: 12px;
-  font-size: 10px;
-  margin: 0;
-  color: var(--muted-foreground);
-}
 .wb-nav-empty {
   color: var(--muted-foreground);
   padding: 14px;
@@ -3917,12 +3911,24 @@ button.link.danger:has(> .action-icon):hover:not(:disabled) {
   padding: 15px 0;
 }
 .wb-deliveries {
-  margin-top: 10px;
-  font-size: 11px;
+  padding: 8px 0;
+  font-size: 12px;
   color: var(--muted-foreground);
 }
-.wb-deliveries summary {
+.wb-deliveries > summary,
+.wb-commands > summary {
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.wb-deliveries > summary::-webkit-details-marker,
+.wb-commands > summary::-webkit-details-marker {
+  display: none;
+}
+.wb-deliveries[open] > summary > svg:last-child,
+.wb-commands[open] > summary > svg:last-child {
+  transform: rotate(180deg);
 }
 .wb-deliveries p {
   display: flex;
@@ -3932,8 +3938,15 @@ button.link.danger:has(> .action-icon):hover:not(:disabled) {
 .wb-deliveries code {
   font-family: var(--mono);
 }
+.wb-workspace-tools {
+  padding: 8px 0 12px;
+}
 .wb-commands {
-  padding: 14px 0 16px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.wb-command-body {
+  padding-top: 12px;
 }
 .wb-command-row {
   display: flex;
@@ -3999,11 +4012,6 @@ button.link.danger:has(> .action-icon):hover:not(:disabled) {
   padding: 8px 16px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
-}
-.wb-review-toolbar > div:first-child {
-  display: flex;
-  align-items: center;
-  gap: 12px;
 }
 .wb-review-toolbar strong {
   font-size: 12px;
@@ -4076,14 +4084,6 @@ button.link.danger:has(> .action-icon):hover:not(:disabled) {
 .wb-files li small {
   font: 10px var(--mono);
 }
-.wb-file-progress {
-  padding: 10px 15px;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 10px;
-  color: var(--muted-foreground);
-}
 .wb-diff {
   display: flex;
   flex-direction: column;
@@ -4117,6 +4117,9 @@ button.link.danger:has(> .action-icon):hover:not(:disabled) {
 .wb-task-footer > span {
   color: var(--muted-foreground);
   font-size: 11px;
+}
+.wb-task-footer > button {
+  margin-left: auto;
 }
 .wb-empty-workspace {
   flex: 1;
@@ -4453,12 +4456,6 @@ button.link.danger:has(> .action-icon):hover:not(:disabled) {
   }
   .wb-review-toolbar {
     padding: 8px 12px;
-  }
-  .wb-review-toolbar > div:first-child > span {
-    display: none;
-  }
-  .wb-diff-layout {
-    display: none;
   }
   .wb-review .wb-files {
     display: none;

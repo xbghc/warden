@@ -16,6 +16,47 @@ task completion. It shows Git facts, connections and operation results. One work
 to one linear task, can deliver several commits and remains available. Rebase is user-triggered.
 The component and visual language is shadcn/ui.
 
+## Interface copy
+
+These rules apply across navigation, task review, preview, history, synchronization, settings and
+shared review controls. The wireframes below describe workflows, not required literal strings.
+
+- Give each fact one primary location. Delivery counts belong to the delivery disclosure; file
+  progress belongs to the file-list heading. Remove duplicate summaries, subtitle explanations
+  of the page title and notes that merely restate the adjacent action.
+- Use nouns for headings and verbs for actions. Within an identified object, shorten labels to
+  the needed distinction: **说明**, **起点**, **调整历史**. Keep destinations on actions
+  where they matter, such as **提交到主开发分支** and **应用到 feature/order**.
+- Prefer familiar icons for refresh, edit, save, cancel, run, send, add, delete and reorder. Use
+  compact square buttons with an accessible name and a tooltip; retain shortcuts in tooltips.
+  Keep short text for navigation and consequential actions such as integration, synchronization
+  and history rewriting, where an icon alone would leave the scope unclear.
+- Keep secondary content on demand: delivery records, terminal input, send details and script
+  output. Preserve accessible names and tooltips on icon buttons. Errors and recovery actions
+  must remain visible, including when terminal controls are collapsed.
+- Empty states give one next step or a short fact, such as **请选择任务** or **暂无变更**. Loading,
+  unavailable data, stale checks and empty results are distinct; do not turn unknown data into
+  a zero count or claim successful synchronization before it runs.
+- State operation consequences once, beside the relevant action. Keep temporary removal of
+  connected previews during preparation, normal commit hooks, rebase semantics, history rewriting
+  and no automatic push explicit. Preserve failure reasons, conflicting paths and recovery steps.
+  Product philosophy and internal allocation mechanics belong in documentation.
+- Toasts report the outcome, not a second description of the workflow. **已复制** does not repeat
+  the copied payload. Do not rewrite user titles, commit messages, command input or Git/script output.
+
+| Concept | Interface vocabulary |
+|---|---|
+| Ordered work and one item | 工作计划 / 任务; 新增任务 / 添加任务 |
+| Review content | 变更 for changed content; 差异 for its code comparison |
+| Delivery history and current scope | 交付 / 未交付 / 待提交 |
+| Terminal configuration and workspace hooks | 终端命令 / 工作区脚本; keep tmux and shell details where configured |
+| Synchronization checks | 已同步 / 预计可同步 / 预计冲突 / 暂不可同步 / 无法判断 / 未检查 |
+| Unusable check results | 检查失败 / 需重新检查, with a reason or recovery action |
+| Review feedback | 评论 / 未导出 / 已导出 / 待确认 |
+
+Review copy in context, including empty, loading, failed and expanded states. Existing Storybook
+interaction checks must continue to find controls by their accessible names after label changes.
+
 ## One navigation area, one ordered work plan
 
 The selected primary development branch is the current context. The only global navigation area

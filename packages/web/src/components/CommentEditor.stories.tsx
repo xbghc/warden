@@ -12,7 +12,7 @@ const meta = {
       </div>
     ),
   ],
-  args: { title: 'src/App.tsx · new 12–15', onSave: fn(), onCancel: fn() },
+  args: { title: 'src/App.tsx:12–15', onSave: fn(), onCancel: fn() },
 } satisfies Meta<typeof CommentEditor>;
 export default meta;
 type Story = StoryObj<typeof meta>;

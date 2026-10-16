@@ -34,7 +34,8 @@ export function CommentEditor({ title, initial = '', submitLabel = '保存评论
         ref={ref}
         value={body}
         onChange={(e) => setBody(e.target.value)}
-        placeholder="写评论，支持 Markdown。Ctrl+Enter 保存，Esc 取消。"
+        aria-label={title}
+        placeholder="输入内容（支持 Markdown）"
         rows={4}
         onKeyDown={(e) => {
           if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
@@ -48,10 +49,17 @@ export function CommentEditor({ title, initial = '', submitLabel = '保存评论
         }}
       />
       <div className="comment-editor-actions">
-        <Button variant="default" size="sm" className="primary" onClick={() => void submit()} disabled={!body.trim() || busy}>
+        <Button
+          variant="default"
+          size="icon-sm"
+          className="primary"
+          onClick={() => void submit()}
+          disabled={!body.trim() || busy}
+          title={`${submitLabel}（Ctrl+Enter）`}
+        >
           <ActionIcon name={busy ? 'loading' : 'save'} label={submitLabel} />
         </Button>
-        <Button variant="outline" size="sm" onClick={onCancel}>
+        <Button variant="outline" size="icon-sm" onClick={onCancel} title="取消（Esc）">
           <ActionIcon name="close" label="取消" />
         </Button>
       </div>

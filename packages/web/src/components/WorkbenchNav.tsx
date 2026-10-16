@@ -68,7 +68,7 @@ export function WorkbenchNav({ connected = 0, behind = 0 }: { connected?: number
             <Plus size={17} />
           </Button>
         </div>
-        <ol className="wb-plan-list" aria-label="有序工作计划">
+        <ol className="wb-plan-list" aria-label="工作计划" title="拖动或使用箭头调整计划顺序">
           {tasks.map((task, index) => (
             <li
               key={task.id}
@@ -92,7 +92,7 @@ export function WorkbenchNav({ connected = 0, behind = 0 }: { connected?: number
                 <span className="wb-plan-number">{index + 1}</span>
                 <span>
                   <strong>{task.title}</strong>
-                  <small>{task.integration?.prepared && task.status === 'integrating' ? '主目录已准备提交' : task.worktree ? task.branch : '尚无工作区'}</small>
+                  <small>{task.integration?.prepared && task.status === 'integrating' ? '待提交' : task.worktree ? task.branch : '未创建工作区'}</small>
                 </span>
               </button>
               <div className="wb-plan-order" aria-label="调整计划顺序">
@@ -100,6 +100,7 @@ export function WorkbenchNav({ connected = 0, behind = 0 }: { connected?: number
                   variant="ghost"
                   size="icon-sm"
                   aria-label={`上移计划：${task.title}`}
+                  title="上移计划"
                   disabled={busy || index === 0}
                   onClick={() => move(task.id, tasks[index - 1]!.id)}
                 >
@@ -109,6 +110,7 @@ export function WorkbenchNav({ connected = 0, behind = 0 }: { connected?: number
                   variant="ghost"
                   size="icon-sm"
                   aria-label={`下移计划：${task.title}`}
+                  title="下移计划"
                   disabled={busy || index === tasks.length - 1}
                   onClick={() => move(task.id, tasks[index + 2]?.id ?? null)}
                 >
@@ -117,9 +119,8 @@ export function WorkbenchNav({ connected = 0, behind = 0 }: { connected?: number
               </div>
             </li>
           ))}
-          {tasks.length === 0 && <li className="wb-nav-empty">添加一条计划，再按需创建工作区。</li>}
+          {tasks.length === 0 && <li className="wb-nav-empty">暂无任务</li>}
         </ol>
-        <p className="wb-plan-hint">顺序只用于计划</p>
         <div className="wb-nav-links wb-nav-bottom">
           <button type="button" onClick={() => setSheet('sync')}>
             <RefreshCw size={16} />

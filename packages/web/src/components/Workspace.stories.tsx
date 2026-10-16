@@ -60,7 +60,7 @@ export const WebCommit: Story = {
     const canvas = within(canvasElement);
     await userEvent.click(await canvas.findByRole('button', { name: '准备合入…' }));
     const dialog = within(await within(document.body).findByRole('dialog'));
-    await userEvent.click(dialog.getByRole('button', { name: '准备本次合入' }));
+    await userEvent.click(dialog.getByRole('button', { name: '准备合入' }));
     await userEvent.click(await dialog.findByRole('button', { name: '提交到主开发分支' }));
     await waitFor(() => expect(api.acceptChange).toHaveBeenCalled());
     await expect(useWorkflow.getState().data!.workflow!.changes.find((task) => task.id === 'orders')!.status).toBe('working');
@@ -87,9 +87,9 @@ export const ArrangeHistory: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await userEvent.selectOptions(await canvas.findByRole('combobox', { name: '历史编排起点' }), 'a100001');
-    await userEvent.click(canvas.getByRole('button', { name: '编排所选历史' }));
+    await userEvent.click(canvas.getByRole('button', { name: '调整历史' }));
     await userEvent.click(canvas.getByRole('button', { name: '上移提交 3' }));
-    await userEvent.click(canvas.getByRole('button', { name: '预览改写结果' }));
+    await userEvent.click(canvas.getByRole('button', { name: '预览改写' }));
     await expect(await canvas.findByRole('button', { name: '应用到 feature/order' })).toBeEnabled();
     await expect(api.applyHistory).not.toHaveBeenCalled();
   },

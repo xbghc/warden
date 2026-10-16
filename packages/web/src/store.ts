@@ -43,7 +43,7 @@ export function branchOf(repo: RepoInfo | null, root: string): string {
 
 export type DiffState = { status: 'loading' } | { status: 'ok'; diff: FileDiff } | { status: 'error'; message: string };
 
-/** The one thing a toast can offer besides its text: the way back (撤消). */
+/** The one thing a toast can offer besides its text: the way back (撤销). */
 export interface ToastAction {
   label: string;
   run: () => void;
@@ -716,7 +716,7 @@ export const useStore = create<AppStore>((set, get) => {
         await copyText(res.text);
         await api.exportComments(res.commentIds);
         markHanded(res.commentIds);
-        get().showToast(`已复制 ${res.count} 条评论到剪贴板`);
+        get().showToast(`已复制 ${res.count} 条评论`);
       } catch (e) {
         fail(e);
       }
@@ -801,7 +801,7 @@ export const useStore = create<AppStore>((set, get) => {
 
     setReattaching(id) {
       set({ reattaching: id, editor: id ? null : get().editor });
-      if (id) get().showToast('在 diff 中点击或拖选行，将评论重新附着到该位置');
+      if (id) get().showToast('点击或拖选代码行，重新定位评论');
     },
 
     setEditor(editor) {
@@ -881,7 +881,7 @@ export const useStore = create<AppStore>((set, get) => {
         await api.deleteTodo(id);
         set((s) => ({ todos: s.todos.filter((t) => t.id !== id) }));
         get().showToast(`已删除「${todo.title}」`, 'info', {
-          label: '撤消',
+          label: '撤销',
           run: () =>
             void get().createTodo({ title: todo.title, body: todo.body, branch: todo.branch, status: todo.status, commentIds: todo.commentIds, after: prev }),
         });
@@ -906,7 +906,7 @@ export const useStore = create<AppStore>((set, get) => {
       }
       if (gone.length === 0) return;
       get().showToast(`已删除 ${gone.length} 条待办`, 'info', {
-        label: '撤消',
+        label: '撤销',
         run: async () => {
           for (const t of [...gone].reverse())
             await get().createTodo({ title: t.title, body: t.body, branch: t.branch, status: t.status, commentIds: t.commentIds });
@@ -931,7 +931,7 @@ export const useStore = create<AppStore>((set, get) => {
     async copyToClipboard(text) {
       try {
         await copyText(text);
-        get().showToast(`已复制 ${text}`);
+        get().showToast('已复制');
       } catch (e) {
         fail(e);
       }
@@ -949,7 +949,7 @@ export const useStore = create<AppStore>((set, get) => {
           await api.exportTodo(id);
           markHanded(res.commentIds);
         }
-        get().showToast(res.count ? `已复制待办（含 ${res.count} 条评论）到剪贴板` : '已复制待办到剪贴板');
+        get().showToast(res.count ? `已复制待办（含 ${res.count} 条评论）` : '已复制待办');
       } catch (e) {
         fail(e);
       }

@@ -11,6 +11,12 @@ there is no separate review-mode switch. The baseline is the last delivered sour
 primary baseline already incorporated by the workspace. Live uncommitted edits remain visible;
 formal delivery in this version requires a clean committed source.
 
+Delivery history and terminal controls are collapsed on the task page. Expand **交付** to inspect
+previous batches, or **终端** to run a configured command or send text. The file-list heading shows
+review progress once; layout and comment controls use icons with accessible labels and tooltips.
+The same [interface copy rules](design.md#interface-copy) apply to preview, history, synchronization,
+settings and comments. Operational consequences and recovery instructions stay beside their actions.
+
 The task page is read-only for source files. Comments and viewed marks support review. Preparation
 isolates this delivery in the primary index; the page supports a message and ordinary Git commit
 with hooks. No validation checkbox or readiness declaration is required. Failed hooks preserve

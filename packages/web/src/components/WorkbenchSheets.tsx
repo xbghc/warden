@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, Trash2 } from 'lucide-react';
+import { LoaderCircle, Plus, Save, Trash2 } from 'lucide-react';
 import type { WorkspaceConfig } from '@warden/shared';
 import { api } from '../api';
 import { useWorkflow, workflowAction } from '../workflow-store';
@@ -28,7 +28,7 @@ function PlanForm() {
       }}
     >
       <label className="wb-field">
-        任务标题
+        标题
         <Input
           aria-label="任务标题"
           autoFocus
@@ -40,19 +40,12 @@ function PlanForm() {
         />
       </label>
       <label className="wb-field">
-        任务说明
-        <Textarea
-          aria-label="任务说明"
-          value={body}
-          onChange={(event) => setBody(event.target.value)}
-          rows={6}
-          placeholder="描述这项改动的目标与范围（可选）"
-        />
+        说明（可选）
+        <Textarea aria-label="任务说明" value={body} onChange={(event) => setBody(event.target.value)} rows={6} placeholder="目标与范围" />
       </label>
-      <p className="muted small">添加计划后，再按需要创建工作区、启动命令或发送提示词。</p>
       <OperationError message={error} />
       {!data?.workflow && <p>请先在设置中选择主开发分支。</p>}
-      <Button disabled={busy || !title.trim() || !data?.workflow}>{busy ? '添加中…' : '添加到计划'}</Button>
+      <Button disabled={busy || !title.trim() || !data?.workflow}>{busy ? '添加中…' : '添加任务'}</Button>
     </form>
   );
 }
@@ -72,7 +65,7 @@ function SettingsForm() {
       if (context) await api.configureWorkflow(branch.trim());
       else await api.saveWorkspaceConfig(config);
       await Promise.all([useWorkflow.getState().refresh(), useWorkbenchData.getState().refresh()]);
-      setNotice(context ? '已保存主开发分支。' : '已保存命令与 hook。');
+      setNotice(context ? '主开发分支已保存' : '命令与脚本已保存');
     } catch (error) {
       setError(errorMessage(error));
     } finally {
@@ -89,7 +82,7 @@ function SettingsForm() {
         }}
       >
         <h2>主开发分支</h2>
-        <p className="muted small">选择这项需求对应的本地分支。</p>
+        <p className="muted small">交付提交到此本地分支。</p>
         <Input
           aria-label="主开发分支"
           list="wb-development-branches"
@@ -103,8 +96,8 @@ function SettingsForm() {
             <option key={item.name} value={item.name} />
           ))}
         </datalist>
-        <Button variant="outline" size="sm" disabled={pending || !branch.trim()}>
-          保存主开发分支
+        <Button variant="outline" size="icon-sm" disabled={pending || !branch.trim()} aria-label="保存分支" title="保存分支">
+          <Save size={14} aria-hidden="true" />
         </Button>
       </form>
       <form
@@ -115,24 +108,25 @@ function SettingsForm() {
         }}
       >
         <div className="wb-section-heading">
-          <h2>tmux 通用命令</h2>
+          <h2>终端命令</h2>
           <Button
             type="button"
             variant="outline"
-            size="sm"
+            size="icon-sm"
+            aria-label="添加命令"
+            title="添加命令"
             onClick={() => setConfig({ ...config, commands: [...config.commands, { id: `command-${crypto.randomUUID()}`, label: '', text: '', keys: [] }] })}
           >
-            <Plus size={14} />
-            添加命令
+            <Plus size={14} aria-hidden="true" />
           </Button>
         </div>
-        <p className="muted small">文本原样发送；按键中包含 Enter 才会回车。点击任务中的运行命令时执行。</p>
+        <p className="muted small">文本与按键依次发送到 tmux；添加 Enter 才会回车。</p>
         {config.commands.map((command, index) => (
           <div className="wb-command-editor" key={command.id}>
             <div className="wb-actions">
               <Input
                 aria-label={`命令名称 ${index + 1}`}
-                placeholder="命令名称，例如启动 agent"
+                placeholder="名称，如“启动 agent”"
                 value={command.label}
                 required
                 onChange={(event) =>
@@ -144,6 +138,7 @@ function SettingsForm() {
                 variant="ghost"
                 size="icon-sm"
                 aria-label={`删除命令 ${index + 1}`}
+                title="删除命令"
                 onClick={() => setConfig({ ...config, commands: config.commands.filter((row) => row.id !== command.id) })}
               >
                 <Trash2 size={14} />
@@ -152,7 +147,7 @@ function SettingsForm() {
             <Textarea
               aria-label={`命令文本 ${index + 1}`}
               rows={2}
-              placeholder="要输入的文本"
+              placeholder="命令文本"
               value={command.text ?? ''}
               onChange={(event) =>
                 setConfig({ ...config, commands: config.commands.map((row) => (row.id === command.id ? { ...row, text: event.target.value } : row)) })
@@ -160,7 +155,7 @@ function SettingsForm() {
             />
             <Input
               aria-label={`命令按键 ${index + 1}`}
-              placeholder="按键，以空格分隔，例如 Enter 或 C-c"
+              placeholder="按键（空格分隔）：Enter、C-c"
               value={command.keys?.join(' ') ?? ''}
               onChange={(event) =>
                 setConfig({
@@ -171,12 +166,12 @@ function SettingsForm() {
             />
           </div>
         ))}
-        <h2>工作区 hook</h2>
-        <p className="muted small">在创建或复用工作区时运行你的 shell 脚本。工作目录为该工作区，输出和退出状态保留在任务中。</p>
+        <h2>工作区脚本</h2>
+        <p className="muted small">在工作区目录执行，运行结果显示在任务中。</p>
         <label className="wb-field">
           创建时
           <Textarea
-            aria-label="创建 hook"
+            aria-label="创建时脚本"
             rows={2}
             value={config.hooks.create ?? ''}
             onChange={(event) => setConfig({ ...config, hooks: { ...config.hooks, create: event.target.value } })}
@@ -185,7 +180,7 @@ function SettingsForm() {
         <label className="wb-field">
           复用时
           <Textarea
-            aria-label="复用 hook"
+            aria-label="复用时脚本"
             rows={2}
             value={config.hooks.reuse ?? ''}
             onChange={(event) => setConfig({ ...config, hooks: { ...config.hooks, reuse: event.target.value } })}
@@ -195,7 +190,9 @@ function SettingsForm() {
           <summary>脚本环境变量</summary>
           <p className="mono">WARDEN_WORKTREE · WARDEN_REPO · WARDEN_BRANCH · WARDEN_DEVELOPMENT_BRANCH · WARDEN_TASK_ID · WARDEN_HOOK_EVENT</p>
         </details>
-        <Button disabled={pending}>{pending ? '保存中…' : '保存命令与 hook'}</Button>
+        <Button size="icon" disabled={pending} aria-label="保存命令与脚本" title={pending ? '保存中…' : '保存命令与脚本'}>
+          {pending ? <LoaderCircle size={16} className="animate-spin" aria-hidden="true" /> : <Save size={16} aria-hidden="true" />}
+        </Button>
       </form>
       <OperationError message={error} />
       {notice && <p role="status">{notice}</p>}
@@ -212,8 +209,7 @@ export function WorkbenchSheets() {
         onOpenChange={(open) => {
           if (!open) useWorkbench.getState().setSheet(null);
         }}
-        title="添加工作计划"
-        description="一条计划对应一个线性任务。"
+        title="新增任务"
       >
         <PlanForm />
       </Sheet>
@@ -223,7 +219,6 @@ export function WorkbenchSheets() {
           if (!open) useWorkbench.getState().setSheet(null);
         }}
         title="设置"
-        description="主开发分支、tmux 命令与工作区 hook。"
       >
         {sheet === 'settings' && <SettingsForm />}
       </Sheet>

@@ -8,14 +8,12 @@ export function Rail() {
   const open = useStore((s) => s.prefs.railOpen);
   const panel = useStore((s) => s.panel);
   const setRailOpen = useStore((s) => s.setRailOpen);
-  const count = useStore((s) => s.comments.length);
   if (!open) return null;
   return (
     <aside className="rail" hidden={panel === 'orchestration'} aria-label="审查评论">
       <div className="rail-head">
         <MessageSquare size={16} />
-        <h2>审查评论</h2>
-        {count > 0 && <span className="tab-count">{count}</span>}
+        <h2>评论</h2>
         <span className="spacer" />
         <Button variant="ghost" size="icon-sm" onClick={() => setRailOpen(false)} title="收起 (Esc)" aria-label="收起右栏">
           <X aria-hidden="true" />

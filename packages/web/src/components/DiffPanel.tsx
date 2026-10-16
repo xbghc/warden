@@ -59,7 +59,11 @@ function FileHeader({ entry }: { entry: FileEntry }) {
       <span className="counts">
         <span className="add">+{entry.additions}</span> <span className="del">-{entry.deletions}</span>
       </span>
-      {marks && entry.changed && <span className="changed">文件已变化，“已读”标记已取消</span>}
+      {marks && entry.changed && (
+        <span className="changed" title="文件有新变更，已取消已读标记">
+          已读已重置
+        </span>
+      )}
       <span className="spacer" />
       {mode && (
         <Button
@@ -109,7 +113,7 @@ function StageBar({ filePath }: { filePath: string }) {
         <kbd>s</kbd>
       </Button>
       <Button variant="outline" size="sm" onClick={() => setStageSel(null)} title="Esc">
-        放弃
+        取消选择
         <kbd>Esc</kbd>
       </Button>
     </div>
@@ -121,6 +125,7 @@ export function DiffPanel() {
   const entry = useStore((s) => s.files.find((f) => f.path === s.activeFile));
   const diffState = useStore((s) => (s.activeFile ? s.diffs[s.activeFile] : undefined));
   const filesLoading = useStore((s) => s.filesLoading);
+  const filesError = useStore((s) => s.filesError);
   const files = useStore((s) => s.files);
   const openFile = useStore((s) => s.openFile);
   const [forceBig, setForceBig] = useState<string | null>(null);
@@ -130,24 +135,13 @@ export function DiffPanel() {
   if (!activeFile || !entry) {
     return (
       <div className="placeholder">
-        {filesLoading && files.length === 0 ? (
-          <p>加载文件列表…</p>
-        ) : files.length === 0 ? (
-          <p>当前 Target 没有改动。</p>
-        ) : (
-          <>
-            <p>在左侧选择一个文件查看 diff。</p>
-            <p className="muted">
-              快捷键：<kbd>j</kbd>/<kbd>k</kbd> 切换文件，<kbd>n</kbd>/<kbd>p</kbd> 切换 hunk，<kbd>r</kbd> 刷新
-            </p>
-          </>
-        )}
+        <p>{filesError ? '暂无法读取文件' : filesLoading && files.length === 0 ? '加载文件…' : files.length === 0 ? '暂无变更' : '选择文件查看差异'}</p>
       </div>
     );
   }
 
   let body: JSX.Element;
-  if (!diffState || diffState.status === 'loading') body = <div className="placeholder">加载 diff…</div>;
+  if (!diffState || diffState.status === 'loading') body = <div className="placeholder">加载差异…</div>;
   else if (diffState.status === 'error')
     body = (
       <div className="placeholder error-box">
@@ -157,7 +151,7 @@ export function DiffPanel() {
         </Button>
       </div>
     );
-  else if (diffState.diff.binary) body = <div className="placeholder">二进制文件，不展示 diff</div>;
+  else if (diffState.diff.binary) body = <div className="placeholder">二进制文件，不显示差异</div>;
   else if (diffState.diff.hunks.length === 0)
     body = (
       <div className="placeholder">
@@ -165,15 +159,15 @@ export function DiffPanel() {
           ? `仅文件模式变更：${entry.oldMode} → ${entry.newMode}`
           : entry.status === 'renamed'
             ? '仅重命名，内容无变化'
-            : '空文件 / 无内容变化'}
+            : '无内容变更'}
       </div>
     );
   else if (lineCount > BIG_FILE_LINES && forceBig !== activeFile)
     body = (
       <div className="placeholder">
-        <p>该文件 diff 有 {lineCount} 行，默认不渲染。</p>
+        <p>差异共 {lineCount} 行</p>
         <Button variant="default" size="sm" className="primary" onClick={() => setForceBig(activeFile)}>
-          仍然渲染
+          加载差异
         </Button>
       </div>
     );

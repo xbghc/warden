@@ -128,7 +128,7 @@ export function App() {
         </Button>
       </div>
     );
-  if (!repo) return <div className="loading-screen">正在读取仓库…</div>;
+  if (!repo) return <div className="loading-screen">加载仓库…</div>;
   return (
     <div className="wb-app">
       <WorkbenchNav connected={preview?.connectedIds.length ?? 0} behind={checks.filter((check) => check.status !== 'current').length} />
@@ -136,7 +136,7 @@ export function App() {
         <div className="wb-mobile-header">
           <Button variant="ghost" size="sm" onClick={() => useWorkbench.setState({ navigationOpen: true })}>
             <Menu size={17} />
-            工作导航
+            导航
           </Button>
           <span>{data?.workflow?.developmentBranch ?? 'Warden'}</span>
         </div>
@@ -152,7 +152,7 @@ export function App() {
           <PreviewPage active={view === 'preview'} />
           <HistoryPage active={view === 'history'} />
           {task && <TaskWorkspace key={task.id} task={task} active={view === 'task'} />}
-          {view === 'task' && !task && <div className="wb-empty-inline">在工作计划中选择任务。</div>}
+          {view === 'task' && !task && <div className="wb-empty-inline">请选择任务</div>}
         </main>
       </div>
       <WorkbenchSheets />
