@@ -46,6 +46,13 @@ Node 22. All platforms run the real Git workflow, workspace hooks, backups and f
 there is no reduced Windows suite. Publishing requires every platform job to pass. CI retains a
 JUnit report for each OS/Node combination, including failed runs.
 
+After every push, follow CI for the exact pushed commit through completion. If any job fails,
+inspect its logs, fix the cause, run the relevant checks, commit and push again. Repeat until the
+quality checks and the complete Windows, Linux and macOS test matrix all pass. Pending, failed,
+cancelled or skipped required jobs do not count as success, and an earlier commit's successful
+run does not validate a later push. CI follow-up is part of the push task: do not finish by merely
+reporting that CI has started. Report the final validated commit and its successful CI run link.
+
 Vitest separates fast unit tests (5 seconds) from real Git integration tests (30 seconds).
 Windows uses at most two file workers to avoid overwhelming process startup. Only the measured
 long, multi-delivery and history workflows have a 90-second Windows budget; checks are not retried

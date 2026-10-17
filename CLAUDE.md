@@ -73,5 +73,7 @@ remain for compatibility; they must not revive readiness gates or automatic recy
 ## Git workflow
 
 - Commit straight to `main`; no branches or PRs. Titles are sentence-case imperative with no prefix (`Make and take down worktrees from the page`); a feature commit carries a body explaining motivation and consequences.
+- Every push must be followed through CI for the exact pushed commit. If any job fails, inspect its logs, fix the cause, run the relevant checks, commit and push again, and repeat until the quality checks and the complete Windows, Linux and macOS test matrix all pass. A pending, failed, cancelled or skipped required job does not count as success; an earlier commit's green run does not validate a later push.
+- Treat CI follow-up as part of the push task. Do not stop after reporting that CI has started. Report the final validated commit and its successful CI run link only after all required jobs pass.
 - Release: bump `version` in the root package.json, commit `Release X.Y.Z`, tag `vX.Y.Z`, push main and the tag. The tag runs `.github/workflows/publish.yml`, which publishes to npm through OIDC trusted publishing. Never run `npm publish` locally (`npm whoami` fails here by design); check the run with `gh run list --workflow=publish.yml`. `/release` does all of this.
 - After editing the web UI, `/ui-check` exercises the built page in a browser against a throwaway repo.
