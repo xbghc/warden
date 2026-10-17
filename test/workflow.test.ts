@@ -247,9 +247,9 @@ describe('requirement development workflow', () => {
     expect(plan.worktree).toBeUndefined();
     expect((await send('POST', '/changes', { title: 'Bad link', commentIds: ['missing'] })).status).toBe(400);
     expect((await send('PATCH', `/changes/${plan.id}`, { body: 'Updated plan' })).status).toBe(200);
-    const started = await send('POST', `/changes/${plan.id}/start`, { agent: 'Claude', kind: 'worktree' });
+    const started = await send('POST', `/changes/${plan.id}/start`, { agent: 'Example agent', kind: 'worktree' });
     expect(started.status).toBe(200);
-    expect(await started.json()).toMatchObject({ status: 'working', agent: 'Claude', body: 'Updated plan' });
+    expect(await started.json()).toMatchObject({ status: 'working', agent: 'Example agent', body: 'Updated plan' });
     expect((await send('POST', `/changes/${plan.id}/start`, null)).status).toBe(400);
   });
 

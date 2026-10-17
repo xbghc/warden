@@ -96,8 +96,7 @@ A comment with a thread is never deleted by a commit (see [Re-anchoring](#re-anc
 agent's answer usually lands with the very commit that removes the lines it was about, and it would
 otherwise go unread. It stays, orphaned, until you resolve it.
 
-To have the agent do this unprompted, tell it so once, in `CLAUDE.md`, `AGENTS.md` or whatever its
-instructions file is:
+To have the agent do this unprompted, add the instruction to the project's `AGENTS.md`:
 
 ```markdown
 When you finish a task, run `warden feedback` (or `npx @xbghc/warden feedback`) and address every

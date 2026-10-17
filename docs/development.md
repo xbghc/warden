@@ -1,6 +1,6 @@
 # Development
 
-Working on warden itself.
+Working on warden itself. Repository-wide coding-agent instructions live in [AGENTS.md](../AGENTS.md).
 
 Use the [workflow contract](workflow.md) as the product design reference. Its
 [alignment plan](workflow.md#implementation-alignment) distinguishes agreed changes from current
@@ -31,7 +31,7 @@ test/                API integration tests on a generated git repository
 Only `dist/`, `README.md`, `LICENSE` and `package.json` are published.
 
 Releasing: bump `version` in the root `package.json`, commit it as `Release X.Y.Z`, tag `vX.Y.Z`, and
-push `main` and the tag (`/release` in Claude Code does all of it). Never `npm publish` from a
+push `main` and the tag. Releases require an explicit user request. Never `npm publish` from a
 machine. The `Publish to npm` workflow first runs the reusable CI workflow against the exact tag,
 then checks the tag against the version, runs lint, typecheck, build and tests through
 `prepublishOnly`, and publishes over OIDC trusted publishing — no `NPM_TOKEN` secret to store or
@@ -68,6 +68,28 @@ configured in its temporary repository. Fixtures resolve their real paths to mat
 Filename cases use spaces, Unicode and literal pathspec characters on every platform, with colons
 and double quotes additionally covered where the host filesystem permits them. Windows workspace
 hooks use Git for Windows' bundled shell; see [Platform](environment.md) for prerequisites.
+
+## UI verification
+
+Exercise UI changes in a real browser against a disposable repository and an isolated Warden state
+file. Keep test repositories, numbered workspace siblings, launchers and screenshots in a dedicated
+temporary directory outside the real checkout.
+
+1. Build the web bundle with `pnpm build:web`; rebuild and reload after further UI edits.
+2. Create a temporary Git repository with a local fixture identity, a few commits and the files or
+   branches the flow needs. Never use a user's real repository for browser verification.
+3. Start `startServer` from `packages/server/src/index.ts` with the temporary `repoPath`, an explicit
+   temporary `stateFile`, and the built `dist/web` as `webDir`. Use a `.mts` launcher when running
+   outside a package so top-level await works. Confirm the server answers before opening the page.
+4. For tmux flows, remove inherited `TMUX` from the launch environment and use an isolated, short
+   `TMUX_TMPDIR`. Address the test socket explicitly with `tmux -S` on every inspection or cleanup
+   command. Never terminate a user's existing tmux sessions or server.
+5. Drive the affected interactions in a browser and inspect screenshots of the result. Check handled
+   API errors against the expected flow; an intentional rejection is not itself a browser failure.
+6. Always close the test server and await its cleanup before deleting fixtures. Stop only processes
+   and tmux sessions created for the check. Confirm `git status --short` contains no test artifacts.
+
+Report the flows exercised and any flow that could not be reached.
 
 ## Storybook
 
