@@ -30,6 +30,8 @@ export default defineConfig({
           name: 'integration',
           include: integrationFiles,
           testTimeout: 30000,
+          // Real Git fixture setup can outlast Vitest's default 10-second hook budget.
+          hookTimeout: 30000,
         },
       },
     ],

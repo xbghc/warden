@@ -2,7 +2,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { Hono } from 'hono';
 import type { FileDiff, FilesResponse } from '@warden/shared';
 import { createApp, resolveRepo, StateStore } from '@warden/server';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
@@ -11,12 +10,13 @@ import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 // working view, and must not be staged from it either.
 
 let fx: FixtureRepo;
-let app: Hono;
+let app: ReturnType<typeof createApp>;
 let dataDir: string;
+let preparing: Promise<void> | undefined;
 
 const files = async (key: string) => (await (await app.request(`/api/targets/${key}/files`)).json()) as FilesResponse;
 
-beforeAll(async () => {
+async function prepareConflict() {
   fx = await makeFixtureRepo('warden-conflict-');
   dataDir = await mkdtemp(path.join(os.tmpdir(), 'warden-conflict-data-'));
   fx.git('checkout', '-q', '-b', 'other');
@@ -32,12 +32,24 @@ beforeAll(async () => {
   }
   const repo = await resolveRepo(fx.root);
   app = createApp({ repo, store: new StateStore(path.join(dataDir, 'state.json'), repo.commonRoot) });
+}
+
+beforeAll(() => {
+  preparing = prepareConflict();
+  return preparing;
 });
 
 afterAll(async () => {
-  await fx.cleanup();
-  await rm(dataDir, { recursive: true, force: true });
-});
+  try {
+    // A timed-out setup is still running: wait for its Git reads and writes before
+    // deleting their cwd, including when a diagnostic shortens the setup timeout.
+    await preparing;
+  } finally {
+    await app?.close();
+    await fx?.cleanup();
+    if (dataDir) await rm(dataDir, { recursive: true, force: true });
+  }
+}, 30000);
 
 describe('a file in conflict', () => {
   it('is listed in the working view, marked, with its markers in a diff against HEAD', async () => {

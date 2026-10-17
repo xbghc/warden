@@ -54,6 +54,8 @@ run does not validate a later push. CI follow-up is part of the push task: do no
 reporting that CI has started. Report the final validated commit and its successful CI run link.
 
 Vitest separates fast unit tests (5 seconds) from real Git integration tests (30 seconds).
+Integration setup and teardown hooks also have a 30-second budget; the conflict fixture drains
+pending setup before cleanup even when setup times out, so Git never races deletion of its cwd.
 Windows uses at most two file workers to avoid overwhelming process startup. Only the measured
 long, multi-delivery and history workflows have a 90-second Windows budget; checks are not retried
 to hide failures. Use `pnpm exec vitest run --project=unit` or `--project=integration` to narrow a run.
