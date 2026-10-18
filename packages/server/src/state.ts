@@ -165,6 +165,20 @@ function migrateLocalViews(targets: ReviewState['targets']): void {
 const LOCK_STALE_MS = 5_000;
 const LOCK_WAIT_MS = 5_000;
 
+function lockOwnerHasExited(owner: string | undefined): boolean {
+  const match = /^([1-9]\d*):[^:\r\n]+$/.exec(owner ?? '');
+  const pid = match ? Number(match[1]) : undefined;
+  // Incomplete owner records or uncertain process status stay occupied. An interrupted
+  // owner-record write may need manual inspection; age alone cannot permit concurrent writes.
+  if (pid === undefined || !Number.isSafeInteger(pid)) return false;
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ESRCH';
+  }
+}
+
 async function sleep(ms: number): Promise<void> {
   await new Promise((r) => setTimeout(r, ms));
 }
@@ -221,8 +235,8 @@ export class StateStore {
       try {
         const state = await this.load();
         const result = await fn(state);
-        // A holder that stalled past the stale limit (a suspended process, a laptop lid) may have
-        // had its lock taken and the file written since; writing its older copy now would undo that.
+        // An older writer or an external lock replacement may have taken this token and
+        // changed the file meanwhile; writing our earlier copy would undo that change.
         if (!(await lock.held())) throw new HttpError(409, 'the state lock was taken over while this change was prepared; try again', 'state_lock_lost');
         await this.writeAtomic(state);
         return result;
@@ -252,8 +266,8 @@ export class StateStore {
   /**
    * An exclusive lock file beside the state file, shared by every warden process and the agent
    * CLI. It carries a token of its own, so a holder releases only the lock it took, and its mtime
-   * is refreshed while held: a lock left by a process that died goes stale and is taken over, one
-   * whose holder is merely slow does not.
+   * is refreshed while held. Reclamation requires both an old heartbeat and a confirmed dead
+   * owner: a suspended process or delayed timer must not permit concurrent repository mutations.
    */
   private async acquireLock(file = this.file): Promise<{ held(): Promise<boolean>; release(): Promise<void> }> {
     const lock = `${file}.lock`;
@@ -270,7 +284,7 @@ export class StateStore {
         if (err.code !== 'EEXIST') throw e;
         try {
           const st = await stat(lock);
-          if (Date.now() - st.mtimeMs > LOCK_STALE_MS) {
+          if (Date.now() - st.mtimeMs > LOCK_STALE_MS && lockOwnerHasExited(await readFile(lock, 'utf8').catch(() => undefined))) {
             // Taken over by renaming it aside, which only one waiter can do to a given file; a
             // plain unlink could remove a fresh lock another waiter created in between.
             const aside = `${lock}.stale-${token.replace(':', '-')}`;

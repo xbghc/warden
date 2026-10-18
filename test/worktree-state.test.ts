@@ -67,9 +67,16 @@ describe('worktree state backends', () => {
     expect(detached.branch).toBeUndefined();
   });
 
-  it.skipIf(process.platform === 'win32')('preserves raw status fingerprints for non-UTF-8 filenames', async () => {
+  it.skipIf(process.platform === 'win32')('preserves raw status fingerprints for non-UTF-8 filenames', async ({ skip }) => {
     const fx = await fixture();
-    await writeFile(Buffer.concat([Buffer.from(fx.root + path.sep), Buffer.from([0xff, 0xfe]), Buffer.from('.txt')]), 'raw filename\n');
+    try {
+      await writeFile(Buffer.concat([Buffer.from(fx.root + path.sep), Buffer.from([0xff, 0xfe]), Buffer.from('.txt')]), 'raw filename\n');
+    } catch (error) {
+      // APFS rejects invalid UTF-8 before Git can observe the path. Parser fixtures still
+      // cover these raw bytes on every platform; only this filesystem exercise is inapplicable.
+      if (process.platform === 'darwin' && (error as NodeJS.ErrnoException).code === 'EILSEQ') skip('The filesystem rejects non-UTF-8 filenames.');
+      throw error;
+    }
     expect(await readWorktreeState(fx.root)).toEqual(await readWorktreeStateWithGit(fx.root));
     expect((await readWorktreeState(fx.root)).dirtyCount).toBe(1);
   });

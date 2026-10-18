@@ -26,6 +26,15 @@ describe('portable worktree status parser', () => {
     expect(parseWorktreeState(`# branch.oid ${oid}\0# branch.head (detached)\0`).branch).toBeUndefined();
   });
 
+  it('distinguishes raw filename bytes that decode to the same displayed path', () => {
+    const raw = Buffer.concat([Buffer.from(headers + '? raw'), Buffer.from([0xff]), Buffer.from('.txt\0')]);
+    const decoded = Buffer.from(raw.toString('utf8'));
+    const state = parseWorktreeState(raw);
+    expect(state).toMatchObject({ dirtyCount: 1, paths: ['raw\ufffd.txt'] });
+    expect(state.paths).toEqual(parseWorktreeState(decoded).paths);
+    expect(state.statusFingerprint).not.toBe(parseWorktreeState(decoded).statusFingerprint);
+  });
+
   it('allows future headers while rejecting truncated entries and missing identity', () => {
     expect(parseWorktreeState(headers + '# future.header value\0').dirtyCount).toBe(0);
     for (const malformed of ['', headers.slice(0, -1), '? untracked.txt\0', headers + '1 M\0', headers + '2 R. N... 100644\0']) {

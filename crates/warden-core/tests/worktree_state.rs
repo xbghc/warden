@@ -278,15 +278,23 @@ async fn retains_newline_and_non_utf8_path_boundaries() {
 
     let fixture = Fixture::new();
     fixture.write("line\nbreak.txt", "new\n");
-    fs::write(
+    let supports_raw_path = match fs::write(
         fixture
             .root
             .join(OsString::from_vec(b"raw\xff.txt".to_vec())),
         "new\n",
-    )
-    .unwrap();
+    ) {
+        Ok(()) => true,
+        // macOS filesystems can reject invalid UTF-8 names with EILSEQ before Git sees them.
+        // Keep the newline fixture active there; byte parsing/fingerprinting also has unit tests
+        // on every platform, independent of what filenames the host filesystem can represent.
+        Err(error) if cfg!(target_os = "macos") && error.raw_os_error() == Some(92) => false,
+        Err(error) => panic!("could not create the byte-path fixture: {error}"),
+    };
     let state = fixture.state().await;
-    assert_eq!(state.dirty_count, 2);
+    assert_eq!(state.dirty_count, if supports_raw_path { 2 } else { 1 });
     assert!(state.paths.contains(&"line\nbreak.txt".to_owned()));
-    assert!(state.paths.contains(&"raw\u{fffd}.txt".to_owned()));
+    if supports_raw_path {
+        assert!(state.paths.contains(&"raw\u{fffd}.txt".to_owned()));
+    }
 }

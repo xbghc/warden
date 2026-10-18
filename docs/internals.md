@@ -145,8 +145,12 @@ mapping. No remote push or user-facing undo/restore operation is provided.
 All mutation arguments are composed by the server; requests cannot supply raw Git commands or
 candidate directories. Local fetches use validated repositories and exact object IDs. Source and
 delivery commits are retained under generated `refs/warden/changes/` refs. Workflow writes share
-a cross-process repository-operation lock; short JSON updates have their own lock. Git and file
-checks reduce stale-write risks but do not stop external editors/agents from writing concurrently.
+a cross-process repository-operation lock; short JSON updates have their own lock. Stale-heartbeat
+recovery also requires the recorded owner process to be gone. A live owner, incomplete owner record,
+or inconclusive liveness check remains occupied, so a delayed heartbeat cannot authorize a second
+writer. Contenders have a bounded wait, and state writes still verify their ownership token before
+publishing. Git and file checks reduce stale-write risks but do not stop external editors/agents
+from writing concurrently.
 
 User-configured workspace hooks are the deliberate shell interface (`/bin/sh -c`, or Git for
 Windows' bundled `sh.exe -c`, with cwd/env and bounded output/timeout). They use the same Git

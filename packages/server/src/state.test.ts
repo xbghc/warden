@@ -1,7 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp, readFile, readdir, rm, utimes, writeFile } from 'node:fs/promises';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Comment } from '@warden/shared';
 import { StateStore, defaultState, ensureTarget, forgetWorktreeTargets, repoHash, stateFilePath } from './state.js';
 
@@ -10,8 +10,19 @@ beforeEach(async () => {
   dir = await mkdtemp(path.join(os.tmpdir(), 'warden-state-'));
 });
 afterEach(async () => {
+  vi.restoreAllMocks();
   await rm(dir, { recursive: true, force: true });
 });
+
+function expireLockWait() {
+  let now = Date.now();
+  // Exercise an expired wait without a real five-second delay or depending on heartbeat
+  // scheduling. Each clock observation advances; unrelated observations cannot stall it.
+  vi.spyOn(Date, 'now').mockImplementation(() => {
+    now += 6_000;
+    return now;
+  });
+}
 
 describe('StateStore', () => {
   it('computes the state file path from the repo root hash', () => {
@@ -209,6 +220,55 @@ describe('what the state file will not lose', () => {
     expect((await readdir(dir)).filter((f) => f.includes('.lock'))).toEqual([]);
   });
 
+  it.each(['state', 'repository'] as const)("does not steal a live owner's %s lock when its heartbeat is stale", async (kind) => {
+    const file = path.join(dir, 'state.json');
+    const lock = `${file}${kind === 'repository' ? '.repository' : ''}.lock`;
+    const owner = `${process.pid}:paused-owner`;
+    await writeFile(lock, owner);
+    const old = new Date(Date.now() - 60_000);
+    await utimes(lock, old, old);
+    const store = new StateStore(file, '/repo');
+    const mutate = vi.fn(async () => undefined);
+    expireLockWait();
+    await expect(kind === 'repository' ? store.withRepositoryLock(mutate) : store.update(mutate)).rejects.toMatchObject({
+      code: 'operation_locked',
+      status: 409,
+    });
+    expect(mutate).not.toHaveBeenCalled();
+    expect(await readFile(lock, 'utf8')).toBe(owner);
+  });
+
+  it.each(['EPERM', 'EIO'])('keeps a stale lock occupied when its owner probe fails with %s', async (code) => {
+    const file = path.join(dir, 'state.json');
+    const lock = `${file}.repository.lock`;
+    const owner = `${process.pid}:unconfirmed-owner`;
+    await writeFile(lock, owner);
+    const old = new Date(Date.now() - 60_000);
+    await utimes(lock, old, old);
+    const probe = vi.spyOn(process, 'kill').mockImplementation(() => {
+      throw Object.assign(new Error('Owner status unavailable'), { code });
+    });
+    const mutate = vi.fn(async () => undefined);
+    expireLockWait();
+    await expect(new StateStore(file, '/repo').withRepositoryLock(mutate)).rejects.toMatchObject({ code: 'operation_locked' });
+    expect(probe).toHaveBeenCalledWith(process.pid, 0);
+    expect(mutate).not.toHaveBeenCalled();
+    expect(await readFile(lock, 'utf8')).toBe(owner);
+  });
+
+  it.each(['', 'unknown:owner'])('keeps a stale lock with an incomplete or malformed owner record %j occupied', async (owner) => {
+    const file = path.join(dir, 'state.json');
+    const lock = `${file}.repository.lock`;
+    await writeFile(lock, owner);
+    const old = new Date(Date.now() - 60_000);
+    await utimes(lock, old, old);
+    const mutate = vi.fn(async () => undefined);
+    expireLockWait();
+    await expect(new StateStore(file, '/repo').withRepositoryLock(mutate)).rejects.toMatchObject({ code: 'operation_locked' });
+    expect(mutate).not.toHaveBeenCalled();
+    expect(await readFile(lock, 'utf8')).toBe(owner);
+  });
+
   it('does not write when its lock was taken over meanwhile, and leaves the new holder’s lock alone', async () => {
     const file = path.join(dir, 'state.json');
     const store = new StateStore(file, '/repo');
@@ -216,7 +276,7 @@ describe('what the state file will not lose', () => {
     await expect(
       store.update(async (s) => {
         s.todos.push(todo('stale'));
-        // Another process decided this one had stalled, took the lock and wrote.
+        // An older writer or an external replacement can still take over the token.
         await writeFile(`${file}.lock`, 'other:holder');
       }),
     ).rejects.toMatchObject({ code: 'state_lock_lost' });

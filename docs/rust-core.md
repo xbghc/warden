@@ -82,6 +82,11 @@ performing isolated checks. Older Git versions without the attribute-path lookup
 working, without verdict reuse. Changes to configuration or filesystem identity invalidate
 eligible results; there is no time-based assumption that an old result is fresh.
 
+The attribute-path lookup follows Git's own system-attributes policy, including an absent system
+path when `GIT_ATTR_NOSYSTEM` disables it. Test fixtures explicitly disable system attributes so
+Git for Windows' installed defaults do not decide whether a cache-reuse test exercises reuse.
+User repositories retain the attribute policy supplied by their environment and configuration.
+
 Checks remain advisory. An actual rebase still requires the user's request and retains its fresh
 HEAD checks, clean-state guards, independent backup, repository lock and explicit Git command.
 Normal delivery commits retain ordinary Git hooks, identity and signing.

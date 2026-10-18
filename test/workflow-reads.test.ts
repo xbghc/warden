@@ -21,6 +21,9 @@ beforeEach(async () => {
   fx.git('switch', '-qc', 'feature/order');
   data = await mkdtemp(path.join(os.tmpdir(), 'warden-workflow-reads-data-'));
   vi.stubEnv('XDG_CONFIG_HOME', path.join(data, 'config'));
+  // Git for Windows ships a system attributes file independently of its system config.
+  // Cache fixtures explicitly exclude it while still testing changes to global attributes.
+  vi.stubEnv('GIT_ATTR_NOSYSTEM', '1');
   store = new StateStore(path.join(data, 'state.json'), fx.root);
   workflow = new WorkflowService(await resolveRepo(fx.root), store);
   checkouts = [];
@@ -57,6 +60,19 @@ async function behind(kind: 'clone' | 'worktree' = 'worktree', conflict = false)
 const check = async (change: DevelopmentChange) => (await workflow.rebaseChecks()).checks.find((row) => row.changeId === change.id)!;
 
 describe('shared workflow reads', () => {
+  it('keeps unsupported attribute lookups uncached even when system attributes are disabled', { timeout: longGitTimeout }, async () => {
+    const change = await behind();
+    const create = vi.spyOn(GitSandbox, 'create');
+    const run = git.runGit;
+    vi.spyOn(git, 'runGit').mockImplementation((args, options) => {
+      if (args[0] === 'var' && args[1] === 'GIT_ATTR_GLOBAL') return Promise.reject(new git.GitError('Unsupported Git variable', 1, ''));
+      return run(args, options);
+    });
+    expect((await check(change)).status).toBe('ready');
+    expect((await check(change)).status).toBe('ready');
+    expect(create).toHaveBeenCalledTimes(2);
+  });
+
   it('reads one checkout inventory per request for several linked and clone workspaces', { timeout: longGitTimeout }, async () => {
     await task();
     await task();

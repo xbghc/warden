@@ -530,8 +530,14 @@ export class WorkflowService {
       // sees exactly the global/system config they inherit, unless conditional includes apply.
       if (repository.code === 0 || !repository.stderr.includes('not a git repository') || opaqueRebaseConfig.test(config.stdout)) return undefined;
       if (this.attributePaths?.environment !== environment) {
-        const paths = finishReads(['GIT_ATTR_GLOBAL', 'GIT_ATTR_SYSTEM'].map((name) => runGit(['var', name], { cwd })))
-          .then((results) => results.map((result) => result.stdout.trim()))
+        const paths = finishReads([runGit(['var', 'GIT_ATTR_GLOBAL'], { cwd }), runGit(['var', 'GIT_ATTR_SYSTEM'], { cwd, okCodes: [0, 1] })])
+          .then(([global, system]) => {
+            // Git reports no system path with exit 1 when GIT_ATTR_NOSYSTEM disables it.
+            // Require a successful global lookup so older Git without these variables still
+            // declines reuse; Git itself interprets the environment's boolean semantics.
+            if (system.code === 1 && (system.stdout.trim() || system.stderr.trim())) return undefined;
+            return [global.stdout.trim(), ...(system.code === 0 ? [system.stdout.trim()] : [])];
+          })
           .catch(() => undefined);
         this.attributePaths = { environment, paths };
       }
