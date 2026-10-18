@@ -11,50 +11,92 @@ permissions:
 
 jobs:
   quality:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     timeout-minutes: 20
+    env:
+      WARDEN_NATIVE: required
     steps:
       - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.88.0
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm build
+      - name: Test the portable Git backend
+        run: pnpm test
+        env:
+          WARDEN_NATIVE: disabled
       - run: pnpm build:storybook
       - name: Check package contents
-        run: pnpm publish --dry-run --no-git-checks --ignore-scripts
+        run: pnpm check:package
 
   test:
     name: Test (${{ matrix.os }}, Node ${{ matrix.node }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+    env:
+      WARDEN_NATIVE: required
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             node: 20
-          - os: ubuntu-latest
+            target: linux-x64-gnu
+          - os: ubuntu-22.04
             node: 22
-          - os: ubuntu-latest
+            target: linux-x64-gnu
+          - os: ubuntu-22.04
             node: 24
+            target: linux-x64-gnu
+          - os: ubuntu-22.04-arm
+            node: 22
+            target: linux-arm64-gnu
           - os: macos-latest
             node: 22
+            target: darwin-arm64
+          - os: macos-15-intel
+            node: 22
+            target: darwin-x64
           - os: windows-latest
             node: 22
+            target: win32-x64-msvc
     steps:
       - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm build:native
+      - run: cargo test --workspace --locked
       - run: pnpm test --reporter=default --reporter=junit --outputFile.junit=test-results/vitest.xml
+      - name: Build and exercise the packaged CLI
+        if: matrix.node == 22
+        run: pnpm build && pnpm check:package
+      - name: Upload tested native module
+        if: matrix.node == 22
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-${{ matrix.target }}
+          path: native/warden.${{ matrix.target }}.node
+          if-no-files-found: error
       - name: Upload test report
         if: always()
         uses: actions/upload-artifact@v7

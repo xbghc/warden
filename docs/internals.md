@@ -32,11 +32,13 @@ first time the file is read, and the 已读 marks those views used to keep are d
 
 ## Security model
 
-Single user, local only. The server binds to `127.0.0.1` and executes git only through
-`execFile('git', [...])`. Reads go through an argument whitelist (`rev-parse`, `diff`, `show`, `log`,
+Single user, local only. The server binds to `127.0.0.1` and executes Git with argument arrays,
+through Node's `execFile` or the Rust core's fixed status operation, without a shell. General
+reads go through an argument whitelist (`rev-parse`, `diff`, `show`, `log`,
 `worktree list`, `ls-files`, `status`, `merge-base`, `rev-list`, `for-each-ref`, `check-ref-format`,
 `grep` without `-O` / `--open-files-in-pager`, and `config` only as `--get`, `--get-all` or
-`--get-regexp` of one name or pattern) that refuses option-looking refs and any write-capable
+`--get-regexp` of one name or pattern; `var` only for `GIT_ATTR_GLOBAL` and `GIT_ATTR_SYSTEM`)
+that refuses option-looking refs and any write-capable
 flag; requests that would need anything else get HTTP 400. The writes are few and each composes its
 own arguments. `POST /api/targets/:key/stage` runs `git apply --cached` (with `--reverse` for the
 Staged view) on a patch the server itself builds from the diff it just produced — the patch is never
@@ -62,6 +64,22 @@ the repository. A checkpoint writes only there: `git add --all [--intent-to-add]
 `git write-tree --missing-ok`, with `GIT_INDEX_FILE` and `GIT_OBJECT_DIRECTORY` set to files in
 warden's data directory and no alternates (see [Checkpoints](reviewing.md#checkpoints)).
 
+The independent `warden-core` Rust crate exposes a typed worktree observation, rather than a raw
+command API. It executes exactly `git status --porcelain=v2 --branch --untracked-files=all
+--no-ahead-behind -z`, returning HEAD, branch, changed-entry count, paths and a hash of the raw
+status bytes. It limits concurrent status children to eight and applies a 30-second deadline,
+including queue time, plus 256 MiB limits per output stream. Timeout/output-limit failures kill and
+reap the direct Git child before returning. Reads set `GIT_OPTIONAL_LOCKS=0`; the real index is not
+refreshed. The N-API binding passes the calling Node worker's environment explicitly, and the core
+independently removes repository redirection variables. Platforms without a prebuilt module use
+the same fixed operation through the guarded Node runner. Both paths hash original bytes; paths
+retain the server's existing UTF-8 representation. Watching repeated edits to a non-UTF-8 filename
+still has the existing lossy-path limitation.
+
+Status results are not retained across completed requests: external agents and ordinary Git
+commands can change files or metadata without notifying Warden. A watcher obtains status, HEAD
+and branch in one observation, and still checks mtime/size of dirty paths to detect further edits.
+
 All Git runners discard inherited repository-location, namespace, index, object-store and temporary
 configuration environment variables. `cwd` and explicitly supplied snapshot locations select the
 repository; a surrounding Git hook or shell cannot redirect writes into a different repository.
@@ -82,6 +100,16 @@ review records. `sourceBase` distinguishes a delivered source tip from its squas
 primary HEADs and clean checkout state, then explicitly rebases selected workspaces with
 `rebase --no-autostash --onto`. Actual conflicts remain for manual handling. There is no background
 rebase or workspace recycling.
+
+Workflow reads share one checkout inventory per request instead of rebuilding every workspace's
+inventory for each task. Synchronization checks may reuse up to 64 isolated replay verdicts,
+including an in-flight trial, when their commits, delivery boundary, physical repository identity,
+configuration and environment match. Source HEAD, branch, clean/busy state and target HEAD are
+validated again on cache hits. Only successful `ready` or `conflict` verdicts are retained;
+operational failures are retried on a later request. Conditional config includes, external merge
+or filter behavior, mutable global attributes, and altered-history mechanisms make the check
+ineligible for reuse. Git versions without the attribute-path lookups still perform ordinary
+isolated checks. This cache does not authorize rebase or change its explicit write-time guards.
 
 Before an actual rebase, Warden rejects ignored local paths that could be overwritten by the target
 or intermediate replay commits, creates an independent backup, then rechecks the observed heads

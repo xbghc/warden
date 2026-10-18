@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
+import path from 'node:path';
+import { readFile, realpath, stat } from 'node:fs/promises';
 import type {
   AcceptChangeRequest,
   CreateChangeRequest,
@@ -20,13 +22,14 @@ import type {
 import { moveBefore, commentScopeKey, commentWorktree, formatTargetKey, isValidRef, tryParseTargetKey } from '@warden/shared';
 import { emptyWorkspaceConfig, runWorkspaceHook } from './workspace.js';
 import { badRequest, HttpError, notFound } from './errors.js';
-import { GitError, LONG_GIT_TIMEOUT_MS, refExists, runGit, runGitWrite } from './git.js';
+import { GitError, LONG_GIT_TIMEOUT_MS, gitEnvironment, refExists, runGit, runGitWrite } from './git.js';
 import { listWorktreesAll, type RepoContext } from './repo.js';
 import { ensureTarget, forgetWorktreeTargets, type StateStore } from './state.js';
 import { checkoutState, checkoutWorktree, dirtyCount, listWorktreesDetailed, nextSlot } from './worktrees.js';
 import { applyPatch, GitSandbox, oid, patchBetween, gitOid, deliveryBase } from './git-sandbox.js';
 import { PreviewService } from './preview.js';
 import { assertSafetyBackupCurrent, createSafetyBackup } from './backups.js';
+import { readWorktreeState } from './worktree-state.js';
 
 function fail(message: string, code: string): never {
   throw new HttpError(409, message, code);
@@ -45,8 +48,49 @@ const changeOf = (state: ReviewState, id: string): DevelopmentChange => {
   return change;
 };
 
+type RebaseVerdict = Pick<RebaseCheck, 'status' | 'files' | 'message'>;
+type RebaseInputs = { fingerprint: string; paths: string[]; commonDirectory: string };
+const REBASE_CACHE_LIMIT = 64;
+const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+
+// These settings can read mutable files or run programs whose output is not determined by
+// the pinned commits. Conditional includes can also differ at a generated sandbox path.
+const opaqueRebaseConfig = /^(?:include(?:if)?\.|filter\.|merge\.[\s\S]*?\.driver(?:\s|$)|core\.(?:attributesfile|fsmonitor|worktree)(?:\s|$))/im;
+const configLocationVariables = new Set(['GIT_CONFIG_GLOBAL', 'GIT_CONFIG_SYSTEM', 'HOME', 'XDG_CONFIG_HOME', 'GIT_EXEC_PATH']);
+
+async function finishReads<T extends readonly unknown[]>(reads: { [K in keyof T]: Promise<T[K]> }): Promise<T> {
+  const results = await Promise.allSettled(reads);
+  const failed = results.find((result) => result.status === 'rejected');
+  if (failed?.status === 'rejected') throw failed.reason;
+  return results.map((result) => (result as PromiseFulfilledResult<unknown>).value) as unknown as T;
+}
+
+async function fileExists(file: string) {
+  try {
+    await stat(file);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+async function repositoryIdentity(paths: string[]) {
+  return finishReads(
+    paths.map(async (file) => {
+      const [resolved, info] = await finishReads([realpath(file), stat(file)]);
+      // A worktree's .git file can be repointed without replacing its directory. Directory
+      // mtimes, in contrast, change during ordinary editing and do not identify a checkout.
+      return [resolved, info.dev, info.ino, info.birthtimeMs, info.isFile() ? await readFile(file, 'utf8') : null];
+    }),
+  );
+}
+
 /** User-reviewed deliveries in persistent workspaces. No automatic rebase or remote pushes. */
 export class WorkflowService {
+  private rebaseTrials = new Map<string, Promise<RebaseVerdict>>();
+  private attributePaths?: { environment: string; paths: Promise<string[] | undefined> };
+
   constructor(
     private repo: RepoContext,
     private store: StateStore,
@@ -60,10 +104,13 @@ export class WorkflowService {
     if (!workflow) return { workflow, workspaceConfig, legacyTodos };
     try {
       const developmentHead = await this.developmentHead(workflow.developmentBranch);
-      for (const row of workflow.changes) {
-        if (!row.worktree || row.status !== 'working' || row.developmentBranch !== workflow.developmentBranch) continue;
+      const working = workflow.changes.filter(
+        (row): row is DevelopmentChange => !!row.worktree && row.status === 'working' && row.developmentBranch === workflow.developmentBranch,
+      );
+      const checkouts = working.length ? this.listCheckouts() : undefined;
+      for (const row of working) {
         try {
-          const checkout = await this.checkout(row);
+          const checkout = await this.checkout(row, checkouts);
           if ((await deliveryBase(row, await revParse(checkout.path, 'HEAD'), developmentHead)) === developmentHead) {
             row.base = developmentHead;
             delete row.sourceBase;
@@ -375,21 +422,30 @@ export class WorkflowService {
     const workflow = workflowOf(state);
     const target = await this.developmentHead(workflow.developmentBranch);
     const checks: RebaseCheck[] = [];
-    for (const row of workflow.changes) {
-      if (!row.worktree || row.status === 'accepted' || row.developmentBranch !== workflow.developmentBranch) continue;
+    const workspaces = workflow.changes.filter(
+      (row): row is DevelopmentChange => !!row.worktree && row.status !== 'accepted' && row.developmentBranch === workflow.developmentBranch,
+    );
+    const checkouts = workspaces.length ? this.listCheckouts() : undefined;
+    let context: Promise<string | undefined> | undefined;
+    const cachedChecks: { key: string; check: RebaseCheck }[] = [];
+    for (const row of workspaces) {
       const check: RebaseCheck = { changeId: row.id, sourceHead: '', developmentHead: target, status: 'unknown', checkedAt: new Date().toISOString() };
       checks.push(check);
-      let sandbox: GitSandbox | undefined;
       try {
-        const checkout = await this.checkout(row);
-        check.sourceHead = await revParse(checkout.path, 'HEAD');
-        if (row.status === 'integrating' || (await dirtyCount(checkout.path))) {
+        const checkout = await this.checkout(row, checkouts);
+        const source = await readWorktreeState(checkout.path);
+        if (source.branch !== row.branch) fail('工位已切换分支，请恢复任务分支后重试', 'change_branch_moved');
+        if (!source.head) fail('工作区分支尚无提交', 'invalid_change_checkout');
+        check.sourceHead = source.head;
+        if (row.status === 'integrating' || source.dirtyCount) {
           check.status = 'blocked';
           check.message = '工作区有未提交改动或正在准备交付';
           continue;
         }
         const boundary = await deliveryBase(row, check.sourceHead, target);
         if (boundary === target) {
+          // This ancestry result is computed from this request's fresh source read. It does
+          // not reuse an isolated verdict; actual synchronization has its own mutation guards.
           check.status = 'current';
           continue;
         }
@@ -398,32 +454,172 @@ export class WorkflowService {
           check.message = '工作区历史已改变，请手动确认同步基点';
           continue;
         }
-        sandbox = await GitSandbox.create(this.store, checkout.path, check.sourceHead);
-        await sandbox.fetch(this.repo.commonRoot, target);
-        try {
-          await sandbox.write(['rebase', '--no-autostash', '--onto', target, boundary]);
-          check.status = 'ready';
-        } catch (error) {
-          check.files = await sandbox.conflicts();
-          check.status = check.files.length ? 'conflict' : 'unknown';
-          check.message = errorMessage(error);
-        }
-        if (
-          (await revParse(checkout.path, 'HEAD')) !== check.sourceHead ||
-          (await dirtyCount(checkout.path)) ||
-          (await this.developmentHead(workflow.developmentBranch)) !== target
-        ) {
-          check.status = 'unknown';
-          check.message = '检查期间代码已变化，请刷新';
-        }
+        context ??= this.rebaseContext();
+        const sandboxContext = await context;
+        const inputs = sandboxContext ? await this.rebaseInputs(checkout.path) : undefined;
+        const key = inputs
+          ? digest([
+              sandboxContext,
+              row.id,
+              row.worktree,
+              row.branch,
+              row.developmentBranch,
+              row.base,
+              row.sourceBase,
+              checkout.clone,
+              check.sourceHead,
+              target,
+              boundary,
+              inputs.fingerprint,
+            ])
+          : undefined;
+        if (key) cachedChecks.push({ key, check });
+        Object.assign(check, structuredClone(await this.rebaseTrial(key, checkout.path, check.sourceHead, target, boundary)));
+        await this.validateRebaseCheck(row, checkout, check);
+        if (inputs && (await this.rebaseInputs(checkout.path, inputs))?.fingerprint !== inputs.fingerprint) this.changedRebaseCheck(check);
       } catch (error) {
         check.status = 'blocked';
         check.message = errorMessage(error);
-      } finally {
-        await sandbox?.dispose();
+        delete check.files;
+      }
+    }
+    for (const { key, check } of cachedChecks) if (check.status !== 'ready' && check.status !== 'conflict') this.rebaseTrials.delete(key);
+    // All trials in this request inherit the same global/system configuration. Recheck it
+    // once after replay, including cache hits, rather than probing it for every workspace.
+    if (cachedChecks.length && (await context) !== (await this.rebaseContext())) {
+      for (const { key, check } of cachedChecks) {
+        this.rebaseTrials.delete(key);
+        if (check.status === 'ready' || check.status === 'conflict') this.changedRebaseCheck(check);
       }
     }
     return { checks };
+  }
+
+  private changedRebaseCheck(check: RebaseCheck) {
+    check.status = 'unknown';
+    check.message = '检查期间代码已变化，请刷新';
+    delete check.files;
+  }
+
+  private async validateRebaseCheck(change: DevelopmentChange, checkout: WorktreeDetail, check: RebaseCheck) {
+    const [source, state, target] = await finishReads([
+      readWorktreeState(checkout.path),
+      checkoutState(this.repo, checkout),
+      this.developmentHead(change.developmentBranch),
+    ]);
+    if (state.foreign) fail('任务工位已不存在或不再属于本仓库', 'invalid_change_checkout');
+    if (source.branch !== change.branch) fail('工位已切换分支，请恢复任务分支后重试', 'change_branch_moved');
+    if (state.busy) fail(`工位中有未完成的 ${state.busy}，请先处理`, 'operation_in_progress');
+    if (source.head !== check.sourceHead || source.dirtyCount || target !== check.developmentHead) this.changedRebaseCheck(check);
+  }
+
+  private async rebaseContext(): Promise<string | undefined> {
+    try {
+      const cwd = path.dirname(this.store.file);
+      const variables = Object.entries(gitEnvironment());
+      // These paths would resolve differently in the parent directory and a generated
+      // sandbox. Their effective config cannot be inferred safely from the parent probe.
+      if (variables.some(([name, value]) => configLocationVariables.has(name.toUpperCase()) && value !== undefined && !path.isAbsolute(value)))
+        return undefined;
+      const environment = digest(variables.sort(([a], [b]) => a.localeCompare(b)));
+      const [repository, config] = await finishReads([
+        runGit(['rev-parse', '--absolute-git-dir'], { cwd, okCodes: [0, 128] }),
+        runGit(['config', '--get-regexp', '.'], { cwd, okCodes: [0, 1] }),
+      ]);
+      // Generated sandboxes have their own local config. Outside a repository, their parent
+      // sees exactly the global/system config they inherit, unless conditional includes apply.
+      if (repository.code === 0 || !repository.stderr.includes('not a git repository') || opaqueRebaseConfig.test(config.stdout)) return undefined;
+      if (this.attributePaths?.environment !== environment) {
+        const paths = finishReads(['GIT_ATTR_GLOBAL', 'GIT_ATTR_SYSTEM'].map((name) => runGit(['var', name], { cwd })))
+          .then((results) => results.map((result) => result.stdout.trim()))
+          .catch(() => undefined);
+        this.attributePaths = { environment, paths };
+      }
+      const attributes = await this.attributePaths.paths;
+      if (!attributes) {
+        if (this.attributePaths?.environment === environment) this.attributePaths = undefined;
+        return undefined;
+      }
+      if (attributes.some((file) => !path.isAbsolute(file)) || (await finishReads(attributes.map(fileExists))).some(Boolean)) return undefined;
+      if (environment !== digest(Object.entries(gitEnvironment()).sort(([a], [b]) => a.localeCompare(b)))) return undefined;
+      return digest([environment, config.stdout, attributes]);
+    } catch {
+      // Older Git versions may not expose attribute paths. Unsupported or unreadable inputs
+      // only disable reuse; the normal isolated check must still remain available.
+      return undefined;
+    }
+  }
+
+  private async rebaseInputs(cwd: string, previous?: RebaseInputs): Promise<RebaseInputs | undefined> {
+    try {
+      const locations = previous ? undefined : (await runGit(['rev-parse', '--absolute-git-dir', '--git-common-dir'], { cwd })).stdout.trim().split('\n');
+      const commonDirectory = previous?.commonDirectory ?? path.resolve(cwd, locations![1]!);
+      const paths = previous?.paths ?? [
+        this.repo.commonRoot,
+        path.join(this.repo.commonRoot, '.git'),
+        cwd,
+        path.join(cwd, '.git'),
+        locations![0]!,
+        commonDirectory,
+      ];
+      const [config, identity, unusualGraph, packed] = await finishReads([
+        runGit(['config', '--get-regexp', '.'], { cwd, okCodes: [0, 1] }),
+        repositoryIdentity(paths),
+        finishReads(['shallow', 'info/grafts', 'refs/replace', 'objects/info/alternates'].map((file) => fileExists(path.join(commonDirectory, file)))),
+        readFile(path.join(commonDirectory, 'packed-refs'), 'utf8').catch((error: NodeJS.ErrnoException) => {
+          if (error.code === 'ENOENT') return '';
+          throw error;
+        }),
+      ]);
+      if (
+        opaqueRebaseConfig.test(config.stdout) ||
+        /^extensions\.refstorage reftable$/im.test(config.stdout) ||
+        unusualGraph.some(Boolean) ||
+        / refs\/replace\//.test(packed)
+      )
+        return undefined;
+      return { paths, commonDirectory, fingerprint: digest([config.stdout, identity]) };
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async rebaseTrial(key: string | undefined, source: string, head: string, target: string, boundary: string): Promise<RebaseVerdict> {
+    const cached = key ? this.rebaseTrials.get(key) : undefined;
+    if (cached) {
+      this.rebaseTrials.delete(key!);
+      this.rebaseTrials.set(key!, cached);
+      return cached;
+    }
+    const trial = (async (): Promise<RebaseVerdict> => {
+      const sandbox = await GitSandbox.create(this.store, source, head);
+      try {
+        await sandbox.fetch(this.repo.commonRoot, target);
+        try {
+          await sandbox.write(['rebase', '--no-autostash', '--onto', target, boundary]);
+          return { status: 'ready' };
+        } catch (error) {
+          const files = await sandbox.conflicts();
+          return { status: files.length ? 'conflict' : 'unknown', files, message: errorMessage(error) };
+        }
+      } finally {
+        await sandbox.dispose();
+      }
+    })();
+    if (key) {
+      this.rebaseTrials.set(key, trial);
+      // Eviction bounds retained entries, not active HTTP requests. An evicted trial still
+      // runs to completion for its callers; sharing is best-effort within this capacity.
+      while (this.rebaseTrials.size > REBASE_CACHE_LIMIT) this.rebaseTrials.delete(this.rebaseTrials.keys().next().value!);
+    }
+    try {
+      const result = await trial;
+      if (key && this.rebaseTrials.get(key) === trial && result.status !== 'ready' && result.status !== 'conflict') this.rebaseTrials.delete(key);
+      return result;
+    } catch (error) {
+      if (key && this.rebaseTrials.get(key) === trial) this.rebaseTrials.delete(key);
+      throw error;
+    }
   }
 
   rebaseBatch(request: RebaseBatchRequest): Promise<RebaseBatchResponse> {
@@ -481,8 +677,12 @@ export class WorkflowService {
     });
   }
 
-  private async checkout(change: DevelopmentChange): Promise<WorktreeDetail> {
-    const checkout = (await listWorktreesDetailed(this.repo)).find((row) => row.path === change.worktree);
+  private async listCheckouts() {
+    return new Map((await listWorktreesDetailed(this.repo)).map((row) => [row.path, row]));
+  }
+
+  private async checkout(change: DevelopmentChange, checkouts = this.listCheckouts()): Promise<WorktreeDetail> {
+    const checkout = (await checkouts).get(change.worktree);
     if (!checkout || checkout.slot === undefined || checkout.prunable || checkout.foreign) fail('任务工位已不存在或不再属于本仓库', 'invalid_change_checkout');
     if (checkout.branch !== change.branch) fail('工位已切换分支，请恢复任务分支后重试', 'change_branch_moved');
     if (checkout.busy) fail(`工位中有未完成的 ${checkout.busy}，请先处理`, 'operation_in_progress');

@@ -30,6 +30,10 @@ jobs:
     needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      WARDEN_NATIVE: required
+      WARDEN_NATIVE_PREBUILT: '1'
+      WARDEN_NATIVE_EXPECT_ALL: '1'
     permissions:
       contents: read
       # Only the publishing job needs to request a registry credential.
@@ -46,6 +50,12 @@ jobs:
       # An older npm silently falls back to token auth and then fails to authenticate.
       - run: npm install -g npm@latest && npm --version
       - run: pnpm install --frozen-lockfile
+      - name: Download native modules tested by this tag's CI
+        uses: actions/download-artifact@v8
+        with:
+          pattern: native-*
+          merge-multiple: true
+          path: native
       - name: Check tag matches package.json version
         run: |
           PKG_VERSION="$(node -p "require('./package.json').version")"
@@ -56,7 +66,9 @@ jobs:
           fi
       # The reusable CI workflow verifies this exact tag across the supported matrix
       # before this job can request an npm credential. prepublishOnly also verifies
-      # lint, types, build and tests in the publishing checkout.
+      # lint, types, build, tests and the packed CLI in the publishing checkout. It copies all
+      # five tested native modules without compiling a host-only replacement, and package smoke
+      # refuses to publish when any platform artifact is missing.
       # `--provenance` is explicit on purpose: npm generates an attestation on its own for a
       # trusted publish, but that did not happen through `pnpm publish` (0.2.0 shipped without
       # one). pnpm's own release workflow passes the flag for the same reason.

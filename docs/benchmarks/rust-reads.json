@@ -1,0 +1,4761 @@
+{
+  "schemaVersion": 1,
+  "baselineRevision": "d53a18f0a0c04ae4d807d240a4936e39304f4457",
+  "optimizedSource": "The working source tree committed together with this report; no benchmark-only implementation changes.",
+  "host": {
+    "platform": "linux-x64",
+    "node": "v24.19.0",
+    "git": "2.51.1",
+    "cpu": "AMD EPYC 9V74 80-Core Processor",
+    "availableCpus": 8,
+    "memoryMiB": 9967
+  },
+  "nativeRuntime": {
+    "tokioWorkers": 2,
+    "maximumConcurrentStatusProcesses": 8
+  },
+  "method": "Sequential runs in a shared container with warm filesystem caches. Each fixture has one primary checkout, N linked task workspaces, and 1000 added tracked files. No preview connections or user/global Git configuration. Each measured operation runs 12 times and includes Git Trace2 overhead. Cold means a new WorkflowService without retained verdicts, not cold filesystem caches. CPU and RSS measurements cover the Node process including Rust, not Git child processes.",
+  "runs": [
+    {
+      "label": "baseline",
+      "sourceRevision": "d53a18f0a0c04ae4d807d240a4936e39304f4457",
+      "platform": "linux-x64",
+      "node": "v24.19.0",
+      "git": "git version 2.51.1",
+      "native": "disabled",
+      "workspaces": 1,
+      "trackedFilesAdded": 1000,
+      "samples": 12,
+      "nodePeakRssMiB": 84.2,
+      "notes": "Warm filesystem cache. Node CPU and peak RSS include Rust in-process; they exclude Git child-process CPU and memory. Timing includes Git Trace2 overhead. No preview connections.",
+      "measurements": [
+        {
+          "name": "idle_watchers",
+          "medianMs": 11.51,
+          "p95Ms": 15.23,
+          "medianNodeCpuMs": 6.89,
+          "medianGitProcesses": 6,
+          "observations": [
+            {
+              "wallMs": 10.64,
+              "nodeCpuMs": 9.18,
+              "gitProcesses": 6,
+              "gitProcessesIncludingChildren": 6
+            },
+            {
+              "wallMs": 13.67,
+              "nodeCpuMs": 6.94,
+              "gitProcesses": 6,
+              "gitProcessesIncludingChildren": 6
+            },
+            {
+              "wallMs": 10.4,
+              "nodeCpuMs": 6.89,
+              "gitProcesses": 6,
+              "gitProcessesIncludingChildren": 6
+            },
+            {
+              "wallMs": 13.32,
+              "nodeCpuMs": 7.35,
+              "gitProcesses": 6,
+              "gitProcessesIncludingChildren": 6
+            },
+            {
+              "wallMs": 11.25,
+              "nodeCpuMs": 5.47,
+              "gitProcesses": 6,
+              "gitProcessesIncludingChildren": 6
+            },
+            {
+              "wallMs": 15.23,
+              "nodeCpuMs": 8.04,
+              "gitProcesses": 6,
+              "gitProcessesIncludingChildren": 6
+            },
+            {
+              "wallMs": 12.03,
+              "nodeCpuMs": 5.14,
+              "gitProcesses": 6,
+              "gitProcessesIncludingChildren": 6
+            },
+            {
+              "wallMs": 10.84,
+              "nodeCpuMs": 5.91,
+              "gitProcesses": 6,
+              "gitProcessesIncludingChildren": 6
+            },
+            {
+              "wallMs": 11.74,
+              "nodeCpuMs": 7.13,
+              "gitProcesses": 6,
+              "gitProcessesIncludingChildren": 6
+            },
+            {
+              "wallMs": 10.83,
+              "nodeCpuMs": 5.53,
+              "gitProcesses": 6,
+              "gitProcessesIncludingChildren": 6
+            },
+            {
+              "wallMs": 11.51,
+              "nodeCpuMs": 6.53,
+              "gitProcesses": 6,
+              "gitProcessesIncludingChildren": 6
+            },
+            {
+              "wallMs": 10.29,
+              "nodeCpuMs": 4.75,
+              "gitProcesses": 6,
+              "gitProcessesIncludingChildren": 6
+            }
+          ]
+        },
+        {
+          "name": "workflow_get",
+          "medianMs": 28.2,
+          "p95Ms": 38.22,
+          "medianNodeCpuMs": 13.54,
+          "medianGitProcesses": 11,
+          "observations": [
+            {
+              "wallMs": 25.42,
+              "nodeCpuMs": 12.41,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 28.2,
+              "nodeCpuMs": 11.86,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 27.92,
+              "nodeCpuMs": 13.54,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 26.77,
+              "nodeCpuMs": 10.79,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 28.93,
+              "nodeCpuMs": 14.17,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 27.27,
+              "nodeCpuMs": 15.47,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 25.57,
+              "nodeCpuMs": 12.42,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 26.55,
+              "nodeCpuMs": 10.36,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 29.41,
+              "nodeCpuMs": 10.51,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 38.22,
+              "nodeCpuMs": 17.06,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 32.39,
+              "nodeCpuMs": 17.44,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 33.45,
+              "nodeCpuMs": 16.69,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            }
+          ]
+        },
+        {
+          "name": "sync_current",
+          "medianMs": 40.35,
+          "p95Ms": 56.32,
+          "medianNodeCpuMs": 14.74,
+          "medianGitProcesses": 12,
+          "observations": [
+            {
+              "wallMs": 40.35,
+              "nodeCpuMs": 13.05,
+              "gitProcesses": 12,
+              "gitProcessesIncludingChildren": 12
+            },
+            {
+              "wallMs": 38.7,
+              "nodeCpuMs": 17.29,
+              "gitProcesses": 12,
+              "gitProcessesIncludingChildren": 12
+            },
+            {
+              "wallMs": 38.05,
+              "nodeCpuMs": 11.73,
+              "gitProcesses": 12,
+              "gitProcessesIncludingChildren": 12
+            },
+            {
+              "wallMs": 40,
+              "nodeCpuMs": 15.74,
+              "gitProcesses": 12,
+              "gitProcessesIncludingChildren": 12
+            },
+            {
+              "wallMs": 34.33,
+              "nodeCpuMs": 14.74,
+              "gitProcesses": 12,
+              "gitProcessesIncludingChildren": 12
+            },
+            {
+              "wallMs": 43.76,
+              "nodeCpuMs": 13.38,
+              "gitProcesses": 12,
+              "gitProcessesIncludingChildren": 12
+            },
+            {
+              "wallMs": 39.55,
+              "nodeCpuMs": 17.91,
+              "gitProcesses": 12,
+              "gitProcessesIncludingChildren": 12
+            },
+            {
+              "wallMs": 37.59,
+              "nodeCpuMs": 14.65,
+              "gitProcesses": 12,
+              "gitProcessesIncludingChildren": 12
+            },
+            {
+              "wallMs": 40.66,
+              "nodeCpuMs": 16.57,
+              "gitProcesses": 12,
+              "gitProcessesIncludingChildren": 12
+            },
+            {
+              "wallMs": 48.69,
+              "nodeCpuMs": 26.08,
+              "gitProcesses": 12,
+              "gitProcessesIncludingChildren": 12
+            },
+            {
+              "wallMs": 42.62,
+              "nodeCpuMs": 13.98,
+              "gitProcesses": 12,
+              "gitProcessesIncludingChildren": 12
+            },
+            {
+              "wallMs": 56.32,
+              "nodeCpuMs": 14.72,
+              "gitProcesses": 12,
+              "gitProcessesIncludingChildren": 12
+            }
+          ]
+        },
+        {
+          "name": "sync_behind_cold",
+          "medianMs": 265.58,
+          "p95Ms": 288.29,
+          "medianNodeCpuMs": 67.91,
+          "medianGitProcesses": 26,
+          "observations": [
+            {
+              "wallMs": 277.25,
+              "nodeCpuMs": 83.83,
+              "gitProcesses": 26,
+              "gitProcessesIncludingChildren": 37
+            },
+            {
+              "wallMs": 243.13,
+              "nodeCpuMs": 57.02,
+              "gitProcesses": 26,
+              "gitProcessesIncludingChildren": 37
+            },
+            {
+              "wallMs": 282.06,
+              "nodeCpuMs": 74.37,
+              "gitProcesses": 26,
+              "gitProcessesIncludingChildren": 37
+            },
+            {
+              "wallMs": 265.58,
+              "nodeCpuMs": 67.91,
+              "gitProcesses": 26,
+              "gitProcessesIncludingChildren": 37
+            },
+            {
+              "wallMs": 257.07,
+              "nodeCpuMs": 65.23,
+              "gitProcesses": 26,
+              "gitProcessesIncludingChildren": 37
+            },
+            {
+              "wallMs": 254.44,
+              "nodeCpuMs": 59.25,
+              "gitProcesses": 26,
+              "gitProcessesIncludingChildren": 37
+            },
+            {
+              "wallMs": 252.81,
+              "nodeCpuMs": 63.59,
+              "gitProcesses": 26,
+              "gitProcessesIncludingChildren": 37
+            },
+            {
+              "wallMs": 252.14,
+              "nodeCpuMs": 63.79,
+              "gitProcesses": 26,
+              "gitProcessesIncludingChildren": 37
+            },
+            {
+              "wallMs": 288.29,
+              "nodeCpuMs": 71.52,
+              "gitProcesses": 26,
+              "gitProcessesIncludingChildren": 37
+            },
+            {
+              "wallMs": 276.12,
+              "nodeCpuMs": 70.46,
+              "gitProcesses": 26,
+              "gitProcessesIncludingChildren": 37
+            },
+            {
+              "wallMs": 274.99,
+              "nodeCpuMs": 80.08,
+              "gitProcesses": 26,
+              "gitProcessesIncludingChildren": 37
+            },
+            {
+              "wallMs": 255.35,
+              "nodeCpuMs": 67.52,
+              "gitProcesses": 26,
+              "gitProcessesIncludingChildren": 37
+            }
+          ]
+        },
+        {
+          "name": "sync_behind_warm",
+          "medianMs": 303.33,
+          "p95Ms": 384.39,
+          "medianNodeCpuMs": 58.86,
+          "medianGitProcesses": 26,
+          "observations": [
+            {
+              "wallMs": 298.96,
+              "nodeCpuMs": 49.11,
+              "gitProcesses": 26,
+              "gitProcessesIncludingChildren": 37
+            },
+            {
+              "wallMs": 285.48,
+              "nodeCpuMs": 51.83,
+              "gitProcesses": 26,
+              "gitProcessesIncludingChildren": 37
+            },
+            {
+              "wallMs": 301.7,
+              "nodeCpuMs": 50.87,
+              "gitProcesses": 26,
+              "gitProcessesIncludingChildren": 37
+            },
+            {
+              "wallMs": 270.87,
+              "nodeCpuMs": 53.68,
+              "gitProcesses": 26,
+              "gitProcessesIncludingChildren": 37
+            },
+            {
+              "wallMs": 303.33,
+              "nodeCpuMs": 69.96,
+              "gitProcesses": 26,
+              "gitProcessesIncludingChildren": 37
+            },
+            {
+              "wallMs": 296.23,
+              "nodeCpuMs": 58.79,
+              "gitProcesses": 26,
+              "gitProcessesIncludingChildren": 37
+            },
+            {
+              "wallMs": 292.98,
+              "nodeCpuMs": 59.1,
+              "gitProcesses": 26,
+              "gitProcessesIncludingChildren": 37
+            },
+            {
+              "wallMs": 342.02,
+              "nodeCpuMs": 64.9,
+              "gitProcesses": 26,
+              "gitProcessesIncludingChildren": 37
+            },
+            {
+              "wallMs": 350.2,
+              "nodeCpuMs": 83.4,
+              "gitProcesses": 26,
+              "gitProcessesIncludingChildren": 37
+            },
+            {
+              "wallMs": 384.39,
+              "nodeCpuMs": 58.86,
+              "gitProcesses": 26,
+              "gitProcessesIncludingChildren": 37
+            },
+            {
+              "wallMs": 348.7,
+              "nodeCpuMs": 61.02,
+              "gitProcesses": 26,
+              "gitProcessesIncludingChildren": 37
+            },
+            {
+              "wallMs": 344.41,
+              "nodeCpuMs": 54.21,
+              "gitProcesses": 26,
+              "gitProcessesIncludingChildren": 37
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "label": "portable",
+      "sourceRevision": "d53a18f0a0c04ae4d807d240a4936e39304f4457",
+      "sourceHasChanges": true,
+      "platform": "linux-x64",
+      "node": "v24.19.0",
+      "git": "git version 2.51.1",
+      "native": "disabled",
+      "workspaces": 1,
+      "trackedFilesAdded": 1000,
+      "samples": 12,
+      "nodePeakRssMiB": 97.03,
+      "notes": "Warm filesystem cache. Node CPU and peak RSS include Rust in-process; they exclude Git child-process CPU and memory. Timing includes Git Trace2 overhead. No preview connections.",
+      "measurements": [
+        {
+          "name": "idle_watchers",
+          "medianMs": 9.97,
+          "p95Ms": 13.18,
+          "medianNodeCpuMs": 3.44,
+          "medianGitProcesses": 2,
+          "observations": [
+            {
+              "wallMs": 13.18,
+              "nodeCpuMs": 4.07,
+              "gitProcesses": 2,
+              "gitProcessesIncludingChildren": 2
+            },
+            {
+              "wallMs": 11.82,
+              "nodeCpuMs": 3.31,
+              "gitProcesses": 2,
+              "gitProcessesIncludingChildren": 2
+            },
+            {
+              "wallMs": 10.38,
+              "nodeCpuMs": 3.49,
+              "gitProcesses": 2,
+              "gitProcessesIncludingChildren": 2
+            },
+            {
+              "wallMs": 8.91,
+              "nodeCpuMs": 2.44,
+              "gitProcesses": 2,
+              "gitProcessesIncludingChildren": 2
+            },
+            {
+              "wallMs": 11.91,
+              "nodeCpuMs": 2.8,
+              "gitProcesses": 2,
+              "gitProcessesIncludingChildren": 2
+            },
+            {
+              "wallMs": 8.52,
+              "nodeCpuMs": 2.37,
+              "gitProcesses": 2,
+              "gitProcessesIncludingChildren": 2
+            },
+            {
+              "wallMs": 9.05,
+              "nodeCpuMs": 3.47,
+              "gitProcesses": 2,
+              "gitProcessesIncludingChildren": 2
+            },
+            {
+              "wallMs": 9.08,
+              "nodeCpuMs": 2.27,
+              "gitProcesses": 2,
+              "gitProcessesIncludingChildren": 2
+            },
+            {
+              "wallMs": 8.53,
+              "nodeCpuMs": 3.79,
+              "gitProcesses": 2,
+              "gitProcessesIncludingChildren": 2
+            },
+            {
+              "wallMs": 10.47,
+              "nodeCpuMs": 3.44,
+              "gitProcesses": 2,
+              "gitProcessesIncludingChildren": 2
+            },
+            {
+              "wallMs": 9.62,
+              "nodeCpuMs": 5.76,
+              "gitProcesses": 2,
+              "gitProcessesIncludingChildren": 2
+            },
+            {
+              "wallMs": 9.97,
+              "nodeCpuMs": 2.32,
+              "gitProcesses": 2,
+              "gitProcessesIncludingChildren": 2
+            }
+          ]
+        },
+        {
+          "name": "workflow_get",
+          "medianMs": 32.68,
+          "p95Ms": 42.5,
+          "medianNodeCpuMs": 16.24,
+          "medianGitProcesses": 11,
+          "observations": [
+            {
+              "wallMs": 30.88,
+              "nodeCpuMs": 16.24,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 28.57,
+              "nodeCpuMs": 13.07,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 35.39,
+              "nodeCpuMs": 17.23,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 36.35,
+              "nodeCpuMs": 18.57,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 36.11,
+              "nodeCpuMs": 14.34,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 33.21,
+              "nodeCpuMs": 15.16,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 42.5,
+              "nodeCpuMs": 19.59,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 32.68,
+              "nodeCpuMs": 14.1,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 26.58,
+              "nodeCpuMs": 13.4,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 29.32,
+              "nodeCpuMs": 14.17,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 30.43,
+              "nodeCpuMs": 22.4,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 31.64,
+              "nodeCpuMs": 16.89,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            }
+          ]
+        },
+        {
+          "name": "sync_current",
+          "medianMs": 39.71,
+          "p95Ms": 49.69,
+          "medianNodeCpuMs": 19.39,
+          "medianGitProcesses": 11,
+          "observations": [
+            {
+              "wallMs": 37.59,
+              "nodeCpuMs": 16.33,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 37.99,
+              "nodeCpuMs": 16.03,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 35.1,
+              "nodeCpuMs": 15.64,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 49.69,
+              "nodeCpuMs": 21.98,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 39.71,
+              "nodeCpuMs": 20.54,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 43.14,
+              "nodeCpuMs": 19.39,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 39.16,
+              "nodeCpuMs": 23.83,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 36.6,
+              "nodeCpuMs": 17.08,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 42.88,
+              "nodeCpuMs": 19.77,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 40.79,
+              "nodeCpuMs": 25.84,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 36.89,
+              "nodeCpuMs": 15.02,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 43.15,
+              "nodeCpuMs": 18.72,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            }
+          ]
+        },
+        {
+          "name": "sync_behind_cold",
+          "medianMs": 384.86,
+          "p95Ms": 509.46,
+          "medianNodeCpuMs": 85.5,
+          "medianGitProcesses": 36,
+          "observations": [
+            {
+              "wallMs": 509.46,
+              "nodeCpuMs": 167.3,
+              "gitProcesses": 36,
+              "gitProcessesIncludingChildren": 47
+            },
+            {
+              "wallMs": 483.17,
+              "nodeCpuMs": 145.77,
+              "gitProcesses": 36,
+              "gitProcessesIncludingChildren": 47
+            },
+            {
+              "wallMs": 480.93,
+              "nodeCpuMs": 101.02,
+              "gitProcesses": 36,
+              "gitProcessesIncludingChildren": 47
+            },
+            {
+              "wallMs": 384.86,
+              "nodeCpuMs": 88.04,
+              "gitProcesses": 36,
+              "gitProcessesIncludingChildren": 47
+            },
+            {
+              "wallMs": 407.5,
+              "nodeCpuMs": 113.4,
+              "gitProcesses": 36,
+              "gitProcessesIncludingChildren": 47
+            },
+            {
+              "wallMs": 384.53,
+              "nodeCpuMs": 78.04,
+              "gitProcesses": 36,
+              "gitProcessesIncludingChildren": 47
+            },
+            {
+              "wallMs": 369.68,
+              "nodeCpuMs": 73.01,
+              "gitProcesses": 36,
+              "gitProcessesIncludingChildren": 47
+            },
+            {
+              "wallMs": 392.87,
+              "nodeCpuMs": 75.57,
+              "gitProcesses": 36,
+              "gitProcessesIncludingChildren": 47
+            },
+            {
+              "wallMs": 384.83,
+              "nodeCpuMs": 85.5,
+              "gitProcesses": 36,
+              "gitProcessesIncludingChildren": 47
+            },
+            {
+              "wallMs": 353.93,
+              "nodeCpuMs": 80.1,
+              "gitProcesses": 36,
+              "gitProcessesIncludingChildren": 47
+            },
+            {
+              "wallMs": 360.75,
+              "nodeCpuMs": 82.58,
+              "gitProcesses": 36,
+              "gitProcessesIncludingChildren": 47
+            },
+            {
+              "wallMs": 366.83,
+              "nodeCpuMs": 63.2,
+              "gitProcesses": 36,
+              "gitProcessesIncludingChildren": 47
+            }
+          ]
+        },
+        {
+          "name": "sync_behind_warm",
+          "medianMs": 45.95,
+          "p95Ms": 48.15,
+          "medianNodeCpuMs": 23.66,
+          "medianGitProcesses": 24,
+          "observations": [
+            {
+              "wallMs": 44.44,
+              "nodeCpuMs": 23.91,
+              "gitProcesses": 24,
+              "gitProcessesIncludingChildren": 24
+            },
+            {
+              "wallMs": 45.32,
+              "nodeCpuMs": 28.38,
+              "gitProcesses": 24,
+              "gitProcessesIncludingChildren": 24
+            },
+            {
+              "wallMs": 43.9,
+              "nodeCpuMs": 21.83,
+              "gitProcesses": 24,
+              "gitProcessesIncludingChildren": 24
+            },
+            {
+              "wallMs": 45.95,
+              "nodeCpuMs": 22.39,
+              "gitProcesses": 24,
+              "gitProcessesIncludingChildren": 24
+            },
+            {
+              "wallMs": 46.54,
+              "nodeCpuMs": 23.88,
+              "gitProcesses": 24,
+              "gitProcessesIncludingChildren": 24
+            },
+            {
+              "wallMs": 48.15,
+              "nodeCpuMs": 28.53,
+              "gitProcesses": 24,
+              "gitProcessesIncludingChildren": 24
+            },
+            {
+              "wallMs": 48.02,
+              "nodeCpuMs": 23.3,
+              "gitProcesses": 24,
+              "gitProcessesIncludingChildren": 24
+            },
+            {
+              "wallMs": 46.32,
+              "nodeCpuMs": 23.32,
+              "gitProcesses": 24,
+              "gitProcessesIncludingChildren": 24
+            },
+            {
+              "wallMs": 43.72,
+              "nodeCpuMs": 21.11,
+              "gitProcesses": 24,
+              "gitProcessesIncludingChildren": 24
+            },
+            {
+              "wallMs": 45.62,
+              "nodeCpuMs": 25.51,
+              "gitProcesses": 24,
+              "gitProcessesIncludingChildren": 24
+            },
+            {
+              "wallMs": 45.96,
+              "nodeCpuMs": 21.97,
+              "gitProcesses": 24,
+              "gitProcessesIncludingChildren": 24
+            },
+            {
+              "wallMs": 44.78,
+              "nodeCpuMs": 23.66,
+              "gitProcesses": 24,
+              "gitProcessesIncludingChildren": 24
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "label": "rust",
+      "sourceRevision": "d53a18f0a0c04ae4d807d240a4936e39304f4457",
+      "sourceHasChanges": true,
+      "platform": "linux-x64",
+      "node": "v24.19.0",
+      "git": "git version 2.51.1",
+      "native": "required",
+      "workspaces": 1,
+      "trackedFilesAdded": 1000,
+      "samples": 12,
+      "nodePeakRssMiB": 87.55,
+      "notes": "Warm filesystem cache. Node CPU and peak RSS include Rust in-process; they exclude Git child-process CPU and memory. Timing includes Git Trace2 overhead. No preview connections.",
+      "measurements": [
+        {
+          "name": "idle_watchers",
+          "medianMs": 9.22,
+          "p95Ms": 12.6,
+          "medianNodeCpuMs": 2.95,
+          "medianGitProcesses": 2,
+          "observations": [
+            {
+              "wallMs": 9.73,
+              "nodeCpuMs": 4.35,
+              "gitProcesses": 2,
+              "gitProcessesIncludingChildren": 2
+            },
+            {
+              "wallMs": 8.46,
+              "nodeCpuMs": 2.96,
+              "gitProcesses": 2,
+              "gitProcessesIncludingChildren": 2
+            },
+            {
+              "wallMs": 8.62,
+              "nodeCpuMs": 2.9,
+              "gitProcesses": 2,
+              "gitProcessesIncludingChildren": 2
+            },
+            {
+              "wallMs": 9.22,
+              "nodeCpuMs": 19.89,
+              "gitProcesses": 2,
+              "gitProcessesIncludingChildren": 2
+            },
+            {
+              "wallMs": 8.65,
+              "nodeCpuMs": 2.68,
+              "gitProcesses": 2,
+              "gitProcessesIncludingChildren": 2
+            },
+            {
+              "wallMs": 8.05,
+              "nodeCpuMs": 2.4,
+              "gitProcesses": 2,
+              "gitProcessesIncludingChildren": 2
+            },
+            {
+              "wallMs": 10.26,
+              "nodeCpuMs": 3.87,
+              "gitProcesses": 2,
+              "gitProcessesIncludingChildren": 2
+            },
+            {
+              "wallMs": 11.73,
+              "nodeCpuMs": 2.95,
+              "gitProcesses": 2,
+              "gitProcessesIncludingChildren": 2
+            },
+            {
+              "wallMs": 9.45,
+              "nodeCpuMs": 3.12,
+              "gitProcesses": 2,
+              "gitProcessesIncludingChildren": 2
+            },
+            {
+              "wallMs": 8.68,
+              "nodeCpuMs": 2.32,
+              "gitProcesses": 2,
+              "gitProcessesIncludingChildren": 2
+            },
+            {
+              "wallMs": 8.23,
+              "nodeCpuMs": 2.72,
+              "gitProcesses": 2,
+              "gitProcessesIncludingChildren": 2
+            },
+            {
+              "wallMs": 12.6,
+              "nodeCpuMs": 2.65,
+              "gitProcesses": 2,
+              "gitProcessesIncludingChildren": 2
+            }
+          ]
+        },
+        {
+          "name": "workflow_get",
+          "medianMs": 27.93,
+          "p95Ms": 30.06,
+          "medianNodeCpuMs": 13.84,
+          "medianGitProcesses": 11,
+          "observations": [
+            {
+              "wallMs": 27.79,
+              "nodeCpuMs": 16,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 29.87,
+              "nodeCpuMs": 17.39,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 26.41,
+              "nodeCpuMs": 12.7,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 26.64,
+              "nodeCpuMs": 13.92,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 29.76,
+              "nodeCpuMs": 13.84,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 28.38,
+              "nodeCpuMs": 13.13,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 28.85,
+              "nodeCpuMs": 12.6,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 27.93,
+              "nodeCpuMs": 14.91,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 30.06,
+              "nodeCpuMs": 16.35,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 27.53,
+              "nodeCpuMs": 11.29,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 25.25,
+              "nodeCpuMs": 10.18,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 23.87,
+              "nodeCpuMs": 11.41,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            }
+          ]
+        },
+        {
+          "name": "sync_current",
+          "medianMs": 32.53,
+          "p95Ms": 36.15,
+          "medianNodeCpuMs": 14.76,
+          "medianGitProcesses": 11,
+          "observations": [
+            {
+              "wallMs": 33.95,
+              "nodeCpuMs": 14.76,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 36.15,
+              "nodeCpuMs": 15.57,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 32.11,
+              "nodeCpuMs": 12.42,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 32.24,
+              "nodeCpuMs": 11.92,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 32.53,
+              "nodeCpuMs": 17.76,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 31.89,
+              "nodeCpuMs": 12.67,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 35.94,
+              "nodeCpuMs": 19.61,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 32.37,
+              "nodeCpuMs": 11.37,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 35.39,
+              "nodeCpuMs": 14.89,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 34.93,
+              "nodeCpuMs": 15.01,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 30.48,
+              "nodeCpuMs": 11.25,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            },
+            {
+              "wallMs": 29.64,
+              "nodeCpuMs": 10.65,
+              "gitProcesses": 11,
+              "gitProcessesIncludingChildren": 11
+            }
+          ]
+        },
+        {
+          "name": "sync_behind_cold",
+          "medianMs": 401.17,
+          "p95Ms": 482.18,
+          "medianNodeCpuMs": 88.44,
+          "medianGitProcesses": 36,
+          "observations": [
+            {
+              "wallMs": 482.18,
+              "nodeCpuMs": 118.08,
+              "gitProcesses": 36,
+              "gitProcessesIncludingChildren": 47
+            },
+            {
+              "wallMs": 410.9,
+              "nodeCpuMs": 78.61,
+              "gitProcesses": 36,
+              "gitProcessesIncludingChildren": 47
+            },
+            {
+              "wallMs": 401.17,
+              "nodeCpuMs": 88.44,
+              "gitProcesses": 36,
+              "gitProcessesIncludingChildren": 47
+            },
+            {
+              "wallMs": 379.73,
+              "nodeCpuMs": 100.73,
+              "gitProcesses": 36,
+              "gitProcessesIncludingChildren": 47
+            },
+            {
+              "wallMs": 387.19,
+              "nodeCpuMs": 117.28,
+              "gitProcesses": 36,
+              "gitProcessesIncludingChildren": 47
+            },
+            {
+              "wallMs": 358.47,
+              "nodeCpuMs": 81.7,
+              "gitProcesses": 36,
+              "gitProcessesIncludingChildren": 47
+            },
+            {
+              "wallMs": 359.28,
+              "nodeCpuMs": 72.36,
+              "gitProcesses": 36,
+              "gitProcessesIncludingChildren": 47
+            },
+            {
+              "wallMs": 378.66,
+              "nodeCpuMs": 76.35,
+              "gitProcesses": 36,
+              "gitProcessesIncludingChildren": 47
+            },
+            {
+              "wallMs": 406.59,
+              "nodeCpuMs": 80.57,
+              "gitProcesses": 36,
+              "gitProcessesIncludingChildren": 47
+            },
+            {
+              "wallMs": 376.59,
+              "nodeCpuMs": 92.03,
+              "gitProcesses": 36,
+              "gitProcessesIncludingChildren": 47
+            },
+            {
+              "wallMs": 402.71,
+              "nodeCpuMs": 118.72,
+              "gitProcesses": 36,
+              "gitProcessesIncludingChildren": 47
+            },
+            {
+              "wallMs": 409.83,
+              "nodeCpuMs": 81.55,
+              "gitProcesses": 36,
+              "gitProcessesIncludingChildren": 47
+            }
+          ]
+        },
+        {
+          "name": "sync_behind_warm",
+          "medianMs": 55.8,
+          "p95Ms": 80.46,
+          "medianNodeCpuMs": 30.73,
+          "medianGitProcesses": 24,
+          "observations": [
+            {
+              "wallMs": 80.46,
+              "nodeCpuMs": 46.03,
+              "gitProcesses": 24,
+              "gitProcessesIncludingChildren": 24
+            },
+            {
+              "wallMs": 61.84,
+              "nodeCpuMs": 41.16,
+              "gitProcesses": 24,
+              "gitProcessesIncludingChildren": 24
+            },
+            {
+              "wallMs": 67.87,
+              "nodeCpuMs": 36.53,
+              "gitProcesses": 24,
+              "gitProcessesIncludingChildren": 24
+            },
+            {
+              "wallMs": 62.03,
+              "nodeCpuMs": 30.73,
+              "gitProcesses": 24,
+              "gitProcessesIncludingChildren": 24
+            },
+            {
+              "wallMs": 54.3,
+              "nodeCpuMs": 31.89,
+              "gitProcesses": 24,
+              "gitProcessesIncludingChildren": 24
+            },
+            {
+              "wallMs": 56.53,
+              "nodeCpuMs": 36.95,
+              "gitProcesses": 24,
+              "gitProcessesIncludingChildren": 24
+            },
+            {
+              "wallMs": 55.8,
+              "nodeCpuMs": 29.13,
+              "gitProcesses": 24,
+              "gitProcessesIncludingChildren": 24
+            },
+            {
+              "wallMs": 50.04,
+              "nodeCpuMs": 27.54,
+              "gitProcesses": 24,
+              "gitProcessesIncludingChildren": 24
+            },
+            {
+              "wallMs": 47.65,
+              "nodeCpuMs": 23.99,
+              "gitProcesses": 24,
+              "gitProcessesIncludingChildren": 24
+            },
+            {
+              "wallMs": 45.48,
+              "nodeCpuMs": 24.8,
+              "gitProcesses": 24,
+              "gitProcessesIncludingChildren": 24
+            },
+            {
+              "wallMs": 47.25,
+              "nodeCpuMs": 24.54,
+              "gitProcesses": 24,
+              "gitProcessesIncludingChildren": 24
+            },
+            {
+              "wallMs": 46.34,
+              "nodeCpuMs": 25.05,
+              "gitProcesses": 24,
+              "gitProcessesIncludingChildren": 24
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "label": "baseline",
+      "sourceRevision": "d53a18f0a0c04ae4d807d240a4936e39304f4457",
+      "platform": "linux-x64",
+      "node": "v24.19.0",
+      "git": "git version 2.51.1",
+      "native": "disabled",
+      "workspaces": 4,
+      "trackedFilesAdded": 1000,
+      "samples": 12,
+      "nodePeakRssMiB": 178.95,
+      "notes": "Warm filesystem cache. Node CPU and peak RSS include Rust in-process; they exclude Git child-process CPU and memory. Timing includes Git Trace2 overhead. No preview connections.",
+      "measurements": [
+        {
+          "name": "idle_watchers",
+          "medianMs": 23.77,
+          "p95Ms": 37.58,
+          "medianNodeCpuMs": 18.22,
+          "medianGitProcesses": 15,
+          "observations": [
+            {
+              "wallMs": 19.94,
+              "nodeCpuMs": 15.55,
+              "gitProcesses": 15,
+              "gitProcessesIncludingChildren": 15
+            },
+            {
+              "wallMs": 21.07,
+              "nodeCpuMs": 12.96,
+              "gitProcesses": 15,
+              "gitProcessesIncludingChildren": 15
+            },
+            {
+              "wallMs": 19.15,
+              "nodeCpuMs": 17.83,
+              "gitProcesses": 15,
+              "gitProcessesIncludingChildren": 15
+            },
+            {
+              "wallMs": 18.99,
+              "nodeCpuMs": 12.06,
+              "gitProcesses": 15,
+              "gitProcessesIncludingChildren": 15
+            },
+            {
+              "wallMs": 19.42,
+              "nodeCpuMs": 13.12,
+              "gitProcesses": 15,
+              "gitProcessesIncludingChildren": 15
+            },
+            {
+              "wallMs": 19.4,
+              "nodeCpuMs": 12.11,
+              "gitProcesses": 15,
+              "gitProcessesIncludingChildren": 15
+            },
+            {
+              "wallMs": 26.56,
+              "nodeCpuMs": 21.17,
+              "gitProcesses": 15,
+              "gitProcessesIncludingChildren": 15
+            },
+            {
+              "wallMs": 29.63,
+              "nodeCpuMs": 24.28,
+              "gitProcesses": 15,
+              "gitProcessesIncludingChildren": 15
+            },
+            {
+              "wallMs": 26.88,
+              "nodeCpuMs": 25.32,
+              "gitProcesses": 15,
+              "gitProcessesIncludingChildren": 15
+            },
+            {
+              "wallMs": 37.58,
+              "nodeCpuMs": 22.51,
+              "gitProcesses": 15,
+              "gitProcessesIncludingChildren": 15
+            },
+            {
+              "wallMs": 26.6,
+              "nodeCpuMs": 23.8,
+              "gitProcesses": 15,
+              "gitProcessesIncludingChildren": 15
+            },
+            {
+              "wallMs": 23.77,
+              "nodeCpuMs": 18.22,
+              "gitProcesses": 15,
+              "gitProcessesIncludingChildren": 15
+            }
+          ]
+        },
+        {
+          "name": "workflow_get",
+          "medianMs": 175.01,
+          "p95Ms": 224.7,
+          "medianNodeCpuMs": 128.1,
+          "medianGitProcesses": 101,
+          "observations": [
+            {
+              "wallMs": 166.81,
+              "nodeCpuMs": 108.04,
+              "gitProcesses": 101,
+              "gitProcessesIncludingChildren": 101
+            },
+            {
+              "wallMs": 175.01,
+              "nodeCpuMs": 136.63,
+              "gitProcesses": 101,
+              "gitProcessesIncludingChildren": 101
+            },
+            {
+              "wallMs": 149.64,
+              "nodeCpuMs": 106.3,
+              "gitProcesses": 101,
+              "gitProcessesIncludingChildren": 101
+            },
+            {
+              "wallMs": 149.91,
+              "nodeCpuMs": 94.52,
+              "gitProcesses": 101,
+              "gitProcessesIncludingChildren": 101
+            },
+            {
+              "wallMs": 187.68,
+              "nodeCpuMs": 133.09,
+              "gitProcesses": 101,
+              "gitProcessesIncludingChildren": 101
+            },
+            {
+              "wallMs": 187.97,
+              "nodeCpuMs": 135.91,
+              "gitProcesses": 101,
+              "gitProcessesIncludingChildren": 101
+            },
+            {
+              "wallMs": 190.97,
+              "nodeCpuMs": 139.41,
+              "gitProcesses": 101,
+              "gitProcessesIncludingChildren": 101
+            },
+            {
+              "wallMs": 174.94,
+              "nodeCpuMs": 128.1,
+              "gitProcesses": 101,
+              "gitProcessesIncludingChildren": 101
+            },
+            {
+              "wallMs": 224.7,
+              "nodeCpuMs": 199.72,
+              "gitProcesses": 101,
+              "gitProcessesIncludingChildren": 101
+            },
+            {
+              "wallMs": 157.63,
+              "nodeCpuMs": 98.85,
+              "gitProcesses": 101,
+              "gitProcessesIncludingChildren": 101
+            },
+            {
+              "wallMs": 178.33,
+              "nodeCpuMs": 103.13,
+              "gitProcesses": 101,
+              "gitProcessesIncludingChildren": 101
+            },
+            {
+              "wallMs": 153.92,
+              "nodeCpuMs": 95.2,
+              "gitProcesses": 101,
+              "gitProcessesIncludingChildren": 101
+            }
+          ]
+        },
+        {
+          "name": "sync_current",
+          "medianMs": 191.09,
+          "p95Ms": 223.33,
+          "medianNodeCpuMs": 104.43,
+          "medianGitProcesses": 105,
+          "observations": [
+            {
+              "wallMs": 191.2,
+              "nodeCpuMs": 105.97,
+              "gitProcesses": 105,
+              "gitProcessesIncludingChildren": 105
+            },
+            {
+              "wallMs": 223.33,
+              "nodeCpuMs": 110.57,
+              "gitProcesses": 105,
+              "gitProcessesIncludingChildren": 105
+            },
+            {
+              "wallMs": 176.33,
+              "nodeCpuMs": 91.07,
+              "gitProcesses": 105,
+              "gitProcessesIncludingChildren": 105
+            },
+            {
+              "wallMs": 214.08,
+              "nodeCpuMs": 106.2,
+              "gitProcesses": 105,
+              "gitProcessesIncludingChildren": 105
+            },
+            {
+              "wallMs": 214.05,
+              "nodeCpuMs": 127.76,
+              "gitProcesses": 105,
+              "gitProcessesIncludingChildren": 105
+            },
+            {
+              "wallMs": 180.49,
+              "nodeCpuMs": 94.45,
+              "gitProcesses": 105,
+              "gitProcessesIncludingChildren": 105
+            },
+            {
+              "wallMs": 203.23,
+              "nodeCpuMs": 131.37,
+              "gitProcesses": 105,
+              "gitProcessesIncludingChildren": 105
+            },
+            {
+              "wallMs": 191.09,
+              "nodeCpuMs": 99.18,
+              "gitProcesses": 105,
+              "gitProcessesIncludingChildren": 105
+            },
+            {
+              "wallMs": 177.59,
+              "nodeCpuMs": 92.15,
+              "gitProcesses": 105,
+              "gitProcessesIncludingChildren": 105
+            },
+            {
+              "wallMs": 185.18,
+              "nodeCpuMs": 104.43,
+              "gitProcesses": 105,
+              "gitProcessesIncludingChildren": 105
+            },
+            {
+              "wallMs": 188.61,
+              "nodeCpuMs": 98.88,
+              "gitProcesses": 105,
+              "gitProcessesIncludingChildren": 105
+            },
+            {
+              "wallMs": 182.99,
+              "nodeCpuMs": 96.14,
+              "gitProcesses": 105,
+              "gitProcessesIncludingChildren": 105
+            }
+          ]
+        },
+        {
+          "name": "sync_behind_cold",
+          "medianMs": 1158.05,
+          "p95Ms": 1253.64,
+          "medianNodeCpuMs": 303.62,
+          "medianGitProcesses": 161,
+          "observations": [
+            {
+              "wallMs": 1211.2,
+              "nodeCpuMs": 303.62,
+              "gitProcesses": 161,
+              "gitProcessesIncludingChildren": 205
+            },
+            {
+              "wallMs": 1253.64,
+              "nodeCpuMs": 342.14,
+              "gitProcesses": 161,
+              "gitProcessesIncludingChildren": 205
+            },
+            {
+              "wallMs": 1147.35,
+              "nodeCpuMs": 316.49,
+              "gitProcesses": 161,
+              "gitProcessesIncludingChildren": 205
+            },
+            {
+              "wallMs": 1113.79,
+              "nodeCpuMs": 311.09,
+              "gitProcesses": 161,
+              "gitProcessesIncludingChildren": 205
+            },
+            {
+              "wallMs": 1158.05,
+              "nodeCpuMs": 310.11,
+              "gitProcesses": 161,
+              "gitProcessesIncludingChildren": 205
+            },
+            {
+              "wallMs": 1161.25,
+              "nodeCpuMs": 303.08,
+              "gitProcesses": 161,
+              "gitProcessesIncludingChildren": 205
+            },
+            {
+              "wallMs": 1122.42,
+              "nodeCpuMs": 247.38,
+              "gitProcesses": 161,
+              "gitProcessesIncludingChildren": 205
+            },
+            {
+              "wallMs": 1138.92,
+              "nodeCpuMs": 268.11,
+              "gitProcesses": 161,
+              "gitProcessesIncludingChildren": 205
+            },
+            {
+              "wallMs": 1231.83,
+              "nodeCpuMs": 294.2,
+              "gitProcesses": 161,
+              "gitProcessesIncludingChildren": 205
+            },
+            {
+              "wallMs": 1230.98,
+              "nodeCpuMs": 308.46,
+              "gitProcesses": 161,
+              "gitProcessesIncludingChildren": 205
+            },
+            {
+              "wallMs": 1111.86,
+              "nodeCpuMs": 283.46,
+              "gitProcesses": 161,
+              "gitProcessesIncludingChildren": 205
+            },
+            {
+              "wallMs": 1100.91,
+              "nodeCpuMs": 285.25,
+              "gitProcesses": 161,
+              "gitProcessesIncludingChildren": 205
+            }
+          ]
+        },
+        {
+          "name": "sync_behind_warm",
+          "medianMs": 1154,
+          "p95Ms": 1206.19,
+          "medianNodeCpuMs": 311.05,
+          "medianGitProcesses": 161,
+          "observations": [
+            {
+              "wallMs": 1147.72,
+              "nodeCpuMs": 304.78,
+              "gitProcesses": 161,
+              "gitProcessesIncludingChildren": 205
+            },
+            {
+              "wallMs": 1143.07,
+              "nodeCpuMs": 304.73,
+              "gitProcesses": 161,
+              "gitProcessesIncludingChildren": 205
+            },
+            {
+              "wallMs": 1154,
+              "nodeCpuMs": 264.78,
+              "gitProcesses": 161,
+              "gitProcessesIncludingChildren": 205
+            },
+            {
+              "wallMs": 1158.5,
+              "nodeCpuMs": 311.49,
+              "gitProcesses": 161,
+              "gitProcessesIncludingChildren": 205
+            },
+            {
+              "wallMs": 1166.62,
+              "nodeCpuMs": 317.24,
+              "gitProcesses": 161,
+              "gitProcessesIncludingChildren": 205
+            },
+            {
+              "wallMs": 1132.79,
+              "nodeCpuMs": 308.84,
+              "gitProcesses": 161,
+              "gitProcessesIncludingChildren": 205
+            },
+            {
+              "wallMs": 1145.27,
+              "nodeCpuMs": 315.43,
+              "gitProcesses": 161,
+              "gitProcessesIncludingChildren": 205
+            },
+            {
+              "wallMs": 1115.94,
+              "nodeCpuMs": 267.05,
+              "gitProcesses": 161,
+              "gitProcessesIncludingChildren": 205
+            },
+            {
+              "wallMs": 1119.96,
+              "nodeCpuMs": 299.35,
+              "gitProcesses": 161,
+              "gitProcessesIncludingChildren": 205
+            },
+            {
+              "wallMs": 1192.96,
+              "nodeCpuMs": 311.05,
+              "gitProcesses": 161,
+              "gitProcessesIncludingChildren": 205
+            },
+            {
+              "wallMs": 1188.49,
+              "nodeCpuMs": 343.42,
+              "gitProcesses": 161,
+              "gitProcessesIncludingChildren": 205
+            },
+            {
+              "wallMs": 1206.19,
+              "nodeCpuMs": 322.21,
+              "gitProcesses": 161,
+              "gitProcessesIncludingChildren": 205
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "label": "portable",
+      "sourceRevision": "d53a18f0a0c04ae4d807d240a4936e39304f4457",
+      "sourceHasChanges": true,
+      "platform": "linux-x64",
+      "node": "v24.19.0",
+      "git": "git version 2.51.1",
+      "native": "disabled",
+      "workspaces": 4,
+      "trackedFilesAdded": 1000,
+      "samples": 12,
+      "nodePeakRssMiB": 142.54,
+      "notes": "Warm filesystem cache. Node CPU and peak RSS include Rust in-process; they exclude Git child-process CPU and memory. Timing includes Git Trace2 overhead. No preview connections.",
+      "measurements": [
+        {
+          "name": "idle_watchers",
+          "medianMs": 15.99,
+          "p95Ms": 21.88,
+          "medianNodeCpuMs": 7.33,
+          "medianGitProcesses": 5,
+          "observations": [
+            {
+              "wallMs": 16.43,
+              "nodeCpuMs": 7.33,
+              "gitProcesses": 5,
+              "gitProcessesIncludingChildren": 5
+            },
+            {
+              "wallMs": 15.99,
+              "nodeCpuMs": 7.71,
+              "gitProcesses": 5,
+              "gitProcessesIncludingChildren": 5
+            },
+            {
+              "wallMs": 19.01,
+              "nodeCpuMs": 7.49,
+              "gitProcesses": 5,
+              "gitProcessesIncludingChildren": 5
+            },
+            {
+              "wallMs": 19.93,
+              "nodeCpuMs": 6.85,
+              "gitProcesses": 5,
+              "gitProcessesIncludingChildren": 5
+            },
+            {
+              "wallMs": 15.81,
+              "nodeCpuMs": 5.24,
+              "gitProcesses": 5,
+              "gitProcessesIncludingChildren": 5
+            },
+            {
+              "wallMs": 15.87,
+              "nodeCpuMs": 6.27,
+              "gitProcesses": 5,
+              "gitProcessesIncludingChildren": 5
+            },
+            {
+              "wallMs": 21.88,
+              "nodeCpuMs": 9.67,
+              "gitProcesses": 5,
+              "gitProcessesIncludingChildren": 5
+            },
+            {
+              "wallMs": 14.52,
+              "nodeCpuMs": 5.79,
+              "gitProcesses": 5,
+              "gitProcessesIncludingChildren": 5
+            },
+            {
+              "wallMs": 15.95,
+              "nodeCpuMs": 6.81,
+              "gitProcesses": 5,
+              "gitProcessesIncludingChildren": 5
+            },
+            {
+              "wallMs": 17.55,
+              "nodeCpuMs": 7.97,
+              "gitProcesses": 5,
+              "gitProcessesIncludingChildren": 5
+            },
+            {
+              "wallMs": 13.16,
+              "nodeCpuMs": 4.82,
+              "gitProcesses": 5,
+              "gitProcessesIncludingChildren": 5
+            },
+            {
+              "wallMs": 14.14,
+              "nodeCpuMs": 7.38,
+              "gitProcesses": 5,
+              "gitProcessesIncludingChildren": 5
+            }
+          ]
+        },
+        {
+          "name": "workflow_get",
+          "medianMs": 53.71,
+          "p95Ms": 62.66,
+          "medianNodeCpuMs": 33.02,
+          "medianGitProcesses": 32,
+          "observations": [
+            {
+              "wallMs": 62.66,
+              "nodeCpuMs": 45.57,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 55.86,
+              "nodeCpuMs": 33.02,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 53.71,
+              "nodeCpuMs": 29.2,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 47.96,
+              "nodeCpuMs": 27.58,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 50.89,
+              "nodeCpuMs": 33.07,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 57.28,
+              "nodeCpuMs": 34.15,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 50.23,
+              "nodeCpuMs": 28.56,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 58.6,
+              "nodeCpuMs": 45.06,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 52.21,
+              "nodeCpuMs": 32.72,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 49.77,
+              "nodeCpuMs": 28.9,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 51.57,
+              "nodeCpuMs": 31.29,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 57.59,
+              "nodeCpuMs": 64.56,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            }
+          ]
+        },
+        {
+          "name": "sync_current",
+          "medianMs": 74.46,
+          "p95Ms": 86.02,
+          "medianNodeCpuMs": 30.5,
+          "medianGitProcesses": 32,
+          "observations": [
+            {
+              "wallMs": 72.94,
+              "nodeCpuMs": 28.02,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 71.77,
+              "nodeCpuMs": 30.5,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 86.02,
+              "nodeCpuMs": 33.49,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 85.91,
+              "nodeCpuMs": 34.33,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 80.89,
+              "nodeCpuMs": 33.98,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 81.88,
+              "nodeCpuMs": 35.43,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 72.36,
+              "nodeCpuMs": 27.2,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 74.46,
+              "nodeCpuMs": 28.45,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 74.02,
+              "nodeCpuMs": 29.64,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 65.41,
+              "nodeCpuMs": 24.96,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 79.41,
+              "nodeCpuMs": 31.38,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 72.14,
+              "nodeCpuMs": 24.95,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            }
+          ]
+        },
+        {
+          "name": "sync_behind_cold",
+          "medianMs": 1054.33,
+          "p95Ms": 1169.95,
+          "medianNodeCpuMs": 257.99,
+          "medianGitProcesses": 114,
+          "observations": [
+            {
+              "wallMs": 1101.35,
+              "nodeCpuMs": 261.51,
+              "gitProcesses": 114,
+              "gitProcessesIncludingChildren": 158
+            },
+            {
+              "wallMs": 1169.95,
+              "nodeCpuMs": 293.42,
+              "gitProcesses": 114,
+              "gitProcessesIncludingChildren": 158
+            },
+            {
+              "wallMs": 1048.2,
+              "nodeCpuMs": 291.43,
+              "gitProcesses": 114,
+              "gitProcessesIncludingChildren": 158
+            },
+            {
+              "wallMs": 1026.1,
+              "nodeCpuMs": 235.9,
+              "gitProcesses": 114,
+              "gitProcessesIncludingChildren": 158
+            },
+            {
+              "wallMs": 1048.24,
+              "nodeCpuMs": 259.49,
+              "gitProcesses": 114,
+              "gitProcessesIncludingChildren": 158
+            },
+            {
+              "wallMs": 1013.61,
+              "nodeCpuMs": 227.26,
+              "gitProcesses": 114,
+              "gitProcessesIncludingChildren": 158
+            },
+            {
+              "wallMs": 1105.34,
+              "nodeCpuMs": 240.16,
+              "gitProcesses": 114,
+              "gitProcessesIncludingChildren": 158
+            },
+            {
+              "wallMs": 1121.92,
+              "nodeCpuMs": 261.99,
+              "gitProcesses": 114,
+              "gitProcessesIncludingChildren": 158
+            },
+            {
+              "wallMs": 1017.8,
+              "nodeCpuMs": 257.99,
+              "gitProcesses": 114,
+              "gitProcessesIncludingChildren": 158
+            },
+            {
+              "wallMs": 1054.33,
+              "nodeCpuMs": 226.64,
+              "gitProcesses": 114,
+              "gitProcessesIncludingChildren": 158
+            },
+            {
+              "wallMs": 1049.89,
+              "nodeCpuMs": 214.15,
+              "gitProcesses": 114,
+              "gitProcessesIncludingChildren": 158
+            },
+            {
+              "wallMs": 1063.61,
+              "nodeCpuMs": 227.45,
+              "gitProcesses": 114,
+              "gitProcessesIncludingChildren": 158
+            }
+          ]
+        },
+        {
+          "name": "sync_behind_warm",
+          "medianMs": 132.51,
+          "p95Ms": 136.71,
+          "medianNodeCpuMs": 74.71,
+          "medianGitProcesses": 72,
+          "observations": [
+            {
+              "wallMs": 128.7,
+              "nodeCpuMs": 65.55,
+              "gitProcesses": 72,
+              "gitProcessesIncludingChildren": 72
+            },
+            {
+              "wallMs": 126.82,
+              "nodeCpuMs": 66.36,
+              "gitProcesses": 72,
+              "gitProcessesIncludingChildren": 72
+            },
+            {
+              "wallMs": 136.71,
+              "nodeCpuMs": 106.53,
+              "gitProcesses": 72,
+              "gitProcessesIncludingChildren": 72
+            },
+            {
+              "wallMs": 133.05,
+              "nodeCpuMs": 75.13,
+              "gitProcesses": 72,
+              "gitProcessesIncludingChildren": 72
+            },
+            {
+              "wallMs": 132.67,
+              "nodeCpuMs": 74.1,
+              "gitProcesses": 72,
+              "gitProcessesIncludingChildren": 72
+            },
+            {
+              "wallMs": 125.75,
+              "nodeCpuMs": 66.23,
+              "gitProcesses": 72,
+              "gitProcessesIncludingChildren": 72
+            },
+            {
+              "wallMs": 132.51,
+              "nodeCpuMs": 75.94,
+              "gitProcesses": 72,
+              "gitProcessesIncludingChildren": 72
+            },
+            {
+              "wallMs": 134.37,
+              "nodeCpuMs": 74.71,
+              "gitProcesses": 72,
+              "gitProcessesIncludingChildren": 72
+            },
+            {
+              "wallMs": 125.63,
+              "nodeCpuMs": 69.3,
+              "gitProcesses": 72,
+              "gitProcessesIncludingChildren": 72
+            },
+            {
+              "wallMs": 133.95,
+              "nodeCpuMs": 86.05,
+              "gitProcesses": 72,
+              "gitProcessesIncludingChildren": 72
+            },
+            {
+              "wallMs": 125.48,
+              "nodeCpuMs": 71.67,
+              "gitProcesses": 72,
+              "gitProcessesIncludingChildren": 72
+            },
+            {
+              "wallMs": 131.18,
+              "nodeCpuMs": 75.75,
+              "gitProcesses": 72,
+              "gitProcessesIncludingChildren": 72
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "label": "rust",
+      "sourceRevision": "d53a18f0a0c04ae4d807d240a4936e39304f4457",
+      "sourceHasChanges": true,
+      "platform": "linux-x64",
+      "node": "v24.19.0",
+      "git": "git version 2.51.1",
+      "native": "required",
+      "workspaces": 4,
+      "trackedFilesAdded": 1000,
+      "samples": 12,
+      "nodePeakRssMiB": 120.34,
+      "notes": "Warm filesystem cache. Node CPU and peak RSS include Rust in-process; they exclude Git child-process CPU and memory. Timing includes Git Trace2 overhead. No preview connections.",
+      "measurements": [
+        {
+          "name": "idle_watchers",
+          "medianMs": 11.48,
+          "p95Ms": 12.45,
+          "medianNodeCpuMs": 5.76,
+          "medianGitProcesses": 5,
+          "observations": [
+            {
+              "wallMs": 11.41,
+              "nodeCpuMs": 6.67,
+              "gitProcesses": 5,
+              "gitProcessesIncludingChildren": 5
+            },
+            {
+              "wallMs": 11.62,
+              "nodeCpuMs": 5.37,
+              "gitProcesses": 5,
+              "gitProcessesIncludingChildren": 5
+            },
+            {
+              "wallMs": 11.42,
+              "nodeCpuMs": 6.32,
+              "gitProcesses": 5,
+              "gitProcessesIncludingChildren": 5
+            },
+            {
+              "wallMs": 11.25,
+              "nodeCpuMs": 6.93,
+              "gitProcesses": 5,
+              "gitProcessesIncludingChildren": 5
+            },
+            {
+              "wallMs": 11.04,
+              "nodeCpuMs": 5.53,
+              "gitProcesses": 5,
+              "gitProcessesIncludingChildren": 5
+            },
+            {
+              "wallMs": 11.48,
+              "nodeCpuMs": 6.21,
+              "gitProcesses": 5,
+              "gitProcessesIncludingChildren": 5
+            },
+            {
+              "wallMs": 12.43,
+              "nodeCpuMs": 4.67,
+              "gitProcesses": 5,
+              "gitProcessesIncludingChildren": 5
+            },
+            {
+              "wallMs": 11.24,
+              "nodeCpuMs": 5.29,
+              "gitProcesses": 5,
+              "gitProcessesIncludingChildren": 5
+            },
+            {
+              "wallMs": 10.95,
+              "nodeCpuMs": 4.22,
+              "gitProcesses": 5,
+              "gitProcessesIncludingChildren": 5
+            },
+            {
+              "wallMs": 12.45,
+              "nodeCpuMs": 5.76,
+              "gitProcesses": 5,
+              "gitProcessesIncludingChildren": 5
+            },
+            {
+              "wallMs": 12.05,
+              "nodeCpuMs": 5.78,
+              "gitProcesses": 5,
+              "gitProcessesIncludingChildren": 5
+            },
+            {
+              "wallMs": 11.65,
+              "nodeCpuMs": 5.69,
+              "gitProcesses": 5,
+              "gitProcessesIncludingChildren": 5
+            }
+          ]
+        },
+        {
+          "name": "workflow_get",
+          "medianMs": 54.37,
+          "p95Ms": 59.91,
+          "medianNodeCpuMs": 33.69,
+          "medianGitProcesses": 32,
+          "observations": [
+            {
+              "wallMs": 56.95,
+              "nodeCpuMs": 36.76,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 59.91,
+              "nodeCpuMs": 45.33,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 47.22,
+              "nodeCpuMs": 29.57,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 52.52,
+              "nodeCpuMs": 34.64,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 53.55,
+              "nodeCpuMs": 31.69,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 52.95,
+              "nodeCpuMs": 31.77,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 55.09,
+              "nodeCpuMs": 31.98,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 56.8,
+              "nodeCpuMs": 33.69,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 53.23,
+              "nodeCpuMs": 34.2,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 55.66,
+              "nodeCpuMs": 33.59,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 51.61,
+              "nodeCpuMs": 34.56,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 54.37,
+              "nodeCpuMs": 30.54,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            }
+          ]
+        },
+        {
+          "name": "sync_current",
+          "medianMs": 83.95,
+          "p95Ms": 100.24,
+          "medianNodeCpuMs": 38.39,
+          "medianGitProcesses": 32,
+          "observations": [
+            {
+              "wallMs": 79.15,
+              "nodeCpuMs": 38.41,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 81.25,
+              "nodeCpuMs": 36.83,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 86.53,
+              "nodeCpuMs": 44.9,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 88.42,
+              "nodeCpuMs": 40.45,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 100.24,
+              "nodeCpuMs": 38.39,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 86.27,
+              "nodeCpuMs": 35.99,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 99.37,
+              "nodeCpuMs": 62.6,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 77.32,
+              "nodeCpuMs": 34.33,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 77.31,
+              "nodeCpuMs": 34.28,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 77.92,
+              "nodeCpuMs": 37.68,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 83.95,
+              "nodeCpuMs": 40.11,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            },
+            {
+              "wallMs": 80.62,
+              "nodeCpuMs": 33.7,
+              "gitProcesses": 32,
+              "gitProcessesIncludingChildren": 32
+            }
+          ]
+        },
+        {
+          "name": "sync_behind_cold",
+          "medianMs": 1064.07,
+          "p95Ms": 1093.62,
+          "medianNodeCpuMs": 271,
+          "medianGitProcesses": 114,
+          "observations": [
+            {
+              "wallMs": 1075.57,
+              "nodeCpuMs": 270.98,
+              "gitProcesses": 114,
+              "gitProcessesIncludingChildren": 158
+            },
+            {
+              "wallMs": 1082.2,
+              "nodeCpuMs": 270.4,
+              "gitProcesses": 114,
+              "gitProcessesIncludingChildren": 158
+            },
+            {
+              "wallMs": 1093.62,
+              "nodeCpuMs": 281.19,
+              "gitProcesses": 114,
+              "gitProcessesIncludingChildren": 158
+            },
+            {
+              "wallMs": 1045.29,
+              "nodeCpuMs": 273.66,
+              "gitProcesses": 114,
+              "gitProcessesIncludingChildren": 158
+            },
+            {
+              "wallMs": 1048.86,
+              "nodeCpuMs": 271,
+              "gitProcesses": 114,
+              "gitProcessesIncludingChildren": 158
+            },
+            {
+              "wallMs": 1064.07,
+              "nodeCpuMs": 273.99,
+              "gitProcesses": 114,
+              "gitProcessesIncludingChildren": 158
+            },
+            {
+              "wallMs": 1085.92,
+              "nodeCpuMs": 271.36,
+              "gitProcesses": 114,
+              "gitProcessesIncludingChildren": 158
+            },
+            {
+              "wallMs": 1080.54,
+              "nodeCpuMs": 260.95,
+              "gitProcesses": 114,
+              "gitProcessesIncludingChildren": 158
+            },
+            {
+              "wallMs": 1051.53,
+              "nodeCpuMs": 230.66,
+              "gitProcesses": 114,
+              "gitProcessesIncludingChildren": 158
+            },
+            {
+              "wallMs": 1029.77,
+              "nodeCpuMs": 240.43,
+              "gitProcesses": 114,
+              "gitProcessesIncludingChildren": 158
+            },
+            {
+              "wallMs": 1046.73,
+              "nodeCpuMs": 272.26,
+              "gitProcesses": 114,
+              "gitProcessesIncludingChildren": 158
+            },
+            {
+              "wallMs": 1062.18,
+              "nodeCpuMs": 246.04,
+              "gitProcesses": 114,
+              "gitProcessesIncludingChildren": 158
+            }
+          ]
+        },
+        {
+          "name": "sync_behind_warm",
+          "medianMs": 132.09,
+          "p95Ms": 136.6,
+          "medianNodeCpuMs": 78.56,
+          "medianGitProcesses": 72,
+          "observations": [
+            {
+              "wallMs": 126.43,
+              "nodeCpuMs": 71.41,
+              "gitProcesses": 72,
+              "gitProcessesIncludingChildren": 72
+            },
+            {
+              "wallMs": 116.68,
+              "nodeCpuMs": 67.99,
+              "gitProcesses": 72,
+              "gitProcessesIncludingChildren": 72
+            },
+            {
+              "wallMs": 132.09,
+              "nodeCpuMs": 77.07,
+              "gitProcesses": 72,
+              "gitProcessesIncludingChildren": 72
+            },
+            {
+              "wallMs": 130.8,
+              "nodeCpuMs": 78.56,
+              "gitProcesses": 72,
+              "gitProcessesIncludingChildren": 72
+            },
+            {
+              "wallMs": 126.79,
+              "nodeCpuMs": 75.32,
+              "gitProcesses": 72,
+              "gitProcessesIncludingChildren": 72
+            },
+            {
+              "wallMs": 124.92,
+              "nodeCpuMs": 71.86,
+              "gitProcesses": 72,
+              "gitProcessesIncludingChildren": 72
+            },
+            {
+              "wallMs": 135.5,
+              "nodeCpuMs": 88.05,
+              "gitProcesses": 72,
+              "gitProcessesIncludingChildren": 72
+            },
+            {
+              "wallMs": 130.06,
+              "nodeCpuMs": 79.78,
+              "gitProcesses": 72,
+              "gitProcessesIncludingChildren": 72
+            },
+            {
+              "wallMs": 135.99,
+              "nodeCpuMs": 78.3,
+              "gitProcesses": 72,
+              "gitProcessesIncludingChildren": 72
+            },
+            {
+              "wallMs": 136.6,
+              "nodeCpuMs": 103.11,
+              "gitProcesses": 72,
+              "gitProcessesIncludingChildren": 72
+            },
+            {
+              "wallMs": 135.13,
+              "nodeCpuMs": 90.3,
+              "gitProcesses": 72,
+              "gitProcessesIncludingChildren": 72
+            },
+            {
+              "wallMs": 135.56,
+              "nodeCpuMs": 80.17,
+              "gitProcesses": 72,
+              "gitProcessesIncludingChildren": 72
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "label": "baseline",
+      "sourceRevision": "d53a18f0a0c04ae4d807d240a4936e39304f4457",
+      "platform": "linux-x64",
+      "node": "v24.19.0",
+      "git": "git version 2.51.1",
+      "native": "disabled",
+      "workspaces": 8,
+      "trackedFilesAdded": 1000,
+      "samples": 12,
+      "nodePeakRssMiB": 205.85,
+      "notes": "Warm filesystem cache. Node CPU and peak RSS include Rust in-process; they exclude Git child-process CPU and memory. Timing includes Git Trace2 overhead. No preview connections.",
+      "measurements": [
+        {
+          "name": "idle_watchers",
+          "medianMs": 35.92,
+          "p95Ms": 39.81,
+          "medianNodeCpuMs": 24.8,
+          "medianGitProcesses": 27,
+          "observations": [
+            {
+              "wallMs": 37.66,
+              "nodeCpuMs": 21.18,
+              "gitProcesses": 27,
+              "gitProcessesIncludingChildren": 27
+            },
+            {
+              "wallMs": 37.92,
+              "nodeCpuMs": 26.76,
+              "gitProcesses": 27,
+              "gitProcessesIncludingChildren": 27
+            },
+            {
+              "wallMs": 35.72,
+              "nodeCpuMs": 24.8,
+              "gitProcesses": 27,
+              "gitProcessesIncludingChildren": 27
+            },
+            {
+              "wallMs": 34.02,
+              "nodeCpuMs": 26.94,
+              "gitProcesses": 27,
+              "gitProcessesIncludingChildren": 27
+            },
+            {
+              "wallMs": 37.94,
+              "nodeCpuMs": 53.49,
+              "gitProcesses": 27,
+              "gitProcessesIncludingChildren": 27
+            },
+            {
+              "wallMs": 32.05,
+              "nodeCpuMs": 22.05,
+              "gitProcesses": 27,
+              "gitProcessesIncludingChildren": 27
+            },
+            {
+              "wallMs": 34.91,
+              "nodeCpuMs": 23.65,
+              "gitProcesses": 27,
+              "gitProcessesIncludingChildren": 27
+            },
+            {
+              "wallMs": 33.47,
+              "nodeCpuMs": 22.26,
+              "gitProcesses": 27,
+              "gitProcessesIncludingChildren": 27
+            },
+            {
+              "wallMs": 31.73,
+              "nodeCpuMs": 21.57,
+              "gitProcesses": 27,
+              "gitProcessesIncludingChildren": 27
+            },
+            {
+              "wallMs": 38.96,
+              "nodeCpuMs": 34.26,
+              "gitProcesses": 27,
+              "gitProcessesIncludingChildren": 27
+            },
+            {
+              "wallMs": 35.92,
+              "nodeCpuMs": 25.12,
+              "gitProcesses": 27,
+              "gitProcessesIncludingChildren": 27
+            },
+            {
+              "wallMs": 39.81,
+              "nodeCpuMs": 19.8,
+              "gitProcesses": 27,
+              "gitProcessesIncludingChildren": 27
+            }
+          ]
+        },
+        {
+          "name": "workflow_get",
+          "medianMs": 511.99,
+          "p95Ms": 717.76,
+          "medianNodeCpuMs": 359.71,
+          "medianGitProcesses": 361,
+          "observations": [
+            {
+              "wallMs": 485.12,
+              "nodeCpuMs": 325.06,
+              "gitProcesses": 361,
+              "gitProcessesIncludingChildren": 361
+            },
+            {
+              "wallMs": 511.99,
+              "nodeCpuMs": 355.34,
+              "gitProcesses": 361,
+              "gitProcessesIncludingChildren": 361
+            },
+            {
+              "wallMs": 472.04,
+              "nodeCpuMs": 312.8,
+              "gitProcesses": 361,
+              "gitProcessesIncludingChildren": 361
+            },
+            {
+              "wallMs": 468.84,
+              "nodeCpuMs": 314.68,
+              "gitProcesses": 361,
+              "gitProcessesIncludingChildren": 361
+            },
+            {
+              "wallMs": 487.79,
+              "nodeCpuMs": 354.48,
+              "gitProcesses": 361,
+              "gitProcessesIncludingChildren": 361
+            },
+            {
+              "wallMs": 507.07,
+              "nodeCpuMs": 338.39,
+              "gitProcesses": 361,
+              "gitProcessesIncludingChildren": 361
+            },
+            {
+              "wallMs": 506.8,
+              "nodeCpuMs": 385.89,
+              "gitProcesses": 361,
+              "gitProcessesIncludingChildren": 361
+            },
+            {
+              "wallMs": 556.78,
+              "nodeCpuMs": 401.53,
+              "gitProcesses": 361,
+              "gitProcessesIncludingChildren": 361
+            },
+            {
+              "wallMs": 631.36,
+              "nodeCpuMs": 362.64,
+              "gitProcesses": 361,
+              "gitProcessesIncludingChildren": 361
+            },
+            {
+              "wallMs": 535.23,
+              "nodeCpuMs": 367.17,
+              "gitProcesses": 361,
+              "gitProcessesIncludingChildren": 361
+            },
+            {
+              "wallMs": 513.07,
+              "nodeCpuMs": 359.71,
+              "gitProcesses": 361,
+              "gitProcessesIncludingChildren": 361
+            },
+            {
+              "wallMs": 717.76,
+              "nodeCpuMs": 412.73,
+              "gitProcesses": 361,
+              "gitProcessesIncludingChildren": 361
+            }
+          ]
+        },
+        {
+          "name": "sync_current",
+          "medianMs": 629.84,
+          "p95Ms": 882.13,
+          "medianNodeCpuMs": 416.89,
+          "medianGitProcesses": 369,
+          "observations": [
+            {
+              "wallMs": 769.5,
+              "nodeCpuMs": 495.6,
+              "gitProcesses": 369,
+              "gitProcessesIncludingChildren": 369
+            },
+            {
+              "wallMs": 701.71,
+              "nodeCpuMs": 466.01,
+              "gitProcesses": 369,
+              "gitProcessesIncludingChildren": 369
+            },
+            {
+              "wallMs": 882.13,
+              "nodeCpuMs": 416.89,
+              "gitProcesses": 369,
+              "gitProcessesIncludingChildren": 369
+            },
+            {
+              "wallMs": 629.84,
+              "nodeCpuMs": 437.6,
+              "gitProcesses": 369,
+              "gitProcessesIncludingChildren": 369
+            },
+            {
+              "wallMs": 582.42,
+              "nodeCpuMs": 367.5,
+              "gitProcesses": 369,
+              "gitProcessesIncludingChildren": 369
+            },
+            {
+              "wallMs": 552.92,
+              "nodeCpuMs": 340.24,
+              "gitProcesses": 369,
+              "gitProcessesIncludingChildren": 369
+            },
+            {
+              "wallMs": 575.73,
+              "nodeCpuMs": 367.45,
+              "gitProcesses": 369,
+              "gitProcessesIncludingChildren": 369
+            },
+            {
+              "wallMs": 599.37,
+              "nodeCpuMs": 375.15,
+              "gitProcesses": 369,
+              "gitProcessesIncludingChildren": 369
+            },
+            {
+              "wallMs": 583.58,
+              "nodeCpuMs": 362.33,
+              "gitProcesses": 369,
+              "gitProcessesIncludingChildren": 369
+            },
+            {
+              "wallMs": 635.76,
+              "nodeCpuMs": 420.25,
+              "gitProcesses": 369,
+              "gitProcessesIncludingChildren": 369
+            },
+            {
+              "wallMs": 652.23,
+              "nodeCpuMs": 421.2,
+              "gitProcesses": 369,
+              "gitProcessesIncludingChildren": 369
+            },
+            {
+              "wallMs": 594.4,
+              "nodeCpuMs": 374.86,
+              "gitProcesses": 369,
+              "gitProcessesIncludingChildren": 369
+            }
+          ]
+        },
+        {
+          "name": "sync_behind_cold",
+          "medianMs": 3476.79,
+          "p95Ms": 3884.9,
+          "medianNodeCpuMs": 774.53,
+          "medianGitProcesses": 481,
+          "observations": [
+            {
+              "wallMs": 2620.88,
+              "nodeCpuMs": 854.06,
+              "gitProcesses": 481,
+              "gitProcessesIncludingChildren": 569
+            },
+            {
+              "wallMs": 2834.84,
+              "nodeCpuMs": 795.82,
+              "gitProcesses": 481,
+              "gitProcessesIncludingChildren": 569
+            },
+            {
+              "wallMs": 3035.58,
+              "nodeCpuMs": 729.05,
+              "gitProcesses": 481,
+              "gitProcessesIncludingChildren": 569
+            },
+            {
+              "wallMs": 3317.46,
+              "nodeCpuMs": 738.29,
+              "gitProcesses": 481,
+              "gitProcessesIncludingChildren": 569
+            },
+            {
+              "wallMs": 3511.65,
+              "nodeCpuMs": 725.08,
+              "gitProcesses": 481,
+              "gitProcessesIncludingChildren": 569
+            },
+            {
+              "wallMs": 3455.87,
+              "nodeCpuMs": 774.53,
+              "gitProcesses": 481,
+              "gitProcessesIncludingChildren": 569
+            },
+            {
+              "wallMs": 3594.27,
+              "nodeCpuMs": 747.08,
+              "gitProcesses": 481,
+              "gitProcessesIncludingChildren": 569
+            },
+            {
+              "wallMs": 3465.22,
+              "nodeCpuMs": 764.23,
+              "gitProcesses": 481,
+              "gitProcessesIncludingChildren": 569
+            },
+            {
+              "wallMs": 3721.52,
+              "nodeCpuMs": 864.17,
+              "gitProcesses": 481,
+              "gitProcessesIncludingChildren": 569
+            },
+            {
+              "wallMs": 3665.17,
+              "nodeCpuMs": 793.36,
+              "gitProcesses": 481,
+              "gitProcessesIncludingChildren": 569
+            },
+            {
+              "wallMs": 3884.9,
+              "nodeCpuMs": 851.06,
+              "gitProcesses": 481,
+              "gitProcessesIncludingChildren": 569
+            },
+            {
+              "wallMs": 3476.79,
+              "nodeCpuMs": 756,
+              "gitProcesses": 481,
+              "gitProcessesIncludingChildren": 569
+            }
+          ]
+        },
+        {
+          "name": "sync_behind_warm",
+          "medianMs": 3596.4,
+          "p95Ms": 4183.56,
+          "medianNodeCpuMs": 798.81,
+          "medianGitProcesses": 481,
+          "observations": [
+            {
+              "wallMs": 3811.96,
+              "nodeCpuMs": 904.98,
+              "gitProcesses": 481,
+              "gitProcessesIncludingChildren": 569
+            },
+            {
+              "wallMs": 3596.4,
+              "nodeCpuMs": 798.81,
+              "gitProcesses": 481,
+              "gitProcessesIncludingChildren": 569
+            },
+            {
+              "wallMs": 3651.26,
+              "nodeCpuMs": 763.37,
+              "gitProcesses": 481,
+              "gitProcessesIncludingChildren": 569
+            },
+            {
+              "wallMs": 4183.56,
+              "nodeCpuMs": 913.09,
+              "gitProcesses": 481,
+              "gitProcessesIncludingChildren": 569
+            },
+            {
+              "wallMs": 3830.08,
+              "nodeCpuMs": 861,
+              "gitProcesses": 481,
+              "gitProcessesIncludingChildren": 569
+            },
+            {
+              "wallMs": 3491.28,
+              "nodeCpuMs": 722.55,
+              "gitProcesses": 481,
+              "gitProcessesIncludingChildren": 569
+            },
+            {
+              "wallMs": 3325.93,
+              "nodeCpuMs": 661.68,
+              "gitProcesses": 481,
+              "gitProcessesIncludingChildren": 569
+            },
+            {
+              "wallMs": 3406.91,
+              "nodeCpuMs": 754.05,
+              "gitProcesses": 481,
+              "gitProcessesIncludingChildren": 569
+            },
+            {
+              "wallMs": 3783.56,
+              "nodeCpuMs": 855.96,
+              "gitProcesses": 481,
+              "gitProcessesIncludingChildren": 569
+            },
+            {
+              "wallMs": 3444.65,
+              "nodeCpuMs": 732.01,
+              "gitProcesses": 481,
+              "gitProcessesIncludingChildren": 569
+            },
+            {
+              "wallMs": 3509.27,
+              "nodeCpuMs": 796.57,
+              "gitProcesses": 481,
+              "gitProcessesIncludingChildren": 569
+            },
+            {
+              "wallMs": 3547.64,
+              "nodeCpuMs": 809.44,
+              "gitProcesses": 481,
+              "gitProcessesIncludingChildren": 569
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "label": "portable",
+      "sourceRevision": "d53a18f0a0c04ae4d807d240a4936e39304f4457",
+      "sourceHasChanges": true,
+      "platform": "linux-x64",
+      "node": "v24.19.0",
+      "git": "git version 2.51.1",
+      "native": "disabled",
+      "workspaces": 8,
+      "trackedFilesAdded": 1000,
+      "samples": 12,
+      "nodePeakRssMiB": 176.75,
+      "notes": "Warm filesystem cache. Node CPU and peak RSS include Rust in-process; they exclude Git child-process CPU and memory. Timing includes Git Trace2 overhead. No preview connections.",
+      "measurements": [
+        {
+          "name": "idle_watchers",
+          "medianMs": 19.65,
+          "p95Ms": 50.52,
+          "medianNodeCpuMs": 9,
+          "medianGitProcesses": 9,
+          "observations": [
+            {
+              "wallMs": 17.41,
+              "nodeCpuMs": 10.9,
+              "gitProcesses": 9,
+              "gitProcessesIncludingChildren": 9
+            },
+            {
+              "wallMs": 17.37,
+              "nodeCpuMs": 9.31,
+              "gitProcesses": 9,
+              "gitProcessesIncludingChildren": 9
+            },
+            {
+              "wallMs": 50.52,
+              "nodeCpuMs": 7.32,
+              "gitProcesses": 9,
+              "gitProcessesIncludingChildren": 9
+            },
+            {
+              "wallMs": 15.66,
+              "nodeCpuMs": 5.97,
+              "gitProcesses": 9,
+              "gitProcessesIncludingChildren": 9
+            },
+            {
+              "wallMs": 24.33,
+              "nodeCpuMs": 8.59,
+              "gitProcesses": 9,
+              "gitProcessesIncludingChildren": 9
+            },
+            {
+              "wallMs": 22.76,
+              "nodeCpuMs": 7.5,
+              "gitProcesses": 9,
+              "gitProcessesIncludingChildren": 9
+            },
+            {
+              "wallMs": 19.65,
+              "nodeCpuMs": 7.87,
+              "gitProcesses": 9,
+              "gitProcessesIncludingChildren": 9
+            },
+            {
+              "wallMs": 21.31,
+              "nodeCpuMs": 12.74,
+              "gitProcesses": 9,
+              "gitProcessesIncludingChildren": 9
+            },
+            {
+              "wallMs": 18.73,
+              "nodeCpuMs": 6.59,
+              "gitProcesses": 9,
+              "gitProcessesIncludingChildren": 9
+            },
+            {
+              "wallMs": 20.25,
+              "nodeCpuMs": 9,
+              "gitProcesses": 9,
+              "gitProcessesIncludingChildren": 9
+            },
+            {
+              "wallMs": 17.74,
+              "nodeCpuMs": 9.52,
+              "gitProcesses": 9,
+              "gitProcessesIncludingChildren": 9
+            },
+            {
+              "wallMs": 18.72,
+              "nodeCpuMs": 12.78,
+              "gitProcesses": 9,
+              "gitProcessesIncludingChildren": 9
+            }
+          ]
+        },
+        {
+          "name": "workflow_get",
+          "medianMs": 86.31,
+          "p95Ms": 97.89,
+          "medianNodeCpuMs": 49.13,
+          "medianGitProcesses": 60,
+          "observations": [
+            {
+              "wallMs": 84.79,
+              "nodeCpuMs": 46,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 85.78,
+              "nodeCpuMs": 54.34,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 88.19,
+              "nodeCpuMs": 45.86,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 92.13,
+              "nodeCpuMs": 48.83,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 85.22,
+              "nodeCpuMs": 49.52,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 88.97,
+              "nodeCpuMs": 49.13,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 80.94,
+              "nodeCpuMs": 44.43,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 86.31,
+              "nodeCpuMs": 49.63,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 83.22,
+              "nodeCpuMs": 46.98,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 97.89,
+              "nodeCpuMs": 56.74,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 89.78,
+              "nodeCpuMs": 48.75,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 84.69,
+              "nodeCpuMs": 57.22,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            }
+          ]
+        },
+        {
+          "name": "sync_current",
+          "medianMs": 131.07,
+          "p95Ms": 154.81,
+          "medianNodeCpuMs": 53.07,
+          "medianGitProcesses": 60,
+          "observations": [
+            {
+              "wallMs": 126.46,
+              "nodeCpuMs": 47.9,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 124.98,
+              "nodeCpuMs": 48,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 134.17,
+              "nodeCpuMs": 71.42,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 154.81,
+              "nodeCpuMs": 62.65,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 136.47,
+              "nodeCpuMs": 53.07,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 124.1,
+              "nodeCpuMs": 46.66,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 134.05,
+              "nodeCpuMs": 57.21,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 140.52,
+              "nodeCpuMs": 53.39,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 130.73,
+              "nodeCpuMs": 52.01,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 124.11,
+              "nodeCpuMs": 48.66,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 130.48,
+              "nodeCpuMs": 51.75,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 131.07,
+              "nodeCpuMs": 60.38,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            }
+          ]
+        },
+        {
+          "name": "sync_behind_cold",
+          "medianMs": 3099.18,
+          "p95Ms": 3215.23,
+          "medianNodeCpuMs": 534.85,
+          "medianGitProcesses": 218,
+          "observations": [
+            {
+              "wallMs": 2950.16,
+              "nodeCpuMs": 465.78,
+              "gitProcesses": 218,
+              "gitProcessesIncludingChildren": 306
+            },
+            {
+              "wallMs": 3009.86,
+              "nodeCpuMs": 557.94,
+              "gitProcesses": 218,
+              "gitProcessesIncludingChildren": 306
+            },
+            {
+              "wallMs": 3215.23,
+              "nodeCpuMs": 493.92,
+              "gitProcesses": 218,
+              "gitProcessesIncludingChildren": 306
+            },
+            {
+              "wallMs": 3188.58,
+              "nodeCpuMs": 534.67,
+              "gitProcesses": 218,
+              "gitProcessesIncludingChildren": 306
+            },
+            {
+              "wallMs": 3034.7,
+              "nodeCpuMs": 519.78,
+              "gitProcesses": 218,
+              "gitProcessesIncludingChildren": 306
+            },
+            {
+              "wallMs": 2987.17,
+              "nodeCpuMs": 520.05,
+              "gitProcesses": 218,
+              "gitProcessesIncludingChildren": 306
+            },
+            {
+              "wallMs": 3126.55,
+              "nodeCpuMs": 582.04,
+              "gitProcesses": 218,
+              "gitProcessesIncludingChildren": 306
+            },
+            {
+              "wallMs": 3095.03,
+              "nodeCpuMs": 534.85,
+              "gitProcesses": 218,
+              "gitProcessesIncludingChildren": 306
+            },
+            {
+              "wallMs": 3152.18,
+              "nodeCpuMs": 556.56,
+              "gitProcesses": 218,
+              "gitProcessesIncludingChildren": 306
+            },
+            {
+              "wallMs": 3155.06,
+              "nodeCpuMs": 566.41,
+              "gitProcesses": 218,
+              "gitProcessesIncludingChildren": 306
+            },
+            {
+              "wallMs": 3099.18,
+              "nodeCpuMs": 559.4,
+              "gitProcesses": 218,
+              "gitProcessesIncludingChildren": 306
+            },
+            {
+              "wallMs": 3054.94,
+              "nodeCpuMs": 484.53,
+              "gitProcesses": 218,
+              "gitProcessesIncludingChildren": 306
+            }
+          ]
+        },
+        {
+          "name": "sync_behind_warm",
+          "medianMs": 258.22,
+          "p95Ms": 338.26,
+          "medianNodeCpuMs": 146.75,
+          "medianGitProcesses": 136,
+          "observations": [
+            {
+              "wallMs": 259.53,
+              "nodeCpuMs": 134.39,
+              "gitProcesses": 136,
+              "gitProcessesIncludingChildren": 136
+            },
+            {
+              "wallMs": 338.26,
+              "nodeCpuMs": 196.56,
+              "gitProcesses": 136,
+              "gitProcessesIncludingChildren": 136
+            },
+            {
+              "wallMs": 277.49,
+              "nodeCpuMs": 152.69,
+              "gitProcesses": 136,
+              "gitProcessesIncludingChildren": 136
+            },
+            {
+              "wallMs": 258.15,
+              "nodeCpuMs": 168.4,
+              "gitProcesses": 136,
+              "gitProcessesIncludingChildren": 136
+            },
+            {
+              "wallMs": 250.47,
+              "nodeCpuMs": 137.04,
+              "gitProcesses": 136,
+              "gitProcessesIncludingChildren": 136
+            },
+            {
+              "wallMs": 258.22,
+              "nodeCpuMs": 149.85,
+              "gitProcesses": 136,
+              "gitProcessesIncludingChildren": 136
+            },
+            {
+              "wallMs": 257.38,
+              "nodeCpuMs": 140.36,
+              "gitProcesses": 136,
+              "gitProcessesIncludingChildren": 136
+            },
+            {
+              "wallMs": 255.13,
+              "nodeCpuMs": 138.22,
+              "gitProcesses": 136,
+              "gitProcessesIncludingChildren": 136
+            },
+            {
+              "wallMs": 247.82,
+              "nodeCpuMs": 132.98,
+              "gitProcesses": 136,
+              "gitProcessesIncludingChildren": 136
+            },
+            {
+              "wallMs": 258.35,
+              "nodeCpuMs": 151.31,
+              "gitProcesses": 136,
+              "gitProcessesIncludingChildren": 136
+            },
+            {
+              "wallMs": 260.13,
+              "nodeCpuMs": 146.75,
+              "gitProcesses": 136,
+              "gitProcessesIncludingChildren": 136
+            },
+            {
+              "wallMs": 235.07,
+              "nodeCpuMs": 124.42,
+              "gitProcesses": 136,
+              "gitProcessesIncludingChildren": 136
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "label": "rust",
+      "sourceRevision": "d53a18f0a0c04ae4d807d240a4936e39304f4457",
+      "sourceHasChanges": true,
+      "platform": "linux-x64",
+      "node": "v24.19.0",
+      "git": "git version 2.51.1",
+      "native": "required",
+      "workspaces": 8,
+      "trackedFilesAdded": 1000,
+      "samples": 12,
+      "nodePeakRssMiB": 186.02,
+      "notes": "Warm filesystem cache. Node CPU and peak RSS include Rust in-process; they exclude Git child-process CPU and memory. Timing includes Git Trace2 overhead. No preview connections.",
+      "measurements": [
+        {
+          "name": "idle_watchers",
+          "medianMs": 19.33,
+          "p95Ms": 29.65,
+          "medianNodeCpuMs": 12.2,
+          "medianGitProcesses": 9,
+          "observations": [
+            {
+              "wallMs": 15.73,
+              "nodeCpuMs": 11.96,
+              "gitProcesses": 9,
+              "gitProcessesIncludingChildren": 9
+            },
+            {
+              "wallMs": 21.15,
+              "nodeCpuMs": 11.61,
+              "gitProcesses": 9,
+              "gitProcessesIncludingChildren": 9
+            },
+            {
+              "wallMs": 18.17,
+              "nodeCpuMs": 12.2,
+              "gitProcesses": 9,
+              "gitProcessesIncludingChildren": 9
+            },
+            {
+              "wallMs": 18.41,
+              "nodeCpuMs": 13.65,
+              "gitProcesses": 9,
+              "gitProcessesIncludingChildren": 9
+            },
+            {
+              "wallMs": 29.65,
+              "nodeCpuMs": 11.6,
+              "gitProcesses": 9,
+              "gitProcessesIncludingChildren": 9
+            },
+            {
+              "wallMs": 16.69,
+              "nodeCpuMs": 12.31,
+              "gitProcesses": 9,
+              "gitProcessesIncludingChildren": 9
+            },
+            {
+              "wallMs": 19.33,
+              "nodeCpuMs": 13.42,
+              "gitProcesses": 9,
+              "gitProcessesIncludingChildren": 9
+            },
+            {
+              "wallMs": 17.24,
+              "nodeCpuMs": 11.48,
+              "gitProcesses": 9,
+              "gitProcessesIncludingChildren": 9
+            },
+            {
+              "wallMs": 18.84,
+              "nodeCpuMs": 11.13,
+              "gitProcesses": 9,
+              "gitProcessesIncludingChildren": 9
+            },
+            {
+              "wallMs": 22.69,
+              "nodeCpuMs": 14.26,
+              "gitProcesses": 9,
+              "gitProcessesIncludingChildren": 9
+            },
+            {
+              "wallMs": 21.09,
+              "nodeCpuMs": 11.59,
+              "gitProcesses": 9,
+              "gitProcessesIncludingChildren": 9
+            },
+            {
+              "wallMs": 20.26,
+              "nodeCpuMs": 12.43,
+              "gitProcesses": 9,
+              "gitProcessesIncludingChildren": 9
+            }
+          ]
+        },
+        {
+          "name": "workflow_get",
+          "medianMs": 100.37,
+          "p95Ms": 110.42,
+          "medianNodeCpuMs": 64.06,
+          "medianGitProcesses": 60,
+          "observations": [
+            {
+              "wallMs": 101.79,
+              "nodeCpuMs": 64.31,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 109.59,
+              "nodeCpuMs": 91.75,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 99.58,
+              "nodeCpuMs": 67.15,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 107.26,
+              "nodeCpuMs": 76.2,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 86.57,
+              "nodeCpuMs": 55.84,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 90.22,
+              "nodeCpuMs": 63.66,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 100.37,
+              "nodeCpuMs": 64.06,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 110.42,
+              "nodeCpuMs": 67.76,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 94.49,
+              "nodeCpuMs": 59.4,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 88.98,
+              "nodeCpuMs": 55.99,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 91.87,
+              "nodeCpuMs": 63.53,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 106.07,
+              "nodeCpuMs": 62.58,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            }
+          ]
+        },
+        {
+          "name": "sync_current",
+          "medianMs": 151.21,
+          "p95Ms": 159.34,
+          "medianNodeCpuMs": 64.32,
+          "medianGitProcesses": 60,
+          "observations": [
+            {
+              "wallMs": 147.12,
+              "nodeCpuMs": 64.48,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 151.52,
+              "nodeCpuMs": 64.32,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 137.87,
+              "nodeCpuMs": 62.45,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 150.93,
+              "nodeCpuMs": 69.22,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 155.5,
+              "nodeCpuMs": 70.91,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 159.34,
+              "nodeCpuMs": 61.48,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 155.17,
+              "nodeCpuMs": 107.94,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 145.19,
+              "nodeCpuMs": 58.52,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 146.41,
+              "nodeCpuMs": 58.36,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 151.4,
+              "nodeCpuMs": 63.04,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 151.21,
+              "nodeCpuMs": 64.23,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            },
+            {
+              "wallMs": 137.22,
+              "nodeCpuMs": 65.4,
+              "gitProcesses": 60,
+              "gitProcessesIncludingChildren": 60
+            }
+          ]
+        },
+        {
+          "name": "sync_behind_cold",
+          "medianMs": 3047.99,
+          "p95Ms": 3139.13,
+          "medianNodeCpuMs": 513.74,
+          "medianGitProcesses": 218,
+          "observations": [
+            {
+              "wallMs": 3012.71,
+              "nodeCpuMs": 525.36,
+              "gitProcesses": 218,
+              "gitProcessesIncludingChildren": 306
+            },
+            {
+              "wallMs": 3084.28,
+              "nodeCpuMs": 588.87,
+              "gitProcesses": 218,
+              "gitProcessesIncludingChildren": 306
+            },
+            {
+              "wallMs": 2926.24,
+              "nodeCpuMs": 456.85,
+              "gitProcesses": 218,
+              "gitProcessesIncludingChildren": 306
+            },
+            {
+              "wallMs": 2978.89,
+              "nodeCpuMs": 482.31,
+              "gitProcesses": 218,
+              "gitProcessesIncludingChildren": 306
+            },
+            {
+              "wallMs": 3068.44,
+              "nodeCpuMs": 513.74,
+              "gitProcesses": 218,
+              "gitProcessesIncludingChildren": 306
+            },
+            {
+              "wallMs": 2946.64,
+              "nodeCpuMs": 482.45,
+              "gitProcesses": 218,
+              "gitProcessesIncludingChildren": 306
+            },
+            {
+              "wallMs": 2949.02,
+              "nodeCpuMs": 508.27,
+              "gitProcesses": 218,
+              "gitProcessesIncludingChildren": 306
+            },
+            {
+              "wallMs": 3139.13,
+              "nodeCpuMs": 474.65,
+              "gitProcesses": 218,
+              "gitProcessesIncludingChildren": 306
+            },
+            {
+              "wallMs": 2945.57,
+              "nodeCpuMs": 488.33,
+              "gitProcesses": 218,
+              "gitProcessesIncludingChildren": 306
+            },
+            {
+              "wallMs": 3047.99,
+              "nodeCpuMs": 560.35,
+              "gitProcesses": 218,
+              "gitProcessesIncludingChildren": 306
+            },
+            {
+              "wallMs": 3051.98,
+              "nodeCpuMs": 530.72,
+              "gitProcesses": 218,
+              "gitProcessesIncludingChildren": 306
+            },
+            {
+              "wallMs": 3105.82,
+              "nodeCpuMs": 520.83,
+              "gitProcesses": 218,
+              "gitProcessesIncludingChildren": 306
+            }
+          ]
+        },
+        {
+          "name": "sync_behind_warm",
+          "medianMs": 256.52,
+          "p95Ms": 266.51,
+          "medianNodeCpuMs": 167.08,
+          "medianGitProcesses": 136,
+          "observations": [
+            {
+              "wallMs": 266.51,
+              "nodeCpuMs": 174.73,
+              "gitProcesses": 136,
+              "gitProcessesIncludingChildren": 136
+            },
+            {
+              "wallMs": 250.21,
+              "nodeCpuMs": 160.16,
+              "gitProcesses": 136,
+              "gitProcessesIncludingChildren": 136
+            },
+            {
+              "wallMs": 257.5,
+              "nodeCpuMs": 170.91,
+              "gitProcesses": 136,
+              "gitProcessesIncludingChildren": 136
+            },
+            {
+              "wallMs": 251.58,
+              "nodeCpuMs": 156.76,
+              "gitProcesses": 136,
+              "gitProcessesIncludingChildren": 136
+            },
+            {
+              "wallMs": 258.72,
+              "nodeCpuMs": 159.88,
+              "gitProcesses": 136,
+              "gitProcessesIncludingChildren": 136
+            },
+            {
+              "wallMs": 265.4,
+              "nodeCpuMs": 178.96,
+              "gitProcesses": 136,
+              "gitProcessesIncludingChildren": 136
+            },
+            {
+              "wallMs": 258,
+              "nodeCpuMs": 165.2,
+              "gitProcesses": 136,
+              "gitProcessesIncludingChildren": 136
+            },
+            {
+              "wallMs": 255.14,
+              "nodeCpuMs": 166.97,
+              "gitProcesses": 136,
+              "gitProcessesIncludingChildren": 136
+            },
+            {
+              "wallMs": 248.49,
+              "nodeCpuMs": 164.29,
+              "gitProcesses": 136,
+              "gitProcessesIncludingChildren": 136
+            },
+            {
+              "wallMs": 251.23,
+              "nodeCpuMs": 167.08,
+              "gitProcesses": 136,
+              "gitProcessesIncludingChildren": 136
+            },
+            {
+              "wallMs": 256.52,
+              "nodeCpuMs": 168.48,
+              "gitProcesses": 136,
+              "gitProcessesIncludingChildren": 136
+            },
+            {
+              "wallMs": 253.82,
+              "nodeCpuMs": 168.5,
+              "gitProcesses": 136,
+              "gitProcessesIncludingChildren": 136
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "followUp": {
+    "purpose": "Repeat only the 8-workspace read operations with 24 samples to check whether Rust-versus-portable ordering is stable; it is not.",
+    "runs": [
+      {
+        "label": "portable-runtime-check",
+        "sourceRevision": "d53a18f0a0c04ae4d807d240a4936e39304f4457",
+        "sourceHasChanges": true,
+        "platform": "linux-x64",
+        "node": "v24.19.0",
+        "git": "git version 2.51.1",
+        "native": "disabled",
+        "workspaces": 8,
+        "trackedFilesAdded": 1000,
+        "samples": 24,
+        "nodePeakRssMiB": 141.33,
+        "notes": "Warm filesystem cache. Node CPU and peak RSS include Rust in-process; they exclude Git child-process CPU and memory. Timing includes Git Trace2 overhead. No preview connections.",
+        "measurements": [
+          {
+            "name": "idle_watchers",
+            "medianMs": 18.83,
+            "p95Ms": 25.45,
+            "medianNodeCpuMs": 8.46,
+            "medianGitProcesses": 9,
+            "observations": [
+              {
+                "wallMs": 23.55,
+                "nodeCpuMs": 13.04,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 18.89,
+                "nodeCpuMs": 9.11,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 18.32,
+                "nodeCpuMs": 7.27,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 30.64,
+                "nodeCpuMs": 8.46,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 24.03,
+                "nodeCpuMs": 28.88,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 25.39,
+                "nodeCpuMs": 8.52,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 17.39,
+                "nodeCpuMs": 8.07,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 23.37,
+                "nodeCpuMs": 11.02,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 17.95,
+                "nodeCpuMs": 6.81,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 15.96,
+                "nodeCpuMs": 6.04,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 17.77,
+                "nodeCpuMs": 10.38,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 16.98,
+                "nodeCpuMs": 8.05,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 18.83,
+                "nodeCpuMs": 12.42,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 17.38,
+                "nodeCpuMs": 7.35,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 17.07,
+                "nodeCpuMs": 8.33,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 21.83,
+                "nodeCpuMs": 7.77,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 25.45,
+                "nodeCpuMs": 30.58,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 15.79,
+                "nodeCpuMs": 10.28,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 18.57,
+                "nodeCpuMs": 9.22,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 21.6,
+                "nodeCpuMs": 8.45,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 20.44,
+                "nodeCpuMs": 8.32,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 18.76,
+                "nodeCpuMs": 7.68,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 18.52,
+                "nodeCpuMs": 7.23,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 20.01,
+                "nodeCpuMs": 8.55,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              }
+            ]
+          },
+          {
+            "name": "workflow_get",
+            "medianMs": 94.64,
+            "p95Ms": 105.16,
+            "medianNodeCpuMs": 57.63,
+            "medianGitProcesses": 60,
+            "observations": [
+              {
+                "wallMs": 105.16,
+                "nodeCpuMs": 60.11,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 115.9,
+                "nodeCpuMs": 67.27,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 100.39,
+                "nodeCpuMs": 61.92,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 99.47,
+                "nodeCpuMs": 57.63,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 94.64,
+                "nodeCpuMs": 51.4,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 96.36,
+                "nodeCpuMs": 55.32,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 85.72,
+                "nodeCpuMs": 42.18,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 90.37,
+                "nodeCpuMs": 50.31,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 87.08,
+                "nodeCpuMs": 48.71,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 91.71,
+                "nodeCpuMs": 49.93,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 87.5,
+                "nodeCpuMs": 59.78,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 86.15,
+                "nodeCpuMs": 43.83,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 94.95,
+                "nodeCpuMs": 80,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 89.24,
+                "nodeCpuMs": 45.76,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 90.57,
+                "nodeCpuMs": 50.7,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 88.19,
+                "nodeCpuMs": 55.43,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 94.67,
+                "nodeCpuMs": 59.71,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 92.68,
+                "nodeCpuMs": 61.14,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 101.47,
+                "nodeCpuMs": 58.1,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 97.67,
+                "nodeCpuMs": 61.51,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 95.76,
+                "nodeCpuMs": 63.08,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 94.78,
+                "nodeCpuMs": 64.71,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 89.64,
+                "nodeCpuMs": 49.48,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 91.74,
+                "nodeCpuMs": 52.97,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              }
+            ]
+          },
+          {
+            "name": "sync_current",
+            "medianMs": 134.02,
+            "p95Ms": 141.42,
+            "medianNodeCpuMs": 52.64,
+            "medianGitProcesses": 60,
+            "observations": [
+              {
+                "wallMs": 132.17,
+                "nodeCpuMs": 52.64,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 136.59,
+                "nodeCpuMs": 58.37,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 134.55,
+                "nodeCpuMs": 62.46,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 139.34,
+                "nodeCpuMs": 51.41,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 138.12,
+                "nodeCpuMs": 52.3,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 133.54,
+                "nodeCpuMs": 48.2,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 131.59,
+                "nodeCpuMs": 65.93,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 132.59,
+                "nodeCpuMs": 48.41,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 126.71,
+                "nodeCpuMs": 49.04,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 127.4,
+                "nodeCpuMs": 53.14,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 126.91,
+                "nodeCpuMs": 48.78,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 139.02,
+                "nodeCpuMs": 48.8,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 129.43,
+                "nodeCpuMs": 53.59,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 123.39,
+                "nodeCpuMs": 47.98,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 134.02,
+                "nodeCpuMs": 57.24,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 128.07,
+                "nodeCpuMs": 47.2,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 139.9,
+                "nodeCpuMs": 59.89,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 126.73,
+                "nodeCpuMs": 49.29,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 133.58,
+                "nodeCpuMs": 49.15,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 141.42,
+                "nodeCpuMs": 53.72,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 136.7,
+                "nodeCpuMs": 50.28,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 147.26,
+                "nodeCpuMs": 83.21,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 139.41,
+                "nodeCpuMs": 60.97,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 139.74,
+                "nodeCpuMs": 78.66,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "label": "rust-runtime-check",
+        "sourceRevision": "d53a18f0a0c04ae4d807d240a4936e39304f4457",
+        "sourceHasChanges": true,
+        "platform": "linux-x64",
+        "node": "v24.19.0",
+        "git": "git version 2.51.1",
+        "native": "required",
+        "workspaces": 8,
+        "trackedFilesAdded": 1000,
+        "samples": 24,
+        "nodePeakRssMiB": 115.89,
+        "notes": "Warm filesystem cache. Node CPU and peak RSS include Rust in-process; they exclude Git child-process CPU and memory. Timing includes Git Trace2 overhead. No preview connections.",
+        "measurements": [
+          {
+            "name": "idle_watchers",
+            "medianMs": 19.18,
+            "p95Ms": 25.63,
+            "medianNodeCpuMs": 11.04,
+            "medianGitProcesses": 9,
+            "observations": [
+              {
+                "wallMs": 19.37,
+                "nodeCpuMs": 13.58,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 20.32,
+                "nodeCpuMs": 13.85,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 18.92,
+                "nodeCpuMs": 11.42,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 19.17,
+                "nodeCpuMs": 10.96,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 19.69,
+                "nodeCpuMs": 8.9,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 18.53,
+                "nodeCpuMs": 10.86,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 17.96,
+                "nodeCpuMs": 16.52,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 25.63,
+                "nodeCpuMs": 9.84,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 16.61,
+                "nodeCpuMs": 10.14,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 18.35,
+                "nodeCpuMs": 11.67,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 23.54,
+                "nodeCpuMs": 10.4,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 22.95,
+                "nodeCpuMs": 10.99,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 35.25,
+                "nodeCpuMs": 12.1,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 17.8,
+                "nodeCpuMs": 10.48,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 23.03,
+                "nodeCpuMs": 17.25,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 17.21,
+                "nodeCpuMs": 11.04,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 21.41,
+                "nodeCpuMs": 12.42,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 21.06,
+                "nodeCpuMs": 14.87,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 19.21,
+                "nodeCpuMs": 11.79,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 18.93,
+                "nodeCpuMs": 10.28,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 19.18,
+                "nodeCpuMs": 10.79,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 16.76,
+                "nodeCpuMs": 9.61,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 15.87,
+                "nodeCpuMs": 11.3,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              },
+              {
+                "wallMs": 18.17,
+                "nodeCpuMs": 9.52,
+                "gitProcesses": 9,
+                "gitProcessesIncludingChildren": 9
+              }
+            ]
+          },
+          {
+            "name": "workflow_get",
+            "medianMs": 90.02,
+            "p95Ms": 108.6,
+            "medianNodeCpuMs": 56.17,
+            "medianGitProcesses": 60,
+            "observations": [
+              {
+                "wallMs": 95.41,
+                "nodeCpuMs": 64.09,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 87.56,
+                "nodeCpuMs": 58.62,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 95.1,
+                "nodeCpuMs": 67.93,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 90.02,
+                "nodeCpuMs": 62.1,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 81.8,
+                "nodeCpuMs": 49.49,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 89.07,
+                "nodeCpuMs": 61.64,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 86.94,
+                "nodeCpuMs": 56.14,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 81.66,
+                "nodeCpuMs": 49.68,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 87.07,
+                "nodeCpuMs": 55.29,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 84.35,
+                "nodeCpuMs": 53.38,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 90.86,
+                "nodeCpuMs": 56.17,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 92.83,
+                "nodeCpuMs": 58.97,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 87.86,
+                "nodeCpuMs": 50.59,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 85.34,
+                "nodeCpuMs": 55.85,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 108.6,
+                "nodeCpuMs": 52.14,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 95.2,
+                "nodeCpuMs": 66.94,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 100.43,
+                "nodeCpuMs": 55.31,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 118.8,
+                "nodeCpuMs": 81.51,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 94.23,
+                "nodeCpuMs": 55.4,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 89.38,
+                "nodeCpuMs": 50.31,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 101,
+                "nodeCpuMs": 80.97,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 90.89,
+                "nodeCpuMs": 57.59,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 89.98,
+                "nodeCpuMs": 57.57,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 86.79,
+                "nodeCpuMs": 51.77,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              }
+            ]
+          },
+          {
+            "name": "sync_current",
+            "medianMs": 140.41,
+            "p95Ms": 158,
+            "medianNodeCpuMs": 62,
+            "medianGitProcesses": 60,
+            "observations": [
+              {
+                "wallMs": 133.62,
+                "nodeCpuMs": 58.66,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 136.43,
+                "nodeCpuMs": 64.72,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 132.16,
+                "nodeCpuMs": 63.82,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 138.37,
+                "nodeCpuMs": 59.07,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 154.99,
+                "nodeCpuMs": 61.83,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 142.9,
+                "nodeCpuMs": 62.87,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 149.84,
+                "nodeCpuMs": 69.3,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 144.57,
+                "nodeCpuMs": 62,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 133.05,
+                "nodeCpuMs": 59.68,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 130.23,
+                "nodeCpuMs": 57.76,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 142.37,
+                "nodeCpuMs": 64.71,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 164.25,
+                "nodeCpuMs": 78.29,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 153.26,
+                "nodeCpuMs": 68.68,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 138.4,
+                "nodeCpuMs": 59.89,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 149.31,
+                "nodeCpuMs": 66.76,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 145.99,
+                "nodeCpuMs": 68.63,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 158,
+                "nodeCpuMs": 90.63,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 136.19,
+                "nodeCpuMs": 59.57,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 137.39,
+                "nodeCpuMs": 59.15,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 133.05,
+                "nodeCpuMs": 58.62,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 134.47,
+                "nodeCpuMs": 58.78,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 152.14,
+                "nodeCpuMs": 61.89,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 140.41,
+                "nodeCpuMs": 69.84,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              },
+              {
+                "wallMs": 136.39,
+                "nodeCpuMs": 58.55,
+                "gitProcesses": 60,
+                "gitProcessesIncludingChildren": 60
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

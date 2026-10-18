@@ -19,13 +19,13 @@ import { detectDefaultBase, isCloneOf, listWorktrees, listWorktreesAll, remoteDe
 import { clonedBranch, discardClone, dropCloneBranch, fetchClone, makeClone, removeClone } from './clones.js';
 import { assertSafetyBackupCurrent, createSafetyBackup } from './backups.js';
 import type { StateStore } from './state.js';
+import { readWorktreeState } from './worktree-state.js';
 
 export { slotOf, slotPath } from './repo.js';
 
 /** Entries `git status` reports, renames counted once: what a worktree would lose if removed. */
 export async function dirtyCount(cwd: string): Promise<number> {
-  const r = await runGit(['status', '--porcelain', '--untracked-files=all'], { cwd });
-  return r.stdout.split('\n').filter((l) => l.trim()).length;
+  return (await readWorktreeState(cwd)).dirtyCount;
 }
 
 /** A local branch's upstream, as `git branch -vv` shows it. */

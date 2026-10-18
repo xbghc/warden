@@ -11,10 +11,12 @@ or a separate requirement approval system around implementation details being re
 
 ```sh
 pnpm install
+pnpm build:native # Rust 1.88.0 (rustup reads rust-toolchain.toml)
 pnpm dev          # API server on :4100 (tsx watch) + Vite dev server on :5173 with /api proxied
 pnpm test         # vitest: diff parser, staging patches, anchoring, comment scopes, watcher, todos, worktrees, export, state, HTTP API
 pnpm typecheck
-pnpm build        # dist/web (Vite) + dist/cli.js (tsup, zero runtime dependencies)
+pnpm build        # dist/native (Rust) + dist/web (Vite) + dist/cli.js (tsup)
+pnpm check:package # pack, unpack and exercise the real CLI with required native execution
 node dist/cli.js path/to/repo
 ```
 
@@ -25,10 +27,34 @@ bin/cli.ts           argument parsing, start server, open browser
 packages/shared      types + target key / comment scope helpers (bundled into both sides)
 packages/server      Hono API, git wrapper, diff parser, staging patches, targets, worktrees, anchoring, watcher, state, export
 packages/web         React + Vite + Tailwind v4 UI (shadcn/ui, shiki highlighting, @tanstack/react-virtual, react-markdown)
+crates/warden-core   independent Rust repository operations, typed data and errors
+crates/warden-node   thin asynchronous napi-rs binding; no workflow or HTTP logic
+scripts/             native builds, package smoke test and repeatable Git read benchmark
 test/                API integration tests on a generated git repository
 ```
 
 Only `dist/`, `README.md`, `LICENSE` and `package.json` are published.
+
+The Rust core initially batches Git status, HEAD and branch reads while keeping Git as the
+implementation of repository semantics. It is a baseline for comparing operation-level native Git
+libraries later. The performance work also shares checkout inventories within workflow requests
+and reuses eligible isolated rebase verdicts; it does not treat changing languages as evidence of
+a speedup. See [Rust core](rust-core.md) for module boundaries and benchmark methodology.
+
+Install Rust through rustup for source builds; the checked-in toolchain and Cargo.lock pin the
+compiler and dependencies. After changing Rust, run `pnpm build:native` and restart the API server
+to load the rebuilt module. Ordinary npm users receive prebuilt artifacts and need Node and Git,
+without a Rust compiler or install-time download. The package includes Linux glibc 2.35+ x64/arm64,
+macOS 11+ x64/arm64, and Windows x64 binaries. Other targets, including musl or older glibc, use
+the portable Git backend. An existing but unloadable native artifact is an error, not a silent
+fallback. Source tests without a native build also use the portable backend.
+
+Set `WARDEN_NATIVE=required` to reject a missing/unsupported native build, or
+`WARDEN_NATIVE=disabled` to select the portable backend for comparison. CI requires native
+execution across the platform matrix, also runs the full portable suite on Linux, runs Rust
+formatting, clippy and tests, and exercises the unpacked npm tarball. The
+release workflow collects the five artifacts tested for that exact tag; it does not rebuild only
+the publishing machine's binary. All five must be present before publishing proceeds.
 
 Releasing: bump `version` in the root `package.json`, commit it as `Release X.Y.Z`, tag `vX.Y.Z`, and
 push `main` and the tag. Releases require an explicit user request. Never `npm publish` from a
@@ -41,8 +67,8 @@ automatic attestation does not fire through `pnpm publish` (0.2.0 shipped withou
 typecheck, tests, build, Storybook build and a package dry run on every push to `main` and every pull
 request. Publishing waits for every CI job to succeed; only the publishing job receives OIDC permission.
 
-The full test suite runs on Linux with Node 20, 22 and 24, and on native Windows and macOS with
-Node 22. All platforms run the real Git workflow, workspace hooks, backups and failure recovery;
+The full test suite runs on Linux x64 with Node 20, 22 and 24, and Linux arm64, Windows x64 and
+macOS x64/arm64 with Node 22. All platforms run the real Git workflow, workspace hooks, backups and failure recovery;
 there is no reduced Windows suite. Publishing requires every platform job to pass. CI retains a
 JUnit report for each OS/Node combination, including failed runs.
 

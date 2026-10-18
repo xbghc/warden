@@ -17,6 +17,7 @@ const ALLOWED_SUBCOMMANDS = new Set([
   'check-ref-format',
   'grep',
   'config',
+  'var',
 ]);
 
 /** The only forms of `git config` that read: anything else it takes (a value, `--unset`, `--edit`) writes. */
@@ -114,6 +115,12 @@ export interface GitResult {
   code: number;
 }
 
+export interface GitBufferResult {
+  stdout: Buffer;
+  stderr: string;
+  code: number;
+}
+
 export function assertAllowedGitArgs(args: readonly string[]): void {
   const sub = args[0];
   if (!sub || !ALLOWED_SUBCOMMANDS.has(sub)) {
@@ -126,6 +133,11 @@ export function assertAllowedGitArgs(args: readonly string[]): void {
   // (the value to set) would each turn it into something other than a lookup in this repository.
   if (sub === 'config' && (!CONFIG_READS.has(args[1] ?? '') || args.length !== 3 || args[2]!.startsWith('-'))) {
     throw new GitError(`git config ${args.slice(1).join(' ')} is not allowed`, null, '', 400, 'git_subcommand_forbidden');
+  }
+  // These two variables only resolve attribute-file paths, used to decide whether an isolated
+  // synchronization check has reusable inputs. Other `var` forms are outside this read API.
+  if (sub === 'var' && (args.length !== 2 || !['GIT_ATTR_SYSTEM', 'GIT_ATTR_GLOBAL'].includes(args[1] ?? ''))) {
+    throw new GitError(`git var ${args.slice(1).join(' ')} is not allowed`, null, '', 400, 'git_subcommand_forbidden');
   }
   // `grep -O` / `--open-files-in-pager` runs a program on the matches. Git takes any unambiguous
   // prefix of a long option, so everything that could be one is refused, not just the full name.
@@ -152,6 +164,12 @@ export function assertAllowedGitArgs(args: readonly string[]): void {
  * Run a read-only git command. Arguments are passed as an array to execFile, never through a shell.
  */
 export async function runGit(args: readonly string[], opts: GitRunOptions): Promise<GitResult> {
+  const result = await runGitBuffer(args, opts);
+  return { ...result, stdout: result.stdout.toString('utf8') };
+}
+
+/** The same guarded read, preserving bytes for NUL protocols and lossless fingerprints. */
+export async function runGitBuffer(args: readonly string[], opts: GitRunOptions): Promise<GitBufferResult> {
   assertAllowedGitArgs(args);
   const okCodes = opts.okCodes ?? [0];
   return new Promise((resolve, reject) => {
@@ -162,7 +180,7 @@ export async function runGit(args: readonly string[], opts: GitRunOptions): Prom
         cwd: opts.cwd,
         timeout: opts.timeoutMs ?? DEFAULT_GIT_TIMEOUT_MS,
         maxBuffer: opts.maxBuffer ?? 256 * 1024 * 1024,
-        encoding: 'utf8',
+        encoding: 'buffer',
         env: gitEnvironment({
           // Never take the index lock / refresh the index as a side effect of diff/status.
           GIT_OPTIONAL_LOCKS: '0',
@@ -170,7 +188,8 @@ export async function runGit(args: readonly string[], opts: GitRunOptions): Prom
         }),
         windowsHide: true,
       },
-      (error, stdout, stderr) => {
+      (error, stdout, stderrBytes) => {
+        const stderr = stderrBytes.toString('utf8');
         const err = error as (NodeJS.ErrnoException & { code?: number | string; killed?: boolean; signal?: string }) | null;
         if (err) {
           if (err.killed || err.signal === 'SIGTERM') {

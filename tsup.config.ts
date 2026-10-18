@@ -17,5 +17,5 @@ export default defineConfig({
   // Bundle everything (workspace packages + hono) so the published package has zero runtime deps.
   noExternal: [/.*/],
   banner: { js: '#!/usr/bin/env node' },
-  define: { __WARDEN_VERSION__: JSON.stringify(pkg.version) },
+  define: { __WARDEN_VERSION__: JSON.stringify(pkg.version), __WARDEN_BUNDLED__: 'true' },
 });

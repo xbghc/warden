@@ -3,7 +3,7 @@ import path from 'node:path';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { isPortFree, PROBE_ATTEMPTS, startServer, type RunningServer, type StartOptions } from '@warden/server';
-import * as git from '../packages/server/src/git.js';
+import * as worktreeState from '../packages/server/src/worktree-state.js';
 import { PreviewService } from '../packages/server/src/preview.js';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
@@ -147,13 +147,11 @@ describe('startServer().close()', () => {
   it('closes an open event stream and drains its in-flight Git poll before resolving', async () => {
     const started = signal();
     const proceed = signal();
-    const read = git.runGit;
-    vi.spyOn(git, 'runGit').mockImplementation(async (args, options) => {
-      const result = await read(args, options);
-      if (args[0] === 'status' && args.includes('--untracked-files=all')) {
-        started.resolve();
-        await proceed.promise;
-      }
+    const read = worktreeState.readWorktreeState;
+    vi.spyOn(worktreeState, 'readWorktreeState').mockImplementation(async (cwd) => {
+      const result = await read(cwd);
+      started.resolve();
+      await proceed.promise;
       return result;
     });
     await usingServer(async (server) => {

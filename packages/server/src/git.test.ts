@@ -50,4 +50,11 @@ describe('git whitelist', () => {
       expect(() => assertAllowedGitArgs(['grep', opt, '-e', 'x'])).toThrow(GitError);
     }
   });
+  it('resolves attribute paths without permitting other Git variables', () => {
+    expect(() => assertAllowedGitArgs(['var', 'GIT_ATTR_SYSTEM'])).not.toThrow();
+    expect(() => assertAllowedGitArgs(['var', 'GIT_ATTR_GLOBAL'])).not.toThrow();
+    for (const args of [['var'], ['var', '-l'], ['var', 'GIT_EDITOR'], ['var', 'GIT_ATTR_GLOBAL', 'extra']]) {
+      expect(() => assertAllowedGitArgs(args)).toThrow(GitError);
+    }
+  });
 });

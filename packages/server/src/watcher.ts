@@ -1,7 +1,6 @@
 import path from 'node:path';
 import { stat } from 'node:fs/promises';
-import { runGit } from './git.js';
-import { currentBranch } from './repo.js';
+import { readWorktreeState } from './worktree-state.js';
 
 export const DEFAULT_POLL_INTERVAL_MS = 1_500;
 
@@ -138,27 +137,12 @@ export class RepoWatcher {
   }
 
   private async snapshot(): Promise<{ signature: string; head: string; branch: string }> {
-    // A failed status read must still drain the parallel Git children before poll/close
-    // settles. Promise.all would leave the other reads running against a released checkout.
-    const results = await Promise.allSettled([
-      // Untracked files one by one: folded into their directory, an edit inside a directory the
-      // agent just created would leave the directory's own mtime and size untouched.
-      runGit(['status', '--porcelain', '-z', '--untracked-files=all'], { cwd: this.root }),
-      runGit(['rev-parse', 'HEAD'], { cwd: this.root }).catch(() => ({ stdout: '' })),
-      // The same label getRepoInfo reports, so the branch identity the client filters todos by
-      // never flips between `HEAD` and a short sha depending on which of the two spoke last.
-      currentBranch(this.root),
-    ]);
-    const [status, headResult, branchResult] = results;
-    if (status.status === 'rejected') throw status.reason;
-    if (headResult.status === 'rejected') throw headResult.reason;
-    if (branchResult.status === 'rejected') throw branchResult.reason;
-    const statusRes = status.value;
-    const headRes = headResult.value;
-    const branch = branchResult.value;
-    const head = headRes.stdout.trim();
+    const state = await readWorktreeState(this.root);
+    const head = state.head ?? '';
+    // Preserve getRepoInfo's detached/unborn label so the client keeps the same task scope.
+    const branch = head ? (state.branch ?? head.slice(0, 7)) : 'HEAD';
     const stats = await Promise.all(
-      statusPaths(statusRes.stdout).map(async (rel) => {
+      state.paths.map(async (rel) => {
         try {
           const st = await stat(path.join(this.root, rel));
           return `${rel}\t${st.mtimeMs}\t${st.size}`;
@@ -167,6 +151,6 @@ export class RepoWatcher {
         }
       }),
     );
-    return { signature: [head, branch, statusRes.stdout, ...stats].join('\n'), head, branch };
+    return { signature: [head, branch, state.statusFingerprint, ...stats].join('\n'), head, branch };
   }
 }

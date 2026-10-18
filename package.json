@@ -37,14 +37,17 @@
     "dev:web": "pnpm --filter @warden/web dev",
     "storybook": "pnpm --filter @warden/web storybook",
     "build:storybook": "pnpm --filter @warden/web build:storybook",
-    "build": "rimraf dist && pnpm build:web && pnpm build:server",
+    "build": "rimraf dist && pnpm build:native && pnpm build:web && pnpm build:server",
+    "build:native": "node scripts/native-build.mjs",
     "build:web": "pnpm --filter @warden/web build",
-    "build:server": "tsup",
+    "build:server": "tsup && node scripts/native-build.mjs --copy-only",
     "lint": "biome check .",
     "typecheck": "tsc --noEmit -p tsconfig.json && pnpm --filter @warden/web typecheck",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepublishOnly": "pnpm lint && pnpm typecheck && pnpm build && pnpm test"
+    "check:package": "node scripts/native-package-smoke.mjs",
+    "bench:git": "node --import tsx scripts/bench-git.mjs",
+    "prepublishOnly": "pnpm lint && pnpm typecheck && pnpm build && pnpm test && pnpm check:package"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.12",

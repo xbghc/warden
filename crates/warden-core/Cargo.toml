@@ -1,0 +1,16 @@
+[package]
+name = "warden-core"
+version = "0.1.0"
+description = "Independent repository operations for Warden"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+sha2 = "0.10.9"
+tokio = { version = "1.48", features = ["io-util", "macros", "process", "sync", "time"] }
+
+[dev-dependencies]
+tempfile = "3.23"
+tokio = { version = "1.48", features = ["rt-multi-thread"] }

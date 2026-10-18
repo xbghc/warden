@@ -3,7 +3,7 @@ import path from 'node:path';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createApp, resolveRepo, RepoWatcher, statusPaths, StateStore } from '@warden/server';
-import * as git from '../packages/server/src/git.js';
+import * as worktreeState from '../packages/server/src/worktree-state.js';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
 let fx: FixtureRepo;
@@ -131,11 +131,11 @@ describe('RepoWatcher', () => {
     const w = watcher();
     const started = signal();
     const proceed = signal();
-    const read = git.runGit;
+    const read = worktreeState.readWorktreeState;
     let hold = true;
-    vi.spyOn(git, 'runGit').mockImplementation(async (args, options) => {
-      const result = await read(args, options);
-      if (args[0] === 'status' && hold) {
+    vi.spyOn(worktreeState, 'readWorktreeState').mockImplementation(async (cwd) => {
+      const result = await read(cwd);
+      if (hold) {
         hold = false;
         started.resolve();
         await proceed.promise;
@@ -168,11 +168,11 @@ describe('RepoWatcher', () => {
     const w = watcher();
     const started = signal();
     const proceed = signal();
-    const read = git.runGit;
+    const read = worktreeState.readWorktreeState;
     let hold = true;
-    vi.spyOn(git, 'runGit').mockImplementation(async (args, options) => {
-      const result = await read(args, options);
-      if (args[0] === 'status' && hold) {
+    vi.spyOn(worktreeState, 'readWorktreeState').mockImplementation(async (cwd) => {
+      const result = await read(cwd);
+      if (hold) {
         hold = false;
         started.resolve();
         await proceed.promise;
@@ -202,19 +202,14 @@ describe('RepoWatcher', () => {
     }
   });
 
-  it('drains parallel Git reads on close even when one snapshot read fails', async () => {
+  it('drains an active status read on close even when the read fails', async () => {
     const w = watcher();
     const started = signal();
     const proceed = signal();
-    const read = git.runGit;
-    vi.spyOn(git, 'runGit').mockImplementation(async (args, options) => {
-      if (args[0] === 'status') throw new Error('Simulated status failure');
-      const result = await read(args, options);
-      if (args[0] === 'rev-parse' && args[1] === 'HEAD') {
-        started.resolve();
-        await proceed.promise;
-      }
-      return result;
+    vi.spyOn(worktreeState, 'readWorktreeState').mockImplementation(async () => {
+      started.resolve();
+      await proceed.promise;
+      throw new Error('Simulated status failure');
     });
     const pending = w.poll();
     try {
