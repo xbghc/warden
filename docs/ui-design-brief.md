@@ -7,7 +7,7 @@ of the current implementation. The scope is interaction design using shadcn/ui, 
 ## Product principles
 
 - Warden is a passive local tool for one developer coordinating several agents on one requirement.
-  Users operate Git, worktrees and tmux through it; they do not maintain a second workflow for it.
+  Users operate Git and create workspaces through it; they do not maintain a second workflow for it.
 - Show observable facts and operation results. No ready/idle/task-complete declarations, automatic
   completion detection, delivery reports or final requirement approval screen.
 - The user decomposes work, chooses concurrency, tests results and accepts the requirement by
@@ -30,12 +30,12 @@ Task branching/splitting into execution paths is outside the current scope.
 
 TODO and orchestration are one ordered plan of changes contributing to the requirement. Ordering
 expresses user intent, not dependencies. Planning does not itself allocate a workspace. Creating
-the workspace, starting an agent and sending a prompt are separate user actions.
+the workspace is a Warden action; starting an agent and sending prompts belong to external tools.
 
-Generic user-configured tmux text/keystroke commands control agents. No agent-specific SDK or process
-supervisor. Creation/reuse hooks are a thin script interface: cwd, limited context, output and exit
-status. No default per-worktree dependency installation, required agent tests, embedded editing or
-Neovim launch/jump integration.
+Agent execution and interaction belong to external user tools. Warden creates workspaces and
+provides creation/reuse hooks as a thin script interface: cwd, limited context, output and exit
+status. It has no terminal-session or agent-process model. No default per-worktree dependency
+installation, required agent tests, embedded editing or Neovim launch/jump integration.
 
 ## Connections
 
@@ -56,8 +56,8 @@ to discuss. Do not invent a file-copy implementation or make preview a second ed
 
 ## Review and delivery
 
-Review the worktree before squash. Users can comment and request more work through commands, then
-choose integration. The Web page supports commit-message entry and committing with normal Git
+Review the worktree before squash. Users can export comments to request more work with their own
+tools, then choose integration. The Web page supports commit-message entry and committing with normal Git
 hooks; terminal use is not required. The user runs tests in the primary directory; no mandatory
 test/agent handoff/cleared-comment gate is established by this brief.
 

@@ -3,7 +3,7 @@ import { execFile, type ChildProcess } from 'node:child_process';
 import { access } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DevelopmentChange } from '@warden/shared';
-import { runWorkspaceHook, workspaceShell } from './workspace.js';
+import { runWorkspaceHook, workspaceConfig, workspaceShell } from './workspace.js';
 
 vi.mock('node:child_process', () => ({ execFile: vi.fn() }));
 vi.mock('node:fs/promises', () => ({ access: vi.fn() }));
@@ -30,6 +30,27 @@ beforeEach(() => {
 });
 
 afterEach(() => vi.unstubAllEnvs());
+
+describe('workspace hook configuration', () => {
+  it('keeps only lifecycle hooks and preserves script text literally', () => {
+    const create = 'printf "%s\\n" "$WARDEN_WORKTREE"; ./setup.sh "a quoted argument"';
+    expect(workspaceConfig({ hooks: { create, reuse: '  ', unknown: 'exit 9' }, commands: [] })).toEqual({ hooks: { create } });
+    expect(workspaceConfig({ hooks: {} })).toEqual({ hooks: {} });
+    expect(execFile).not.toHaveBeenCalled();
+  });
+
+  it.each([null, [], {}, { hooks: null }, { hooks: [] }, { hooks: 'script' }, { hooks: { create: 1 } }, { hooks: { reuse: 'echo\0bad' } }])(
+    'rejects invalid configuration without starting a process: %j',
+    (config) => {
+      expect(() => workspaceConfig(config)).toThrow();
+      expect(execFile).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects scripts above the input limit', () => {
+    expect(() => workspaceConfig({ hooks: { create: 'x'.repeat(20001) } })).toThrow('hook 应是 shell 命令字符串');
+  });
+});
 
 describe('workspace shell selection', () => {
   it.each(['linux', 'darwin'] as const)('keeps /bin/sh on %s', async (platform) => {

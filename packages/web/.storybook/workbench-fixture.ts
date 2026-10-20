@@ -27,13 +27,6 @@ export async function setupWorkbenchFixture() {
       },
     ];
   }
-  data.workspaceConfig = {
-    commands: [
-      { id: 'agent', label: '启动 agent', text: 'codex', keys: ['Enter'] },
-      { id: 'interrupt', label: '发送 Ctrl+C', keys: ['C-c'] },
-    ],
-    hooks: {},
-  };
   const oldWorkflow = api.workflow;
   api.workflow = fn(async () => {
     const latest = await oldWorkflow();
@@ -76,7 +69,6 @@ export async function setupWorkbenchFixture() {
     preview.updatedAt = new Date().toISOString();
     return structuredClone(preview);
   });
-  api.sendWorkspaceInput = fn(async () => ({ session: 'warden-1', pane: '%1', created: false }));
   const checks: RebaseCheck[] = [
     { changeId: 'orders', sourceHead: 'def5678', developmentHead: 'abc1234', status: 'current', checkedAt: new Date().toISOString() },
     { changeId: 'errors', sourceHead: 'bcd2345', developmentHead: 'abc1234', status: 'ready', checkedAt: new Date().toISOString() },

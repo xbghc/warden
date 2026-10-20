@@ -20,7 +20,7 @@ import type {
   RebaseBatchResponse,
 } from '@warden/shared';
 import { moveBefore, commentScopeKey, commentWorktree, formatTargetKey, isValidRef, tryParseTargetKey } from '@warden/shared';
-import { emptyWorkspaceConfig, runWorkspaceHook } from './workspace.js';
+import { runWorkspaceHook } from './workspace.js';
 import { badRequest, HttpError, notFound } from './errors.js';
 import { GitError, LONG_GIT_TIMEOUT_MS, gitEnvironment, refExists, runGit, runGitWrite } from './git.js';
 import { listWorktreesAll, type RepoContext } from './repo.js';
@@ -100,7 +100,7 @@ export class WorkflowService {
     const state = await this.store.load();
     const workflow = state.workflow ?? null;
     const legacyTodos = state.todos;
-    const workspaceConfig = state.workspaceConfig ?? emptyWorkspaceConfig();
+    const workspaceConfig = { hooks: state.workspaceConfig?.hooks ?? {} };
     if (!workflow) return { workflow, workspaceConfig, legacyTodos };
     try {
       const developmentHead = await this.developmentHead(workflow.developmentBranch);

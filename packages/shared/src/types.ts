@@ -216,16 +216,7 @@ export interface ReviewState {
   };
 }
 
-export interface WorkspaceCommand {
-  id: string;
-  label: string;
-  /** Literal input; Enter is sent only when explicitly present in keys. */
-  text?: string;
-  keys?: string[];
-}
-
 export interface WorkspaceConfig {
-  commands: WorkspaceCommand[];
   hooks: { create?: string; reuse?: string };
 }
 
@@ -520,17 +511,6 @@ export interface WorktreeReview {
    */
   toAgentTarget?: TargetKey;
   toReviewerTarget?: TargetKey;
-}
-
-export interface TmuxSession {
-  id: string;
-  name: string;
-  path: string;
-}
-export interface TmuxSessionResponse {
-  session: string;
-  /** False when the worktree already had its session, which is handed back as it is. */
-  created: boolean;
 }
 
 export interface BranchInfo {

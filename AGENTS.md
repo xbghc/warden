@@ -11,9 +11,11 @@ by an independent agent given only the agreed workflow, without reading existing
 preserve old navigation or state machines merely because the current code contains them.
 
 Warden is a passive tool: users act through it; they do not maintain extra status reports for it.
-The user decomposes and orders work, invokes configured tmux commands and reviews changes before
-squash. No dependency enforcement, scheduling, agent-owned decomposition, ready/idle declarations,
-task-complete checkbox or separate requirement approval belongs in the product.
+The user decomposes and orders work, runs agents with their own tools and reviews changes before
+squash. Warden creates workspaces and exposes generic creation/reuse hooks; terminal tools, agent
+launch, prompt delivery and process control stay outside its product boundary. No dependency
+enforcement, scheduling, agent-owned decomposition, ready/idle declarations, task-complete checkbox
+or separate requirement approval belongs in the product.
 
 One workspace corresponds to one linear task and can deliver several commits. Keep it available
 across deliveries; do not automatically recycle it or ask whether a delivery finishes the task.
@@ -28,7 +30,7 @@ commit hooks without requiring terminal use. A development commit must not inclu
 workspaces by accident. After the
 primary development branch changes, automatically check and display synchronization conditions;
 rebase runs only on the user's request for one, selected or all workspaces. Checks must not change
-active workspace files. Clean Git state or successful tmux input does not establish agent idleness.
+active workspace files. Clean Git state does not establish agent idleness.
 
 Accepted commit order and messages can be edited in the planned history UI. This is separate from
 plan ordering; use stable delivery associations across rewritten SHAs. Do not add history undo,

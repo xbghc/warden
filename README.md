@@ -6,7 +6,7 @@ branch** (主开发分支).
 
 The project is being redesigned around the [agreed workflow](docs/workflow.md) and a fresh
 [interaction design](docs/design.md), using shadcn/ui. Warden is a passive tool: workspaces persist
-across deliveries, and users trigger Git/tmux operations without maintaining readiness or task
+across deliveries, and users trigger Git operations without maintaining readiness or task
 completion declarations. The working copy implements the new page, temporary connected previews and commit-history
 arrangement. These changes have not been published to npm or the hosted Storybook.
 
@@ -51,8 +51,8 @@ changes accumulate. It need not be the repository's default branch.
 
 1. **Plan in the left navigation.** Add and order tasks; create each workspace when needed.
    Ordering does not impose dependencies. One workspace can deliver multiple commits.
-2. **Control agents explicitly.** Configure tmux text/keys and optional workspace hooks in
-   settings. Creating a workspace, launching an agent and sending a prompt are separate actions.
+2. **Create a workspace.** Configure optional creation/reuse hooks in settings. Warden supplies
+   the workspace and hook context; use your own tools or scripts to run agents there.
 3. **Connect for preview.** Choose workspaces on *主目录预览*. Their committed and uncommitted
    changes are temporarily composed into the primary directory for your dev server and tests.
    A conflicting connection fails and preserves the previous preview. HEAD and index stay unchanged.
@@ -64,7 +64,7 @@ changes accumulate. It need not be the repository's default branch.
    selected linear range, preview it, then apply. There is no undo or automatic push.
 
 Code edits belong in task worktrees; dependencies and user-run validation belong in the primary
-directory. A clean checkout or a successful tmux send does not mean an agent has stopped.
+directory. A clean checkout does not mean an agent has stopped.
 No readiness declaration, task-completion checkbox or workspace-release step is required.
 
 The first version delivers clean, committed source changes as one squash commit per operation.
@@ -96,7 +96,7 @@ The copy button beside the path in the file header copies the path, relative to 
 | [Interaction design](docs/design.md) | Agreed behavior, connection previews, commit arrangement and open product decisions |
 | [Reviewing](docs/reviewing.md) | Targets and the sidebar, staging, debug code, 已读, checkpoints, auto-refresh |
 | [Comments and the agent](docs/agent.md) | Comments, the export format, `warden feedback` / `reply`, re-anchoring, task planning |
-| [Worktrees and tasks](docs/worktrees.md) | Commit plans, tmux commands, workspace hooks, squash acceptance and synchronization |
+| [Worktrees and tasks](docs/worktrees.md) | Commit plans, workspace hooks, squash acceptance and synchronization |
 | [Platform](docs/environment.md) | WSL2 and browser access |
 | [State and security](docs/internals.md) | The state file, what git commands run and why |
 | [Development](docs/development.md) | Building, testing, releasing, Storybook |

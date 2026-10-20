@@ -1,6 +1,6 @@
 # Warden page design
 
-Status: interaction design, updated 2026-10-16. The new page is implemented in the working copy.
+Status: interaction design, updated 2026-10-20. The new page is implemented in the working copy.
 The [workflow](workflow.md) owns agreed behavior; [first-version boundaries](#first-version-boundaries-and-explicit-exclusions)
 record the implementation choices. Original wireframes describe intent rather than exact labels.
 
@@ -9,7 +9,7 @@ record the implementation choices. Original wireframes describe intent rather th
 An independent agent designed this proposal in a fresh conversation context, using only the agreed
 requirements represented by the [design brief](ui-design-brief.md). It did not read the repository,
 existing UI, screenshots or documentation. A second review of its own proposal clarified uncertain
-history boundaries, delivery ranges, tmux feedback and batch-operation behavior.
+history boundaries, delivery ranges, hook feedback and batch-operation behavior.
 
 Warden is a passive tool. Users operate through it rather than reporting readiness, idleness or
 task completion. It shows Git facts, connections and operation results. One workspace corresponds
@@ -27,13 +27,12 @@ shared review controls. The wireframes below describe workflows, not required li
 - Use nouns for headings and verbs for actions. Within an identified object, shorten labels to
   the needed distinction: **说明**, **起点**, **调整历史**. Keep destinations on actions
   where they matter, such as **提交到主开发分支** and **应用到 feature/order**.
-- Prefer familiar icons for refresh, edit, save, cancel, run, send, add, delete and reorder. Use
+- Prefer familiar icons for refresh, edit, save, cancel, add, delete and reorder. Use
   compact square buttons with an accessible name and a tooltip; retain shortcuts in tooltips.
   Keep short text for navigation and consequential actions such as integration, synchronization
   and history rewriting, where an icon alone would leave the scope unclear.
-- Keep secondary content on demand: delivery records, terminal input, send details and script
-  output. Preserve accessible names and tooltips on icon buttons. Errors and recovery actions
-  must remain visible, including when terminal controls are collapsed.
+- Keep secondary content on demand: delivery records and script output. Preserve accessible names
+  and tooltips on icon buttons. Errors and recovery actions must remain visible.
 - Empty states give one next step or a short fact, such as **请选择任务** or **暂无变更**. Loading,
   unavailable data, stale checks and empty results are distinct; do not turn unknown data into
   a zero count or claim successful synchronization before it runs.
@@ -42,14 +41,14 @@ shared review controls. The wireframes below describe workflows, not required li
   and no automatic push explicit. Preserve failure reasons, conflicting paths and recovery steps.
   Product philosophy and internal allocation mechanics belong in documentation.
 - Toasts report the outcome, not a second description of the workflow. **已复制** does not repeat
-  the copied payload. Do not rewrite user titles, commit messages, command input or Git/script output.
+  the copied payload. Do not rewrite user titles, commit messages, hook scripts or Git/script output.
 
 | Concept | Interface vocabulary |
 |---|---|
 | Ordered work and one item | 工作计划 / 任务; 新增任务 / 添加任务 |
 | Review content | 变更 for changed content; 差异 for its code comparison |
 | Delivery history and current scope | 交付 / 未交付 / 待提交 |
-| Terminal configuration and workspace hooks | 终端命令 / 工作区脚本; keep tmux and shell details where configured |
+| Workspace hooks | 工作区脚本; show script configuration, output and exit status |
 | Synchronization checks | 已同步 / 预计可同步 / 预计冲突 / 暂不可同步 / 无法判断 / 未检查 |
 | Unusable check results | 检查失败 / 需重新检查, with a reason or recovery action |
 | Review feedback | 评论 / 未导出 / 已导出 / 待确认 |
@@ -99,13 +98,13 @@ the selected object and its actions; it does not duplicate global navigation.
 
 Task rows display at most two relevant facts, without “完成”, “待验收” or “agent 空闲” badges.
 Dragging the list changes plan order only; label the action “调整计划顺序”. “同步工作区” opens a batch
-operation sheet rather than a fourth permanent page. Settings hold commands and workspace hooks,
+operation sheet rather than a fourth permanent page. Settings hold workspace hooks,
 not general project-management configuration.
 
 Assumption: one repository and primary development branch in the current context. Cross-repository
 and multi-requirement dashboards are outside this design.
 
-## Plan, create a workspace and use tmux
+## Plan and create a workspace
 
 `＋` creates a plan item with a title and optional description. It does not allocate a workspace,
 ask for an owner or lifecycle state, or impose a dependency or delivery-report form.
@@ -115,7 +114,7 @@ ask for an owner or lifecycle state, or impose a dependency or delivery-report f
 为订单列表增加筛选参数……
 
 尚无工作区
-创建后可查看 Git 差异、使用已配置的 tmux 命令。
+创建后可查看 Git 差异，并执行已配置的工作区脚本。
 
 [创建工作区…]
 ```
@@ -132,9 +131,7 @@ After creation, the same task detail becomes the working surface:
 ────────────────────────────────────────────────────────────────
 任务说明                                                   [展开]
 
-tmux：session:window.%3
-[运行配置命令 ▾]  [提示词输入框……………………………………]  [发送文本]
-最近操作：已向 %3 发送文本                             [查看发送结果]
+工作区脚本：已完成                                      [展开结果]
 ────────────────────────────────────────────────────────────────
 本次变更                  │ src/api/orders.ts
 src/api/orders.ts      M  │
@@ -145,19 +142,12 @@ src/api/filter.ts      A  │   + 新内容
 相对于已记录交付的未交付变化                             [合入…]
 ```
 
-Creation, agent launch and prompt delivery remain independent. “运行配置命令” lists user-defined
-names and exposes text, keys and the target pane. A configured “启动 agent” is just another command;
-Warden does not establish an agent lifecycle.
+Warden creates the workspace and runs any configured creation/reuse hook. Agent launch, prompt
+submission and process control belong to the user's external tools or scripts. The page has no
+terminal controls or agent-session state.
 
-The proposed free-text field sends text explicitly. Enter or another key remains distinguishable
-from filling text; task creation sends neither. Configured commands can combine text and keys.
-Exact prompt-submission controls can be refined without changing this separation. Do not require
-a confirmation dialog for every routine command or automatically retry failed input.
-
-“查看发送结果” shows the target, input and send result. It is not a terminal mirror or agent-state
-collector; default behavior does not read pane contents. Hook output is separate: show cwd, output
-and exit code. Distinguish “工作区已创建；hook 退出码 1” from workspace creation failing. Retrying a
-hook is explicit; do not roll back arbitrary user-script modifications.
+Show a hook's output and exit code. Distinguish “工作区已创建；hook 退出码 1” from workspace
+creation failing. Retrying a hook is explicit; do not roll back arbitrary user-script modifications.
 
 ## Compose the primary-directory preview
 
@@ -228,7 +218,7 @@ navigation system, alter the connection set or implicitly narrow the delivery sc
 
 Comments attach to the displayed file and revision. Show “基于较早版本” when later changes make an
 anchor uncertain. Comments need not be cleared before delivery and are not sent to agents
-automatically. An explicit send action, if provided, uses the same generic tmux mechanism.
+automatically. Users export comments through the clipboard or the optional feedback CLI.
 
 After A1, review defaults to the reliably identified undelivered changes:
 
@@ -312,7 +302,7 @@ rebase. “同步工作区” opens a sheet supporting one, selected or all work
 
 “预计有冲突” is a forecast, not an actual Git conflict. Unknown and stale are separate conditions.
 Results refer to checked source/destination revisions; history rewording can invalidate them even
-if file content stays identical. Neither a clean worktree nor successful tmux input proves idleness.
+if file content stays identical. A clean worktree does not prove idleness.
 
 Recheck before execution. Proposed batch behavior leaves known conflicts, unknown results,
 uncommitted work and other obstructions unexecuted with explicit reasons. Process eligible rows
@@ -412,7 +402,6 @@ Avoid an omnibus task status. Each surface shows only facts it can establish:
 |---|---|---|
 | Plan item | Order, notes, associated workspace | Started, finished or dependencies satisfied |
 | Git workspace | Branch, path, changed files, relation to primary branch, Git operation | Agent activity or code correctness |
-| tmux input | Target, input and send result | Agent ready, idle or finished |
 | Hook | Result, output, exit code | Environment fully prepared or dependencies installed |
 | Preview | Applied combination, last successful snapshot, pending/failed update | A failed or unknown check means current content |
 | Rebase check | Forecast, checked revisions, freshness | Clean means idle; forecast conflict is an actual conflict |
@@ -433,7 +422,7 @@ the page with dashboard cards. Do not use green task-completion badges.
 |---|---|
 | Single navigation area | `Sidebar`, `SidebarMenu`, `ScrollArea` |
 | Files and diff | `ResizablePanelGroup`, `ScrollArea`, `Separator` |
-| Actions and configured commands | `Button`, `DropdownMenu` |
+| Actions | `Button`, `DropdownMenu` |
 | Creation, delivery and rebase panels | `Sheet` |
 | Preview sources, rebase selection and commits | `Table`, `Checkbox` |
 | Connections | `Switch` with workspace labels and pending/error feedback |

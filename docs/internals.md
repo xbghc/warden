@@ -154,8 +154,8 @@ from writing concurrently.
 
 User-configured workspace hooks are the deliberate shell interface (`/bin/sh -c`, or Git for
 Windows' bundled `sh.exe -c`, with cwd/env and bounded output/timeout). They use the same Git
-environment isolation as server Git calls. Tmux commands send literal text plus separately validated keys. Neither
-interface infers agent readiness or automatically runs commands merely because a task was planned.
+environment isolation as server Git calls. Warden records hook output and exit status without
+interpreting the script as an agent lifecycle. Planning a task does not execute hooks.
 Windows shell discovery uses a fixed `git --exec-path` invocation with a five-second timeout and
 removes inherited `GIT_EXEC_PATH`; this installation lookup does not read or change the repository.
 

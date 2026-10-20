@@ -1,11 +1,6 @@
 import { configDefaults, defineConfig } from 'vitest/config';
 
-const integrationFiles = [
-  'test/**/*.test.ts',
-  'packages/server/src/git-env.test.ts',
-  'packages/server/src/tmux.test.ts',
-  'packages/server/src/worktrees.test.ts',
-];
+const integrationFiles = ['test/**/*.test.ts', 'packages/server/src/git-env.test.ts', 'packages/server/src/worktrees.test.ts'];
 
 export default defineConfig({
   test: {

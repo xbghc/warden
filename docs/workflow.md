@@ -2,7 +2,7 @@
 
 Warden is a passive tool tailored to a developer's workflow. The user acts through it rather than
 maintaining a separate workflow for it. The user plans, decides, reviews and accepts the work.
-Warden supplies workspaces, configurable hooks, tmux command interactions,
+Warden supplies workspaces, configurable hooks,
 diff review, local squash integration and clear commit history. Keep the current version simple enough to support
 that loop without turning it into an autonomous agent orchestrator or a project approval system.
 
@@ -25,9 +25,9 @@ merging that branch into the company's main branch remains outside Warden's core
 |---|---|---|
 | Plan | Decompose the requirement and arrange the work sequence. | Keep one ordered plan of intended commits; TODO and orchestration are the same thing. |
 | Prepare | Choose which work to start and how its workspace should be initialized. | Create or reuse a workspace from the development branch and support user-defined workspace hooks. |
-| Execute | Choose an agent, configure its launch command, and decide whether and when to launch it or send a prompt. | Send the configured text and keys to the workspace's tmux target when requested. |
+| Execute | Choose and run agents using external tools or user scripts. | Supply the workspace path and generic hook context; execution tools remain outside Warden. |
 | Preview and test | Choose connected worktrees and run the development server, lint or tests in the primary directory. | Temporarily compose their live changes there without creating a commit; this capability is planned. |
-| Review | Inspect the worktree's changes and decide whether they are ready to integrate. | Show the diff and feedback before squash; provide command interactions the user can use for further work. |
+| Review | Inspect the worktree's changes and decide whether they are ready to integrate. | Show the diff and feedback before squash; let the user export comments for further work. |
 | Integrate | Initiate squash, decide what testing is needed, and commit after validation. | Perform the requested Git operations, preserve normal commit hooks, and report their results. |
 | Continue | Continue the task and choose when to synchronize its workspace. | Keep the workspace available, show synchronization conditions and rebase only when requested. |
 | Organize history | Group related commits and edit their messages; adjust again if needed. | Preview and apply local history edits with conflict feedback; no undo/restore-history feature. |
@@ -59,33 +59,25 @@ an earlier item to be accepted before a later one can start.
 
 Task decomposition is the user's work. There is no dedicated feature for an agent to discover
 an oversized task, split it, propose a new task hierarchy or request scope approval. A user may
-configure a command asking an agent to help with planning, just as with any other prompt; that
-requires no special product workflow. Task notes can hold the detail the user finds useful,
+ask an agent to help with planning through their own tools; that requires no special product
+workflow. Task notes can hold the detail the user finds useful,
 without mandatory acceptance templates or agent-generated reports.
 
-## Workspaces, hooks and tmux commands
+## Workspaces and hooks
 
 A workspace is an execution resource, normally a Git worktree on a temporary branch based on
-the requirement's development branch. Creating or reusing it is separate from starting an agent.
+the requirement's development branch. Warden creates or reuses it and exposes generic hooks.
+The user chooses external tools for running agents and sending prompts. Warden has no terminal
+session model, agent launcher or process-control API.
 
-The user configures how their agent starts. Warden controls that terminal interaction by sending
-text and keys through tmux. The same generic mechanism can support launching a program, filling
-or submitting a prompt, or sending an interrupt. The user chooses which action to invoke; no
-particular agent or prompt sequence is built into the workflow. Sending input is not evidence
-that an agent understood it, completed work or stopped writing.
+Workspace hooks are a thin interface for user scripts: execute the configured creation/reuse
+command with the workspace directory and context, then expose output and exit status. Scripts
+may prepare local configuration or invoke user tools; their internals have no special meaning to
+Warden. A failed hook leaves the workspace available and can be retried explicitly. Planning a
+task does not run hooks. Creation/reuse hooks do not imply recycling a workspace after delivery.
 
-Workspace hooks are a thin interface for user scripts, for example preparing local configuration:
-execute a configured command with its workspace directory and context, then expose output and exit
-status. Dependency installation is not built in or required in each worktree. They are distinct from Git commit hooks:
-
-- **Workspace hooks** are user-defined commands associated with workspace lifecycle events.
-- **Git commit hooks** are the repository's normal hooks run by ordinary `git commit` in the
-  development checkout. Workspace hooks do not replace or bypass them.
-
-Warden does not implicitly start an agent or send a task prompt merely because a workspace was
-created. Any automation must come from the user's explicitly configured command or hook. Hook
-results and errors should be visible without introducing an agent scheduler or approval system.
-Creation/reuse hooks describe workspace setup, not a requirement to recycle after delivery.
+Workspace hooks are distinct from the repository's normal Git commit hooks. Actual delivery uses
+ordinary `git commit` in the development checkout, preserving those hooks and signing.
 
 ## Primary directory and temporary connections
 
@@ -128,7 +120,7 @@ contributing workspaces. Delivery preparation removes owned preview contribution
 ```mermaid
 flowchart LR
   P[User plans and orders commits] --> W[Warden prepares a workspace]
-  W --> E[User develops or invokes configured tmux commands]
+  W --> E[User develops with their own tools]
   E --> V[User connects worktrees and tests in the primary directory]
   E --> R[User reviews worktree changes]
   V --> R[User reviews worktree changes]
@@ -143,8 +135,8 @@ flowchart LR
 ```
 
 Review takes place against the worktree **before squash**. Selecting its files is already review;
-there is no separate review-area navigation step. The user can request more work using feedback
-or a configured command and continue reviewing the result.
+there is no separate review-area navigation step. The user can export feedback to their own tools
+to request more work and continue reviewing the result.
 
 Delivery is a user action through Warden's integration interaction. It does not require an agent
 to announce readiness, run `warden ready` / `warden resume`, submit a structured report, or satisfy
@@ -236,14 +228,14 @@ The implementation is an internal server module; a separate repository is not ne
 
 ## Current-version boundaries
 
-Keep the product centered on the ordered plan, workspace operations, configurable hooks and tmux
-commands, diff review, squash/commit operations and history. In particular, do not add:
+Keep the product centered on the ordered plan, workspace creation, configurable hooks,
+diff review, squash/commit operations and history. In particular, do not add:
 
 - Agent-driven task decomposition or special scope-change approval features.
 - Dependency enforcement, automatic scheduling or automatic concurrency decisions.
 - Mandatory agent handoff commands, delivery reports or automatic completion detection.
 - Task-complete/idle declarations, automatic workspace recycling or rebase triggered by acceptance.
-- Agent-specific launch integrations when a user-configured terminal command will do.
+- Built-in terminal sessions, agent launch, prompt delivery or process control; user scripts own these choices.
 - Embedded editing or editor launch/jump integrations, including Neovim.
 - A separate requirement approval or final acceptance workflow.
 - Undo/restore-history actions; users adjust the current history themselves.
@@ -259,7 +251,7 @@ The working copy implements the workflow above. It has not been published as a r
 | Operation | Current boundary |
 |---|---|
 | Plan and workspace | Ordered task notes, explicit allocation, persistent workspaces and repeated deliveries. No completion declaration or automatic recycling. |
-| Agent control | Configured tmux literal text/keys and free text input; thin creation/reuse hooks with cwd, environment, output and status. |
+| Workspace hooks | Generic creation/reuse scripts with cwd, environment, output and status. Agent execution stays in user tools. |
 | Connection | Live committed/uncommitted changes composed in an independent temporary Git repository, then written only to primary working files. Failed initial connections preserve the prior set and files. |
 | Later connection conflict | Preserve the last coherent preview and display stale status; user changes the connections or source work. |
 | Delivery | All current undelivered changes from a clean committed source, pinned by source and primary HEAD. No file/commit subset picking in this version. |

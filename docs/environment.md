@@ -11,9 +11,6 @@ Workspace `create` and `reuse` hooks use POSIX shell syntax on every platform. L
 Missing shell support is reported as a failed hook and leaves the workspace available for retry.
 Use the provided `WARDEN_*` variables to identify the repository and task; quote path arguments.
 
-The optional tmux command interface requires tmux in the environment where Warden runs. On Windows,
-run Warden inside WSL2 when using tmux; the native Git review and workspace flows do not require it.
-
 The complete automated suite is a release gate on all three operating systems. See
 [Development](development.md#building-and-testing) for the Node matrix and test isolation rules.
 

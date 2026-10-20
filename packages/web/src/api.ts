@@ -47,7 +47,6 @@ import type {
   UpdateNotice,
   UpdateTodoRequest,
   WorktreesResponse,
-  TmuxSessionResponse,
 } from '@warden/shared';
 
 export class ApiError extends Error {
@@ -102,10 +101,7 @@ export const api = {
   history: () => req<HistoryResponse>('GET', '/api/history'),
   previewHistory: (body: HistoryPreviewRequest) => req<HistoryPreviewResponse>('POST', '/api/history/preview', body),
   applyHistory: (id: string, head: string) => req<HistoryResponse>('POST', '/api/history/apply', { id, head }),
-  sendWorkspaceInput: (body: { path: string; text?: string; keys?: string[] }) =>
-    req<{ session: string; created: boolean; pane: string }>('POST', '/api/workspace/input', body),
   saveWorkspaceConfig: (body: WorkspaceConfig) => req<WorkspaceConfig>('PUT', '/api/workspace/config', body),
-  runWorkspaceCommand: (id: string, path: string) => req<{ session: string; pane: string }>('POST', `/api/workspace/commands/${enc(id)}`, { path }),
   retryWorkspaceHook: (id: string) => req<DevelopmentChange>('POST', `/api/workflow/changes/${enc(id)}/hook`),
   workflow: () => req<WorkflowResponse>('GET', '/api/workflow'),
   configureWorkflow: (developmentBranch: string) => req<WorkflowResponse>('PUT', '/api/workflow', { developmentBranch }),
@@ -160,7 +156,6 @@ export const api = {
   worktrees: () => req<WorktreesResponse>('GET', '/api/worktrees'),
   /** `slot`: a clone slot, whose remote branches are its own; omitted, the main worktree's. */
   remoteBranches: (branch: string, slot?: number) => req<RemoteBranchesResponse>('GET', `/api/worktrees/remotes${q({ branch, slot })}`),
-  openTmuxSession: (body: { path: string }) => req<TmuxSessionResponse>('POST', '/api/tmux/sessions', body),
   createWorktree: (body: CreateWorktreeRequest) => req<CreateWorktreeResponse>('POST', '/api/worktrees', body),
   releaseWorktree: (body: ReleaseWorktreeRequest) => req<ReleaseWorktreeResponse>('POST', '/api/worktrees/release', body),
   removeWorktree: (body: RemoveWorktreeRequest) => req<RemoveWorktreeResponse>('POST', '/api/worktrees/remove', body),

@@ -136,12 +136,11 @@ export async function setupWorkflowStore() {
     Object.assign(checkouts.worktrees.find((row) => row.path === change.worktree)!, { branch: change.branch, free: false, detached: false });
     return structuredClone(change);
   });
-  data.workspaceConfig = { commands: [], hooks: {} };
+  data.workspaceConfig = { hooks: {} };
   api.saveWorkspaceConfig = fn(async (config) => {
     data.workspaceConfig = structuredClone(config);
     return structuredClone(config);
   });
-  api.runWorkspaceCommand = fn(async () => ({ session: 'warden-1', created: false, pane: '%1' }));
   api.retryWorkspaceHook = fn(async (id) => structuredClone(assigned(id)));
   api.syncChange = fn(async (id) => {
     const change = assigned(id);

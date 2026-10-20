@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { LoaderCircle, Plus, Save, Trash2 } from 'lucide-react';
+import { LoaderCircle, Save } from 'lucide-react';
 import type { WorkspaceConfig } from '@warden/shared';
 import { api } from '../api';
 import { useWorkflow, workflowAction } from '../workflow-store';
@@ -53,7 +53,7 @@ function PlanForm() {
 function SettingsForm() {
   const { data, checkouts } = useWorkflow();
   const [branch, setBranch] = useState(data?.workflow?.developmentBranch ?? '');
-  const [config, setConfig] = useState<WorkspaceConfig>(() => structuredClone(data?.workspaceConfig ?? { commands: [], hooks: {} }));
+  const [config, setConfig] = useState<WorkspaceConfig>(() => structuredClone(data?.workspaceConfig ?? { hooks: {} }));
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
@@ -65,7 +65,7 @@ function SettingsForm() {
       if (context) await api.configureWorkflow(branch.trim());
       else await api.saveWorkspaceConfig(config);
       await Promise.all([useWorkflow.getState().refresh(), useWorkbenchData.getState().refresh()]);
-      setNotice(context ? '主开发分支已保存' : '命令与脚本已保存');
+      setNotice(context ? '主开发分支已保存' : '工作区脚本已保存');
     } catch (error) {
       setError(errorMessage(error));
     } finally {
@@ -107,65 +107,6 @@ function SettingsForm() {
           void save(false);
         }}
       >
-        <div className="wb-section-heading">
-          <h2>终端命令</h2>
-          <Button
-            type="button"
-            variant="outline"
-            size="icon-sm"
-            aria-label="添加命令"
-            title="添加命令"
-            onClick={() => setConfig({ ...config, commands: [...config.commands, { id: `command-${crypto.randomUUID()}`, label: '', text: '', keys: [] }] })}
-          >
-            <Plus size={14} aria-hidden="true" />
-          </Button>
-        </div>
-        <p className="muted small">文本与按键依次发送到 tmux；添加 Enter 才会回车。</p>
-        {config.commands.map((command, index) => (
-          <div className="wb-command-editor" key={command.id}>
-            <div className="wb-actions">
-              <Input
-                aria-label={`命令名称 ${index + 1}`}
-                placeholder="名称，如“启动 agent”"
-                value={command.label}
-                required
-                onChange={(event) =>
-                  setConfig({ ...config, commands: config.commands.map((row) => (row.id === command.id ? { ...row, label: event.target.value } : row)) })
-                }
-              />
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                aria-label={`删除命令 ${index + 1}`}
-                title="删除命令"
-                onClick={() => setConfig({ ...config, commands: config.commands.filter((row) => row.id !== command.id) })}
-              >
-                <Trash2 size={14} />
-              </Button>
-            </div>
-            <Textarea
-              aria-label={`命令文本 ${index + 1}`}
-              rows={2}
-              placeholder="命令文本"
-              value={command.text ?? ''}
-              onChange={(event) =>
-                setConfig({ ...config, commands: config.commands.map((row) => (row.id === command.id ? { ...row, text: event.target.value } : row)) })
-              }
-            />
-            <Input
-              aria-label={`命令按键 ${index + 1}`}
-              placeholder="按键（空格分隔）：Enter、C-c"
-              value={command.keys?.join(' ') ?? ''}
-              onChange={(event) =>
-                setConfig({
-                  ...config,
-                  commands: config.commands.map((row) => (row.id === command.id ? { ...row, keys: event.target.value.split(/\s+/).filter(Boolean) } : row)),
-                })
-              }
-            />
-          </div>
-        ))}
         <h2>工作区脚本</h2>
         <p className="muted small">在工作区目录执行，运行结果显示在任务中。</p>
         <label className="wb-field">
@@ -190,7 +131,7 @@ function SettingsForm() {
           <summary>脚本环境变量</summary>
           <p className="mono">WARDEN_WORKTREE · WARDEN_REPO · WARDEN_BRANCH · WARDEN_DEVELOPMENT_BRANCH · WARDEN_TASK_ID · WARDEN_HOOK_EVENT</p>
         </details>
-        <Button size="icon" disabled={pending} aria-label="保存命令与脚本" title={pending ? '保存中…' : '保存命令与脚本'}>
+        <Button size="icon" disabled={pending} aria-label="保存工作区脚本" title={pending ? '保存中…' : '保存工作区脚本'}>
           {pending ? <LoaderCircle size={16} className="animate-spin" aria-hidden="true" /> : <Save size={16} aria-hidden="true" />}
         </Button>
       </form>

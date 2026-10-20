@@ -81,13 +81,21 @@ const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 const shellCheckout = (cwd: string) => shellQuote(fx.git('-C', cwd, 'rev-parse', '--show-toplevel').trim());
 
 describe('requirement development workflow', () => {
+  it('preserves hooks from saved configuration while omitting obsolete settings', async () => {
+    const hooks = { create: 'echo setup', reuse: 'echo reuse' };
+    await store.update((state) => {
+      state.workspaceConfig = Object.assign({ hooks }, { commands: [{ id: 'old', label: 'Old setting' }] });
+    });
+    expect((await workflow.get()).workspaceConfig).toEqual({ hooks });
+  });
+
   it('runs thin creation hooks with workspace context and preserves failed assignments and delivered workspaces', async () => {
     const app = createApp({ repo: await resolveRepo(fx.root), store });
     const configure = (hooks: unknown) =>
       app.request('/api/workspace/config', {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ commands: [], hooks }),
+        body: JSON.stringify({ hooks }),
       });
     expect((await configure({ create: 1 })).status).toBe(400);
     expect(
@@ -116,7 +124,6 @@ describe('requirement development workflow', () => {
     fx.git('worktree', 'add', '--detach', available, 'feature/order');
     await store.update((state) => {
       state.workspaceConfig = {
-        commands: [],
         hooks: {
           create: 'exit 9',
           reuse: 'git rev-parse --show-toplevel; printf "%s\\n" "$WARDEN_TASK_ID" "$WARDEN_HOOK_EVENT" "$WARDEN_DEVELOPMENT_BRANCH"',

@@ -297,6 +297,6 @@ describe('commit history arrangement', () => {
     expect((await post('/api/preview', { connectedIds: [1] }, 'PUT')).status).toBe(400);
     expect((await post('/api/history/preview', { head: '--help' })).status).toBe(400);
     expect((await post('/api/workflow/rebase', { items: [{ changeId: 'x', sourceHead: '--help' }] })).status).toBe(400);
-    expect((await post('/api/workspace/input', { path: fx.root, text: 'echo hello', keys: ['Enter'] })).status).toBe(400);
+    expect((await post('/api/workspace/input', { path: fx.root, text: 'echo hello' })).status).toBe(404);
   });
 });

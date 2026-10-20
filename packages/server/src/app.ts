@@ -68,7 +68,6 @@ import { checkoutWorktree, listBranches, listWorktreesDetailed, lookupRemoteBran
 import { ensureTarget, forgetWorktreeTargets, type StateStore, unlinkComments } from './state.js';
 import { formatCommentsExport, formatTodoExport } from './export.js';
 import { addReply } from './feedback.js';
-import { TmuxService } from './tmux.js';
 import { WorkflowService } from './workflow.js';
 import { PreviewService } from './preview.js';
 import { HistoryService } from './history.js';
@@ -80,7 +79,6 @@ import { serveStaticFile } from './static.js';
 export interface AppOptions {
   repo: RepoContext;
   store: StateStore;
-  tmux?: TmuxService;
   /** Directory of the built web app; when omitted only /api is served. */
   webDir?: string;
   /** Poll interval of the repository watchers; tests use a short one. */
@@ -1023,47 +1021,6 @@ export function createApp(opts: AppOptions): WardenApp {
     );
     if (held) throw new HttpError(409, '该工位有进行中的任务，请通过任务的验证提交流程完成', 'active_change');
   };
-
-  const tmux = opts.tmux ?? new TmuxService();
-  // One session per worktree, in its directory, created detached: getting into it is the reviewer's.
-  api.post('/tmux/sessions', async (c) => {
-    const body = await c.req.json();
-    if (!body || typeof body.path !== 'string') throw badRequest('path is required');
-    const wt = (await worktrees(true)).find((w) => w.path === body.path && !w.bare);
-    if (!wt) throw badRequest('unknown worktree', 'unknown_worktree');
-    const res = await tmux.openSession(wt.path);
-    return c.json(res, res.created ? 201 : 200);
-  });
-
-  api.post('/workspace/commands/:id', async (c) => {
-    const body = await c.req.json();
-    if (typeof body?.path !== 'string') throw badRequest('path is required');
-    return store.withRepositoryLock(async () => {
-      const state = await store.load();
-      const command = state.workspaceConfig?.commands.find((row) => row.id === c.req.param('id'));
-      if (!command) throw notFound('自定义命令不存在', 'unknown_command');
-      const wt = (await listWorktreesDetailed(repo)).find((row) => row.path === body.path && !row.bare && !row.prunable && !row.foreign);
-      if (!wt) throw badRequest('unknown worktree', 'unknown_worktree');
-      if (state.workflow?.changes.some((row) => row.status === 'integrating' && row.worktree === wt.path))
-        throw new HttpError(409, '此任务正在合入，完成或撤回后再发送命令', 'change_integrating');
-      return c.json(await tmux.send(wt.path, command));
-    });
-  });
-
-  api.post('/workspace/input', async (c) => {
-    const body = await c.req.json();
-    if (typeof body?.path !== 'string') throw badRequest('path is required');
-    const command = workspaceConfig({ commands: [{ id: 'input', label: '输入', text: body.text, keys: body.keys }], hooks: {} }).commands[0]!;
-    return store.withRepositoryLock(async () => {
-      const state = await store.load();
-      const wt = (await listWorktreesDetailed(repo)).find((row) => row.path === body.path && !row.bare && !row.prunable && !row.foreign);
-      if (!wt || !state.workflow?.changes.some((row) => row.worktree === wt.path && row.status !== 'accepted'))
-        throw badRequest('unknown workspace', 'unknown_worktree');
-      if (state.workflow.changes.some((row) => row.worktree === wt.path && row.status === 'integrating'))
-        throw new HttpError(409, '此工作区正在准备提交', 'change_integrating');
-      return c.json(await tmux.send(wt.path, command));
-    });
-  });
 
   api.get('/worktrees', async (c) => {
     const [list, state] = await Promise.all([listWorktreesDetailed(repo), store.load()]);

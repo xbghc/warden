@@ -20,13 +20,11 @@ comment links are retained; old checked items migrate as archived notes, not acc
 The primary branch can change when no integration or connection is using the primary directory.
 Tasks remain associated with the branch for which they were created.
 
-## Workspace commands and hooks
+## Workspace hooks
 
-Settings contain local repository configuration, outside task branches. A command has an `id`,
-`label`, optional literal `text` and optional tmux `keys` such as `Enter` or `C-c`. Invocation sends
-the text first, then keys, to the active pane of the workspace's validated tmux session. Text does
-not append Enter implicitly. The task page also supports direct text input with an explicit Enter
-option. The page reports the send result; it does not infer the state of the agent.
+Settings contain local repository configuration, outside task branches. The configuration contains
+only a `hooks` object. Warden creates workspaces and runs these user-provided scripts; users choose
+external tools for agent execution and interaction.
 
 `hooks.create` and `hooks.reuse` are optional POSIX shell commands executed after the assignment is
 saved, with the workspace as cwd. Linux and macOS use `/bin/sh -c`; native Windows uses Git for

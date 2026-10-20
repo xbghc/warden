@@ -3839,17 +3839,6 @@ button.link.danger:has(> .action-icon):hover:not(:disabled) {
   gap: 8px;
   flex-wrap: wrap;
 }
-.wb-command-editor {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 14px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-}
-.wb-command-editor .wb-actions {
-  flex-wrap: nowrap;
-}
 .wb-task {
   height: 100%;
   display: flex;
@@ -3915,19 +3904,16 @@ button.link.danger:has(> .action-icon):hover:not(:disabled) {
   font-size: 12px;
   color: var(--muted-foreground);
 }
-.wb-deliveries > summary,
-.wb-commands > summary {
+.wb-deliveries > summary {
   cursor: pointer;
   display: flex;
   align-items: center;
   gap: 6px;
 }
-.wb-deliveries > summary::-webkit-details-marker,
-.wb-commands > summary::-webkit-details-marker {
+.wb-deliveries > summary::-webkit-details-marker {
   display: none;
 }
-.wb-deliveries[open] > summary > svg:last-child,
-.wb-commands[open] > summary > svg:last-child {
+.wb-deliveries[open] > summary > svg:last-child {
   transform: rotate(180deg);
 }
 .wb-deliveries p {
@@ -3938,61 +3924,14 @@ button.link.danger:has(> .action-icon):hover:not(:disabled) {
 .wb-deliveries code {
   font-family: var(--mono);
 }
-.wb-workspace-tools {
-  padding: 8px 0 12px;
-}
-.wb-commands {
-  font-size: 12px;
-  color: var(--muted-foreground);
-}
-.wb-command-body {
-  padding-top: 12px;
-}
-.wb-command-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--muted-foreground);
-}
-.wb-command-row select {
-  font-size: 12px;
-  height: 32px;
-  min-width: 150px;
-}
-.wb-prompt-row {
-  display: flex;
-  align-items: stretch;
-  gap: 12px;
-  margin-top: 10px;
-}
-.wb-prompt-row textarea {
-  min-height: 60px;
-  resize: vertical;
-  font-size: 12px;
-  padding: 9px 11px;
-}
-.wb-prompt-row > div {
-  display: flex;
-  flex-shrink: 0;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 8px;
-}
-.wb-prompt-row .check {
-  font-size: 10px;
-  color: var(--muted-foreground);
-}
-.wb-send-result,
 .wb-hook {
   font-size: 11px;
   margin-top: 10px;
   color: var(--muted-foreground);
 }
-.wb-send-result summary,
 .wb-hook summary {
   cursor: pointer;
 }
-.wb-send-result pre,
 .wb-hook pre {
   font: 11px / 1.5 var(--mono);
   background: var(--sidebar);
@@ -4450,9 +4389,6 @@ button.link.danger:has(> .action-icon):hover:not(:disabled) {
   }
   .wb-task-facts span + span::before {
     margin-right: 8px;
-  }
-  .wb-command-row > span {
-    display: none;
   }
   .wb-review-toolbar {
     padding: 8px 12px;

@@ -109,13 +109,10 @@ temporary directory outside the real checkout.
 3. Start `startServer` from `packages/server/src/index.ts` with the temporary `repoPath`, an explicit
    temporary `stateFile`, and the built `dist/web` as `webDir`. Use a `.mts` launcher when running
    outside a package so top-level await works. Confirm the server answers before opening the page.
-4. For tmux flows, remove inherited `TMUX` from the launch environment and use an isolated, short
-   `TMUX_TMPDIR`. Address the test socket explicitly with `tmux -S` on every inspection or cleanup
-   command. Never terminate a user's existing tmux sessions or server.
-5. Drive the affected interactions in a browser and inspect screenshots of the result. Check handled
+4. Drive the affected interactions in a browser and inspect screenshots of the result. Check handled
    API errors against the expected flow; an intentional rejection is not itself a browser failure.
-6. Always close the test server and await its cleanup before deleting fixtures. Stop only processes
-   and tmux sessions created for the check. Confirm `git status --short` contains no test artifacts.
+5. Always close the test server and await its cleanup before deleting fixtures. Stop only processes
+   created for the check. Confirm `git status --short` contains no test artifacts.
 
 Report the flows exercised and any flow that could not be reached.
 
@@ -126,7 +123,7 @@ Report the flows exercised and any flow that could not be reached.
 Run `pnpm storybook` for isolated review and layout components at http://127.0.0.1:6006. Stories use in-memory fixtures and include interaction checks. Run `pnpm build:storybook` to build the static preview.
 
 The new application uses one left navigation: *主目录预览*, *提交历史*, the ordered work plan,
-and bottom *同步工作区* / *设置* actions. A selected task contains its workspace controls,
+and bottom *同步工作区* / *设置* actions. A selected task contains its workspace path, hook results,
 notes, files and diff. There is no second review-mode switch or task-completion declaration.
 
 `Workspace/Workspace` stories cover connection previews, initial conflicts, stale previews,

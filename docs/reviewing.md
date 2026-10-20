@@ -11,8 +11,8 @@ there is no separate review-mode switch. The baseline is the last delivered sour
 primary baseline already incorporated by the workspace. Live uncommitted edits remain visible;
 formal delivery in this version requires a clean committed source.
 
-Delivery history and terminal controls are collapsed on the task page. Expand **交付** to inspect
-previous batches, or **终端** to run a configured command or send text. The file-list heading shows
+Delivery history and successful workspace-hook output are collapsed on the task page. Expand
+**交付** to inspect previous batches or **工作区脚本** to inspect hook output. Failed hooks remain visible. The file-list heading shows
 review progress once; layout and comment controls use icons with accessible labels and tooltips.
 The same [interface copy rules](design.md#interface-copy) apply to preview, history, synchronization,
 settings and comments. Operational consequences and recovery instructions stay beside their actions.

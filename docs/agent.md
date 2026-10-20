@@ -1,17 +1,12 @@
 # Comments and the agent
 
-Warden uses user-configured tmux text/key commands and user-driven delivery. Creating a workspace,
-starting an agent and sending a prompt are separate actions. See [workspace commands and hooks](worktrees.md#workspace-commands-and-hooks).
+Warden creates task workspaces and exposes generic [workspace hooks](worktrees.md#workspace-hooks).
+Users run agents and interact with them through their own tools or scripts.
 
 Work happens in the assigned task worktree. The user runs tests in the primary directory and reviews
 changes before squash. Warden does not require an agent test command, structured delivery report or
-readiness signal. Feedback commands below are optional conveniences.
-
-## Workspace control
-
-Users invoke configured tmux text/keys or free text from the task page. Warden does not require
-an agent to declare ready, stop, resume or task completion. `warden feedback` and `warden reply`
-remain the comment interface; workspace creation and command invocation are separate user actions.
+readiness signal. `warden feedback` and `warden reply` are optional comment conveniences; they do
+not launch or control agents.
 
 ## Comments and export
 

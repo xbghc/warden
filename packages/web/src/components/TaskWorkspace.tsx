@@ -1,26 +1,10 @@
 import { useEffect, useState } from 'react';
-import {
-  ArrowLeft,
-  ChevronDown,
-  Columns2,
-  FileCode2,
-  GitBranch,
-  LoaderCircle,
-  MessageSquare,
-  Pencil,
-  Play,
-  RefreshCw,
-  Save,
-  Send,
-  Terminal,
-  X,
-} from 'lucide-react';
+import { ArrowLeft, ChevronDown, Columns2, FileCode2, GitBranch, MessageSquare, Pencil, RefreshCw, Save, X } from 'lucide-react';
 import type { DevelopmentChange, WorkflowTask, SlotKind } from '@warden/shared';
 import { tryParseTargetKey } from '@warden/shared';
 import { api } from '../api';
 import { useStore, useTracksViewed } from '../store';
 import { changeTarget, preparationTarget, useWorkflow, workflowAction } from '../workflow-store';
-import { useWorkbench } from '../workbench-store';
 import { errorMessage, useWorkbenchData } from '../workbench-data';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -95,115 +79,25 @@ function WorkspaceCreation({ task }: { task: WorkflowTask }) {
   );
 }
 
-function WorkspaceCommands({ task }: { task: DevelopmentChange }) {
-  const config = useWorkflow((state) => state.data?.workspaceConfig);
-  const commands = config?.commands ?? [];
-  const text = useWorkbench((state) => state.prompts[task.id] ?? '');
-  const [commandId, setCommandId] = useState('');
-  const [enter, setEnter] = useState(false);
-  const [pending, setPending] = useState(false);
-  const [result, setResult] = useState<{ session: string; pane: string; input: string } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const command = commands.find((item) => item.id === commandId);
-  const send = async (configured: boolean) => {
-    setPending(true);
-    setError(null);
-    try {
-      const response =
-        configured && command
-          ? await api.runWorkspaceCommand(command.id, task.worktree)
-          : await api.sendWorkspaceInput({ path: task.worktree, text, ...(enter ? { keys: ['Enter'] } : {}) });
-      setResult({
-        ...response,
-        input: configured && command ? [command.text, command.keys?.join(' ')].filter(Boolean).join('\n') : `${text}${enter ? '\n[Enter]' : ''}`,
-      });
-    } catch (error) {
-      setError(errorMessage(error));
-    } finally {
-      setPending(false);
-    }
-  };
+function WorkspaceHook({ task }: { task: DevelopmentChange }) {
+  const hook = task.workspaceHook;
+  if (!hook) return null;
   return (
-    <div className="wb-workspace-tools">
-      <details className="wb-commands">
-        <summary>
-          <Terminal size={14} aria-hidden="true" />
-          终端
-          <ChevronDown size={13} aria-hidden="true" />
-        </summary>
-        <div className="wb-command-body">
-          <div className="wb-command-row">
-            <NativeSelect aria-label="已配置的 tmux 命令" value={commandId} onChange={(event) => setCommandId(event.target.value)}>
-              <option value="">选择命令</option>
-              {commands.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.label}
-                </option>
-              ))}
-            </NativeSelect>
-            <Button
-              variant="outline"
-              size="icon-sm"
-              disabled={pending || !command}
-              onClick={() => void send(true)}
-              aria-label="运行命令"
-              title={command ? `运行命令\n${[command.text, command.keys?.join(' ')].filter(Boolean).join('\n')}` : '运行命令'}
-            >
-              {pending ? <LoaderCircle size={14} className="animate-spin" aria-hidden="true" /> : <Play size={14} aria-hidden="true" />}
-            </Button>
-            {commands.length === 0 && <span className="muted small">在设置中添加命令</span>}
-          </div>
-          <div className="wb-prompt-row">
-            <Textarea
-              rows={2}
-              aria-label="提示词"
-              placeholder="发送到终端…"
-              value={text}
-              onChange={(event) => useWorkbench.getState().setPrompt(task.id, event.target.value)}
-            />
-            <div>
-              <label className="check small">
-                <Checkbox checked={enter} onCheckedChange={(value) => setEnter(value === true)} />
-                附加 Enter
-              </label>
-              <Button size="icon-sm" disabled={pending || !text} onClick={() => void send(false)} aria-label="发送文本" title="发送文本">
-                {pending ? <LoaderCircle size={14} className="animate-spin" aria-hidden="true" /> : <Send size={14} aria-hidden="true" />}
-              </Button>
-            </div>
-          </div>
-          {result && (
-            <details className="wb-send-result">
-              <summary>已发送</summary>
-              <code>
-                {result.session} {result.pane}
-              </code>
-              <pre>{result.input}</pre>
-            </details>
-          )}
-        </div>
-      </details>
-      <OperationError message={error} />
-      {task.workspaceHook && (
-        <details className="wb-hook" open={task.workspaceHook.status === 'failed' || undefined}>
-          <summary>
-            工作区脚本 ·{' '}
-            {task.workspaceHook.status === 'succeeded' ? '已完成' : task.workspaceHook.status === 'failed' ? '执行失败，工作区已保留' : '执行中或已中断'}
-          </summary>
-          <code>{task.workspaceHook.command}</code>
-          {task.workspaceHook.status !== 'running' && <p>退出码 {task.workspaceHook.exitCode ?? '未知'}</p>}
-          <pre>{task.workspaceHook.output}</pre>
-          <Button
-            variant="outline"
-            size="icon-sm"
-            onClick={() => void workflowAction(() => api.retryWorkspaceHook(task.id))}
-            aria-label="重试脚本"
-            title="重试脚本"
-          >
-            <RefreshCw size={14} aria-hidden="true" />
-          </Button>
-        </details>
-      )}
-    </div>
+    <details className="wb-hook" open={hook.status === 'failed' || undefined}>
+      <summary>工作区脚本 · {hook.status === 'succeeded' ? '已完成' : hook.status === 'failed' ? '执行失败，工作区已保留' : '执行中或已中断'}</summary>
+      <code>{hook.command}</code>
+      {hook.status !== 'running' && <p>退出码 {hook.exitCode ?? '未知'}</p>}
+      <pre>{hook.output}</pre>
+      <Button
+        variant="outline"
+        size="icon-sm"
+        onClick={() => void workflowAction(() => api.retryWorkspaceHook(task.id))}
+        aria-label="重试脚本"
+        title="重试脚本"
+      >
+        <RefreshCw size={14} aria-hidden="true" />
+      </Button>
+    </details>
   );
 }
 
@@ -483,7 +377,7 @@ export function TaskWorkspace({ task, active }: { task: WorkflowTask; active: bo
                 ))}
               </details>
             )}
-            <WorkspaceCommands task={task} />
+            <WorkspaceHook task={task} />
           </>
         )}
       </div>
