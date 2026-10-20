@@ -3,7 +3,7 @@
 Where the review state lives, and what warden will and will not do to the repository.
 
 High-risk operations also create [verified independent backups](backups.md) before changing Git
-history or discarding a checkout. These are separate from review checkpoints and retained Git refs.
+history or discarding a checkout. These are separate from review checkpoints and ordinary Git reflogs.
 
 ## State
 
@@ -63,6 +63,10 @@ request after a release or removal (`-d`, so only a merged one), and the review 
 the repository. A checkpoint writes only there: `git add --all [--intent-to-add]` and
 `git write-tree --missing-ok`, with `GIT_INDEX_FILE` and `GIT_OBJECT_DIRECTORY` set to files in
 warden's data directory and no alternates (see [Checkpoints](reviewing.md#checkpoints)).
+
+New clone workspaces copy the primary repository's effective `user.name` and `user.email` with
+fixed `git config` writes only when they differ from the clone's inherited defaults. This preserves
+repository-local commit identity without overriding matching global defaults.
 
 The independent `warden-core` Rust crate exposes a typed worktree observation, rather than a raw
 command API. It executes exactly `git status --porcelain=v2 --branch --untracked-files=all
@@ -129,6 +133,11 @@ range in isolation, suspends owned preview files and stages only that delivery. 
 the real index. Preparation is journaled first. Interrupted preparation accepts only its known
 reviewed tree, preserving other edits.
 
+Only the final binary patch enters the primary index. Neither the agent's source commits nor
+temporary composition commits are fetched into the primary repository. Interrupted preparation
+compares NUL-delimited raw index changes with the isolated candidate, without importing its tree
+or depending on display-only diff configuration.
+
 `POST /workflow/changes/:id/accept` checks HEAD and the staged binary-diff fingerprint, then runs
 ordinary `git commit -m` in the primary checkout. Identity, signing and Git hooks are preserved.
 `record` instead records a user-reviewed manual commit pinned by SHA. Both require a single child
@@ -136,15 +145,23 @@ of the prepared parent and clean files. Successful delivery appends a record, pr
 workspace and resumes connections. No `reset`, `clean`, `commit-tree` or hook bypass is used.
 
 History preview uses isolated `cherry-pick` and message amendments. Applying a validated linear
-candidate requires the same final tree and original HEAD. The candidate is fetched locally, a
-backup `refs/warden/history/<id>` is retained, and `update-ref <branch> <new> <old>` publishes it.
+candidate requires the same final tree and original HEAD. Only the selected replacement commit
+graph is fetched locally; `update-ref <branch> <new> <old>` publishes it.
 An independent filesystem backup is also required before fetching/publishing the candidate.
 The real files/index need no change. `historyDraft` journals publication and subsequent delivery-SHA
-mapping. No remote push or user-facing undo/restore operation is provided.
+mapping. The temporary repository and operation backup are removed after that mapping is durable.
+No remote push or user-facing undo/restore operation is provided.
 
 All mutation arguments are composed by the server; requests cannot supply raw Git commands or
-candidate directories. Local fetches use validated repositories and exact object IDs. Source and
-delivery commits are retained under generated `refs/warden/changes/` refs. Workflow writes share
+candidate directories. Local fetches use validated repositories and exact object IDs. Source
+history stays in the task workspace; delivery records associate it with the final primary commit
+without adding retention refs. Successful delivery, synchronization and history publication retire
+older versions' exact generated `refs/warden/changes/<id>/{source,accepted}`,
+`refs/warden/deliveries/<id>/{source,commit}` and `refs/warden/history/<id>` refs with
+`update-ref -d <ref> <observed-old-value>`. Other refs and user reflogs are preserved; ordinary Git
+maintenance decides when previously retained, now-unreachable objects can be collected. Clone
+workspaces isolate agent objects; explicitly selected linked worktrees share the primary object
+store by Git's design. Workflow writes share
 a cross-process repository-operation lock; short JSON updates have their own lock. Stale-heartbeat
 recovery also requires the recorded owner process to be gone. A live owner, incomplete owner record,
 or inconclusive liveness check remains occupied, so a delayed heartbeat cannot authorize a second

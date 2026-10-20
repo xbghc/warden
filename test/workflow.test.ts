@@ -277,7 +277,7 @@ describe('requirement development workflow', () => {
     expect(fx.git('rev-parse', 'main').trim()).toBe(main);
     expect(fx.git('log', '-1', '--format=%s').trim()).toBe(change.title);
     expect(fx.git('rev-parse', 'HEAD^{tree}').trim()).toBe(fx.git('rev-parse', `${source}^{tree}`).trim());
-    expect(fx.git('rev-parse', `refs/warden/changes/${change.id}/source`).trim()).toBe(source);
+    expect(fx.git('for-each-ref', '--format=%(refname)', 'refs/warden/').trim()).toBe('');
     expect((await listWorktreesDetailed(await resolveRepo(fx.root))).find((row) => row.path === change.worktree)?.free).toBe(false);
     expect(await readFile(path.join(change.worktree, 'node_modules/keep'), 'utf8')).toBe('dependency');
     const next = await task('Next change');
@@ -333,15 +333,73 @@ describe('requirement development workflow', () => {
     );
   });
 
-  it('imports a clone task locally and preserves it while a new workspace uses the latest baseline', async () => {
+  it('delivers only the final clone changes without importing source or trial commits', async () => {
     const clone = await task('Clone task', 'clone');
     await commit(clone);
-    const accepted = await accept(await workflow.ready(clone.id));
+    const intermediate = gitAt(clone, 'rev-parse', 'HEAD');
+    await commit(clone, 'task.txt', 'final\n');
+    const source = gitAt(clone, 'rev-parse', 'HEAD');
+    const originalCommits = fx
+      .git('cat-file', '--batch-all-objects', '--batch-check=%(objectname) %(objecttype)')
+      .trim()
+      .split('\n')
+      .filter((line) => line.endsWith(' commit'));
+    await workflow.prepare(clone.id, { sourceHead: source, developmentHead: clone.base });
+    expect(
+      fx
+        .git('cat-file', '--batch-all-objects', '--batch-check=%(objectname) %(objecttype)')
+        .trim()
+        .split('\n')
+        .filter((line) => line.endsWith(' commit')),
+    ).toEqual(originalCommits);
+    const accepted = await accept(clone);
     expect(accepted.cleanupError).toBeUndefined();
-    expect(await readFile(path.join(fx.root, 'task.txt'), 'utf8')).toBe('task\n');
+    expect(await readFile(path.join(fx.root, 'task.txt'), 'utf8')).toBe('final\n');
+    const commits = fx
+      .git('cat-file', '--batch-all-objects', '--batch-check=%(objectname) %(objecttype)')
+      .trim()
+      .split('\n')
+      .filter((line) => line.endsWith(' commit'));
+    expect(commits).toHaveLength(originalCommits.length + 1);
+    expect(commits).not.toContain(`${intermediate} commit`);
+    expect(commits).not.toContain(`${source} commit`);
+    expect(fx.git('for-each-ref', '--format=%(refname)', 'refs/warden/').trim()).toBe('');
+    expect(fx.git('status', '--porcelain').trim()).toBe('');
+    expect(gitAt(clone, 'rev-parse', 'HEAD')).toBe(source);
     const next = await task('Clone next', 'clone');
     expect(next.worktree).not.toBe(clone.worktree);
     expect(gitAt(next, 'rev-parse', 'HEAD')).toBe(accepted.deliveries!.at(-1)!.commit);
+  });
+
+  it('allocates an independent clone by default to isolate development objects', async () => {
+    const planned = await workflow.create({ title: 'Isolated default' });
+    const change = await workflow.start(planned.id);
+    const checkout = (await listWorktreesDetailed(await resolveRepo(fx.root))).find((row) => row.path === change.worktree);
+    expect(checkout?.clone).toBe(true);
+    expect(gitAt(change, 'rev-parse', '--git-common-dir')).toBe('.git');
+    expect(gitAt(change, 'config', '--get', 'user.name')).toBe(fx.git('config', '--get', 'user.name').trim());
+    expect(gitAt(change, 'config', '--get', 'user.email')).toBe(fx.git('config', '--get', 'user.email').trim());
+    expect(fx.git('for-each-ref', '--format=%(refname)', `refs/heads/${change.branch}`).trim()).toBe('');
+  });
+
+  it('retires legacy retention refs after delivery without touching user branches or other refs', async () => {
+    const change = await task('Retire old retention refs');
+    await commit(change);
+    const source = gitAt(change, 'rev-parse', 'HEAD');
+    for (const ref of [
+      `refs/warden/changes/${change.id}/source`,
+      `refs/warden/changes/${change.id}/accepted`,
+      `refs/warden/deliveries/${change.id}/source`,
+      `refs/warden/deliveries/${change.id}/commit`,
+      `refs/warden/history/${change.id}`,
+    ])
+      fx.git('update-ref', ref, source);
+    fx.git('update-ref', 'refs/warden/notes/keep', source);
+    fx.git('branch', 'keep-source', source);
+    await accept(await workflow.ready(change.id));
+    expect(fx.git('for-each-ref', '--format=%(refname)', 'refs/warden/').trim()).toBe('refs/warden/notes/keep');
+    expect(fx.git('rev-parse', 'keep-source').trim()).toBe(source);
+    expect(fx.git('rev-parse', 'refs/warden/notes/keep').trim()).toBe(source);
   });
 
   it('blocks dirty task and development checkouts, and refuses changed review revisions', async () => {
@@ -680,8 +738,8 @@ describe('requirement development workflow', () => {
     expect(gitAt(change, 'branch', '--show-current')).toBe(change.branch);
   });
 
-  it('recovers interrupted staging only when the index still equals the reviewed tree', async () => {
-    const change = await task('Recover staging');
+  it.each(['clone', 'worktree'] as const)('recovers interrupted %s staging only when the index still equals the reviewed tree', async (kind) => {
+    const change = await task('Recover staging', kind);
     await commit(change);
     const ready = await workflow.ready(change.id);
     await prepare(ready);
@@ -692,6 +750,7 @@ describe('requirement development workflow', () => {
     await expect(prepare(ready)).rejects.toMatchObject({ code: 'development_dirty' });
     expect(await readFile(path.join(fx.root, 'keep.txt'), 'utf8')).toBe('preserve test work');
     await rm(path.join(fx.root, 'keep.txt'));
+    fx.git('config', 'diff.mnemonicPrefix', 'true');
     expect((await prepare(ready)).integration!.prepared).toBe(true);
     expect(fx.git('rev-parse', 'HEAD').trim()).toBe(ready.base);
     await accept(ready);

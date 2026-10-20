@@ -12,7 +12,18 @@ Backups live at `backups/<timestamp>-<uuid>/` beside this repository's `state.js
 [State](internals.md#state) for the data directory. `GET /api/backups` lists completed backups with
 their reason, original checkout path, HEAD and backup path. Release/remove responses also include
 the created `backup`. The listing survives a server restart and does not rely on a successful
-post-operation state write. Warden does not automatically delete these backups or push them anywhere.
+post-operation state write. Warden never pushes backups anywhere.
+
+Rebase and history backups are temporary recovery data. Their operation journals retain their
+identities before mutation. Once the rebase bookkeeping or history mapping is durable, Warden
+removes those backups and clears their journal entries. An interrupted operation keeps its backup;
+a successful retry completes cleanup without repeating an already-published Git operation.
+Cleanup validates the backup's external path, directory type, manifest identity and operation
+reason, and is idempotent if the files were removed before the final journal update.
+
+Release/removal backups remain available because their original workspace may no longer exist.
+Older backups without an active operation journal are also preserved. These retained backups can
+be removed manually after validating that their data is no longer needed.
 
 ## Contents and guarantees
 
@@ -45,10 +56,11 @@ concurrent changes. Only a complete verified backup is atomically renamed into i
 Directories are also flushed on POSIX; Node cannot perform directory fsync on Windows. A crash can
 leave an unpublished `.pending-*` directory, which is never listed as a completed backup.
 
-Copies intentionally include ignored dependencies and can consume substantial time and disk
-space. There is no silent truncation, size cap or age-based eviction. Keep the data directory on
-storage with enough free space and remove old backups manually only after validating recovery or
-copying them to retained storage. These local copies protect against operation errors, not loss of
+Copies intentionally include ignored dependencies and can consume substantial time and peak disk
+space. Successful rebase/history operations clean up their copies; failed operations, older copies
+and release/removal backups have no silent truncation, size cap or age-based eviction. Keep the
+data directory on storage with enough free space and remove retained backups manually only after
+validating recovery or copying them to retained storage. These local copies protect against operation errors, not loss of
 the disk itself. They may contain local secrets; directories/files use private permissions on POSIX
 and inherit the user's directory ACLs on Windows.
 

@@ -27,7 +27,7 @@ export function OperationError({ message }: { message?: string | null }) {
 function WorkspaceCreation({ task }: { task: WorkflowTask }) {
   const { checkouts, data, busy, actionError } = useWorkflow();
   const [open, setOpen] = useState(false);
-  const [kind, setKind] = useState<SlotKind>('worktree');
+  const [kind, setKind] = useState<SlotKind>('clone');
   const [existing, setExisting] = useState('');
   const occupied = new Set(data?.workflow?.changes.filter((change) => change.worktree).map((change) => change.worktree));
   const available = checkouts?.worktrees.filter((row) => !row.isMain && !row.foreign && !row.prunable && !occupied.has(row.path)) ?? [];

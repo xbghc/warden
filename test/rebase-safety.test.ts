@@ -80,6 +80,8 @@ describe('rebase safety', () => {
     expect(await readFile(path.join(change.worktree, 'task.txt'), 'utf8')).toBe('task work\n');
     expect(fx.git('-C', change.worktree, 'status', '--porcelain').trim()).toBe('');
     expect(backups.createSafetyBackup).toHaveBeenCalledOnce();
+    expect(await backups.listSafetyBackups(store)).toEqual([]);
+    expect((await store.load()).workflow!.changes.find((row) => row.id === change.id)).not.toHaveProperty('rebaseBackups');
   });
 
   it('leaves the source untouched when its backup fails', async () => {
@@ -213,5 +215,6 @@ describe('rebase safety', () => {
     expect(head(change.worktree)).toBe(rebased);
     expect(write.mock.calls.some(([args]) => args.includes('rebase'))).toBe(false);
     expect(backup).not.toHaveBeenCalled();
+    expect(await backups.listSafetyBackups(store)).toEqual([]);
   });
 });

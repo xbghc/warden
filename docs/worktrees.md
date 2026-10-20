@@ -10,7 +10,8 @@ Workspace creation does not install dependencies or launch an agent.
 The left navigation holds the ordered work plan. Add a task and its notes, reorder it, and select
 *创建工作区* when needed. Planning does not create a Git branch or pin a baseline. A task can use
 a new numbered worktree, an available detached slot, or a validated existing numbered checkout.
-The default is a linked Git worktree. Ordering never enforces dependencies.
+The default is an independent clone, keeping agent development objects outside the primary
+repository. A linked Git worktree remains an explicit option. Ordering never enforces dependencies.
 
 A workspace corresponds to one linear task. It can contain multiple local commits and make multiple
 deliveries without being recycled. There is no task-complete declaration or release step. Editing
@@ -108,7 +109,7 @@ still use their ordinary hooks; history preview is not another validation run.
 
 The first version accepts only consecutive linear commits with one parent and the same final tree
 as the original tip. Conflicts or different final content require changing the draft. Apply checks
-that the original HEAD still matches, retains a backup ref, imports the candidate and updates the
+that the original HEAD still matches, journals an external temporary backup, imports the candidate and updates the
 primary ref with an expected-old-value check. The final files/index stay identical. Delivery IDs
 remain associated with the rewritten commits, and workspaces remain unchanged until explicit rebase.
 There is no history undo/restore UI, automatic remote push or merge-commit arrangement.
@@ -117,7 +118,10 @@ There is no history undo/restore UI, automatic remote push or merge-commit arran
 
 Release/removal, explicit rebase and history application require an automatic verified local backup.
 Backup failure stops the operation. See [Safety backups](backups.md) for contents, storage costs,
-supported layouts and recovery. Rebase also refuses to overwrite ignored local files.
+supported layouts and recovery. Successful rebase/history operations remove their temporary backups
+after persisting their results; interrupted operations keep recovery data. Rebase also refuses to
+overwrite ignored local files. Delivery applies only the final reviewed patch to the primary
+repository, without importing agent source history or retaining internal Git refs.
 
 Numbered directories (`<repo>-1`, `<repo>-2`, ...) remain available to their tasks across deliveries.
 A reusable slot is detached, clean, valid, unassigned and not inside a Git operation; this is a Git
@@ -129,7 +133,8 @@ also remain; ready no longer rebases, and no readiness protocol is exposed by th
 
 ## Clone slots
 
-Linked worktrees are the default. An independent clone remains available for tooling that needs its
-own `.git` directory. Delivery and explicit rebase exchange exact commits with validated local
-repositories, without remote fetches or remote-tracking ref updates. Clone ownership and branch
+Independent clones are the default, providing their own `.git` directories and isolating agent
+objects from the primary repository. Delivery applies the final reviewed patch; explicit rebase
+imports exact primary commits into the clone from validated local repositories, without remote
+fetches or remote-tracking ref updates. Clone ownership and branch
 validation use the same rules as other task workspaces.

@@ -1,11 +1,12 @@
 import os from 'node:os';
 import path from 'node:path';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import type { DevelopmentChange } from '@warden/shared';
 import { createApp, resolveRepo, StateStore, WorkflowService } from '@warden/server';
 import { PreviewService } from '../packages/server/src/preview.js';
 import { HistoryService } from '../packages/server/src/history.js';
+import { listSafetyBackups } from '../packages/server/src/backups.js';
 import { listWorktreesDetailed } from '../packages/server/src/worktrees.js';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
@@ -122,6 +123,9 @@ describe('temporary primary-directory connections', () => {
     expect(await file(fx.root, 'src/b.ts')).toBe('export const b = 10;\n');
     await restarted.set([]);
     expect(fx.git('status', '--porcelain').trim()).toBe('');
+    expect(fx.git('for-each-ref', '--format=%(refname)', 'refs/warden/').trim()).toBe('');
+    expect(await listSafetyBackups(store)).toEqual([]);
+    expect(await readdir(path.join(data, 'operations'))).toEqual([]);
   });
 
   it('preserves binary changes, renames and deletions across connection and disconnection', async () => {
@@ -277,17 +281,46 @@ describe('commit history arrangement', () => {
     const spy = vi.spyOn(store, 'update').mockImplementation(async (mutate) =>
       update((s) => {
         const result = mutate(s);
-        if (!s.historyDraft) throw new Error('interrupted mapping');
+        if (s.workflow!.changes.some((c) => c.worktree && c.deliveries?.some((delivery) => delivery.commit === draft.newHead)))
+          throw new Error('interrupted mapping');
         return result;
       }),
     );
     await expect(history.apply({ id: draft.id!, head: current.head })).rejects.toThrow('interrupted mapping');
     spy.mockRestore();
     expect(head()).toBe(draft.newHead);
+    expect(await listSafetyBackups(store)).toHaveLength(1);
+    expect(await readdir(path.join(data, 'operations'))).toHaveLength(1);
     const restarted = new HistoryService(await resolveRepo(fx.root), store);
     expect((await restarted.apply({ id: draft.id!, head: current.head })).head).toBe(draft.newHead);
     expect((await store.load()).historyDraft).toBeUndefined();
+    expect(await listSafetyBackups(store)).toEqual([]);
+    expect(await readdir(path.join(data, 'operations'))).toEqual([]);
     expect((await restarted.get()).commits.at(-1)?.deliveryId).toBe(last.deliveryId);
+  });
+
+  it('retries cleanup after temporary files were removed but their journal update failed', async () => {
+    const a = await task('A');
+    await edit(a, 'a.txt', 'A1\n', true);
+    await deliver(a, 'A1');
+    const current = await history.get();
+    const last = current.commits.at(-1)!;
+    const draft = await history.preview({ head: current.head, start: last.sha, commits: [{ sha: last.sha, message: 'Clarified' }] });
+    const update = store.update.bind(store);
+    const spy = vi.spyOn(store, 'update').mockImplementation(async (mutate) =>
+      update((s) => {
+        const result = mutate(s);
+        if (!s.historyDraft) throw new Error('interrupted cleanup');
+        return result;
+      }),
+    );
+    await expect(history.apply({ id: draft.id!, head: current.head })).rejects.toThrow('interrupted cleanup');
+    spy.mockRestore();
+    expect(await listSafetyBackups(store)).toEqual([]);
+    expect(await readdir(path.join(data, 'operations'))).toEqual([]);
+    const restarted = new HistoryService(await resolveRepo(fx.root), store);
+    expect((await restarted.apply({ id: draft.id!, head: current.head })).head).toBe(draft.newHead);
+    expect((await store.load()).historyDraft).toBeUndefined();
   });
 
   it('exposes validation errors through the web API rather than mutating on malformed requests', async () => {

@@ -52,6 +52,14 @@ deliveries. Warden does not require a task-complete declaration, automatically r
 commit or add a release-button step. An accepted commit is an observable delivery result, not a
 claim that the entire task or requirement has ended.
 
+The primary repository receives only the final commits the user chooses to deliver and push.
+Agent source history, trial commits and recovery copies belong to task workspaces or Warden's
+external data directory. Deliveries apply the reviewed final patch without importing the source
+commit graph. Successful operations retire their temporary repositories and recovery backups;
+interrupted operations retain the data their recovery journals still need. User branches and
+reflogs are never expired automatically. Clone workspaces provide object-store isolation; linked
+worktrees deliberately share the primary repository's objects while development is active.
+
 The list's order expresses the user's intended work sequence. It does **not** assert that each
 item depends on the previous one. Users decide dependencies, parallelism and when to begin a
 later item. Warden does not enforce a dependency graph, dispatch tasks automatically or require
@@ -221,8 +229,9 @@ The first implementation provides a linear history editor. Its operation must pr
 
 The user's candidate approach is a backup branch plus a temporary branch: replay commits with
 cherry-pick in the requested order, inspect the result and only then update the primary development
-branch. The implementation uses an independent temporary repository and a backup ref for this
-sequence. The backup does not imply a user-facing restoration workflow.
+branch. The implementation uses an independent temporary repository and a journaled external
+backup for this sequence, removing both after successful application and bookkeeping. The backup
+does not imply a user-facing restoration workflow or a permanent retention ref in the primary repository.
 Existing tools and libraries should inform the design; see [research references](design.md#research-references).
 The implementation is an internal server module; a separate repository is not needed for this version.
 

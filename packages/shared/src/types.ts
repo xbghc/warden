@@ -213,6 +213,7 @@ export interface ReviewState {
     sandbox: string;
     branch: string;
     applying?: boolean;
+    backups?: SafetyBackup[];
   };
 }
 
@@ -275,6 +276,8 @@ export interface DevelopmentChange extends ChangePlan {
   /** An explicit handoff: the agent must stop writing until it resumes the task. */
   submittedHead?: string;
   sync?: { status: 'pending' | 'conflict' | 'error'; message: string; target: string };
+  /** Kept through interrupted synchronization; removed after successful bookkeeping. */
+  rebaseBackups?: SafetyBackup[];
   /** Recorded before staging on the development checkout. A commit exists only after validation. */
   integration?: {
     id?: string;

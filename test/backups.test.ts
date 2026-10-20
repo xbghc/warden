@@ -7,7 +7,7 @@ import type { Hono } from 'hono';
 import type { RemoveWorktreeResponse, SafetyBackup } from '@warden/shared';
 import { createApp, resolveRepo, StateStore, WorkflowService } from '@warden/server';
 import { HistoryService } from '../packages/server/src/history.js';
-import { assertSafetyBackupCurrent, createSafetyBackup, listSafetyBackups } from '../packages/server/src/backups.js';
+import { assertSafetyBackupCurrent, createSafetyBackup, discardOperationBackup, listSafetyBackups } from '../packages/server/src/backups.js';
 import * as backups from '../packages/server/src/backups.js';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
@@ -233,16 +233,32 @@ describe('verified safety backups', () => {
       await expect(history.apply({ id: draft.id!, head: original.head })).rejects.toMatchObject({ code: 'backup_failed' });
       expect(fx.git('rev-parse', 'HEAD').trim()).toBe(original.head);
     } else {
+      const verify = backups.assertSafetyBackupCurrent;
+      const verification = vi.spyOn(backups, 'assertSafetyBackupCurrent').mockImplementation(async (backup) => {
+        await verify(backup);
+        expect(backup).toMatchObject({ reason: 'history', head: original.head });
+        const restored = await recover(backup);
+        expect(fx.git('-C', restored, 'rev-parse', 'HEAD').trim()).toBe(original.head);
+        expect(fx.git('-C', restored, 'log', '-1', '--format=%s').trim()).toBe(last.message);
+      });
       const published = await history.apply({ id: draft.id!, head: original.head });
       expect(published.head).toBe(draft.newHead);
-      const [backup] = await listSafetyBackups(store);
-      expect(backup).toMatchObject({ reason: 'history', head: original.head });
-      const restored = await recover(backup!);
-      expect(fx.git('-C', restored, 'rev-parse', 'HEAD').trim()).toBe(original.head);
-      expect(fx.git('-C', restored, 'log', '-1', '--format=%s').trim()).toBe(last.message);
+      expect(verification).toHaveBeenCalledOnce();
+      expect(await listSafetyBackups(store)).toEqual([]);
     }
     expect(await fs.readFile(path.join(fx.root, '.git/index'))).toEqual(index);
     expect(fx.git('rev-parse', 'HEAD^{tree}')).toBe(tree);
+  });
+
+  it('retires only a journaled temporary backup and permits cleanup retries', async () => {
+    const retained = await createSafetyBackup(store, fx.root, 'remove');
+    const temporary = await createSafetyBackup(store, fx.root, 'rebase');
+    await expect(discardOperationBackup(store, retained)).rejects.toMatchObject({ code: 'backup_invalid' });
+    await expect(discardOperationBackup(store, { ...temporary, path: fx.root })).rejects.toMatchObject({ code: 'backup_invalid' });
+    expect(existsSync(path.join(fx.root, '.git'))).toBe(true);
+    await discardOperationBackup(store, temporary);
+    await discardOperationBackup(store, temporary);
+    expect(await listSafetyBackups(store)).toEqual([retained]);
   });
 
   it.each(['worktree', 'clone'] as const)('preserves ignored files when reusing a %s slot for another branch', async (kind) => {

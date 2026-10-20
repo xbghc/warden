@@ -185,6 +185,32 @@ export async function assertSafetyBackupCurrent(backup: SafetyBackup): Promise<v
   }
 }
 
+/** Only completed rebase/history journals may retire their own external recovery copies.
+ * Release/removal backups still protect data that no longer has a live checkout.
+ */
+export async function discardOperationBackup(store: StateStore, backup: SafetyBackup): Promise<void> {
+  const root = await realpath(backupDirectory(store));
+  if (
+    !/^\d{4}-.*-[0-9a-f-]{36}$/.test(backup.id) ||
+    path.basename(backup.id) !== backup.id ||
+    path.dirname(path.resolve(backup.path)) !== root ||
+    path.resolve(backup.path) !== path.join(root, backup.id) ||
+    (backup.reason !== 'rebase' && backup.reason !== 'history')
+  )
+    throw new HttpError(409, '临时备份路径或用途不匹配，已保留备份', 'backup_invalid');
+  // Recovery can repeat after deletion succeeded but the following state write failed.
+  const info = await lstat(backup.path).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== 'ENOENT') throw error;
+    return undefined;
+  });
+  if (!info) return;
+  if (!info.isDirectory() || info.isSymbolicLink()) throw new HttpError(409, '临时备份目录不匹配，已保留备份', 'backup_invalid');
+  const manifest = JSON.parse(await readFile(path.join(backup.path, 'manifest.json'), 'utf8')) as Manifest;
+  if (manifest.version !== 1 || manifest.id !== backup.id || manifest.reason !== backup.reason || manifest.head !== backup.head)
+    throw new HttpError(409, '临时备份清单不匹配，已保留备份', 'backup_invalid');
+  await rm(backup.path, { recursive: true, force: true });
+}
+
 /** Completed backups are discoverable even if the operation or state update crashed afterward. */
 export async function listSafetyBackups(store: StateStore): Promise<SafetyBackup[]> {
   const root = backupDirectory(store);

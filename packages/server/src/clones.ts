@@ -36,10 +36,19 @@ export async function makeClone(ctx: RepoContext, dir: string): Promise<void> {
       timeoutMs: LONG_GIT_TIMEOUT_MS,
     },
   );
-  if (!remotes.length) return;
   // From here on the directory is the clone just made; one that `clone` itself refused — something
   // appeared there since the slot was picked — is left alone.
   try {
+    // A linked worktree inherited repository-local identity. Preserve that identity in a
+    // new independent workspace, while leaving matching global defaults unpinned.
+    for (const key of ['user.name', 'user.email']) {
+      const [source, cloned] = await Promise.all([
+        runGit(['config', '--get', key], { cwd: ctx.commonRoot, okCodes: [0, 1] }),
+        runGit(['config', '--get', key], { cwd: dir, okCodes: [0, 1] }),
+      ]);
+      if (source.code === 0 && (cloned.code !== 0 || cloned.stdout !== source.stdout)) await runGitWrite(['config', key, source.stdout.trim()], { cwd: dir });
+    }
+    if (!remotes.length) return;
     // Removing it takes the main worktree's branches, which `clone` filed under `origin/`, with it.
     await runGitWrite(['remote', 'remove', 'origin'], { cwd: dir });
     for (const [name, r] of remotes) {

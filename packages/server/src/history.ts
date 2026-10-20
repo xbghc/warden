@@ -8,7 +8,8 @@ import { PreviewService, primaryCheckout } from './preview.js';
 import type { RepoContext } from './repo.js';
 import { ensureTarget, type StateStore } from './state.js';
 import { dirtyCount } from './worktrees.js';
-import { assertSafetyBackupCurrent, createSafetyBackup } from './backups.js';
+import { assertSafetyBackupCurrent, createSafetyBackup, discardOperationBackup } from './backups.js';
+import { retireWorkflowRefs } from './retention.js';
 
 function fail(message: string, code = 'history_changed'): never {
   throw new HttpError(409, message, code);
@@ -133,8 +134,10 @@ export class HistoryService {
         const backup = await createSafetyBackup(this.store, primary.path, 'history');
         if ((await oid(primary.path, 'HEAD')) !== draft.head || (await dirtyCount(primary.path))) fail('备份期间主目录已变化，请重新编排');
         await assertSafetyBackupCurrent(backup);
+        await this.store.update((s) => {
+          s.historyDraft!.backups = [...(s.historyDraft!.backups ?? []), backup];
+        });
         await runGitWrite(['fetch', '--quiet', '--no-tags', '--no-write-fetch-head', '--', sandbox.path, draft.newHead], { cwd: primary.path });
-        await runGitWrite(['update-ref', `refs/warden/history/${draft.id}`, draft.head], { cwd: primary.path });
         await this.store.update((s) => {
           s.historyDraft!.applying = true;
         });
@@ -191,9 +194,13 @@ export class HistoryService {
         destination.comments.push(...target.comments.filter((c) => !ids.has(c.id)).map((c) => ({ ...c, targetKey: next })));
         target.comments = [];
       }
+    });
+    await retireWorkflowRefs(this.repo.commonRoot);
+    await GitSandbox.open(this.store, draft.sandbox).dispose();
+    for (const backup of draft.backups ?? []) await discardOperationBackup(this.store, backup);
+    await this.store.update((s) => {
       delete s.historyDraft;
     });
-    await GitSandbox.open(this.store, draft.sandbox).dispose();
     return true;
   }
 }

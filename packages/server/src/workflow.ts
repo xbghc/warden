@@ -28,7 +28,8 @@ import { ensureTarget, forgetWorktreeTargets, type StateStore } from './state.js
 import { checkoutState, checkoutWorktree, dirtyCount, listWorktreesDetailed, nextSlot } from './worktrees.js';
 import { applyPatch, GitSandbox, oid, patchBetween, gitOid, deliveryBase } from './git-sandbox.js';
 import { PreviewService } from './preview.js';
-import { assertSafetyBackupCurrent, createSafetyBackup } from './backups.js';
+import { assertSafetyBackupCurrent, createSafetyBackup, discardOperationBackup } from './backups.js';
+import { retireWorkflowRefs } from './retention.js';
 import { readWorktreeState } from './worktree-state.js';
 
 function fail(message: string, code: string): never {
@@ -298,7 +299,7 @@ export class WorkflowService {
       fork = (await runGit(['merge-base', base, 'HEAD'], { cwd: worktree })).stdout.trim();
     } else {
       branch = `warden/change-${plan.id.replace(/^todo-/, '').slice(0, 8)}`;
-      const kind = request.kind ?? 'worktree';
+      const kind = request.kind ?? 'clone';
       const free = list.find(
         (row) => row.free && !!row.clone === (kind === 'clone') && !workflow.changes.some((change) => active(change) && change.worktree === row.path),
       );
@@ -365,6 +366,8 @@ export class WorkflowService {
         fail('备份期间代码或主开发分支已变化，请重新检查', 'review_changed');
       await this.assertRebaseIgnoredFiles(checkout.path, boundary, before, target);
       await assertSafetyBackupCurrent(backup);
+      change.rebaseBackups = [...(change.rebaseBackups ?? []), backup];
+      await this.save(change);
       try {
         await runGitWrite(['-c', 'rebase.updateRefs=false', 'rebase', '--no-autostash', '--onto', target, boundary], {
           cwd: checkout.path,
@@ -384,6 +387,12 @@ export class WorkflowService {
     await this.moveReview(change);
     delete change.submittedHead;
     await this.save(change);
+    await retireWorkflowRefs(this.repo.commonRoot);
+    if (change.rebaseBackups?.length) {
+      for (const backup of change.rebaseBackups) await discardOperationBackup(this.store, backup);
+      delete change.rebaseBackups;
+      await this.save(change);
+    }
     return change;
   }
 
@@ -774,7 +783,7 @@ export class WorkflowService {
         result.state = 'committed';
         result.canRecord = (await dirtyCount(destination.path)) === 0;
         result.changed =
-          (await revParse(destination.path, 'HEAD^{tree}')) !== (integration.tree ?? (await revParse(this.repo.commonRoot, `${integration.source}^{tree}`)));
+          (await revParse(destination.path, 'HEAD^{tree}')) !== (integration.tree ?? (await revParse(change.worktree, `${integration.source}^{tree}`)));
         if (!result.canRecord) result.message = '提交已创建，但主开发分支还有未提交改动；请处理后再确认。';
       } else if (!integration.prepared) {
         result.message = '准备过程尚未完成，请重试准备；已有文件会保留。';
@@ -826,13 +835,15 @@ export class WorkflowService {
         const destination = await this.destination(change.developmentBranch, !change.integration, change.integration?.worktree);
         if (change.integration && (await dirtyCount(destination.path))) {
           const index = await this.indexState(destination.path);
-          await this.importCommit(sandbox.path, destination.path, composed);
-          const matches = await runGit(['diff', '--cached', '--quiet', tree, '--'], { cwd: destination.path, okCodes: [0, 1] });
-          if (index.unstaged || matches.code) fail('准备被中断，主目录有其他改动，请手动处理后重试', 'development_dirty');
+          // Compare index entries without importing the trial commit or its history into the
+          // primary repository. NUL-delimited raw diffs also ignore display-only diff settings.
+          const flags = ['--raw', '--no-abbrev', '--no-renames', '--no-ext-diff', '--no-textconv', '-z'];
+          const [staged, expected] = await finishReads([
+            runGit(['diff', '--cached', ...flags, target, '--'], { cwd: destination.path }),
+            runGit(['diff', ...flags, target, composed, '--'], { cwd: sandbox.path }),
+          ]);
+          if (index.unstaged || staged.stdout !== expected.stdout) fail('准备被中断，主目录有其他改动，请手动处理后重试', 'development_dirty');
         } else {
-          await this.importCommit(checkout.path, this.repo.commonRoot, source);
-          await runGitWrite(['update-ref', `refs/warden/changes/${change.id}/source`, source], { cwd: this.repo.commonRoot });
-          await this.importCommit(sandbox.path, destination.path, composed);
           change.integration = { id: randomUUID(), source, sourceBase: boundary, tree, parent: target, worktree: destination.path, message: change.title };
           change.status = 'integrating';
           await this.save(change);
@@ -862,8 +873,11 @@ export class WorkflowService {
       const change = changeOf(await this.store.load(), id);
       if (!change.integration && change.deliveries?.length) {
         const last = change.deliveries.at(-1)!;
-        if ((request?.mode === 'record' && request.commit === last.commit) || (request?.mode === 'commit' && request.developmentHead === last.parent))
+        if ((request?.mode === 'record' && request.commit === last.commit) || (request?.mode === 'commit' && request.developmentHead === last.parent)) {
+          await retireWorkflowRefs(this.repo.commonRoot);
+          await new PreviewService(this.repo, this.store).resume().catch(() => {});
           return change;
+        }
       }
       const integration = change.integration;
       if (change.status !== 'integrating' || !integration) fail('请先将改动准备到主开发分支并验证', 'change_not_prepared');
@@ -906,11 +920,9 @@ export class WorkflowService {
       integration.message = (await runGit(['log', '-1', '--format=%B', head], { cwd: destination.path })).stdout.trim();
       delete integration.error;
       integration.id ??= randomUUID();
-      await runGitWrite(['update-ref', `refs/warden/deliveries/${integration.id}/source`, integration.source], { cwd: this.repo.commonRoot });
-      await runGitWrite(['update-ref', `refs/warden/deliveries/${integration.id}/commit`, head], { cwd: this.repo.commonRoot });
-      await runGitWrite(['update-ref', `refs/warden/changes/${change.id}/accepted`, head], { cwd: this.repo.commonRoot });
       await this.save(change);
       await this.recordAccepted(change);
+      await retireWorkflowRefs(this.repo.commonRoot);
       await new PreviewService(this.repo, this.store).resume().catch(() => {});
       return change;
     });

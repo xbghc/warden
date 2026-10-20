@@ -96,16 +96,26 @@ export class PreviewService {
   private async recover(state: ReviewState, cwd: string) {
     const saved = state.connectionPreview;
     if (!saved?.pending) return;
+    const obsolete: string[] = [];
     const actual = await snapshotWorktree(cwd, checkpointStore(this.store.file));
     if (actual === saved.pending.tree) {
       const pending = saved.pending;
-      state.connectionPreview = { ...pending.response, tree: pending.tree, sandbox: pending.sandbox, snapshot: pending.snapshot };
+      const keepSnapshot = pending.response.status !== 'paused' && pending.response.connectedIds.length > 0;
+      state.connectionPreview = {
+        ...pending.response,
+        tree: pending.tree,
+        ...(keepSnapshot ? { sandbox: pending.sandbox, snapshot: pending.snapshot } : {}),
+      };
+      if (saved.sandbox && saved.sandbox !== pending.sandbox) obsolete.push(saved.sandbox);
+      if (!keepSnapshot) obsolete.push(pending.sandbox);
     } else if (actual === saved.tree) {
+      obsolete.push(saved.pending.sandbox);
       delete saved.pending;
     } else conflict('连接更新被中断，主目录有其他改动；请手动处理后重试', 'preview_interrupted');
     await this.store.update((s) => {
       s.connectionPreview = state.connectionPreview;
     });
+    for (const sandbox of obsolete) await GitSandbox.open(this.store, sandbox).dispose();
   }
 
   private async compose(requestedIds?: string[], suspending = false): Promise<PreviewResponse> {
@@ -177,11 +187,15 @@ export class PreviewService {
           previous.status !== response.status ||
           previous.developmentHead !== head ||
           JSON.stringify(previous.connectedIds) !== JSON.stringify(ids) ||
-          JSON.stringify(previous.files) !== JSON.stringify(response.files)
+          JSON.stringify(previous.files) !== JSON.stringify(response.files) ||
+          (!ids.length && !!previous.sandbox)
         )
           await this.store.update((s) => {
-            s.connectionPreview = { ...previous, ...response };
+            s.connectionPreview = { ...previous, ...response, ...(!ids.length ? { sandbox: undefined, snapshot: undefined } : {}) };
           });
+        if (!ids.length && previous.sandbox) {
+          await GitSandbox.open(this.store, previous.sandbox).dispose();
+        }
         return response;
       }
       // Durable before touching files. On restart, accept only the complete old or new tree.
@@ -197,8 +211,9 @@ export class PreviewService {
       if ((await snapshotWorktree(primary.path, checkpointStore(this.store.file))) !== tree)
         conflict('同步期间主目录发生变化，已停止继续同步，请检查文件', 'preview_interrupted');
       await this.store.update((s) => {
-        s.connectionPreview = { ...response, tree, sandbox: sandbox.path, snapshot };
+        s.connectionPreview = { ...response, tree, ...(ids.length ? { sandbox: sandbox.path, snapshot } : {}) };
       });
+      retained = ids.length > 0;
       if (previous?.sandbox && previous.sandbox !== sandbox.path) await GitSandbox.open(this.store, previous.sandbox).dispose();
       return response;
     } finally {
