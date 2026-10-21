@@ -137,6 +137,9 @@ Only the final binary patch enters the primary index. Neither the agent's source
 temporary composition commits are fetched into the primary repository. Interrupted preparation
 compares NUL-delimited raw index changes with the isolated candidate, without importing its tree
 or depending on display-only diff configuration.
+Preview and delivery patches share the review diff's fixed `a/` and `b/` prefixes, disabled color,
+three context lines and short submodule format, with external diff and textconv disabled. Local
+and global Git display settings cannot redirect delivered paths or replace the file bytes.
 
 `POST /workflow/changes/:id/accept` checks HEAD and the staged binary-diff fingerprint, then runs
 ordinary `git commit -m` in the primary checkout. Identity, signing and Git hooks are preserved.

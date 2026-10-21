@@ -2,7 +2,7 @@ import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 import type { FileDiff, FileSummary, Target, TargetKey, WorktreeInfo, CommentSide } from '@warden/shared';
 import { parseTargetKey, TargetKeyError } from '@warden/shared';
-import { EMPTY_TREE_SHA, mergeBase, refExists, revParse, runGit, type SnapshotEnv } from './git.js';
+import { DIFF_OUTPUT_ARGS, EMPTY_TREE_SHA, mergeBase, refExists, revParse, runGit, type SnapshotEnv } from './git.js';
 import { checkpointObjects, withCheckpointIndex } from './checkpoints.js';
 import { parseUnifiedDiff } from './diffparse.js';
 import { DEBUG_MARKER_STRINGS, debugLineNumbers, markDebugLines } from './debug.js';
@@ -37,14 +37,6 @@ async function runDiff(ctx: TargetContext, args: string[]): Promise<string> {
   return withCheckpointIndex(ctx.cwd, checkpointOf(ctx).store, async (snapshot) => (await runGit(args, { cwd: ctx.cwd, snapshot })).stdout);
 }
 
-/**
- * Every diff warden parses or turns into a patch. The user's git config reaches these commands, and
- * each flag here overrides one setting that would change the output: textconv would put a
- * converted text in the patch staging applies (a PDF's extracted text, say, in the index), the
- * mnemonic or no-prefix settings would break every path, and diff.submodule would hide a
- * submodule's change or list files from inside it.
- */
-const DIFF_OUTPUT_ARGS = ['--no-color', '--no-ext-diff', '--no-textconv', '--src-prefix=a/', '--dst-prefix=b/', '--submodule=short', '-U3'];
 const DIFF_BASE_ARGS = ['diff', ...DIFF_OUTPUT_ARGS, '-M', '--find-renames'];
 
 export function resolveTargetContext(repo: RepoContext, worktrees: WorktreeInfo[], key: TargetKey): TargetContext {

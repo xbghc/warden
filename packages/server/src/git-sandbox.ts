@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { runGit, runGitWrite, type SnapshotEnv } from './git.js';
+import { DIFF_OUTPUT_ARGS, runGit, runGitWrite, type SnapshotEnv } from './git.js';
 import type { StateStore } from './state.js';
 import type { DevelopmentChange } from '@warden/shared';
 
@@ -15,7 +15,8 @@ export async function deliveryBase(change: DevelopmentChange, head: string, targ
   return contains.code === 0 ? target : (change.sourceBase ?? change.base);
 }
 export async function patchBetween(cwd: string, from: string, to: string, snapshot?: SnapshotEnv) {
-  return (await runGit(['diff', '--binary', '--full-index', '--no-renames', '--no-ext-diff', '--no-textconv', from, to, '--'], { cwd, snapshot })).stdout;
+  const args = ['diff', ...DIFF_OUTPUT_ARGS, '--binary', '--full-index', '--no-renames', from, to, '--'];
+  return (await runGit(args, { cwd, snapshot })).stdout;
 }
 
 /** Server-generated patches only. No shell, no partial/reject application, no automatic stash. */

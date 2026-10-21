@@ -35,6 +35,7 @@ beforeEach(async () => {
   await workflow.configure('feature/order');
 });
 afterEach(async () => {
+  vi.unstubAllEnvs();
   for (const w of await listWorktreesDetailed(await resolveRepo(fx.root))) if (w.slot !== undefined) await rm(w.path, { recursive: true, force: true });
   await fx.cleanup();
   await rm(data, { recursive: true, force: true });
@@ -56,6 +57,66 @@ async function deliver(c: DevelopmentChange, message: string) {
 }
 
 describe('continuous workspace delivery and passive synchronization', () => {
+  it('delivers nested additions without stripping their directory when diff.noprefix is enabled', async () => {
+    const a = await task('Nested addition');
+    fx.git('-C', a.worktree, 'config', 'diff.noprefix', 'true');
+    await edit(a, 'src/added.txt', 'Nested content\n', true);
+
+    const delivered = await deliver(a, 'Add a nested file');
+
+    expect(fx.git('show', '--format=', '--name-only', head()).trim()).toBe('src/added.txt');
+    expect(await file(fx.root, 'src/added.txt')).toBe('Nested content\n');
+    await expect(file(fx.root, 'added.txt')).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(fx.git('rev-parse', 'HEAD^{tree}').trim()).toBe(fx.git('-C', a.worktree, 'rev-parse', 'HEAD^{tree}').trim());
+    expect(delivered.sourceBase).toBe(sourceHead(a));
+  });
+
+  it.each(['local', 'global'] as const)(
+    'preserves preview and delivery paths and bytes under %s Git display configuration',
+    { timeout: longGitTimeout },
+    async (scope) => {
+      const a = await task('Display configuration');
+      const config = path.join(data, 'display.gitconfig');
+      for (const [key, value] of [
+        ['diff.noprefix', 'true'],
+        ['diff.mnemonicPrefix', 'true'],
+        ['diff.srcPrefix', 'before/'],
+        ['diff.dstPrefix', 'after/'],
+        ['diff.context', '0'],
+        ['diff.submodule', 'diff'],
+        ['color.ui', 'always'],
+      ]) {
+        if (scope === 'global') fx.git('config', '--file', config, key!, value!);
+        else {
+          fx.git('config', key!, value!);
+          fx.git('-C', a.worktree, 'config', key!, value!);
+        }
+      }
+      if (scope === 'global') vi.stubEnv('GIT_CONFIG_GLOBAL', config);
+      const originalHead = head();
+      const bytes = Buffer.from([0, 255, 0, 128, 3, 10]);
+      await edit(a, 'src/a.ts', 'export function a() {\n  return 3;\n}\n\nexport const extra = true;\n');
+      await edit(a, 'src/added.txt', 'Nested content\n');
+      await writeFile(path.join(a.worktree, 'src/image.bin'), bytes);
+
+      expect(await preview.set([a.id])).toMatchObject({ status: 'current', connectedIds: [a.id] });
+      expect(await file(fx.root, 'src/added.txt')).toBe('Nested content\n');
+      expect(await file(fx.root, 'src/a.ts')).toBe(await file(a.worktree, 'src/a.ts'));
+      expect(await readFile(path.join(fx.root, 'src/image.bin'))).toEqual(bytes);
+      expect(head()).toBe(originalHead);
+      expect(fx.git('diff', '--cached', '--name-only').trim()).toBe('');
+
+      fx.git('-C', a.worktree, 'add', '--all');
+      fx.git('-C', a.worktree, 'commit', '-qm', 'Agent changes');
+      await deliver(a, 'Deliver the previewed files');
+
+      expect(fx.git('rev-parse', 'HEAD^{tree}').trim()).toBe(fx.git('-C', a.worktree, 'rev-parse', 'HEAD^{tree}').trim());
+      expect(fx.git('show', '--format=', '--name-only', head()).trim().split('\n')).toEqual(['src/a.ts', 'src/added.txt', 'src/image.bin']);
+      expect(await readFile(path.join(fx.root, 'src/image.bin'))).toEqual(bytes);
+      expect(fx.git('status', '--porcelain').trim()).toBe('');
+    },
+  );
+
   it('delivers A1, B1, A2 without rebasing either source or including A1 twice', { timeout: longGitTimeout }, async () => {
     const a = await task('A');
     const b = await task('B');

@@ -29,6 +29,13 @@ const FORBIDDEN_OPTION_PREFIXES = ['--output', '--ext-diff', '--textconv', '-c',
 export const DEFAULT_GIT_TIMEOUT_MS = 30_000;
 export const EMPTY_TREE_SHA = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
 
+/**
+ * Diffs parsed or applied by Warden need a stable format even under user display settings.
+ * Textconv would substitute converted content, custom prefixes would change the paths apply
+ * strips, and submodule summaries would hide gitlink changes. Keep context for ordinary apply.
+ */
+export const DIFF_OUTPUT_ARGS = ['--no-color', '--no-ext-diff', '--no-textconv', '--src-prefix=a/', '--dst-prefix=b/', '--submodule=short', '-U3'] as const;
+
 export class GitError extends HttpError {
   constructor(
     message: string,
