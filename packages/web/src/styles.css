@@ -3,7 +3,7 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* shadcn/ui neutral theme. Feedback and diff colors remain domain-specific below. */
+/* shadcn/ui neutral theme. Diff colors remain domain-specific below. */
 :root {
   --radius: 0.5rem;
   --background: oklch(1 0 0);
@@ -89,10 +89,6 @@
   --line-strong: oklch(0.708 0 0);
   --ink: var(--foreground);
   --ink-2: oklch(0.439 0 0);
-  --feedback: oklch(0.541 0.281 293.009);
-  --feedback-strong: oklch(0.491 0.27 292.581);
-  --feedback-soft: oklch(0.969 0.016 293.756);
-  --feedback-line: oklch(0.811 0.111 293.571);
   --add-bg: #e3f5e7;
   --add-fg: #1e7a3a;
   --del-bg: #fce8e8;
@@ -149,7 +145,7 @@ button.link.danger {
   color: var(--destructive);
 }
 button.link.active {
-  color: var(--feedback);
+  color: var(--foreground);
 }
 button.toggle[aria-pressed="true"] {
   background: var(--secondary);
@@ -190,27 +186,6 @@ kbd {
   gap: 5px;
   white-space: nowrap;
   cursor: pointer;
-}
-.badge-active {
-  background: var(--feedback-soft);
-  color: var(--feedback);
-}
-/* A count that leads somewhere: the badge's look, a button's behaviour. */
-button.wt-review {
-  border: 0;
-  cursor: pointer;
-}
-button.wt-review:hover {
-  background: var(--feedback);
-  color: var(--surface);
-}
-.badge-exported {
-  background: var(--surface-3);
-  color: var(--muted-foreground);
-}
-.badge-orphaned {
-  background: var(--warn-bg);
-  color: var(--warn-fg);
 }
 .badge-open {
   background: var(--ink);
@@ -404,37 +379,6 @@ button.wt-review:hover {
   align-items: center;
   gap: 6px;
 }
-/* The rail's switch, set apart from the reading tools by the gap it opens on its left. */
-.rail-switch {
-  margin-left: 8px;
-  background: none;
-  border-color: transparent;
-  color: var(--ink-2);
-}
-.rail-switch:hover:not(:disabled) {
-  background: var(--surface-3);
-  border-color: transparent;
-  color: var(--ink);
-}
-.rail-switch.active {
-  background: var(--surface);
-  border-color: var(--line);
-  color: var(--ink);
-}
-.rail-switch-n {
-  font-family: var(--mono);
-  font-size: var(--t-meta);
-  color: var(--muted-foreground);
-}
-/* Comments nobody has sent back yet are the one thing the tool exists to produce, so the switch
-   that reveals them carries the accent while any are outstanding. */
-.rail-switch.has-unexported .rail-switch-n {
-  background: var(--feedback-soft);
-  color: var(--feedback);
-  border-radius: var(--r-ctl);
-  padding: 0 5px;
-}
-
 /* ---- sidebar / tree ------------------------------------------------------------ */
 .sidebar {
   border-right: 1px solid var(--border);
@@ -800,14 +744,6 @@ button.wt-review:hover {
   border-radius: var(--r-ctl);
   padding: 0 5px;
 }
-.cc {
-  font-family: var(--mono);
-  font-size: 11px;
-  background: var(--feedback-soft);
-  color: var(--feedback);
-  border-radius: var(--r-ctl);
-  padding: 0 5px;
-}
 
 /* ---- diff panel ---------------------------------------------------------------- */
 .diff-panel {
@@ -862,13 +798,6 @@ button.wt-review:hover {
   tab-size: 4;
   background: var(--surface);
 }
-.diff-scroll.selecting {
-  user-select: none;
-  cursor: row-resize;
-}
-.diff-scroll.reattaching .add-btn {
-  background: var(--warn-fg);
-}
 .vrow {
   will-change: transform;
 }
@@ -876,51 +805,12 @@ button.wt-review:hover {
   display: flex;
   min-height: 20px;
 }
-/* Anchors the comment pin and pill of the row. */
-.row.line,
-.cell {
-  position: relative;
-}
-.pin {
-  position: absolute;
-  right: 0;
-  top: 0;
-  bottom: 0;
-  width: 3px;
-  background: var(--feedback);
-}
-.pin.muted {
-  background: var(--line-strong);
-}
-.pill {
-  position: absolute;
-  right: 10px;
-  top: 2px;
-  height: 16px;
-  min-width: 16px;
-  padding: 0 5px;
-  justify-content: center;
-  border: none;
-  border-radius: 8px;
-  background: var(--feedback);
-  color: #fff;
-  font-family: var(--sans);
-  font-size: 11px;
-  line-height: 16px;
-}
-.pill:hover:not(:disabled) {
-  background: var(--feedback-strong);
-  border-color: transparent;
-}
-.pill.muted {
-  background: var(--line-strong);
-}
 .row.hunk-head {
   align-items: center;
   background: var(--surface-2);
   color: var(--muted-foreground);
   font-size: 11.5px;
-  padding: 3px 12px 3px 128px;
+  padding: 3px 12px 3px 110px;
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
   white-space: pre-wrap;
@@ -961,15 +851,6 @@ button.wt-review:hover {
 .debug-row .link:hover {
   color: var(--ink);
 }
-.row.attach {
-  background: var(--surface-2);
-  border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
-  padding: 6px 12px 6px 60px;
-  font-family: var(--sans);
-  font-size: 13px;
-  display: block;
-}
 .gut {
   flex: 0 0 48px;
   text-align: right;
@@ -981,47 +862,6 @@ button.wt-review:hover {
 }
 .gut:hover {
   color: var(--ink);
-}
-.addc {
-  flex: 0 0 18px;
-  position: relative;
-}
-.add-btn {
-  position: absolute;
-  left: 0;
-  top: 2px;
-  width: 16px;
-  height: 16px;
-  padding: 0;
-  justify-content: center;
-  line-height: 16px;
-  border-radius: var(--r-ctl);
-  background: var(--feedback);
-  color: #fff;
-  border: none;
-  font-weight: 600;
-  font-size: 13px;
-  opacity: 0;
-  cursor: pointer;
-  z-index: 1;
-}
-.add-btn:hover:not(:disabled) {
-  background: var(--feedback-strong);
-  border-color: transparent;
-}
-.row:hover .add-btn,
-.cell:hover .add-btn {
-  opacity: 1;
-}
-/* Same badge shown inline in prose ("click the + next to a line"), not over a row. */
-.add-btn.static {
-  position: static;
-  display: inline-flex;
-  opacity: 1;
-  width: 16px;
-  height: 16px;
-  font-size: 11px;
-  vertical-align: -3px;
 }
 /* Code block toggle: shown on the head's hover, and always while the block is shut. */
 .foldc {
@@ -1098,8 +938,7 @@ button.wt-review:hover {
   min-width: 0;
   white-space: pre-wrap;
   word-break: break-all;
-  /* Keeps the text clear of the lane the comment pin and pill sit in. */
-  padding-right: 40px;
+  padding-right: 12px;
 }
 .nonl {
   color: var(--del-fg);
@@ -1124,30 +963,6 @@ button.wt-review:hover {
   background: var(--surface);
   color: var(--muted-foreground);
 }
-.row.line.selected,
-.cell.selected {
-  background: var(--feedback-soft) !important;
-}
-/* Keep after .selected: these tie on specificity and both are !important, so the
-   focused row only wins by source order. */
-.row.line.focused,
-.cell.focused {
-  background: var(--feedback-soft) !important;
-  box-shadow: inset 3px 0 var(--feedback);
-}
-.row.line.flash,
-.cell.flash {
-  animation: flash 1.6s ease-out;
-}
-@keyframes flash {
-  0% {
-    background: var(--feedback-line);
-  }
-  100% {
-    background: transparent;
-  }
-}
-
 /* split */
 .row.pair {
   display: grid;
@@ -1167,166 +982,9 @@ button.wt-review:hover {
   background: var(--surface-2);
 }
 .diff-list.split .row.hunk-head {
-  padding-left: 78px;
+  padding-left: 60px;
 }
 
-/* ---- comments ---------------------------------------------------------------- */
-/* A card is a note headed back to the agent; the left rule says where it stands. */
-.comment-card {
-  position: relative;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-left: 3px solid var(--feedback);
-  border-radius: var(--r-card);
-  padding: 7px 10px 8px;
-}
-.comment-card.status-exported {
-  border-left-color: var(--line-strong);
-}
-.comment-card.status-orphaned {
-  border-color: var(--warn-line);
-  border-left-style: dashed;
-  background: var(--warn-soft);
-}
-.comment-card.selected {
-  border-color: var(--feedback);
-  box-shadow: 0 0 0 2px var(--feedback-soft);
-}
-.comment-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 20px;
-  font-size: 12px;
-  color: var(--ink-2);
-  flex-wrap: wrap;
-}
-.comment-head .mono {
-  font-size: 11px;
-}
-.comment-head .time {
-  font-size: 11px;
-  color: var(--muted-foreground);
-}
-/* Out of flow, so four text buttons stop pushing the metadata onto a second line in a
-   360px rail. `background: inherit` picks up whatever the card is painted with,
-   including the cream of an orphaned one, so the overlay reads as part of the card. */
-.card-actions {
-  position: absolute;
-  right: 6px;
-  top: 5px;
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding-left: 8px;
-  border-radius: var(--r-ctl);
-  background: inherit;
-  opacity: 0;
-  transition: opacity 0.1s;
-}
-.card-actions .link {
-  font-size: 12px;
-}
-/* :focus-within is not optional here — keyboard users never hover, and the buttons stay
-   in the tab order while transparent. */
-.comment-card:hover .card-actions,
-.comment-card:focus-within .card-actions,
-/* 重新附着 is a toggle; hiding it once the pointer leaves would leave no way back
-   except the rail banner. */
-.comment-card.reattaching .card-actions {
-  opacity: 1;
-}
-/* Where 加入待办 lists the todos the comment can join: 新建 first, then the branch's open ones. */
-.todo-pick {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  margin: 6px 0 2px;
-  padding: 4px 6px;
-  border-radius: var(--r-ctl);
-  background: var(--surface-2);
-}
-.todo-pick .link {
-  font-size: 12px;
-}
-.todo-pick-item {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: left;
-}
-/* The thread under a comment. Each answer hangs off the note it answers rather than
-   becoming a card of its own: the conversation is about one place in the code. */
-.comment-reply {
-  margin-top: 6px;
-  padding-top: 6px;
-  border-top: 1px dashed var(--line);
-}
-.comment-reply-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 11px;
-  color: var(--ink-2);
-}
-.reply-agent .comment-reply-head > :first-child {
-  color: var(--feedback);
-  font-weight: 600;
-}
-.comment-card .comment-editor {
-  margin-top: 6px;
-}
-.comment-editor {
-  background: var(--surface);
-  border: 1px solid var(--feedback);
-  border-left-width: 3px;
-  border-radius: var(--r-card);
-  padding: 8px 10px;
-  max-width: 900px;
-}
-.comment-editor-head {
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--muted-foreground);
-  margin-bottom: 6px;
-}
-.comment-editor textarea {
-  border-color: var(--line);
-}
-.comment-editor-actions {
-  display: flex;
-  gap: 6px;
-  margin-top: 8px;
-}
-.comment-editor .primary {
-  background: var(--feedback);
-  border-color: var(--feedback);
-}
-.comment-editor .primary:hover:not(:disabled) {
-  background: var(--feedback-strong);
-  border-color: var(--feedback-strong);
-}
-.snippet {
-  font-family: var(--mono);
-  font-size: 11.5px;
-  line-height: 18px;
-  background: var(--surface-2);
-  border-radius: var(--r-ctl);
-  padding: 4px 8px;
-  margin: 6px 0;
-  overflow-x: auto;
-  white-space: pre;
-}
-.snippet .ln {
-  display: inline-block;
-  width: 40px;
-  color: var(--muted-foreground);
-  text-align: right;
-  margin-right: 10px;
-  user-select: none;
-}
 .md {
   font-size: 13px;
 }
@@ -1646,13 +1304,6 @@ button.wt-review:hover {
   border-radius: var(--r-card);
   overflow-wrap: anywhere;
 }
-.wt-expanded .rail-tools {
-  padding: 0 0 8px;
-}
-.wt-expanded .rail-list {
-  padding: 0;
-  overflow: visible;
-}
 .wt-commit {
   display: flex;
   align-items: baseline;
@@ -1714,10 +1365,6 @@ button.wt-review:hover {
   padding: 20px 2px;
 }
 /* ---- task lists: todos and issues, in the shape of Google Tasks -------------------- */
-.rail-list.tasks {
-  padding: 4px 0 12px;
-  gap: 0;
-}
 /* Keep the add action aligned with the task titles. */
 .task-add {
   height: 34px;
@@ -1931,64 +1578,6 @@ button.wt-review:hover {
 .task-list-pick {
   max-width: 220px;
 }
-/* An issue's linked comments, under the open row like subtasks. */
-.task-subs {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-top: 6px;
-}
-.task-sub {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 4px 6px;
-  border-radius: var(--r-ctl);
-  background: var(--surface-2);
-  font-size: 12px;
-}
-.task-sub-dot {
-  flex: 0 0 8px;
-  width: 8px;
-  height: 8px;
-  margin-top: 6px;
-  border-radius: 50%;
-  background: var(--feedback);
-}
-.task-sub.status-exported .task-sub-dot {
-  background: var(--line-strong);
-}
-.task-sub.status-orphaned .task-sub-dot {
-  background: var(--warn-line);
-}
-.task-sub-main {
-  flex: 1;
-  min-width: 0;
-}
-.task-sub-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-.task-sub-head .mono {
-  font-size: 11px;
-}
-.task-sub-body {
-  color: var(--muted-foreground);
-  white-space: pre-wrap;
-  max-height: 54px;
-  overflow: hidden;
-}
-.task-sub-add {
-  align-self: flex-start;
-  font-size: 12px;
-}
-.task-sub-none {
-  font-size: 12px;
-  color: var(--muted-foreground);
-}
-
 /* ---- toast ------------------------------------------------------------------------- */
 .toast {
   position: fixed;
@@ -2020,117 +1609,10 @@ button.wt-review:hover {
   border-color: rgba(255, 255, 255, 0.5);
 }
 
-/* ---- rail: comments, todos, issues ------------------------------------------------ */
-.rail {
-  width: 360px;
-  flex: none;
-  border-left: 1px solid var(--line);
-  display: flex;
-  flex-direction: column;
-  background: var(--ground);
-  min-height: 0;
-}
-.rail-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  min-height: 56px;
-  border-bottom: 1px solid var(--line);
-}
-/* Second row of the rail: the filters of whichever notebook is open. */
-.rail-tools {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  min-height: 48px;
-  border-bottom: 1px solid var(--line);
-  font-size: 12px;
-}
-.rail-notice {
-  padding: 6px 10px;
-  background: var(--warn-bg);
-  color: var(--warn-fg);
-  border-bottom: 1px solid var(--warn-line);
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  font-size: 12px;
-}
-.rail-notice .link {
-  color: var(--warn-fg);
-}
-.rail-list {
-  flex: 1;
-  overflow: auto;
-  padding: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.rail-slot {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.rail-foot {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px;
-  border-top: 1px solid var(--line);
-  background: var(--ground);
-}
-.rail-foot-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-/* The one loud control in the app: what you wrote goes back to the agent from here. */
-.send {
-  height: 30px;
-  padding: 0 14px;
-  background: var(--feedback);
-  border-color: var(--feedback);
-  color: #fff;
-  font-weight: 500;
-}
-.send:hover:not(:disabled) {
-  background: var(--feedback-strong);
-  border-color: var(--feedback-strong);
-}
-.send-n {
-  font-family: var(--mono);
-  font-size: 11px;
-  font-weight: 400;
-  line-height: 16px;
-  padding: 0 5px;
-  border-radius: var(--r-ctl);
-  background: rgba(255, 255, 255, 0.22);
-}
-.rail .comment-card {
-  cursor: pointer;
-}
-.rail .comment-card.focused {
-  border-color: var(--feedback);
-  box-shadow: 0 0 0 2px var(--feedback-soft);
-}
-.comment-head .file {
-  color: var(--muted-foreground);
-  max-width: 120px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.rail .comment-editor {
-  max-width: none;
-}
-
 @media (prefers-reduced-motion: reduce) {
   [data-slot="button"],
   [data-slot="tabs-trigger"],
   .chev,
-  .card-actions,
   .task-row.completing,
   .progress-track > span {
     transition: none;
@@ -2321,17 +1803,6 @@ button.link.danger:has(> .action-icon):hover:not(:disabled) {
   font-size: 11px;
   font-weight: 500;
   line-height: 1;
-}
-
-.comment-editor-head {
-  font-family: var(--mono);
-  font-size: 12px;
-  color: var(--muted-foreground);
-  margin: -8px -10px 8px;
-  padding: 8px 19px;
-  background: var(--surface-2);
-  border-bottom: 1px solid var(--line);
-  border-radius: 5px 5px 0 0;
 }
 
 .block-heading {
@@ -2600,30 +2071,6 @@ button.link.danger:has(> .action-icon):hover:not(:disabled) {
 .wt-add > [data-slot="button"] {
   margin-top: 4px;
 }
-.wt-review {
-  height: 24px;
-  padding: 0 8px;
-  font-size: 12px;
-}
-.rail {
-  background: var(--background);
-}
-.rail-list {
-  background: var(--sidebar);
-  padding: 12px;
-  gap: 12px;
-}
-.comment-card {
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
-}
-.comment-editor textarea {
-  font-family: var(--sans);
-  resize: vertical;
-  min-height: 100px;
-}
-.comment-card .comment-editor {
-  padding: 8px 10px;
-}
 .md ul {
   list-style-type: disc;
 }
@@ -2766,11 +2213,6 @@ button.link.danger:has(> .action-icon):hover:not(:disabled) {
   line-height: 1.6;
   margin-top: 12px;
 }
-.change-feedback {
-  margin-top: 12px;
-  font-size: 12px;
-  color: var(--feedback);
-}
 .change-checklist {
   margin-top: 16px;
   padding-top: 12px;
@@ -2782,9 +2224,6 @@ button.link.danger:has(> .action-icon):hover:not(:disabled) {
   cursor: pointer;
   color: var(--muted-foreground);
   font-size: 12px;
-}
-.change-checklist .todo-rail {
-  max-width: none;
 }
 .workflow-config p,
 .workflow-guide p {
@@ -3096,17 +2535,6 @@ button.link.danger:has(> .action-icon):hover:not(:disabled) {
   color: var(--muted-foreground);
   margin-bottom: 8px;
 }
-.plan-comment {
-  padding: 8px 12px;
-  border-left: 2px solid var(--feedback-border);
-  margin-top: 8px;
-}
-.plan-comment button {
-  padding-left: 0;
-  white-space: normal;
-  text-align: left;
-  height: auto;
-}
 .legacy-todos {
   margin-top: 24px;
   font-size: 13px;
@@ -3124,10 +2552,6 @@ button.link.danger:has(> .action-icon):hover:not(:disabled) {
 .legacy-todos small {
   display: block;
   margin-top: 4px;
-}
-.rail-head h2 {
-  font-size: 14px;
-  font-weight: 600;
 }
 .commit-plan .workflow-filters {
   flex-wrap: wrap;
@@ -3189,7 +2613,7 @@ button.link.danger:has(> .action-icon):hover:not(:disabled) {
   overflow-wrap: anywhere;
 }
 
-/* The workbench has one navigation area; files and comments belong to its content. */
+/* The workbench has one navigation area; files and diffs belong to its content. */
 .wb-app {
   display: flex;
   height: 100%;
@@ -3927,10 +3351,6 @@ button.link.danger:has(> .action-icon):hover:not(:disabled) {
   font-size: 11px;
   flex-wrap: wrap;
 }
-.wb-review .rail {
-  width: 320px;
-  flex: 0 0 320px;
-}
 .wb-task-footer {
   display: flex;
   align-items: center;
@@ -4179,15 +3599,6 @@ button.link.danger:has(> .action-icon):hover:not(:disabled) {
     width: 210px;
     flex-basis: 210px;
   }
-  .wb-review .rail {
-    position: absolute;
-    right: 0;
-    top: 0;
-    bottom: 0;
-    background: var(--background);
-    z-index: 10;
-    box-shadow: -8px 0 20px #0001;
-  }
 }
 @media (max-width: 900px) {
   .wb-navigation {
@@ -4297,9 +3708,6 @@ button.link.danger:has(> .action-icon):hover:not(:disabled) {
     display: inline-flex;
     align-self: flex-start;
     margin: 4px;
-  }
-  .wb-review .rail {
-    width: min(350px, 100%);
   }
   .wb-task-footer {
     padding: 10px 12px;

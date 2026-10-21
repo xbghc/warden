@@ -36,7 +36,7 @@ export interface FileDiff extends FileSummary {
 }
 
 export interface Hunk {
-  /** sha1 of hunk content (see anchoring rules). */
+  /** sha1 of hunk content. */
   hash: string;
   oldStart: number;
   oldLines: number;
@@ -60,54 +60,7 @@ export interface DiffLine {
   debug?: boolean;
 }
 
-export type CommentSide = 'old' | 'new';
-export type CommentStatus = 'active' | 'exported' | 'orphaned';
-
-export interface CommentAnchor {
-  /** sha1 of the full hunk content the comment lives in. */
-  hunkHash: string;
-  /** sha1 of every covered line (same side). */
-  lineHashes: string[];
-  /** hashes of up to 3 lines above the range (same side). */
-  contextBefore: string[];
-  /** hashes of up to 3 lines below the range (same side). */
-  contextAfter: string[];
-  /** Index of the first covered line among the side-lines of the hunk. */
-  hunkLineOffset: number;
-}
-
-export interface Comment {
-  id: string;
-  targetKey: TargetKey;
-  filePath: string;
-  side: CommentSide;
-  startLine: number;
-  endLine: number;
-  /** Original text of the covered lines (for export & orphaned display). */
-  codeSnippet: string[];
-  body: string;
-  status: CommentStatus;
-  anchor: CommentAnchor;
-  createdAt: string;
-  updatedAt: string;
-  /**
-   * When the comment last went to the agent, by the clipboard or by `warden feedback`. A reviewer
-   * reply clears it: the follow-up has not gone anywhere yet.
-   */
-  exportedAt?: string;
-  /** The conversation under the comment, oldest first; absent until someone answers. */
-  replies?: CommentReply[];
-}
-
-export type ReplyAuthor = 'agent' | 'reviewer';
-
-export interface CommentReply {
-  id: string;
-  author: ReplyAuthor;
-  /** Markdown. */
-  body: string;
-  at: string;
-}
+export type DiffSide = 'old' | 'new';
 
 export type ViewMode = 'unified' | 'split';
 export type Panel = 'orchestration' | 'diff' | 'commits';
@@ -119,11 +72,6 @@ export interface Prefs {
   lastPanel?: Panel;
   /** Re-run the refresh cycle when the watcher reports a repository change. */
   autoRefresh: boolean;
-  /**
-   * Whether the right-hand rail is showing. It costs 360px of the code column — most of it on a
-   * laptop in split view — so it stays shut until there is something to put in it.
-   */
-  railOpen: boolean;
   /** Fold debug code in the diff without changing the review scope or file contents. */
   ignoreDebug: boolean;
   /** How the last new slot was made; the checkout form offers the same kind first next time. */
@@ -140,17 +88,11 @@ export type SlotKind = 'clone' | 'worktree';
 export interface TargetState {
   /** filePath -> contentHash at the time it was marked viewed */
   viewed: Record<string, string>;
-  comments: Comment[];
-  /**
-   * HEAD sha recorded at the last reanchor of this scope. A different HEAD on the next reanchor
-   * means a commit happened, which is what turns "no longer locatable" into a deletion.
-   */
-  head?: string;
 }
 
 export type TodoStatus = 'open' | 'done';
 
-/** A branch-scoped note. Unlike comments, todos are not anchored to code and survive commits. */
+/** A branch-scoped note that survives commits. */
 export interface Todo {
   id: string;
   /** Branch the todo was created on; short sha when HEAD was detached. */
@@ -159,11 +101,6 @@ export interface Todo {
   /** Markdown, may be empty. */
   body: string;
   status: TodoStatus;
-  /**
-   * Comments that go with the task, in the order they were added: copying the todo hands them to the
-   * agent with it. Absent when there are none; a comment deleted anywhere is dropped from here too.
-   */
-  commentIds?: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -184,8 +121,6 @@ export interface Checkpoint {
   /** HEAD when it was taken; empty on an unborn branch. */
   head: string;
   createdAt: string;
-  /** Taken by warden as comments went to the agent, rather than by the reviewer's hand. */
-  handoff?: boolean;
 }
 
 export interface ReviewState {
@@ -240,7 +175,6 @@ export interface ChangePlan {
   /** Legacy planning metadata; never blocks allocation. */
   dependsOn?: string[];
   agent?: string;
-  commentIds?: string[];
   /** Kept when importing old checklists; a checked box is not evidence of a Git commit. */
   legacyTodo?: { branch: string; status: TodoStatus };
   createdAt: string;
@@ -254,7 +188,6 @@ export interface PlannedChange extends ChangePlan {
   submittedHead?: never;
   integration?: never;
   sync?: never;
-  review?: never;
   cleanupError?: never;
 }
 
@@ -291,8 +224,6 @@ export interface DevelopmentChange extends ChangePlan {
   acceptedAt?: string;
   cleanupError?: string;
   workspaceHook?: WorkspaceHookResult;
-  /** Review history survives reuse of the checkout directory. */
-  review?: Comment[];
 }
 
 export interface ChangeDelivery {
@@ -303,7 +234,6 @@ export interface ChangeDelivery {
   commit: string;
   message: string;
   createdAt: string;
-  review?: Comment[];
 }
 
 export interface RebaseCheck {
@@ -403,7 +333,6 @@ export interface CreateChangeRequest {
   acceptance?: string;
   /** Legacy planning metadata; never blocks allocation. */
   dependsOn?: string[];
-  commentIds?: string[];
   /** Adopt an existing numbered checkout instead of creating a task branch. */
   worktree?: string;
 }
@@ -494,23 +423,8 @@ export interface WorktreeDetail extends WorktreeInfo {
   /** The upstream the branch is set to track when that ref no longer exists, as in `[origin/topic: gone]`. */
   upstreamGone?: string;
   comparisonError?: string;
-  /** Where the comments on its code stand in the loop with its agent, across all their pools. */
-  review?: WorktreeReview;
   /** A free clone's own local branches, which the checkout form offers for it instead of the main worktree's. */
   branches?: BranchInfo[];
-}
-
-export interface WorktreeReview {
-  /** Not handed to the agent yet: new, or followed up since. */
-  toAgent: number;
-  /** Answered by the agent, waiting on the reviewer. */
-  toReviewer: number;
-  /**
-   * The target the latest of each sits in. The counts span every pool of the worktree — local
-   * views, base, commits, checkpoints — and the rail lists one pool, so a count leads there.
-   */
-  toAgentTarget?: TargetKey;
-  toReviewerTarget?: TargetKey;
 }
 
 export interface BranchInfo {
@@ -650,12 +564,11 @@ export interface FilesResponse {
   /** Root directory of the worktree this target refers to. */
   root: string;
   files: FileEntry[];
-  comments: Comment[];
 }
 
 export interface FullFileResponse {
   path: string;
-  side: CommentSide;
+  side: DiffSide;
   /** null when the file doesn't exist on that side. */
   content: string | null;
 }
@@ -710,48 +623,6 @@ export interface CreateCheckpointResponse {
   targetKey: TargetKey;
 }
 
-export interface ExportResponse {
-  text: string;
-  count: number;
-  commentIds: string[];
-}
-
-export interface CreateCommentRequest {
-  filePath: string;
-  side: CommentSide;
-  startLine: number;
-  endLine: number;
-  body: string;
-}
-
-export interface UpdateCommentRequest {
-  body?: string;
-  /** Re-attach to a new selection. */
-  side?: CommentSide;
-  startLine?: number;
-  endLine?: number;
-}
-
-/** Lines of one hunk to stage or unstage; `lines` omitted means the whole hunk. */
-
-export interface ReanchorRequest {
-  files?: FileDiff[];
-}
-
-export interface ReanchorResponse {
-  comments: Comment[];
-}
-
-export interface ReplyRequest {
-  body: string;
-}
-
-export interface ExportRequest {
-  commentIds: string[];
-  /** Build the text only. Without it the comments are marked as handed over and a checkpoint is taken. */
-  preview?: boolean;
-}
-
 /** Reorder: put the item right before `before`, or last when null. */
 export interface MoveRequest {
   before: string | null;
@@ -766,15 +637,12 @@ export interface CreateTodoRequest {
   status?: TodoStatus;
   /** Put the new todo right after this one; omitted = at the top of the list. */
   after?: string;
-  commentIds?: string[];
 }
 
 export interface UpdateTodoRequest {
   title?: string;
   body?: string;
   status?: TodoStatus;
-  /** The whole list: linking a comment appends to it, unlinking filters it. Unknown ids are refused. */
-  commentIds?: string[];
 }
 
 export interface TodosResponse {
@@ -791,7 +659,7 @@ export interface ChangeEvent {
   at: string;
 }
 
-/** The state file was written, by this server or by the CLI an agent ran (`warden reply`). */
+/** The state file was written by this server or another Warden instance. */
 export interface StateEvent {
   type: 'state';
   at: string;

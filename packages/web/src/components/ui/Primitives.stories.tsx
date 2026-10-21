@@ -43,9 +43,7 @@ export const Controls: Story = {
           </Badge>
           <Badge variant="secondary">空闲</Badge>
           <Badge variant="outline">3 个提交</Badge>
-          <Badge variant="secondary" className="badge-active">
-            2 条待确认
-          </Badge>
+          <Badge variant="secondary">2 个文件</Badge>
         </div>
         <Separator />
         <label className="field">
@@ -60,8 +58,8 @@ export const Controls: Story = {
           </NativeSelect>
         </label>
         <label className="field">
-          评论
-          <Textarea placeholder="写下给 agent 的反馈…" />
+          任务说明
+          <Textarea placeholder="描述任务目标与范围…" />
         </label>
         <label className="check">
           <Checkbox defaultChecked />

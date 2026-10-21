@@ -4,7 +4,7 @@ import { NativeSelect } from './ui/native-select';
 import { useEffect, useMemo, useState } from 'react';
 import { FileIcon } from '@react-symbols/icons/utils';
 import type { Checkpoint, FileEntry, Target, TargetKey } from '@warden/shared';
-import { formatTargetKey, targetLabel, commentScopeKey, tryParseTargetKey } from '@warden/shared';
+import { formatTargetKey, targetLabel, tryParseTargetKey } from '@warden/shared';
 import { useStore } from '../store';
 import { allDirPaths, buildTree, type DirNode, type TreeNode } from '../lib/tree';
 
@@ -57,7 +57,6 @@ function FileRow({ node, depth, view }: RowProps & { node: Extract<TreeNode, { k
   const active = useStore((s) => s.panel === 'diff' && s.activeFile === node.path && s.targetKey === view);
   const openFile = useStore((s) => s.openFile);
   const toggleViewed = useStore((s) => s.toggleViewed);
-  const commentCount = useStore((s) => s.comments.filter((c) => c.filePath === node.path && c.targetKey === view).length);
   const e = node.entry;
 
   return (
@@ -88,11 +87,6 @@ function FileRow({ node, depth, view }: RowProps & { node: Extract<TreeNode, { k
         </span>
         <span className="name">{node.name}</span>
         {e.changed && <span className="tree-changed" title="文件自上次标记已读后发生变化" aria-label="文件有新变化" />}
-        {commentCount > 0 && (
-          <span className="cc" title={`${commentCount} 条评论`}>
-            {commentCount}
-          </span>
-        )}
         <FileStatusLabel status={e.status} conflicted={e.conflicted} />
         <span className="counts">
           {e.binary ? (
@@ -152,7 +146,7 @@ function useTreeState(tree: DirNode, view: TargetKey) {
   const activeFile = useStore((s) => s.activeFile);
   const inView = useStore((s) => s.targetKey === view);
 
-  // Reveal the active file after j/k navigation or a jump from a comment.
+  // Reveal the active file after j/k navigation.
   useEffect(() => {
     if (!activeFile || !inView) return;
     setOpen((prev) => {
@@ -263,7 +257,7 @@ function DebugToggle() {
 
 /** What a checkpoint is called in a list: its number, its time, and why it exists when warden took it. */
 function checkpointName(c: Checkpoint): string {
-  return `#${c.id} · ${checkpointTime(c.createdAt)}${c.handoff ? ' · 交付反馈' : ''}`;
+  return `#${c.id} · ${checkpointTime(c.createdAt)}`;
 }
 
 /** 14:05 for today, 9/21 14:05 before that. */
@@ -294,7 +288,7 @@ function CheckpointBar({ target }: { target: Target }) {
 
   if (target.kind === 'checkpoint') {
     const remove = () => {
-      if (window.confirm(`删除检查点 #${target.id}？它上面的评论和已读标记会一起删除。`)) void deleteCheckpoint(target.id);
+      if (window.confirm(`删除检查点 #${target.id}？它上面的已读标记会一起删除。`)) void deleteCheckpoint(target.id);
     };
     return (
       <div className="checkpoint-bar">
@@ -324,7 +318,7 @@ function CheckpointBar({ target }: { target: Target }) {
           size="sm"
           className="checkpoint-open"
           onClick={() => open(newest.id)}
-          title={`只看检查点 ${checkpointName(newest)} 以后的改动${newest.handoff ? '：评论交给 agent 时自动记下的' : ''}`}
+          title={`只看检查点 ${checkpointName(newest)} 以后的改动`}
         >
           对比检查点 #{newest.id} · {checkpointTime(newest.createdAt)}
         </Button>
@@ -345,7 +339,7 @@ export function FileTree() {
 
   const target = useMemo(() => tryParseTargetKey(targetKey), [targetKey]);
   // Keep expanded directories while refreshing the same worktree's comparison.
-  const scope = commentScopeKey(targetKey);
+  const scope = target?.worktree ?? '';
 
   if (error) {
     // The view picker names any other target and its 工作区 is the way back, even when the listing

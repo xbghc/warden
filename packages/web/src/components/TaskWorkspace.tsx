@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, ChevronDown, Columns2, FileCode2, GitBranch, MessageSquare, Pencil, RefreshCw, Save, X } from 'lucide-react';
+import { ArrowLeft, ChevronDown, Columns2, FileCode2, GitBranch, Pencil, RefreshCw, Save, X } from 'lucide-react';
 import type { DevelopmentChange, WorkflowTask, SlotKind } from '@warden/shared';
 import { tryParseTargetKey } from '@warden/shared';
 import { api } from '../api';
@@ -13,7 +13,6 @@ import { NativeSelect } from './ui/native-select';
 import { Checkbox } from './ui/checkbox';
 import { Sheet } from './ui/sheet';
 import { DiffPanel } from './DiffPanel';
-import { Rail } from './Rail';
 import { Markdown } from './Markdown';
 
 export function OperationError({ message }: { message?: string | null }) {
@@ -247,7 +246,7 @@ function DeliveryPanel({ task, open, onOpenChange }: { task: DevelopmentChange; 
   );
 }
 
-function TaskFiles() {
+function TaskFiles({ onOpenFile }: { onOpenFile(): void }) {
   const files = useStore((state) => state.files);
   const active = useStore((state) => state.activeFile);
   const loading = useStore((state) => state.filesLoading);
@@ -266,7 +265,15 @@ function TaskFiles() {
       <ul>
         {files.map((file) => (
           <li key={file.path} className={active === file.path ? 'is-active' : ''}>
-            <button type="button" onClick={() => void useStore.getState().openFile(file.path)} aria-label={`打开 ${file.path}`} title={file.path}>
+            <button
+              type="button"
+              onClick={() => {
+                void useStore.getState().openFile(file.path);
+                onOpenFile();
+              }}
+              aria-label={`打开 ${file.path}`}
+              title={file.path}
+            >
               <FileCode2 size={15} />
               <span>{file.path}</span>
               <small className={`status-${file.status}`}>
@@ -284,8 +291,6 @@ function TaskFiles() {
 export function TaskWorkspace({ task, active }: { task: WorkflowTask; active: boolean }) {
   const { checkouts } = useWorkflow();
   const viewMode = useStore((state) => state.prefs.viewMode);
-  const railOpen = useStore((state) => state.prefs.railOpen);
-  const commentCount = useStore((state) => state.comments.length);
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(task.title);
   const [body, setBody] = useState(task.body ?? '');
@@ -403,21 +408,10 @@ export function TaskWorkspace({ task, active }: { task: WorkflowTask; active: bo
               >
                 {viewMode === 'split' ? <FileCode2 size={15} /> : <Columns2 size={15} />}
               </Button>
-              <Button
-                size={commentCount ? 'sm' : 'icon-sm'}
-                variant={railOpen ? 'secondary' : 'ghost'}
-                aria-label={`评论${commentCount ? ` ${commentCount}` : ''}`}
-                aria-pressed={railOpen}
-                title="评论"
-                onClick={() => useStore.getState().setRailOpen(!railOpen)}
-              >
-                <MessageSquare size={14} aria-hidden="true" />
-                {commentCount > 0 && <span aria-hidden="true">{commentCount}</span>}
-              </Button>
             </div>
           </div>
           <div className={`wb-review${mobileFileList ? ' show-file-list' : ''}`}>
-            <TaskFiles />
+            <TaskFiles onOpenFile={() => setMobileFileList(false)} />
             <div className="wb-diff">
               <Button
                 className="wb-mobile-only wb-back-files"
@@ -431,7 +425,6 @@ export function TaskWorkspace({ task, active }: { task: WorkflowTask; active: bo
               </Button>
               <DiffPanel />
             </div>
-            <Rail />
           </div>
           <footer className="wb-task-footer">
             {(preparationIncomplete || isPrepared) && <span>{preparationIncomplete ? '准备未完成' : '预览已暂停'}</span>}

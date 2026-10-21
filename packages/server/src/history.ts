@@ -1,12 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import type { HistoryPreviewRequest, HistoryPreviewResponse, HistoryResponse } from '@warden/shared';
-import { formatTargetKey, tryParseTargetKey } from '@warden/shared';
 import { badRequest, HttpError } from './errors.js';
 import { runGit, runGitWrite } from './git.js';
 import { GitSandbox, gitMessage, gitOid, oid } from './git-sandbox.js';
 import { PreviewService, primaryCheckout } from './preview.js';
 import type { RepoContext } from './repo.js';
-import { ensureTarget, type StateStore } from './state.js';
+import type { StateStore } from './state.js';
 import { dirtyCount } from './worktrees.js';
 import { assertSafetyBackupCurrent, createSafetyBackup, discardOperationBackup } from './backups.js';
 import { retireWorkflowRefs } from './retention.js';
@@ -182,17 +181,6 @@ export class HistoryService {
         }
         if (c.developmentBranch === draft.branch && c.status !== 'accepted')
           c.sync = { status: 'pending', target: draft.newHead!, message: '提交历史已更新，可主动同步工作区' };
-      }
-      for (const [key, target] of Object.entries(s.targets)) {
-        const parsed = tryParseTargetKey(key);
-        if (parsed?.kind !== 'commit' || parsed.worktree) continue;
-        const rewritten = mapping.get(parsed.sha);
-        if (!rewritten || rewritten.sha === parsed.sha) continue;
-        const next = formatTargetKey({ kind: 'commit', sha: rewritten.sha });
-        const destination = ensureTarget(s, next);
-        const ids = new Set(destination.comments.map((c) => c.id));
-        destination.comments.push(...target.comments.filter((c) => !ids.has(c.id)).map((c) => ({ ...c, targetKey: next })));
-        target.comments = [];
       }
     });
     await retireWorkflowRefs(this.repo.commonRoot);

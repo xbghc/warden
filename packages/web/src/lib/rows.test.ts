@@ -37,7 +37,7 @@ describe('computeGaps', () => {
 });
 
 describe('buildRows', () => {
-  it('unified: gap, hunk and line rows in order; comments never interrupt the code', () => {
+  it('unified: gap, hunk and line rows in order', () => {
     const rows = buildRows({ diff, viewMode: 'unified', expansions: {}, fullLines: null });
     expect(rows.map((r) => r.kind)).toEqual(['gap', 'hunk', 'line', 'line', 'line', 'line', 'line', 'gap', 'hunk', 'line', 'line', 'gap']);
     const idx = findRowIndex(rows, 'new', 12);
@@ -95,7 +95,7 @@ describe('buildRows', () => {
 
     const shut = buildRows({ diff: d, viewMode: 'unified', expansions: {}, fullLines: null, foldDebug: true });
     expect(kinds(shut)).toEqual(['a', 'b', 'fold:3']);
-    // A comment on a folded line finds the fold.
+    // A scroll position inside a folded block finds the fold.
     expect(shut[findRowIndex(shut, 'new', 11)]?.kind).toBe('debug');
 
     const open = buildRows({ diff: d, viewMode: 'unified', expansions: {}, fullLines: null, foldDebug: true, openDebug: new Set(['0:2']) });

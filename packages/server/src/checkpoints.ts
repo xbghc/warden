@@ -4,7 +4,7 @@ import { copyFile, mkdir, rm, stat, utimes } from 'node:fs/promises';
 import type { Checkpoint, ReviewState, TargetKey } from '@warden/shared';
 import { formatTargetKey } from '@warden/shared';
 import { revParse, runGit, runGitSnapshot, type SnapshotEnv } from './git.js';
-import { type StateStore, unlinkComments } from './state.js';
+import type { StateStore } from './state.js';
 
 /**
  * Where checkpoints keep their objects: a directory of warden's beside the state file, never the
@@ -81,7 +81,7 @@ export async function withCheckpointIndex<T>(cwd: string, store: string, fn: (en
   });
 }
 
-/** How many checkpoints a worktree keeps; taking one more drops the oldest, with its comments. */
+/** How many checkpoints a worktree keeps; taking one more drops the oldest. */
 export const MAX_CHECKPOINTS = 20;
 
 const sameWorktree = (c: Checkpoint, worktree: string | undefined) => c.worktree === worktree;
@@ -99,33 +99,23 @@ export function checkpointKey(c: Checkpoint): TargetKey {
 }
 
 /**
- * Drops a checkpoint and what was kept under its target: the comments and 已读 marks were about a
- * diff against it, and the next checkpoint may be given its number. Todos let go of those comments.
+ * Drops a checkpoint and its viewed marks; the next checkpoint may be given its number.
  * Its objects stay in the store; they are small and another checkpoint may share them.
  */
 export function forgetCheckpoint(state: ReviewState, c: Checkpoint): void {
   state.checkpoints = state.checkpoints.filter((x) => x !== c);
   const key = checkpointKey(c);
-  const gone = new Set((state.targets[key]?.comments ?? []).map((x) => x.id));
   delete state.targets[key];
-  unlinkComments(state, gone);
 }
 
-/**
- * Records a tree just written as the worktree's newest checkpoint, dropping the oldest past the
- * limit — except one whose pool still holds comments. A comment is deleted when it is resolved, so
- * one still there is open: not handed over yet, waiting on the agent, or answered and waiting on the
- * reviewer. Every hand-off takes a checkpoint, and evicting by age alone would delete those after
- * twenty rounds. Such a checkpoint stays past the limit until its comments are dealt with.
- */
-export function addCheckpoint(state: ReviewState, worktree: string | undefined, tree: string, head: string, handoff = false): Checkpoint {
+/** Record a new baseline and retain the newest checkpoints for this worktree. */
+export function addCheckpoint(state: ReviewState, worktree: string | undefined, tree: string, head: string): Checkpoint {
   const mine = checkpointsOf(state, worktree);
   const id = mine.reduce((n, c) => Math.max(n, c.id), 0) + 1;
-  const checkpoint: Checkpoint = { id, ...(worktree ? { worktree } : {}), tree, head, createdAt: new Date().toISOString(), ...(handoff ? { handoff } : {}) };
+  const checkpoint: Checkpoint = { id, ...(worktree ? { worktree } : {}), tree, head, createdAt: new Date().toISOString() };
   state.checkpoints.push(checkpoint);
-  const evictable = mine.filter((c) => !state.targets[checkpointKey(c)]?.comments.length);
   const excess = mine.length + 1 - MAX_CHECKPOINTS;
-  for (const old of evictable.slice(0, Math.max(0, excess))) forgetCheckpoint(state, old);
+  for (const old of mine.slice(0, Math.max(0, excess))) forgetCheckpoint(state, old);
   return checkpoint;
 }
 
@@ -134,17 +124,12 @@ export function addCheckpoint(state: ReviewState, worktree: string | undefined, 
  * root), unless the newest checkpoint already holds that very tree: two names for one baseline
  * would only be noise. The snapshot runs outside the state lock; it touches only warden's store.
  */
-export async function takeCheckpoint(
-  store: StateStore,
-  cwd: string,
-  worktree: string | undefined,
-  opts: { handoff?: boolean } = {},
-): Promise<{ checkpoint: Checkpoint; unchanged: boolean }> {
+export async function takeCheckpoint(store: StateStore, cwd: string, worktree: string | undefined): Promise<{ checkpoint: Checkpoint; unchanged: boolean }> {
   const tree = await snapshotWorktree(cwd, checkpointStore(store.file));
   const head = (await revParse(cwd, 'HEAD')) ?? '';
   return store.update((s) => {
     const newest = checkpointsOf(s, worktree).at(-1);
     if (newest?.tree === tree) return { checkpoint: newest, unchanged: true };
-    return { checkpoint: addCheckpoint(s, worktree, tree, head, opts.handoff), unchanged: false };
+    return { checkpoint: addCheckpoint(s, worktree, tree, head), unchanged: false };
   });
 }

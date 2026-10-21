@@ -3,7 +3,7 @@ import path from 'node:path';
 import { mkdtemp, readdir, rm, stat, unlink } from 'node:fs/promises';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Hono } from 'hono';
-import type { CheckpointsResponse, Comment, CreateCheckpointResponse, FileDiff, FilesResponse, FullFileResponse, RepoInfo, ReviewState } from '@warden/shared';
+import type { CheckpointsResponse, CreateCheckpointResponse, FileDiff, FilesResponse, FullFileResponse, RepoInfo, ReviewState } from '@warden/shared';
 import { createApp, resolveRepo, StateStore } from '@warden/server';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
@@ -114,15 +114,12 @@ describe('checkpoints', () => {
     expect(b.content).toBe('export const b = 31;\n');
   });
 
-  it('keeps comments and 已读 marks of its own, and drops them with the checkpoint', async () => {
+  it('keeps 已读 marks of its own and drops them with the checkpoint', async () => {
     const key = 'checkpoint:1';
-    const created = await send('POST', `/api/targets/${k(key)}/comments`, { filePath: 'notes.txt', side: 'new', startLine: 3, endLine: 3, body: 'why three?' });
-    expect(created.status).toBe(201);
-    const comment = await json<Comment>(created);
     const files = await listing(key);
     const notes = files.files.find((f) => f.path === 'notes.txt')!;
     expect((await send('PUT', `/api/targets/${k(key)}/viewed`, { path: 'notes.txt', viewed: true, contentHash: notes.contentHash })).status).toBe(200);
-    expect((await listing(key)).comments.map((c) => c.id)).toEqual([comment.id]);
+    expect((await listing(key)).files.find((file) => file.path === 'notes.txt')?.viewed).toBe(true);
 
     expect((await send('DELETE', `/api/targets/${k('working')}/checkpoints/1`)).status).toBe(200);
     const gone = await get(`/api/targets/${k(key)}/files`);

@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { readFile } from 'node:fs/promises';
-import type { FileDiff, FileSummary, Target, TargetKey, WorktreeInfo, CommentSide } from '@warden/shared';
+import type { FileDiff, FileSummary, Target, TargetKey, WorktreeInfo, DiffSide } from '@warden/shared';
 import { parseTargetKey, TargetKeyError } from '@warden/shared';
 import { DIFF_OUTPUT_ARGS, EMPTY_TREE_SHA, mergeBase, refExists, revParse, runGit, type SnapshotEnv } from './git.js';
 import { checkpointObjects, withCheckpointIndex } from './checkpoints.js';
@@ -48,8 +48,7 @@ export function resolveTargetContext(repo: RepoContext, worktrees: WorktreeInfo[
     throw e;
   }
   // A key without a worktree is the main worktree's, whichever checkout this server was started in.
-  // Keyed by "the server's own directory" instead, a server started inside a slot shared the main
-  // worktree's comment pool and HEAD, and each one's re-anchoring deleted the other's comments.
+  // Using the server's own directory here would mix a slot's comparison with the main worktree's marks.
   let cwd = repo.commonRoot;
   if (target.worktree) {
     const wt = worktrees.find((w) => w.path === target.worktree);
@@ -238,7 +237,7 @@ export async function getFileDiff(ctx: TargetContext, filePath: string, hints: F
 }
 
 /** Which ref holds the content of `side` for this target (undefined = working tree file). */
-async function refForSide(ctx: TargetContext, side: CommentSide): Promise<string | undefined> {
+async function refForSide(ctx: TargetContext, side: DiffSide): Promise<string | undefined> {
   const t = ctx.target;
   switch (t.kind) {
     case 'working':
@@ -262,7 +261,7 @@ async function refForSide(ctx: TargetContext, side: CommentSide): Promise<string
 }
 
 /** Full content of a file on one side of the target; null when it does not exist there. */
-export async function getFullFile(ctx: TargetContext, filePath: string, side: CommentSide): Promise<string | null> {
+export async function getFullFile(ctx: TargetContext, filePath: string, side: DiffSide): Promise<string | null> {
   assertRepoPath(filePath);
   const ref = await refForSide(ctx, side);
   if (ref === undefined) {
@@ -286,7 +285,7 @@ export async function getFullFile(ctx: TargetContext, filePath: string, side: Co
 const GREP_CHUNK = 500;
 
 /** Which of `paths` hold a debug marker on `side` of the target: the only ones worth reading whole. */
-async function pathsWithMarkers(ctx: TargetContext, side: CommentSide, paths: string[]): Promise<Set<string>> {
+async function pathsWithMarkers(ctx: TargetContext, side: DiffSide, paths: string[]): Promise<Set<string>> {
   const found = new Set<string>();
   if (paths.length === 0) return found;
   const ref = await refForSide(ctx, side);
@@ -327,7 +326,7 @@ export async function annotateDebug(ctx: TargetContext, files: FileDiff[]): Prom
     ).catch(none),
     pathsWithMarkers(ctx, 'old', text.filter((f) => f.status !== 'added').map(oldPathOf)).catch(none),
   ]);
-  const read = async (p: string, side: CommentSide, marked: Set<string>) => {
+  const read = async (p: string, side: DiffSide, marked: Set<string>) => {
     if (!marked.has(p)) return undefined;
     const content = await getFullFile(ctx, p, side).catch(() => null);
     return content === null ? undefined : debugLineNumbers(content);

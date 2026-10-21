@@ -5,8 +5,8 @@ import { existsSync } from 'node:fs';
 import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Hono } from 'hono';
-import type { Comment, CreateWorktreeResponse, FilesResponse, ReleaseWorktreeResponse, RepoInfo, WorktreeDetail, WorktreesResponse } from '@warden/shared';
-import { createApp, resolveRepo, StateStore, takeFeedback } from '@warden/server';
+import type { CreateWorktreeResponse, FilesResponse, ReleaseWorktreeResponse, RepoInfo, WorktreeDetail, WorktreesResponse } from '@warden/shared';
+import { createApp, resolveRepo, StateStore } from '@warden/server';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
 // Clone slots: a repository of its own beside the main worktree, made from it on this machine and
@@ -264,7 +264,7 @@ describe('a clone slot', () => {
     expect((await checkout({ branch: 'agent/one', kind: 'clone' })).slot).toBe(2);
   });
 
-  it('shares the main worktree’s review state with a server or an agent started inside it', async () => {
+  it('shares viewed marks with a server started inside the clone', async () => {
     const made = await checkout({ branch: 'agent/one', kind: 'clone' });
     const dir = made.worktree.path;
     const inClone = await resolveRepo(dir);
@@ -273,18 +273,13 @@ describe('a clone slot', () => {
     expect((await json<RepoInfo>(await there.request('/api/repo'))).defaultTarget).toBe(`worktree:${dir}:all`);
 
     await writeFile(path.join(dir, 'src/b.ts'), 'export const b = 3;\n');
-    const comment = await json<Comment>(
-      await send('POST', `/api/targets/${k(`worktree:${dir}:working`)}/comments`, {
-        filePath: 'src/b.ts',
-        side: 'new',
-        startLine: 1,
-        endLine: 1,
-        body: 'why 3?',
-      }),
-    );
-    // What `warden feedback` in the clone reads.
-    const taken = await takeFeedback(store, { worktreeRoot: inClone.root, mainRoot: inClone.commonRoot, peek: true });
-    expect(taken.map((c) => c.id)).toEqual([comment.id]);
+    const target = k(`worktree:${dir}:all`);
+    const files = await json<FilesResponse>(await app.request(`/api/targets/${target}/files`));
+    const file = files.files.find((row) => row.path === 'src/b.ts')!;
+    await send('PUT', `/api/targets/${target}/viewed`, { path: file.path, viewed: true, contentHash: file.contentHash });
+    const fromClone = await json<FilesResponse>(await there.request(`/api/targets/${target}/files`));
+    expect(fromClone.files.find((row) => row.path === file.path)?.viewed).toBe(true);
+    await there.close();
   });
 
   it('points back at the main worktree when there is no server to copy', async () => {

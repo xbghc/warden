@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { commentScopeKey, formatTargetKey, isLocalTarget, parseTargetKey, targetLabel, TargetKeyError } from './target.js';
+import { formatTargetKey, parseTargetKey, targetLabel, TargetKeyError } from './target.js';
 
 describe('target keys', () => {
   it('parses simple kinds', () => {
@@ -20,18 +20,11 @@ describe('target keys', () => {
     expect(() => parseTargetKey('base:-x')).toThrow(TargetKeyError);
     expect(() => parseTargetKey('base:a..b')).toThrow(TargetKeyError);
   });
-  it('keeps a base target out of the local comment pool', () => {
-    expect(isLocalTarget(parseTargetKey('base:main'))).toBe(false);
-    expect(commentScopeKey('base:main')).toBe('base:main');
-    expect(commentScopeKey('worktree:/p/q:base:main')).toBe('worktree:/p/q:base:main');
-    expect(targetLabel(parseTargetKey('worktree:/p/wt:base:main'))).toBe('[wt] Branch vs main');
-  });
-  it('parses checkpoints, which keep a pool and 已读 marks of their own', () => {
+  it('parses checkpoints, which keep 已读 marks of their own', () => {
     expect(parseTargetKey('checkpoint:3')).toEqual({ kind: 'checkpoint', id: 3 });
     expect(parseTargetKey('worktree:/p/a:b:checkpoint:12')).toEqual({ kind: 'checkpoint', id: 12, worktree: '/p/a:b' });
     for (const bad of ['checkpoint:', 'checkpoint:0', 'checkpoint:01', 'checkpoint:-1', 'checkpoint:1.5', 'checkpoint:x', 'worktree:/p:checkpoint:x'])
       expect(() => parseTargetKey(bad)).toThrow(TargetKeyError);
-    expect(commentScopeKey('checkpoint:3')).toBe('checkpoint:3');
     expect(targetLabel(parseTargetKey('worktree:/p/wt:checkpoint:2'))).toBe('[wt] Checkpoint #2');
   });
   it('parses worktree variants including paths with colons', () => {

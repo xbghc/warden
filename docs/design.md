@@ -51,7 +51,6 @@ shared review controls. The wireframes below describe workflows, not required li
 | Workspace hooks | 工作区脚本; show script configuration, output and exit status |
 | Synchronization checks | 已同步 / 预计可同步 / 预计冲突 / 暂不可同步 / 无法判断 / 未检查 |
 | Unusable check results | 检查失败 / 需重新检查, with a reason or recovery action |
-| Review feedback | 评论 / 未导出 / 已导出 / 待确认 |
 
 Review copy in context, including empty, loading, failed and expanded states. Existing Storybook
 interaction checks must continue to find controls by their accessible names after label changes.
@@ -221,9 +220,8 @@ The workspace detail directly presents its file list and diff. Clicking a file d
 “进入审查”, “切换审查区” or “标记审查完成”. Local file selection does not create a second global
 navigation system, alter the connection set or implicitly narrow the delivery scope.
 
-Comments attach to the displayed file and revision. Show “基于较早版本” when later changes make an
-anchor uncertain. Comments need not be cleared before delivery and are not sent to agents
-automatically. Users export comments through the clipboard or the optional feedback CLI.
+Review uses viewed marks and copyable file locations. Inline comments, the review rail and comment
+feedback commands have been removed. Users exchange feedback through their own tools.
 
 After A1, review defaults to the reliably identified undelivered changes:
 
@@ -463,7 +461,7 @@ The implementation follows these bounded choices:
 
 Do not add task branching, dependency scheduling, completion declarations, agent-specific SDKs,
 editor integration, default dependency installation, test gates, automatic rebase/stash/recycling,
-comment-clearing requirements, history undo/restore, automatic force-push or general project management.
+history undo/restore, automatic force-push or general project management.
 
 ## Design review
 

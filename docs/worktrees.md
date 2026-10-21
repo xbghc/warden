@@ -16,7 +16,7 @@ repository. A linked Git worktree remains an explicit option. Ordering never enf
 A workspace corresponds to one linear task. It can contain multiple local commits and make multiple
 deliveries without being recycled. There is no task-complete declaration or release step. Editing
 notes and ordering remain available while work is in progress. Historical TODO descriptions and
-comment links are retained; old checked items migrate as archived notes, not accepted commits.
+historical metadata is retained; old checked items migrate as archived notes, not accepted commits.
 
 The primary branch can change when no integration or connection is using the primary directory.
 Tasks remain associated with the branch for which they were created.
@@ -82,7 +82,7 @@ single child of the prepared parent. Interrupted preparation can be retried only
 snapshot. Unexpected changes are preserved. No reset/clean or undo action is involved.
 
 A completed delivery appends a stable record containing its source range, primary parent, commit,
-message and review comments. It leaves the task worktree and branch in place. Connections resume
+message and creation time. It leaves the task worktree and branch in place. Connections resume
 against the new primary baseline; if their current contributions conflict, the page reports that
 separately from the successful commit. New plans do not inherit the occupied workspace.
 

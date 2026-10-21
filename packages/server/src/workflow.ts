@@ -19,12 +19,12 @@ import type {
   RebaseBatchRequest,
   RebaseBatchResponse,
 } from '@warden/shared';
-import { moveBefore, commentScopeKey, commentWorktree, formatTargetKey, isValidRef, tryParseTargetKey } from '@warden/shared';
+import { moveBefore, isValidRef, tryParseTargetKey } from '@warden/shared';
 import { runWorkspaceHook } from './workspace.js';
 import { badRequest, HttpError, notFound } from './errors.js';
 import { GitError, LONG_GIT_TIMEOUT_MS, gitEnvironment, refExists, runGit, runGitWrite } from './git.js';
 import { listWorktreesAll, type RepoContext } from './repo.js';
-import { ensureTarget, forgetWorktreeTargets, type StateStore } from './state.js';
+import { forgetWorktreeTargets, type StateStore } from './state.js';
 import { checkoutState, checkoutWorktree, dirtyCount, listWorktreesDetailed, nextSlot } from './worktrees.js';
 import { applyPatch, GitSandbox, oid, patchBetween, gitOid, deliveryBase } from './git-sandbox.js';
 import { PreviewService } from './preview.js';
@@ -193,9 +193,6 @@ export class WorkflowService {
       const id = randomUUID();
       const fields = this.planFields(request);
       if (!fields.title) throw badRequest('请填写任务标题', 'invalid_title');
-      const comments = Object.values(state.targets).flatMap((row) => row.comments);
-      if (request.commentIds !== undefined && (!Array.isArray(request.commentIds) || request.commentIds.some((key) => !comments.some((c) => c.id === key))))
-        throw badRequest('关联的评论不存在', 'invalid_comments');
       const change: PlannedChange = {
         ...fields,
         id,
@@ -203,7 +200,6 @@ export class WorkflowService {
         developmentBranch: workflow.developmentBranch,
         status: 'planned',
         createdAt: new Date().toISOString(),
-        ...(request.commentIds?.length ? { commentIds: [...new Set(request.commentIds)] } : {}),
       };
       // Adopting an existing checkout is an explicit execution request. Ordinary planning does
       // not inspect or create worktrees and does not pin a development baseline prematurely.
@@ -252,7 +248,7 @@ export class WorkflowService {
           id: `todo-${todo.id}`,
           title: todo.title,
           body: todo.body,
-          commentIds: todo.commentIds,
+          ...('commentIds' in todo ? { commentIds: todo.commentIds } : {}),
           developmentBranch: workflow.developmentBranch,
           status: todo.status === 'done' ? 'archived' : 'planned',
           createdAt: todo.createdAt,
@@ -383,8 +379,6 @@ export class WorkflowService {
     delete change.sourceBase;
     delete change.sync;
     change.status = 'working';
-    change.submittedHead = await revParse(checkout.path, 'HEAD');
-    await this.moveReview(change);
     delete change.submittedHead;
     await this.save(change);
     await retireWorkflowRefs(this.repo.commonRoot);
@@ -718,28 +712,6 @@ export class WorkflowService {
     return (await runGit(['merge-base', '--is-ancestor', base, head], { cwd, okCodes: [0, 1] })).code === 0;
   }
 
-  private async moveReview(change: DevelopmentChange) {
-    const next = formatTargetKey({ kind: 'range', base: change.base, head: change.submittedHead!, worktree: change.worktree });
-    const local = commentScopeKey(formatTargetKey({ kind: 'working', worktree: change.worktree }));
-    await this.store.update((state) => {
-      const target = ensureTarget(state, next);
-      const ids = new Set(target.comments.map((comment) => comment.id));
-      for (const [key, value] of Object.entries(state.targets)) {
-        if (key === next || (key !== local && tryParseTargetKey(key)?.worktree !== change.worktree)) continue;
-        // A new handoff changes the review revision, but not the conversation. The normal
-        // reanchoring endpoint relocates these comments against the newly selected diff.
-        for (const comment of value.comments) {
-          if (!ids.has(comment.id)) {
-            target.comments.push({ ...comment, targetKey: next });
-            ids.add(comment.id);
-          }
-        }
-        value.comments = [];
-        value.viewed = {};
-      }
-    });
-  }
-
   /** Never switch the user's checkout or silently publish a branch that cannot be tested there. */
   private async destination(branch: string, clean = false, expectedPath?: string) {
     const checkout = (await listWorktreesAll(this.repo)).find((row) => !row.clone && row.branch === branch);
@@ -931,19 +903,8 @@ export class WorkflowService {
   private async recordAccepted(change: DevelopmentChange) {
     const integration = change.integration!;
     await this.store.update((state) => {
-      const comments = Object.values(state.targets)
-        .flatMap((target) => target.comments)
-        .filter((comment) => commentWorktree(comment) === change.worktree);
-      const key = formatTargetKey({ kind: 'commit', sha: integration.commit! });
-      const target = ensureTarget(state, key);
-      const ids = new Set(target.comments.map((comment) => comment.id));
-      for (const comment of comments) if (!ids.has(comment.id)) target.comments.push({ ...structuredClone(comment), targetKey: key });
-      const local = commentScopeKey(formatTargetKey({ kind: 'working', worktree: change.worktree }));
-      for (const [oldKey, previous] of Object.entries(state.targets)) {
-        if (oldKey === local || tryParseTargetKey(oldKey)?.worktree === change.worktree) {
-          previous.comments = [];
-          previous.viewed = {};
-        }
+      for (const [key, target] of Object.entries(state.targets)) {
+        if (tryParseTargetKey(key)?.worktree === change.worktree) target.viewed = {};
       }
       change.deliveries ??= [];
       if (!change.deliveries.some((d) => d.commit === integration.commit))
@@ -955,7 +916,6 @@ export class WorkflowService {
           commit: integration.commit!,
           message: integration.message,
           createdAt: new Date().toISOString(),
-          review: structuredClone(comments),
         });
       change.sourceBase = integration.source;
       change.status = 'working';

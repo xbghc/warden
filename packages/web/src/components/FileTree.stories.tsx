@@ -72,8 +72,8 @@ export const FileTypes: Story = {
 export const LongPaths: Story = {
   beforeEach: () => {
     const files = [
-      file('src/components/ReviewCommentAttachmentSelector.tsx', 'modified', { additions: 1248, deletions: 365, changed: true }),
-      file('src/components/ReviewCommentAttachmentSelector.test.tsx', 'added', { additions: 240, deletions: 0 }),
+      file('src/components/ReviewFileComparisonSelector.tsx', 'modified', { additions: 1248, deletions: 365, changed: true }),
+      file('src/components/ReviewFileComparisonSelector.test.tsx', 'added', { additions: 240, deletions: 0 }),
       file('src/components/原始文件与新文件的差异比较.tsx', 'renamed', { oldPath: 'src/compare.tsx' }),
     ];
     useStore.setState({ files, activeFile: files[0]!.path });

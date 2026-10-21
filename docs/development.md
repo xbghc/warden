@@ -13,7 +13,7 @@ or a separate requirement approval system around implementation details being re
 pnpm install
 pnpm build:native # Rust 1.88.0 (rustup reads rust-toolchain.toml)
 pnpm dev          # API server on :4100 (tsx watch) + Vite dev server on :5173 with /api proxied
-pnpm test         # vitest: diff parser, read-only review, anchoring, comment scopes, watcher, todos, worktrees, export, state, HTTP API
+pnpm test         # vitest: diff parser, read-only review, watcher, todos, worktrees, export, state, HTTP API
 pnpm typecheck
 pnpm build        # dist/native (Rust) + dist/web (Vite) + dist/cli.js (tsup)
 pnpm check:package # pack, unpack and exercise the real CLI with required native execution
@@ -24,8 +24,8 @@ Layout:
 
 ```
 bin/cli.ts           argument parsing, start server, open browser
-packages/shared      types + target key / comment scope helpers (bundled into both sides)
-packages/server      Hono API, git wrapper, diff parser, read-only review, targets, worktrees, anchoring, watcher, state, export
+packages/shared      types + target key helpers (bundled into both sides)
+packages/server      Hono API, git wrapper, diff parser, read-only review, targets, worktrees, watcher, state, export
 packages/web         React + Vite + Tailwind v4 UI (shadcn/ui, shiki highlighting, @tanstack/react-virtual, react-markdown)
 crates/warden-core   independent Rust repository operations, typed data and errors
 crates/warden-node   thin asynchronous napi-rs binding; no workflow or HTTP logic
@@ -141,6 +141,6 @@ on controls that receive refs). They use Radix, Tailwind v4, `class-variance-aut
 run it from `packages/web` when adding a component and retain React 18 ref support.
 
 `src/styles.css` defines the neutral theme and application layouts. Use component variants for
-common controls; keep custom styles for the diff, file tree and task editor. `--feedback` is the
-violet comment accent; `--accent` and `--muted` are shadcn surface colors. Interface text uses the
+common controls; keep custom styles for the diff, file tree and task editor. `--accent` and
+`--muted` are shadcn surface colors. Interface text uses the
 system sans-serif font, while code retains IBM Plex Mono. Vite and Storybook share the same theme.

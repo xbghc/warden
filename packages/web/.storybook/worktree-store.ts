@@ -109,7 +109,7 @@ export function setupWorktreeStore() {
         author: 'Lin',
         email: 'lin@example.com',
         date: '2026-09-11T10:00:00Z',
-        subject: '补充评论导出',
+        subject: '优化差异预览',
         parents: [],
         refs: [],
         head: true,
@@ -120,7 +120,7 @@ export function setupWorktreeStore() {
   api.todos = fn(async (branch) => ({
     todos:
       branch === 'feature/review'
-        ? [{ id: 't1', branch, title: '验证导出格式', body: '覆盖文件名和行号。', status: 'open' as const, createdAt: '', updatedAt: '' }]
+        ? [{ id: 't1', branch, title: '验证位置复制', body: '覆盖文件名和行号。', status: 'open' as const, createdAt: '', updatedAt: '' }]
         : [],
   }));
   api.remoteBranches = fn(async () => ({ remotes: [] }));

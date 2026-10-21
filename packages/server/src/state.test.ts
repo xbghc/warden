@@ -2,7 +2,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp, readFile, readdir, rm, utimes, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Comment } from '@warden/shared';
 import { StateStore, defaultState, ensureTarget, forgetWorktreeTargets, repoHash, stateFilePath } from './state.js';
 
 let dir: string;
@@ -40,38 +39,26 @@ describe('StateStore', () => {
       targets: {},
       todos: [],
       checkpoints: [],
-      prefs: { viewMode: 'unified', autoRefresh: true, railOpen: false, ignoreDebug: true },
+      prefs: { viewMode: 'unified', autoRefresh: true, ignoreDebug: true },
     });
   });
 
   it('drops rows that are missing the fields the server dereferences', async () => {
     const file = path.join(dir, 'state.json');
-    const ok = {
-      id: 'ok',
-      targetKey: 'local',
-      filePath: 'a.ts',
-      side: 'new',
-      startLine: 1,
-      endLine: 1,
-      codeSnippet: [],
-      body: '',
-      status: 'active',
-      anchor: { hunkHash: 'h' },
-    };
     await writeFile(
       file,
       JSON.stringify({
         schemaVersion: 1,
         repoRoot: '/repo',
-        targets: { local: { viewed: {}, comments: [null, 'junk', { id: 'no-anchor' }, ok] } },
+        targets: { all: { viewed: null }, invalid: null },
         // Issues were folded into todos; what an older file kept of them is let go.
-        issues: [{ id: 'i1', title: 't', body: '', status: 'open', commentIds: [] }],
+        issues: [{ id: 'i1', title: 't', body: '', status: 'open' }],
         todos: [{ title: 'no id' }, { id: 't1', branch: 'main', title: 'x', body: '', status: 'open', createdAt: '', updatedAt: '' }],
         prefs: {},
       }),
     );
     const s = await new StateStore(file, '/repo').load();
-    expect(s.targets.local!.comments.map((c) => c.id)).toEqual(['ok']);
+    expect(s.targets).toEqual({ all: { viewed: {} } });
     expect(s).not.toHaveProperty('issues');
     expect(s.todos.map((t) => t.id)).toEqual(['t1']);
   });
@@ -123,7 +110,7 @@ describe('StateStore', () => {
         ensureTarget(s, 'base:main').viewed['b.ts'] = '2';
       }),
       a.update((s) => {
-        s.todos.push({ id: 't1', branch: 'main', title: 't', body: '', status: 'open', commentIds: [], createdAt: '', updatedAt: '' });
+        s.todos.push({ id: 't1', branch: 'main', title: 't', body: '', status: 'open', createdAt: '', updatedAt: '' });
       }),
     ]);
     const s = await a.load();
@@ -141,46 +128,24 @@ describe('StateStore', () => {
     expect(files.some((f) => f.startsWith('state.json.corrupt-'))).toBe(true);
   });
 
-  it('moves comments from the local views into the shared scope and drops what is left of those views', async () => {
+  it('preserves historical review data without reanchoring or pooling it on unrelated writes', async () => {
     const file = path.join(dir, 'state.json');
-    const comment = (id: string, targetKey: string) => ({
-      id,
-      targetKey,
-      filePath: 'a.ts',
-      side: 'new',
-      startLine: 1,
-      endLine: 1,
-      codeSnippet: [],
-      body: id,
-      status: 'active',
-      anchor: { hunkHash: '', lineHashes: [], contextBefore: [], contextAfter: [], hunkLineOffset: 0 },
-      createdAt: '',
-      updatedAt: '',
+    const historical = { id: 'old', body: 'Keep this review', targetKey: 'working', anchor: { hunkHash: 'h' } };
+    const targets = {
+      working: { viewed: { 'a.ts': 'h' }, comments: [historical] },
+      local: { viewed: {}, comments: [{ ...historical, id: 'local' }], head: 'abc' },
+      'commit:abc': { viewed: {}, comments: [{ ...historical, id: 'delivered' }] },
+    };
+    await writeFile(file, JSON.stringify({ schemaVersion: 1, targets }));
+    const store = new StateStore(file, '/repo');
+    expect((await store.load()).targets).toEqual(targets);
+    await store.update((state) => {
+      state.prefs.viewMode = 'split';
+      ensureTarget(state, 'all').viewed['b.ts'] = 'new-hash';
     });
-    await writeFile(
-      file,
-      JSON.stringify({
-        schemaVersion: 1,
-        targets: {
-          working: { viewed: { 'a.ts': 'h' }, comments: [comment('c1', 'working')] },
-          staged: { viewed: {}, comments: [comment('c2', 'staged')] },
-          'commit:abc': { viewed: { 'a.ts': 'h' }, comments: [comment('c3', 'commit:abc')] },
-        },
-        issues: [],
-      }),
-    );
-    const s = await new StateStore(file, '/repo').load();
-    // Sorted key order: staged before working.
-    expect(s.targets.local!.comments.map((c) => c.id)).toEqual(['c2', 'c1']);
-    // Comments migrate, but hashes remain bound to the original comparison.
-    expect(Object.keys(s.targets).sort()).toEqual(['commit:abc', 'local', 'working']);
-    expect(s.targets.working).toEqual({ viewed: { 'a.ts': 'h' }, comments: [] });
-    await writeFile(file, JSON.stringify(s));
-    expect((await new StateStore(file, '/repo').load()).targets).toEqual(s.targets);
-    // A commit target keeps its own comments and its marks.
-    expect(s.targets['commit:abc']!.comments.map((c) => c.id)).toEqual(['c3']);
-    expect(s.targets['commit:abc']!.viewed).toEqual({ 'a.ts': 'h' });
-    expect(s.todos).toEqual([]);
+    const saved = JSON.parse(await readFile(file, 'utf8'));
+    expect(saved.targets).toEqual({ ...targets, all: { viewed: { 'b.ts': 'new-hash' } } });
+    expect((await store.load()).targets).toEqual(saved.targets);
   });
 });
 
@@ -289,36 +254,19 @@ describe('what the state file will not lose', () => {
 });
 
 describe('forgetWorktreeTargets', () => {
-  const comment = (id: string, targetKey: string): Comment => ({
-    id,
-    targetKey,
-    filePath: 'a.ts',
-    side: 'new',
-    startLine: 1,
-    endLine: 1,
-    codeSnippet: ['x'],
-    body: 'b',
-    status: 'active',
-    anchor: { hunkHash: 'h', lineHashes: [], contextBefore: [], contextAfter: [], hunkLineOffset: 0 },
-    createdAt: '',
-    updatedAt: '',
-  });
-
-  it('drops every target under the worktree path, and no other, and unlinks their comments from issues', () => {
+  it('drops only the reused worktree’s targets', () => {
     const slot = '/x/repo-1';
     const s = defaultState('/x/repo');
     s.targets = {
-      [`worktree:${slot}:local`]: { viewed: {}, comments: [comment('c1', `worktree:${slot}:working`)], head: 'abc' },
-      [`worktree:${slot}:working`]: { viewed: { 'a.ts': 'h1' }, comments: [] },
-      [`worktree:${slot}:base:main`]: { viewed: {}, comments: [comment('c2', `worktree:${slot}:base:main`)] },
+      [`worktree:${slot}:local`]: { viewed: {} },
+      [`worktree:${slot}:working`]: { viewed: { 'a.ts': 'h1' } },
+      [`worktree:${slot}:base:main`]: { viewed: {} },
       // `/x/repo-1` is a prefix of `/x/repo-10`; the colon after the path keeps them apart.
-      'worktree:/x/repo-10:local': { viewed: {}, comments: [comment('c3', 'worktree:/x/repo-10:working')] },
-      local: { viewed: {}, comments: [comment('c4', 'working')] },
-      'base:main': { viewed: { 'a.ts': 'h2' }, comments: [] },
+      'worktree:/x/repo-10:local': { viewed: {} },
+      local: { viewed: {} },
+      'base:main': { viewed: { 'a.ts': 'h2' } },
     };
-    s.todos = [{ id: 't1', branch: 'main', title: 't', body: '', status: 'open', commentIds: ['c1', 'c2', 'c3', 'c4'], createdAt: '', updatedAt: '' }];
     forgetWorktreeTargets(s, slot);
     expect(Object.keys(s.targets).sort()).toEqual(['base:main', 'local', 'worktree:/x/repo-10:local']);
-    expect(s.todos[0]!.commentIds).toEqual(['c3', 'c4']);
   });
 });

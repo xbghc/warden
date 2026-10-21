@@ -28,8 +28,6 @@ or install globally:
 ```sh
 npm i -g @xbghc/warden
 warden [repoPath] [--port <n>] [--no-open] [--no-update-check]
-warden feedback [--peek]          # for the agent, see Handing comments to the agent
-warden reply <id> <message>
 ```
 
 The server picks the first free port from 4100 (or `--port`), prints the URL and tries to open a
@@ -77,14 +75,11 @@ See [Workflow](docs/workflow.md), [Worktrees and tasks](docs/worktrees.md) and
 
 | Key | Action |
 |---|---|
-| `r` | Refresh the current target (file list + open diff, then re-anchor comments) |
+| `r` | Refresh the current target (file list + open diff) |
 | `j` / `k` | Next / previous file in the selected task |
 | `n` / `p` | Next / previous hunk |
-| `Ctrl+Enter` | Save the comment being edited |
-| `Esc` | Drop the picked lines / cancel editing / cancel re-attach mode / shut the rail / back to the files under review |
 | Click a line number | Copy the review location (`path:line`) |
-| `Alt`+click a line number | Copy the place as `src/a.ts:12` — `src/a.ts:12（修改前）` for a line of the old side |
-| `Alt`+`Shift`+click a line number | Copy the range from the line last copied, `src/a.ts:12-18` |
+| `Shift`+click a line number | Copy the range from the line last copied, `src/a.ts:12-18` |
 
 The copy button beside the path in the file header copies the path, relative to the repository.
 
@@ -95,7 +90,7 @@ The copy button beside the path in the file header copies the path, relative to 
 | [Workflow](docs/workflow.md) | User-controlled development loop, current-version scope and implementation alignment |
 | [Interaction design](docs/design.md) | Agreed behavior, connection previews, commit arrangement and open product decisions |
 | [Reviewing](docs/reviewing.md) | Read-only review, targets, debug code, 已读, checkpoints, auto-refresh |
-| [Comments and the agent](docs/agent.md) | Comments, the export format, `warden feedback` / `reply`, re-anchoring, task planning |
+| [Working with agents](docs/agent.md) | Workspace boundaries, task briefs and external tools |
 | [Worktrees and tasks](docs/worktrees.md) | Commit plans, workspace hooks, squash acceptance and synchronization |
 | [Platform](docs/environment.md) | WSL2 and browser access |
 | [State and security](docs/internals.md) | The state file, what git commands run and why |

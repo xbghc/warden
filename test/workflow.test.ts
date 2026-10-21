@@ -243,7 +243,7 @@ describe('requirement development workflow', () => {
     expect((await store.load()).workflow!.changes).toHaveLength(4);
   });
 
-  it('exposes planning and explicit execution through the API and rejects invalid comments', async () => {
+  it('exposes planning and explicit execution through the API', async () => {
     const app = createApp({ repo: await resolveRepo(fx.root), store });
     const send = (method: string, url: string, body: unknown) =>
       app.request(`/api/workflow${url}`, { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
@@ -252,7 +252,6 @@ describe('requirement development workflow', () => {
     const plan = (await created.json()) as { id: string; status: string; worktree?: string };
     expect(plan.status).toBe('planned');
     expect(plan.worktree).toBeUndefined();
-    expect((await send('POST', '/changes', { title: 'Bad link', commentIds: ['missing'] })).status).toBe(400);
     expect((await send('PATCH', `/changes/${plan.id}`, { body: 'Updated plan' })).status).toBe(200);
     const started = await send('POST', `/changes/${plan.id}/start`, { agent: 'Example agent', kind: 'worktree' });
     expect(started.status).toBe(200);
@@ -473,29 +472,13 @@ describe('requirement development workflow', () => {
     expect(fx.git('rev-list', '--count', 'main..feature/order').trim()).toBe('1');
   });
 
-  it('records review comments on each delivery without completing unrelated plan notes', async () => {
+  it('clears delivered viewed marks without completing unrelated plan notes', async () => {
     const change = await task('Archive');
     await commit(change);
     const targetKey = `worktree:${change.worktree}:working`;
     await store.update((state) => {
       state.targets[targetKey] = {
         viewed: { 'task.txt': 'hash' },
-        comments: [
-          {
-            id: 'feedback',
-            targetKey,
-            filePath: 'task.txt',
-            body: 'Reviewed',
-            side: 'new',
-            startLine: 1,
-            endLine: 1,
-            codeSnippet: ['task'],
-            status: 'active',
-            createdAt: 'now',
-            updatedAt: 'now',
-            anchor: { hunkHash: 'h', lineHashes: [], contextBefore: [], contextAfter: [], hunkLineOffset: 0 },
-          },
-        ],
       };
       state.todos.push({ id: 'todo', branch: change.branch, title: 'Check', body: '', status: 'open', createdAt: 'now', updatedAt: 'now' });
     });
@@ -503,8 +486,8 @@ describe('requirement development workflow', () => {
     const accepted = await accept(ready);
     await task('Next');
     const state = await store.load();
-    expect(state.targets[`commit:${accepted.deliveries!.at(-1)!.commit}`]?.comments[0]?.body).toBe('Reviewed');
-    expect(accepted.deliveries![0]!.review?.[0]?.body).toBe('Reviewed');
+    expect(state.targets[targetKey]?.viewed).toEqual({});
+    expect(accepted.deliveries![0]).not.toHaveProperty('review');
     expect(state.todos).toEqual([]);
     expect(state.workflow!.changes.find((row) => row.id === 'todo-todo')).toMatchObject({ status: 'planned', title: 'Check' });
   });

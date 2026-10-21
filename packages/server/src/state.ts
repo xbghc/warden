@@ -3,7 +3,6 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, rename, stat, unlink, utimes } from 'node:fs/promises';
 import type { Checkpoint, Prefs, ReviewState, TargetState } from '@warden/shared';
-import { commentScopeKey } from '@warden/shared';
 import { sha1 } from './hash.js';
 import { HttpError } from './errors.js';
 
@@ -22,7 +21,7 @@ export function stateFilePath(repoRoot: string, baseDir = dataDir()): string {
 }
 
 export function defaultPrefs(): Prefs {
-  return { viewMode: 'unified', autoRefresh: true, railOpen: false, ignoreDebug: true };
+  return { viewMode: 'unified', autoRefresh: true, ignoreDebug: true };
 }
 
 export function defaultState(repoRoot: string): ReviewState {
@@ -32,7 +31,7 @@ export function defaultState(repoRoot: string): ReviewState {
 export function ensureTarget(state: ReviewState, key: string): TargetState {
   let t = state.targets[key];
   if (!t) {
-    t = { viewed: {}, comments: [] };
+    t = { viewed: {} };
     state.targets[key] = t;
   }
   return t;
@@ -44,7 +43,6 @@ const usableCheckpoint = (v: unknown): boolean => {
   const c = v as Partial<Checkpoint> | null;
   return !!c && typeof c === 'object' && Number.isInteger(c.id) && typeof c.tree === 'string' && (c.worktree === undefined || typeof c.worktree === 'string');
 };
-const usableComment = (v: unknown): boolean => usable(v) && typeof (v as { anchor?: unknown }).anchor === 'object' && !!(v as { anchor?: unknown }).anchor;
 
 /**
  * The schema this build reads and writes. It must stay 1: every warden up to 0.16 replaces a file
@@ -76,12 +74,11 @@ function normalise(raw: unknown, repoRoot: string, file: string): ReviewState {
   for (const [k, v] of Object.entries(r.targets ?? {})) {
     if (!v || typeof v !== 'object') continue;
     targets[k] = {
+      // Retain unknown historical fields as opaque data when another state change is saved.
+      ...v,
       viewed: typeof v.viewed === 'object' && v.viewed ? v.viewed : {},
-      comments: Array.isArray(v.comments) ? v.comments.filter(usableComment) : [],
-      ...(typeof v.head === 'string' ? { head: v.head } : {}),
     };
   }
-  migrateLocalViews(targets);
   // Older builds remembered a separate review area. Fold it into the content destination and
   // leave the selected target intact; there is no longer an extra mode to enter before reading.
   const { lastArea, ...prefs } = (r.prefs ?? {}) as Partial<Prefs> & { lastArea?: unknown };
@@ -90,8 +87,6 @@ function normalise(raw: unknown, repoRoot: string, file: string): ReviewState {
     schemaVersion: SCHEMA_VERSION,
     repoRoot: r.repoRoot ?? repoRoot,
     targets,
-    // Issues were folded into todos (a todo links comments now); the few there were are let go,
-    // and the next write leaves them out of the file.
     todos: Array.isArray(r.todos) ? r.todos.filter(usable) : [],
     checkpoints: Array.isArray(r.checkpoints) ? r.checkpoints.filter(usableCheckpoint) : [],
     prefs: {
@@ -106,7 +101,6 @@ function normalise(raw: unknown, repoRoot: string, file: string): ReviewState {
       slotKind: undefined,
       ...(r.prefs?.slotKind === 'clone' || r.prefs?.slotKind === 'worktree' ? { slotKind: r.prefs.slotKind } : {}),
       autoRefresh: typeof r.prefs?.autoRefresh === 'boolean' ? r.prefs.autoRefresh : true,
-      railOpen: typeof r.prefs?.railOpen === 'boolean' ? r.prefs.railOpen : false,
       ignoreDebug: typeof r.prefs?.ignoreDebug === 'boolean' ? r.prefs.ignoreDebug : true,
     },
   };
@@ -114,7 +108,7 @@ function normalise(raw: unknown, repoRoot: string, file: string): ReviewState {
   return state;
 }
 
-/** Stable IDs make migration repeatable across readers and preserve ordering and comment links. */
+/** Stable IDs make migration repeatable across readers and preserve note order. */
 function migrateTodoPlans(state: ReviewState): void {
   const workflow = state.workflow;
   if (!workflow) return;
@@ -128,7 +122,7 @@ function migrateTodoPlans(state: ReviewState): void {
         id,
         title: todo.title,
         body: todo.body,
-        commentIds: todo.commentIds,
+        ...('commentIds' in todo ? { commentIds: todo.commentIds } : {}),
         developmentBranch: branch,
         status: todo.status === 'done' ? 'archived' : 'planned',
         createdAt: todo.createdAt,
@@ -137,30 +131,6 @@ function migrateTodoPlans(state: ReviewState): void {
     }
     return false;
   });
-}
-
-/**
- * Legacy local-view comments share one scope per worktree so they can follow code across git add.
- * Viewed hashes remain under their original target: different comparisons have different hashes,
- * and staging alone does not establish that a file has been reviewed.
- */
-function migrateLocalViews(targets: ReviewState['targets']): void {
-  // Sorted so a state file with several stale views migrates in a stable order.
-  for (const key of Object.keys(targets).sort()) {
-    const scope = commentScopeKey(key);
-    if (scope === key) continue;
-    const src = targets[key]!;
-    const comments = src.comments;
-    if (Object.keys(src.viewed).length === 0) delete targets[key];
-    else src.comments = [];
-    if (comments.length === 0) continue;
-    let dst = targets[scope];
-    if (!dst) {
-      dst = { viewed: {}, comments: [] };
-      targets[scope] = dst;
-    }
-    dst.comments.push(...comments);
-  }
 }
 
 const LOCK_STALE_MS = 5_000;
@@ -197,7 +167,7 @@ export class StateStore {
     public readonly repoRoot: string,
   ) {}
 
-  /** Shared by HTTP and agent CLI operations; independent of the short state-file lock. */
+  /** Shared by repository operations; independent of the short state-file lock. */
   async withRepositoryLock<T>(fn: () => Promise<T>): Promise<T> {
     await mkdir(path.dirname(this.file), { recursive: true });
     const lock = await this.acquireLock(`${this.file}.repository`);
@@ -256,7 +226,7 @@ export class StateStore {
     try {
       await fh.writeFile(JSON.stringify(state, null, 2) + '\n', 'utf8');
       // Without it a power cut can leave the renamed file empty, which load() then sets aside as
-      // corrupt: every comment gone, with nothing in the copy either.
+      // corrupt: saved state gone, with nothing in the copy either.
       await fh.sync();
     } finally {
       await fh.close();
@@ -265,8 +235,8 @@ export class StateStore {
   }
 
   /**
-   * An exclusive lock file beside the state file, shared by every warden process and the agent
-   * CLI. It carries a token of its own, so a holder releases only the lock it took, and its mtime
+   * An exclusive lock file beside the state file, shared by every warden process.
+   * It carries a token of its own, so a holder releases only the lock it took, and its mtime
    * is refreshed while held. Reclamation requires both an old heartbeat and a confirmed dead
    * owner: a suspended process or delayed timer must not permit concurrent repository mutations.
    */
@@ -319,34 +289,12 @@ export class StateStore {
   }
 }
 
-/**
- * Drops everything kept under one worktree path: the scope its local views share, the viewed
- * flags and comment pools of its commit, range, `base` and checkpoint targets, and its checkpoints.
- * A slot is checked out again for the next branch, and what was said about the previous one —
- * `base` comments above all, which no commit ever deletes — would otherwise come back orphaned
- * over code they were never about; a checkpoint of the old branch is no baseline for the new one.
- * Todos let go of the comments that went with it.
- */
+/** A reused slot starts with fresh viewed marks and checkpoint baselines. */
 export function forgetWorktreeTargets(state: ReviewState, worktreePath: string): void {
   const prefix = `worktree:${worktreePath}:`;
-  const gone = new Set<string>();
   for (const key of Object.keys(state.targets)) {
     if (!key.startsWith(prefix)) continue;
-    for (const c of state.targets[key]!.comments) gone.add(c.id);
     delete state.targets[key];
   }
-  unlinkComments(state, gone);
   state.checkpoints = state.checkpoints.filter((c) => c.worktree !== worktreePath);
-}
-
-/** Takes deleted comments off the todos that linked them; a todo left with none loses the field. */
-export function unlinkComments(state: ReviewState, ids: Iterable<string>): void {
-  const gone = new Set(ids);
-  if (gone.size === 0) return;
-  for (const todo of [...state.todos, ...(state.workflow?.changes ?? [])]) {
-    if (!todo.commentIds?.some((id) => gone.has(id))) continue;
-    const kept = todo.commentIds.filter((id) => !gone.has(id));
-    if (kept.length) todo.commentIds = kept;
-    else delete todo.commentIds;
-  }
 }

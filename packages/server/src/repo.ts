@@ -132,8 +132,8 @@ async function ownRoot(dir: string): Promise<string | undefined> {
 
 /**
  * The main worktree a clone slot at `root` belongs to: `<repo>` beside `<repo>-<n>`, when that is a
- * repository of its own and `root` a clone of it. An agent's `warden feedback` in the clone, or a
- * server started there, then shares that repository's review state, as one in a linked worktree does.
+ * repository of its own and `root` a clone of it. A server started there shares that repository's
+ * review state, as one in a linked worktree does.
  */
 async function mainOfClone(root: string): Promise<string | undefined> {
   const m = /^(.+)-[1-9]\d*$/.exec(path.basename(root));

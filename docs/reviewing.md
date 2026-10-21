@@ -13,16 +13,16 @@ formal delivery in this version requires a clean committed source.
 
 Delivery history and successful workspace-hook output are collapsed on the task page. Expand
 **交付** to inspect previous batches or **工作区脚本** to inspect hook output. Failed hooks remain visible. The file-list heading shows
-review progress once; layout and comment controls use icons with accessible labels and tooltips.
-The same [interface copy rules](design.md#interface-copy) apply to preview, history, synchronization,
-settings and comments. Operational consequences and recovery instructions stay beside their actions.
+review progress once; layout controls use icons with accessible labels and tooltips.
+The same [interface copy rules](design.md#interface-copy) apply to preview, history, synchronization
+and settings. Operational consequences and recovery instructions stay beside their actions.
 
-The task page is read-only for source files. Comments and viewed marks support review. Preparation
+The task page is read-only for source files. Viewed marks support review. Preparation
 isolates this delivery in the primary index; the page supports a message and ordinary Git commit
 with hooks. No validation checkbox or readiness declaration is required. Failed hooks preserve
 files; successful delivery preserves the workspace. See [Squash acceptance](worktrees.md#squash-acceptance).
 
-The read-only target APIs below underpin diff rendering and preserve historical comment locations.
+The read-only target APIs below underpin diff rendering.
 Checkpoint APIs remain available; the task page uses its delivery baseline for review.
 
 ## Targets (what is being reviewed)
@@ -46,9 +46,9 @@ Worktrees are discovered with `git worktree list`, and clone slots beside the ma
 [Clone slots](worktrees.md#clone-slots)); both are made in *任务编排* and share the review
 state of the main repository.
 One whose directory is gone (git lists it as *prunable*) is not offered, and a remembered target
-inside a removed worktree falls back to the working tree on the next load. The comments and viewed
-flags kept under a worktree's key stay in the state file until a branch is checked out into that
-slot again, which drops them: they were about another branch.
+inside a removed worktree falls back to the working tree on the next load. Viewed flags kept under a
+worktree's key stay in the state file until a branch is checked out into that slot again, which drops
+them: they were about another branch.
 
 Navigation stays together in the left sidebar: *主目录预览*, *提交历史*, ordered tasks and the
 synchronization/settings sheets. Within a task, its file list selects the diff directly. Connection
@@ -58,7 +58,7 @@ Review presents one file list for the current comparison. Staging does not mark 
 the [已读 mark](#viewed-files) records that separately and is invalidated when the diff changes.
 Local review opens `all`, including staged, unstaged and untracked content in the current working
 files. Saved `working` or `staged` startup targets open `all` in the same workspace. Their read-only
-APIs remain available so historical comments can still resolve against their original comparison.
+APIs remain available for explicit comparisons against HEAD or the index.
 
 `base:<ref>` is for a branch a coding agent has been working on, committing as it goes: one tree with
 everything since the branch forked off `<ref>` — the commits plus whatever is still uncommitted or
@@ -68,12 +68,13 @@ not listed as reverted (which is what a plain `git diff <ref>` would do). The *�
 review, otherwise `main` or `master` — and takes any ref. Under it the form names the fork point (the
 merge base with that ref, `GET /api/fork-point`) with how many commits the branch is ahead of it and how
 many landed on the base since, and the list marks that commit with a *分叉自* chip and a rule above it:
-what sits above is the branch's own work. Unlike the three local views, `base` keeps its own
-pool of comments and a commit never deletes them: the round under review is not over when the agent
-commits, so a comment whose lines changed stays *orphaned*, snippet and all, until you have checked
-the fix and delete or re-attach it.
+what sits above is the branch's own work.
 
 ## Read-only review
+
+Inline comments and their dedicated endpoints have been removed. Comment creation, editing, replies,
+reanchoring and export requests return 404. Click a line number to copy its location, or Shift-click
+to copy a range from the last copied line on the same side.
 
 Review does not modify source files or the real index. File, hunk and line staging controls and the
 legacy `POST /api/targets/:key/stage` endpoint have been removed; requests to that endpoint return
@@ -94,7 +95,7 @@ single convention for this, so warden takes the ones in use, in any comment synt
   the tag the usual pre-commit hooks look for.
 
 With *忽略调试代码* enabled (the default), runs of debug lines fold into one striped row that opens
-with a click; jumping to a comment inside a fold opens it. Folding changes presentation only: it
+with a click. Folding changes presentation only: it
 does not filter delivery content, modify the index or count a file as reviewed.
 
 A hunk rarely shows the marker that opened the block its lines sit in, so warden reads both sides of a
@@ -107,7 +108,7 @@ A file in any comparison can be marked *已读* — the
 box beside it in the sidebar, or the one in the file header. A directory whose files are all read
 recedes with a check. The mark is bound to a hash of the file's diff: when the diff changes (a `base`
 target reads the working tree, so the agent's next edit does that) the mark is dropped and the file
-is flagged *已变化*. The local views keep no such mark — see [Targets](#targets-what-is-being-reviewed).
+is flagged *已变化*. Viewed marks belong to the exact comparison, including local views.
 
 ## Checkpoints
 
@@ -120,21 +121,13 @@ working tree now — whatever was staged or committed in between does not show, 
 - *新建检查点*, under the progress figure in 工作区, takes one: tracked and untracked files as they are
   on disk, ignored ones left out. *对比检查点 #n* beside it opens the newest. A checkpoint of a working
   tree that has not changed since the newest one is not taken twice; that one is handed back.
-- Handing comments to the agent takes one by itself — *复制评论*, *复制此条*, a task's *复制任务给 agent* when it carries comments, or
-  the agent's own `warden feedback` — in each worktree the comments are about, marked *交付反馈* in
-  the list. A round is the reviewer's, not the agent's: it ends when feedback goes out, however many
-  turns the agent then takes, so *对比检查点* afterwards shows what it did about that feedback and
-  nothing before. A copy in the page does not wait for the snapshot, which on a large tree can
-  outlast the moment a browser allows for writing the clipboard; the list catches up when it lands.
 - In a checkpoint's view the picker reads *检查点 #n*, and the row under the figure switches to another
   checkpoint, takes a new one — the round is over, so the view moves on to it, empty — or deletes
   the one in front after asking.
-- Files there carry the [已读 mark](#viewed-files), which the agent's next edit to a file drops, and
-  comments on a checkpoint are a pool of their own. Deleting the checkpoint deletes both.
-- Checkpoints are numbered per worktree. A worktree keeps the newest 20; taking one more drops the
-  oldest with no comments on it, and its 已读 marks. One that still has comments is kept past the
-  limit until they are resolved: since every hand-off takes a checkpoint, dropping by age alone
-  would delete open comments after twenty rounds. A slot checked out to another branch drops its own.
+- Files there carry the [已读 mark](#viewed-files), which the agent's next edit to a file drops.
+  Deleting the checkpoint also deletes its marks.
+- Checkpoints are numbered per worktree. Each worktree retains its newest 20; older checkpoints
+  and their viewed marks are dropped. Reusing a slot for another branch clears its checkpoints.
 
 Nothing of this is written to the repository. The snapshot is `git add --all` plus
 `git write-tree` run against a copy of the index kept in warden's data directory, with
@@ -152,11 +145,10 @@ filters configured for the repository run as they do for any `git add` (Git LFS 
 warden polls the worktree every 1.5 s while the page is open (`git status --porcelain
 --untracked-files=all`, HEAD, the branch name, plus mtime and size of the paths status reports — enough to notice a second edit to an
 already-modified file) and pushes a change event over `GET /api/events` (SSE). The page then re-runs
-the normal refresh: re-anchor, reload both file lists, reload the open diff. Your draft comment,
-selection, current view and current file are left alone, and the diff is scrolled back to where you
-were reading. Turn it off with the *自动* toggle next to the refresh button; `r` still
+the normal refresh: reload the file list and the open diff. The current view and current file
+are left alone, and the diff is scrolled back to where you were reading.
+Turn it off with the *自动* toggle next to the refresh button; `r` still
 refreshes by hand.
 
-The same stream carries a `state` event when the state file's mtime moves, which is how an answer
-written by `warden reply` — a process with no server to tell — reaches the page within a poll. The
-page re-reads the comments then, and nothing else.
+The same stream carries a `state` event when the state file's mtime moves, so changes made by
+another Warden instance refresh the page.

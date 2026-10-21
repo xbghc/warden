@@ -15,7 +15,7 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-export const ReviewComment: Story = {
+export const ReviewNote: Story = {
   args: { text: '这里需要处理 **空列表**，并复用 `calcTotal`。\n\n- 保留折扣逻辑\n- 添加边界情况测试\n\n> 避免在渲染期间修改原始数据。' },
 };
 

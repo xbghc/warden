@@ -27,7 +27,7 @@ merging that branch into the company's main branch remains outside Warden's core
 | Prepare | Choose which work to start and how its workspace should be initialized. | Create or reuse a workspace from the development branch and support user-defined workspace hooks. |
 | Execute | Choose and run agents using external tools or user scripts. | Supply the workspace path and generic hook context; execution tools remain outside Warden. |
 | Preview and test | Choose connected worktrees and run the development server, lint or tests in the primary directory. | Temporarily compose their live changes there without creating a commit; this capability is planned. |
-| Review | Inspect the worktree's changes and decide whether they are ready to integrate. | Show the diff and feedback before squash; let the user export comments for further work. |
+| Review | Inspect the worktree's changes and decide whether they are ready to integrate. | Show the diff and viewed marks before squash; let the user copy code locations for their own tools. |
 | Integrate | Initiate squash, decide what testing is needed, and commit after validation. | Perform the requested Git operations, preserve normal commit hooks, and report their results. |
 | Continue | Continue the task and choose when to synchronize its workspace. | Keep the workspace available, show synchronization conditions and rebase only when requested. |
 | Organize history | Group related commits and edit their messages; adjust again if needed. | Preview and apply local history edits with conflict feedback; no undo/restore-history feature. |
@@ -128,7 +128,7 @@ contributing workspaces. Delivery preparation removes owned preview contribution
 Review and connection previews use the workspace's current content, regardless of whether changes
 are staged. Review has one file list and hash-bound viewed marks; staging is not a review status.
 The legacy line/file staging API has been removed. Read-only comparison keys remain available for
-historical comments. Formal delivery continues to use the primary checkout's Git index and hooks.
+explicit comparisons. Formal delivery continues to use the primary checkout's Git index and hooks.
 
 ```mermaid
 flowchart LR
@@ -148,13 +148,12 @@ flowchart LR
 ```
 
 Review takes place against the worktree **before squash**. Selecting its files is already review;
-there is no separate review-area navigation step. The user can export feedback to their own tools
-to request more work and continue reviewing the result.
+there is no separate review-area navigation step. The user requests further work through their own tools and continues reviewing the result.
+Inline comments, their export/reply APIs and feedback/reply CLI commands have been removed.
 
 Delivery is a user action through Warden's integration interaction. It does not require an agent
 to announce readiness, run `warden ready` / `warden resume`, submit a structured report, or satisfy
-a comment-resolution gate. Existing feedback commands can remain useful conveniences, but they
-must not become prerequisites for the core workflow.
+an extra approval gate.
 
 The integration action operates on the change the user reviewed. Ordinary Git checks still need
 to prevent an operation from silently using changed source content, overwriting unrelated local
@@ -285,4 +284,5 @@ old/new snapshots. This operation bookkeeping is not an undo feature. Users hand
 edits and actual rebase conflicts themselves.
 
 Existing low-level checkout and ready/resume HTTP endpoints remain for compatibility, but are
-absent from the new UI. Legacy ready does not rebase. The agent CLI exposes feedback/reply only.
+absent from the new UI. Legacy ready does not rebase. The CLI starts the review server; there are no
+comment feedback or reply commands.

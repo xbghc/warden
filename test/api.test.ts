@@ -4,14 +4,11 @@ import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type {
-  Comment,
   CommitsResponse,
   CreateWorktreeResponse,
-  ExportResponse,
   FileDiff,
   FilesResponse,
   ForkPointResponse,
-  ReanchorResponse,
   ReleaseWorktreeRequest,
   ReleaseWorktreeResponse,
   RemoveWorktreeRequest,
@@ -19,7 +16,6 @@ import type {
   RepoInfo,
   ReviewState,
   Todo,
-  TodosResponse,
   UpdateNotice,
   WorktreesResponse,
 } from '@warden/shared';
@@ -306,22 +302,7 @@ describe('repo & targets', () => {
   });
 });
 
-describe('viewed, comments, export, todos', () => {
-  async function createComment(shifted = false) {
-    const lines = ['export function a() {', shifted ? '  return 4;' : '  return 3;', '}', '', 'export const extra = true;', 'export const more = 1;', ''];
-    if (shifted) lines.unshift('// header');
-    await fx.write('src/a.ts', lines.join('\n'));
-    const res = await send('POST', `/api/targets/${k('working')}/comments`, {
-      filePath: 'src/a.ts',
-      side: 'new',
-      startLine: shifted ? 3 : 2,
-      endLine: shifted ? 3 : 2,
-      body: 'why 3?',
-    });
-    expect(res.status).toBe(201);
-    return json<Comment>(res);
-  }
-
+describe('read-only review and preferences', () => {
   // `base:main` on main is HEAD against the working tree: a target that tracks the mark and whose
   // diff an edit can still change.
   it('viewed state is bound to the content hash', async () => {
@@ -373,87 +354,39 @@ describe('viewed, comments, export, todos', () => {
     expect((await list()).files.find((f) => f.path === before.path)).toMatchObject({ viewed: false, changed: true });
   });
 
-  it('creates a comment with anchor + snippet', async () => {
-    const comment = await createComment();
-    expect(comment.codeSnippet).toEqual(['  return 3;']);
-    expect(comment.status).toBe('active');
-    expect(comment.anchor.lineHashes).toHaveLength(1);
-    const bad = await send('POST', `/api/targets/${k('working')}/comments`, { filePath: 'src/a.ts', side: 'new', startLine: 999, endLine: 999, body: 'x' });
-    expect(bad.status).toBe(400);
-    const files = await json<FilesResponse>(await get(`/api/targets/${k('working')}/files`));
-    expect(files.comments.map((c) => c.id)).toEqual([comment.id]);
-  });
-
-  it('reanchors after unrelated edits and orphans after edits to the commented line', async () => {
-    const comment = await createComment();
-    // unrelated edit at top of file (same hunk, shifted)
-    await fx.write(
-      'src/a.ts',
-      ['// header', 'export function a() {', '  return 3;', '}', '', 'export const extra = true;', 'export const more = 1;', ''].join('\n'),
-    );
-    let re = await json<ReanchorResponse>(await send('POST', `/api/targets/${k('working')}/comments/reanchor`, {}));
-    expect(re.comments[0]).toMatchObject({ status: 'active', startLine: 3, endLine: 3 });
-    // now change the commented line itself
-    await fx.write(
-      'src/a.ts',
-      ['// header', 'export function a() {', '  return 4;', '}', '', 'export const extra = true;', 'export const more = 1;', ''].join('\n'),
-    );
-    re = await json<ReanchorResponse>(await send('POST', `/api/targets/${k('working')}/comments/reanchor`, {}));
-    expect(re.comments[0]!.status).toBe('orphaned');
-    expect(re.comments[0]!.codeSnippet).toEqual(['  return 3;']);
-    // manual re-attach to a new selection
-    const patched = await json<Comment>(await send('PATCH', `/api/targets/${k('working')}/comments/${comment.id}`, { side: 'new', startLine: 3, endLine: 3 }));
-    expect(patched.status).toBe('active');
-    expect(patched.codeSnippet).toEqual(['  return 4;']);
-  });
-
-  it('exports comments and marks them exported', async () => {
-    const comment = await createComment(true);
-    const res = await json<ExportResponse>(await send('POST', '/api/comments/export', { commentIds: [comment.id, 'missing'] }));
-    expect(res.count).toBe(1);
-    expect(res.text).toContain(
-      '# Review comments\nTarget: working\nRepo: ' +
-        fx.root +
-        '\nCount: 1\n\n## src/a.ts:3 (new) [id: ' +
-        comment.id.slice(0, 8) +
-        ']\n```ts\n3 |   return 4;\n```\n> why 3?',
-    );
+  it('returns 404 for removed comment routes without changing repository or state', async () => {
+    await prepareLocalChanges();
     const state = await json<ReviewState>(await get('/api/state'));
-    const c = state.targets.local!.comments[0]!;
-    expect(c.status).toBe('exported');
-    expect(c.exportedAt).toBeTruthy();
-    // A changed body is one the agent has not read, so it waits to go out again.
-    const edited = await json<Comment>(await send('PATCH', `/api/targets/${k('working')}/comments/${comment.id}`, { body: 'why 4?' }));
-    expect(edited.status).toBe('active');
-    expect(edited.exportedAt).toBeUndefined();
-    expect(edited.body).toBe('why 4?');
+    const head = fx.git('rev-parse', 'HEAD');
+    const index = await readFile(path.join(fx.root, '.git', 'index'));
+    const work = await readFile(path.join(fx.root, 'src/b.ts'));
+    for (const [method, route] of [
+      ['GET', '/api/targets/all/comments'],
+      ['POST', '/api/targets/all/comments'],
+      ['PATCH', '/api/targets/all/comments/old'],
+      ['DELETE', '/api/targets/all/comments/old'],
+      ['POST', '/api/targets/all/comments/old/replies'],
+      ['POST', '/api/targets/all/comments/reanchor'],
+      ['POST', '/api/comments/export'],
+    ]) {
+      const response = await send(method!, route!, method === 'GET' ? undefined : { body: 'obsolete', commentIds: ['old'] });
+      expect(response.status).toBe(404);
+      expect(await response.json()).toMatchObject({ code: 'not_found' });
+    }
+    expect(await json<ReviewState>(await get('/api/state'))).toEqual(state);
+    expect(await readFile(path.join(fx.root, '.git', 'index'))).toEqual(index);
+    expect(await readFile(path.join(fx.root, 'src/b.ts'))).toEqual(work);
+    expect(fx.git('rev-parse', 'HEAD')).toBe(head);
+    expect(await json<FilesResponse>(await get('/api/targets/all/files'))).not.toHaveProperty('comments');
   });
 
-  it('todos link comments, hand them over when copied, and survive a store reload', async () => {
-    const comment = await createComment(true);
-    const created = await json<Todo>(await send('POST', '/api/todos', { title: 'Totals', body: 'desc', commentIds: [comment.id, comment.id] }));
-    expect(created.commentIds).toEqual([comment.id]);
-    expect((await send('POST', '/api/todos', { title: 'x', commentIds: ['missing'] })).status).toBe(404);
-    expect((await send('PATCH', `/api/todos/${created.id}`, { commentIds: 'nope' })).status).toBe(400);
-
-    const exp = await json<ExportResponse>(await send('POST', `/api/todos/${created.id}/export`));
-    expect(exp.text.startsWith('Totals\n\ndesc\n\n## src/a.ts:3 (new)')).toBe(true);
-    expect(exp.commentIds).toEqual([comment.id]);
-    // fresh store instance == server restart
-    const repo = await resolveRepo(fx.root);
-    const fresh = new StateStore(stateFile, repo.commonRoot);
-    const state = await fresh.load();
-    expect(state.todos.find((t) => t.id === created.id)).toMatchObject({ title: 'Totals', commentIds: [comment.id] });
-    expect(state.targets.local!.comments[0]!.exportedAt).toBeTruthy();
-
-    // Unlinking the last comment drops the field; deleting a comment unlinks it everywhere.
-    const unlinked = await json<Todo>(await send('PATCH', `/api/todos/${created.id}`, { commentIds: [] }));
-    expect(unlinked).not.toHaveProperty('commentIds');
-    await send('PATCH', `/api/todos/${created.id}`, { commentIds: [comment.id] });
-    await send('DELETE', `/api/targets/${k('working')}/comments/${comment.id}`);
-    const after = await json<TodosResponse>(await get('/api/todos'));
-    expect(after.todos.find((t) => t.id === created.id)).not.toHaveProperty('commentIds');
-    expect((await send('DELETE', `/api/todos/${created.id}`)).status).toBe(200);
+  it('copies task notes without modifying state or taking a checkpoint', async () => {
+    const created = await json<Todo>(await send('POST', '/api/todos', { title: 'Totals', body: 'desc' }));
+    const before = await json<ReviewState>(await get('/api/state'));
+    const response = await send('POST', `/api/todos/${created.id}/export`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ text: 'Totals\n\ndesc' });
+    expect(await json<ReviewState>(await get('/api/state'))).toEqual(before);
   });
 
   it('prefs are persisted', async () => {
@@ -747,9 +680,9 @@ describe('worktree management', () => {
     freeSlot(1);
     const slotPath = (await slot(1))!.path;
     const state = await json<ReviewState>(await get('/api/state'));
-    state.targets[`worktree:${slotPath}:base:main`] = { viewed: { 'src/a.ts': 'h' }, comments: [] };
-    state.targets[`worktree:${slotPath}:local`] = { viewed: {}, comments: [], head: 'abc' };
-    state.targets['base:main'] = { viewed: { 'src/a.ts': 'h' }, comments: [] };
+    state.targets[`worktree:${slotPath}:base:main`] = { viewed: { 'src/a.ts': 'h' } };
+    state.targets[`worktree:${slotPath}:local`] = { viewed: {} };
+    state.targets['base:main'] = { viewed: { 'src/a.ts': 'h' } };
     await writeFile(stateFile, JSON.stringify(state));
     const made = await json<CreateWorktreeResponse>(await create({ branch: 'agent/state', base: 'main', slot: 1 }));
     expect(made.reused).toBe(true);

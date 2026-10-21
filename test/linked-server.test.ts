@@ -3,7 +3,7 @@ import path from 'node:path';
 import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Hono } from 'hono';
-import type { Comment, ReanchorResponse, RepoInfo, ReviewState } from '@warden/shared';
+import type { FilesResponse, RepoInfo, ReviewState } from '@warden/shared';
 import { createApp, resolveRepo, StateStore } from '@warden/server';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
@@ -47,24 +47,22 @@ describe('a server started inside a linked worktree', () => {
     expect(info.defaultTarget).toBe(`worktree:${linked}:all`);
   });
 
-  it('neither sees nor deletes the main worktree’s comments', async () => {
+  it('keeps viewed marks scoped to their worktree across servers', async () => {
     await fx.write('src/a.ts', 'export function a() {\n  return 2;\n}\n');
-    const c = (await (
-      await send(main, 'POST', '/api/targets/working/comments', { filePath: 'src/a.ts', side: 'new', startLine: 2, endLine: 2, body: 'why 2?' })
-    ).json()) as Comment;
-    await send(main, 'POST', '/api/targets/working/comments/reanchor', {});
+    const files = (await (await main.request('/api/targets/all/files')).json()) as FilesResponse;
+    const file = files.files.find((row) => row.path === 'src/a.ts')!;
+    await send(main, 'PUT', '/api/targets/all/viewed', { path: file.path, viewed: true, contentHash: file.contentHash });
 
     // The linked worktree moves its own HEAD, as an agent committing there does.
     await writeFile(path.join(linked, 'side.txt'), 'x\n');
     fx.git('-C', linked, 'add', 'side.txt');
     fx.git('-C', linked, 'commit', '-q', '-m', 'side work');
 
-    // The linked server's page looks at its own worktree; a bare `working` from it is main's.
-    await send(inLinked, 'POST', `/api/targets/${k(`worktree:${linked}:working`)}/comments/reanchor`, {});
-    const viaBare = (await (await send(inLinked, 'POST', '/api/targets/working/comments/reanchor', {})).json()) as ReanchorResponse;
-    expect(viaBare.comments.map((x) => [x.id, x.status])).toEqual([[c.id, 'active']]);
-
+    const own = (await (await inLinked.request(`/api/targets/${k(`worktree:${linked}:all`)}/files`)).json()) as FilesResponse;
+    expect(own.files).toEqual([]);
+    const viaBare = (await (await inLinked.request('/api/targets/all/files')).json()) as FilesResponse;
+    expect(viaBare.files.find((row) => row.path === file.path)?.viewed).toBe(true);
     const state = (await (await main.request('/api/state')).json()) as ReviewState;
-    expect(state.targets.local!.comments.map((x) => x.id)).toEqual([c.id]);
+    expect(state.targets.all!.viewed[file.path]).toBe(file.contentHash);
   });
 });

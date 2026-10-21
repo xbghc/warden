@@ -68,7 +68,7 @@ export async function setupWorkspaceStore() {
   useStore.setState((s) => ({
     repo: { ...s.repo!, branch: 'feature/order', worktrees },
     todos: s.todos.map((todo) => (todo.branch === 'main' ? { ...todo, branch: 'feature/order' } : todo)),
-    prefs: { ...s.prefs, railOpen: true, autoRefresh: false },
+    prefs: { ...s.prefs, autoRefresh: false },
     files: [file],
     activeFile: diff.path,
     diffs: { [diff.path]: { status: 'ok', diff } },
@@ -81,19 +81,6 @@ export async function setupWorkspaceStore() {
     loadCheckpoints: fn(async () => {}),
     createCheckpoint: fn(async () => {
       useStore.getState().showToast('预览：已记录当前工作区');
-    }),
-    replyToComment: fn(async (id, body) => {
-      useStore.setState((current) => ({
-        comments: current.comments.map((comment) =>
-          comment.id === id
-            ? {
-                ...comment,
-                replies: [...(comment.replies ?? []), { id: 'preview-reply', author: 'reviewer' as const, body, at: new Date().toISOString() }],
-              }
-            : comment,
-        ),
-      }));
-      return true;
     }),
     toggleViewed: fn(async (path) => {
       useStore.setState((current) => ({ files: current.files.map((entry) => (entry.path === path ? { ...entry, viewed: !entry.viewed } : entry)) }));

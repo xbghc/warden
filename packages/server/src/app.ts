@@ -7,13 +7,9 @@ import type {
   ChangeEvent,
   CheckpointsResponse,
   CreateCheckpointResponse,
-  Comment,
   CommitsResponse,
-  CreateCommentRequest,
   CreateTodoRequest,
   CreateWorktreeRequest,
-  ExportRequest,
-  ExportResponse,
   ForkPointResponse,
   FileDiff,
   FileEntry,
@@ -21,48 +17,28 @@ import type {
   FullFileResponse,
   MoveRequest,
   Prefs,
-  ReanchorRequest,
-  ReanchorResponse,
   ReleaseWorktreeRequest,
-  ReplyRequest,
   RemoteBranchesResponse,
   RemoveWorktreeRequest,
   RepoInfo,
-  ReviewState,
   StateEvent,
   Todo,
   TodosResponse,
-  UpdateCommentRequest,
   UpdateNotice,
   UpdateTodoRequest,
   WorktreeInfo,
-  WorktreeReview,
   WorktreesResponse,
 } from '@warden/shared';
-import {
-  awaitsAgent,
-  awaitsReviewer,
-  commentWorktree,
-  commentScopeKey,
-  formatTargetKey,
-  insertAfter,
-  isLocalTarget,
-  isValidRef,
-  localViewKeys,
-  moveBefore,
-  tryParseTargetKey,
-} from '@warden/shared';
+import { formatTargetKey, insertAfter, isLocalTarget, isValidRef, moveBefore, tryParseTargetKey } from '@warden/shared';
 import { badRequest, HttpError, notFound } from './errors.js';
 import { COMMIT_FORMAT, parseCommitLog } from './commits.js';
 import { mergeBase, refExists, revParse, runGit } from './git.js';
 import { currentBranch, getRepoInfo, listWorktrees, remoteDefault, slotPath, type RepoContext } from './repo.js';
 import { annotateDebug, getFileDiff, getFullFile, listTargetDiffs, literal, resolveTargetContext, toSummary, type TargetContext } from './targets.js';
-import { buildAnchor, reanchorComment } from './anchor.js';
 import { checkpointKey, checkpointStore, checkpointsOf, findCheckpoint, forgetCheckpoint, takeCheckpoint } from './checkpoints.js';
 import { checkoutWorktree, listBranches, listWorktreesDetailed, lookupRemoteBranches, nextSlot, releaseWorktree, removeWorktree } from './worktrees.js';
-import { ensureTarget, forgetWorktreeTargets, type StateStore, unlinkComments } from './state.js';
-import { formatCommentsExport, formatTodoExport } from './export.js';
-import { addReply } from './feedback.js';
+import { ensureTarget, forgetWorktreeTargets, type StateStore } from './state.js';
+import { formatTodoExport } from './export.js';
 import { WorkflowService } from './workflow.js';
 import { PreviewService } from './preview.js';
 import { HistoryService } from './history.js';
@@ -82,8 +58,6 @@ export interface AppOptions {
   instanceToken?: string;
   /** The CLI's update check, still in flight when the first page loads; it never rejects. */
   update?: Promise<UpdateNotice | null>;
-  /** How an agent runs the CLI (`warden`, `npx @xbghc/warden`); exports tell it to reply that way. */
-  replyCommand?: string;
 }
 
 const SSE_HEARTBEAT_MS = 15_000;
@@ -107,7 +81,6 @@ export function createApp(opts: AppOptions): WardenApp {
   let closing: Promise<void> | undefined;
   const requests = new Set<Promise<void>>();
   const stateReads = new Set<Promise<number>>();
-  const backgroundCheckpoints = new Set<Promise<unknown>>();
   const stopStreams = new Set<() => void>();
   app.use('*', async (c, next) => {
     if (stopped) return c.json({ error: 'Server is closing', code: 'server_closing' }, 503);
@@ -143,11 +116,10 @@ export function createApp(opts: AppOptions): WardenApp {
     stopped = true;
     for (const stop of stopStreams) stop();
     closing = (async () => {
-      // An export already in flight can schedule its checkpoint after shutdown
-      // starts. Finish those requests before capturing the background work to drain.
+      // Finish requests before draining watcher activity and state reads.
       const results: PromiseSettledResult<unknown>[] = await Promise.allSettled([...requests]);
       for (const stop of stopStreams) stop();
-      results.push(...(await Promise.allSettled([...backgroundCheckpoints, ...stateReads, ...[...watchers.values()].map((watcher) => watcher.close())])));
+      results.push(...(await Promise.allSettled([...stateReads, ...[...watchers.values()].map((watcher) => watcher.close())])));
       const errors = results.filter((result) => result.status === 'rejected').map((result) => result.reason);
       if (errors.length) throw new AggregateError(errors, 'Failed to close repository activity');
     })();
@@ -204,40 +176,6 @@ export function createApp(opts: AppOptions): WardenApp {
       oldPath: explicit?.oldPath ?? hint?.oldPath,
       untracked: explicit?.untracked ?? hint?.untracked,
     });
-  };
-
-  // Handing comments to the agent ends a round, so the working tree is noted then: what the agent
-  // does about them is `checkpoint:<n>`, the view the reviewer comes back to. It runs after the
-  // response, not before: the page writes the clipboard when the export returns, which a browser
-  // allows only shortly after the click, and a snapshot of a large tree can take longer than that.
-  // The page hears of the checkpoint through the state event.
-  const checkpointHandoff = (comments: Comment[]): void => {
-    const worktrees = new Set(comments.map((x) => tryParseTargetKey(x.targetKey)?.worktree));
-    for (const wt of worktrees) {
-      const pending = takeCheckpoint(store, wt ?? repo.commonRoot, wt, { handoff: true })
-        .catch((e) => {
-          console.error(`warden: no checkpoint for the comments handed over in ${wt ?? repo.commonRoot}: ${e instanceof Error ? e.message : e}`);
-        })
-        .finally(() => backgroundCheckpoints.delete(pending));
-      backgroundCheckpoints.add(pending);
-    }
-  };
-
-  const findComment = (state: ReviewState, id: string): { comment: Comment; targetKey: string; index: number } | undefined => {
-    for (const [targetKey, t] of Object.entries(state.targets)) {
-      const index = t.comments.findIndex((c) => c.id === id);
-      if (index >= 0) return { comment: t.comments[index]!, targetKey, index };
-    }
-    return undefined;
-  };
-
-  /** The ids of a request that name existing comments, each once; any other is refused rather than kept dangling. */
-  const linkable = (state: ReviewState, raw: unknown): string[] => {
-    if (!Array.isArray(raw) || raw.some((x) => typeof x !== 'string')) throw badRequest('commentIds must be a list of ids');
-    const ids = [...new Set(raw as string[])];
-    const missing = ids.find((x) => !findComment(state, x));
-    if (missing) throw notFound(`no comment with id ${missing}`, 'unknown_comment');
-    return ids;
   };
 
   app.onError((err, c) => {
@@ -322,7 +260,6 @@ export function createApp(opts: AppOptions): WardenApp {
       if (typeof body.lastTarget === 'string') s.prefs.lastTarget = body.lastTarget;
       if (body.lastPanel === 'orchestration' || body.lastPanel === 'diff' || body.lastPanel === 'commits') s.prefs.lastPanel = body.lastPanel;
       if (typeof body.autoRefresh === 'boolean') s.prefs.autoRefresh = body.autoRefresh;
-      if (typeof body.railOpen === 'boolean') s.prefs.railOpen = body.railOpen;
       if (typeof body.ignoreDebug === 'boolean') s.prefs.ignoreDebug = body.ignoreDebug;
       return s.prefs;
     });
@@ -364,8 +301,7 @@ export function createApp(opts: AppOptions): WardenApp {
       viewed: !stale.includes(d.path) && viewed[d.path] === d.contentHash,
       changed: notices.has(d.path),
     }));
-    const scope = state.targets[commentScopeKey(key)];
-    const res: FilesResponse = { targetKey: key, root: ctx.cwd, files, comments: scope?.comments ?? [] };
+    const res: FilesResponse = { targetKey: key, root: ctx.cwd, files };
     return c.json(res);
   });
 
@@ -435,290 +371,6 @@ export function createApp(opts: AppOptions): WardenApp {
     return c.json({ ok: true });
   });
 
-  // ---- comments ----------------------------------------------------------
-
-  api.get('/targets/:key/comments', async (c) => {
-    const key = c.req.param('key');
-    const state = await store.load();
-    return c.json({ comments: state.targets[commentScopeKey(key)]?.comments ?? [] });
-  });
-
-  api.post('/targets/:key/comments', async (c) => {
-    const key = c.req.param('key');
-    const ctx = await targetCtx(key);
-    const body = (await c.req.json()) as CreateCommentRequest;
-    if (!body.filePath || typeof body.body !== 'string' || !body.body.trim()) throw badRequest('filePath and body are required');
-    if (body.side !== 'old' && body.side !== 'new') throw badRequest('side must be old|new');
-    const start = Number(body.startLine);
-    const end = Number(body.endLine ?? body.startLine);
-    if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < 1) throw badRequest('invalid line range');
-    const diff = await fileDiffWithHints(ctx, body.filePath);
-    if (!diff) throw badRequest(`file ${body.filePath} is not part of ${key}`, 'no_diff');
-    const anchored = buildAnchor(diff, body.side, start, end);
-    if (!anchored) throw badRequest('selection is not fully visible in the diff on that side (must be inside one hunk)', 'bad_selection');
-    const now = new Date().toISOString();
-    const comment: Comment = {
-      id: randomUUID(),
-      targetKey: key,
-      filePath: body.filePath,
-      side: body.side,
-      startLine: anchored.startLine,
-      endLine: anchored.endLine,
-      codeSnippet: anchored.snippet,
-      body: body.body,
-      status: 'active',
-      anchor: anchored.anchor,
-      createdAt: now,
-      updatedAt: now,
-    };
-    await store.update((s) => {
-      ensureTarget(s, commentScopeKey(key)).comments.push(comment);
-    });
-    return c.json(comment, 201);
-  });
-
-  api.patch('/targets/:key/comments/:id', async (c) => {
-    const key = c.req.param('key');
-    const id = c.req.param('id');
-    const ctx = await targetCtx(key);
-    const body = (await c.req.json()) as UpdateCommentRequest;
-    const scope = commentScopeKey(key);
-    const state = await store.load();
-    const existing = state.targets[scope]?.comments.find((x) => x.id === id);
-    if (!existing) throw notFound('comment not found');
-
-    let patch: Partial<Comment> = {};
-    if (typeof body.body === 'string') {
-      if (!body.body.trim()) throw badRequest('body must not be empty');
-      patch.body = body.body;
-    }
-    if (body.startLine !== undefined || body.side !== undefined) {
-      const side = body.side ?? existing.side;
-      const start = Number(body.startLine ?? existing.startLine);
-      const end = Number(body.endLine ?? body.startLine ?? existing.endLine);
-      if (side !== 'old' && side !== 'new') throw badRequest('side must be old|new');
-      const diff = await fileDiffWithHints(ctx, existing.filePath);
-      if (!diff) throw badRequest(`file ${existing.filePath} is not part of ${key}`, 'no_diff');
-      const anchored = buildAnchor(diff, side, start, end);
-      if (!anchored) throw badRequest('selection is not fully visible in the diff on that side', 'bad_selection');
-      patch = {
-        ...patch,
-        side,
-        startLine: anchored.startLine,
-        endLine: anchored.endLine,
-        codeSnippet: anchored.snippet,
-        anchor: anchored.anchor,
-        status: existing.exportedAt ? 'exported' : 'active',
-        // Re-attaching in a view moves the comment to it.
-        targetKey: key,
-      };
-    }
-    const updated = await store.update((s) => {
-      const t = ensureTarget(s, scope);
-      const idx = t.comments.findIndex((x) => x.id === id);
-      if (idx < 0) throw notFound('comment not found');
-      const prev = t.comments[idx]!;
-      const next: Comment = { ...prev, ...patch, updatedAt: new Date().toISOString() };
-      // A changed note is one the agent has not read: it goes out again, as a reviewer reply does.
-      if (patch.body !== undefined && patch.body !== prev.body && next.exportedAt) {
-        delete next.exportedAt;
-        if (next.status === 'exported') next.status = 'active';
-      }
-      t.comments[idx] = next;
-      return next;
-    });
-    return c.json(updated);
-  });
-
-  api.delete('/targets/:key/comments/:id', async (c) => {
-    const key = c.req.param('key');
-    const id = c.req.param('id');
-    const removed = await store.update((s) => {
-      const t = s.targets[commentScopeKey(key)];
-      if (!t) return false;
-      const before = t.comments.length;
-      t.comments = t.comments.filter((x) => x.id !== id);
-      unlinkComments(s, [id]);
-      return t.comments.length !== before;
-    });
-    if (!removed) throw notFound('comment not found');
-    return c.json({ ok: true });
-  });
-
-  api.post('/targets/:key/comments/:id/replies', async (c) => {
-    const body = (await c.req.json()) as ReplyRequest;
-    if (typeof body.body !== 'string') throw badRequest('body is required');
-    const found = findComment(await store.load(), c.req.param('id'));
-    if (!found || found.targetKey !== commentScopeKey(c.req.param('key'))) throw notFound('comment not found');
-    return c.json(await addReply(store, found.comment.id, 'reviewer', body.body), 201);
-  });
-
-  api.post('/targets/:key/comments/reanchor', async (c) => {
-    const key = c.req.param('key');
-    const ctx = await targetCtx(key);
-    const scope = commentScopeKey(key);
-    const local = isLocalTarget(ctx.target);
-    const body = ((await c.req.json().catch(() => ({}))) ?? {}) as ReanchorRequest;
-    const provided = new Map<string, FileDiff>();
-    for (const f of body.files ?? []) if (f && typeof f.path === 'string' && Array.isArray(f.hunks)) provided.set(f.path, f);
-
-    // Staging a hunk moves it from `working` to `staged` without changing the code, so a comment
-    // that vanished from one view has most likely just reappeared in another. Every local view of
-    // this worktree is therefore a candidate; commit/range targets only ever look at themselves.
-    const views = local ? localViewKeys(key) : [key];
-    const contexts = new Map<string, TargetContext>([[key, ctx]]);
-    /** view key -> file path -> diff, computed at most once per pass. */
-    const diffs = new Map<string, Map<string, Promise<FileDiff | undefined>>>();
-    const diffFor = (view: string, filePath: string): Promise<FileDiff | undefined> => {
-      let byPath = diffs.get(view);
-      if (!byPath) {
-        byPath = new Map();
-        diffs.set(view, byPath);
-      }
-      let pending = byPath.get(filePath);
-      if (!pending) {
-        pending = (async () => {
-          // Diffs in the request body describe the view the client is looking at, nothing else.
-          if (view === key && provided.has(filePath)) return provided.get(filePath);
-          try {
-            let viewCtx = contexts.get(view);
-            if (!viewCtx) {
-              viewCtx = await targetCtx(view);
-              contexts.set(view, viewCtx);
-            }
-            return await fileDiffWithHints(viewCtx, filePath);
-          } catch {
-            return undefined;
-          }
-        })();
-        byPath.set(filePath, pending);
-      }
-      return pending;
-    };
-
-    const state = await store.load();
-    const comments = state.targets[scope]?.comments ?? [];
-    const prevHead = state.targets[scope]?.head;
-    const head = (await revParse(ctx.cwd, 'HEAD')) ?? '';
-
-    const now = new Date().toISOString();
-    /** comment id -> the view it was located in, and the fields that follow from that location. */
-    const located = new Map<string, Partial<Comment>>();
-    await Promise.all(
-      comments.map(async (cm) => {
-        const ordered = views.includes(cm.targetKey) ? [cm.targetKey, ...views.filter((v) => v !== cm.targetKey)] : views;
-        for (const view of ordered) {
-          const diff = await diffFor(view, cm.filePath);
-          if (!diff) continue;
-          const next = reanchorComment(cm, diff, now);
-          if (next.status === 'orphaned') continue;
-          located.set(cm.id, {
-            side: next.side,
-            startLine: next.startLine,
-            endLine: next.endLine,
-            codeSnippet: next.codeSnippet,
-            anchor: next.anchor,
-            status: next.status,
-            targetKey: view,
-          });
-          return;
-        }
-      }),
-    );
-
-    // A comment with nowhere left to sit is finished work only if its lines went into a commit: HEAD
-    // moved forward from where the last pass saw it, and the code it was on is in that stretch of
-    // history. Anything else that moves HEAD — a branch switch, a reset, a stash and checkout, an
-    // amend or rebase — leaves the comment orphaned for the reviewer, never deleted. Never on the
-    // first pass, when there is no HEAD to compare to.
-    const landed = new Set<string>();
-    const lost = comments.filter((cm) => !located.has(cm.id));
-    if (local && lost.length && prevHead && head && prevHead !== head && (await mergeBase(ctx.cwd, prevHead, head)) === prevHead) {
-      const range = await worktreeCtx(
-        formatTargetKey({ kind: 'range', base: prevHead, head, ...(ctx.target.worktree ? { worktree: ctx.target.worktree } : {}) }),
-      );
-      await Promise.all(
-        lost.map(async (cm) => {
-          const committedDiff = await getFileDiff(range, cm.filePath).catch(() => undefined);
-          if (committedDiff && reanchorComment(cm, committedDiff, now).status !== 'orphaned') landed.add(cm.id);
-        }),
-      );
-    }
-
-    const result = await store.update((s) => {
-      const t = ensureTarget(s, scope);
-      const dropped: string[] = [];
-      // The patch is applied to the freshest copy so a body edited while the diffs were computed
-      // is not overwritten by the snapshot this pass started from.
-      t.comments = t.comments.flatMap((cm): Comment[] => {
-        const patch = located.get(cm.id);
-        if (!patch) {
-          // Created after the snapshot: not part of this pass, leave untouched.
-          if (!comments.some((x) => x.id === cm.id)) return [cm];
-          // A thread is a conversation the reviewer has not closed: the agent's answer usually
-          // arrives with the very commit that makes the code it was about disappear, and dropping
-          // the comment then would lose the answer unread.
-          if (landed.has(cm.id) && !cm.replies?.length) {
-            dropped.push(cm.id);
-            return [];
-          }
-          return [cm.status === 'orphaned' ? cm : { ...cm, status: 'orphaned', updatedAt: now }];
-        }
-        const next: Comment = { ...cm, ...patch };
-        const unchanged =
-          cm.targetKey === next.targetKey &&
-          cm.status === next.status &&
-          cm.startLine === next.startLine &&
-          cm.endLine === next.endLine &&
-          cm.anchor.hunkHash === next.anchor.hunkHash;
-        return [unchanged ? cm : { ...next, updatedAt: now }];
-      });
-      unlinkComments(s, dropped);
-      t.head = head;
-      return t.comments;
-    });
-    const res: ReanchorResponse = { comments: result };
-    return c.json(res);
-  });
-
-  /**
-   * Marks comments as handed to the agent and notes the working tree, as one hand-off. Kept apart
-   * from building the text: the page asks for the text first (`preview`), writes the clipboard,
-   * and only then confirms, so a clipboard that refused the text does not leave the comments
-   * looking delivered.
-   */
-  const handOver = async (ids: string[]): Promise<Comment[]> => {
-    const handed = await store.update((s): Comment[] => {
-      const now = new Date().toISOString();
-      const out: Comment[] = [];
-      for (const id of ids) {
-        const found = findComment(s, id);
-        if (!found) continue;
-        const next: Comment = { ...found.comment, exportedAt: now, updatedAt: now };
-        if (next.status === 'active') next.status = 'exported';
-        s.targets[found.targetKey]!.comments[found.index] = next;
-        out.push(next);
-      }
-      return out;
-    });
-    checkpointHandoff(handed);
-    return handed;
-  };
-  const existing = (state: ReviewState, ids: string[]): Comment[] => ids.flatMap((id) => findComment(state, id)?.comment ?? []);
-
-  api.post('/comments/export', async (c) => {
-    const body = (await c.req.json()) as ExportRequest;
-    if (!Array.isArray(body.commentIds)) throw badRequest('commentIds required');
-    const ids = body.commentIds.filter((x): x is string => typeof x === 'string');
-    const comments = body.preview ? existing(await store.load(), ids) : await handOver(ids);
-    const res: ExportResponse = {
-      text: formatCommentsExport({ repoRoot: repo.root, comments, replyCommand: opts.replyCommand }),
-      count: comments.length,
-      commentIds: comments.map((x) => x.id),
-    };
-    return c.json(res);
-  });
-
   // ---- todos ---------------------------------------------------------------
 
   /** A root the server is willing to answer for: this worktree, the main one, or a listed sibling. */
@@ -754,10 +406,6 @@ export function createApp(opts: AppOptions): WardenApp {
       updatedAt: now,
     };
     await store.update((s) => {
-      if (body.commentIds !== undefined) {
-        const ids = linkable(s, body.commentIds);
-        if (ids.length) todo.commentIds = ids;
-      }
       s.todos = insertAfter(s.todos, todo, typeof body.after === 'string' ? body.after : undefined);
     });
     return c.json(todo, 201);
@@ -786,33 +434,16 @@ export function createApp(opts: AppOptions): WardenApp {
       if (typeof body.title === 'string' && body.title.trim()) todo.title = body.title.trim();
       if (typeof body.body === 'string') todo.body = body.body;
       if (body.status === 'open' || body.status === 'done') todo.status = body.status;
-      if (body.commentIds !== undefined) {
-        const ids = linkable(s, body.commentIds);
-        if (ids.length) todo.commentIds = ids;
-        else delete todo.commentIds;
-      }
       todo.updatedAt = new Date().toISOString();
       return todo;
     });
     return c.json(updated);
   });
 
-  // A todo with comments is what an issue was: a task with the review notes it is about, handed to
-  // the agent together. So its copy is a hand-off, as copying the comments would be.
   api.post('/todos/:id/export', async (c) => {
-    const id = c.req.param('id');
-    const body = ((await c.req.json().catch(() => ({}))) ?? {}) as { preview?: boolean };
-    const state = await store.load();
-    const todo = state.todos.find((t) => t.id === id);
+    const todo = (await store.load()).todos.find((row) => row.id === c.req.param('id'));
     if (!todo) throw notFound('todo not found');
-    const ids = todo.commentIds ?? [];
-    const comments = body.preview ? existing(state, ids) : await handOver(ids);
-    const res: ExportResponse = {
-      text: formatTodoExport({ todo, comments, replyCommand: opts.replyCommand }),
-      count: comments.length,
-      commentIds: comments.map((x) => x.id),
-    };
-    return c.json(res);
+    return c.json({ text: formatTodoExport(todo) });
   });
 
   api.delete('/todos/:id', async (c) => {
@@ -985,30 +616,6 @@ export function createApp(opts: AppOptions): WardenApp {
   api.get('/worktrees', async (c) => {
     const [list, state] = await Promise.all([listWorktreesDetailed(repo), store.load()]);
     const [branches, newSlot] = await Promise.all([listBranches(repo, list), nextSlot(repo, list)]);
-    // A key without a worktree is the main worktree's (see resolveTargetContext).
-    const review = new Map<string, WorktreeReview>();
-    const latest = new Map<string, { agent: string; reviewer: string }>();
-    for (const t of Object.values(state.targets)) {
-      for (const cm of t.comments) {
-        const at = commentWorktree(cm) ?? repo.commonRoot;
-        const r = review.get(at) ?? { toAgent: 0, toReviewer: 0 };
-        const seen = latest.get(at) ?? { agent: '', reviewer: '' };
-        if (awaitsAgent(cm)) {
-          r.toAgent++;
-          if (cm.updatedAt >= seen.agent) [seen.agent, r.toAgentTarget] = [cm.updatedAt, cm.targetKey];
-        }
-        if (awaitsReviewer(cm)) {
-          r.toReviewer++;
-          if (cm.updatedAt >= seen.reviewer) [seen.reviewer, r.toReviewerTarget] = [cm.updatedAt, cm.targetKey];
-        }
-        review.set(at, r);
-        latest.set(at, seen);
-      }
-    }
-    for (const wt of list) {
-      const r = review.get(wt.path);
-      if (r && (r.toAgent || r.toReviewer)) wt.review = r;
-    }
     const trunk = await remoteDefault(repo.commonRoot).catch(() => undefined);
     const res: WorktreesResponse = { worktrees: list, branches, newSlot, slotKind: state.prefs.slotKind ?? 'clone', ...(trunk ? { trunk } : {}) };
     return c.json(res);
@@ -1121,8 +728,7 @@ export function createApp(opts: AppOptions): WardenApp {
       };
       stopStreams.add(stop);
       stream.onAbort(stop);
-      // The page's own writes land here too; the agent's `warden reply` only lands here, since the
-      // CLI writes the state file without a server. mtime is enough: every write is a rename.
+      // Detect writes from this page and other Warden instances; each write replaces the file.
       try {
         let stamp = await stateStamp();
         if (ended) return;

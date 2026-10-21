@@ -44,8 +44,6 @@ export function revealTask(id: string) {
 
 export async function copyTaskBrief(change: DevelopmentChange) {
   try {
-    const ids = change.commentIds ?? [];
-    const comments = ids.length ? await api.exportComments(ids, true) : undefined;
     await copyText(
       [
         `任务：${change.title}`,
@@ -56,16 +54,11 @@ export async function copyTaskBrief(change: DevelopmentChange) {
         `临时分支：${change.branch}`,
         `主开发分支：${change.developmentBranch}`,
         '只在任务工作区开发。可以提交多个本地 commit，由用户审查后分批合入主开发分支。',
-        '用户在主目录自行运行测试。用 warden feedback / warden reply 获取和回复评论。',
-        comments?.text,
+        '用户在主目录自行运行测试。',
       ]
         .filter(Boolean)
         .join('\n\n'),
     );
-    if (comments?.commentIds.length) {
-      await api.exportComments(comments.commentIds);
-      await useStore.getState().loadAllComments();
-    }
     useStore.getState().showToast('任务说明已复制');
   } catch (error) {
     useStore.getState().showToast(error instanceof Error ? error.message : String(error), 'error');

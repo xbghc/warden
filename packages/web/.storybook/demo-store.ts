@@ -1,34 +1,11 @@
 import { fn } from 'storybook/test';
-import type { Comment, Todo } from '@warden/shared';
+import type { Todo } from '@warden/shared';
 import { parseTargetKey } from '@warden/shared';
 import { branchOf, useStore, type AppStore } from '../src/store';
 
 const timestamp = '2026-09-11T02:00:00.000Z';
-export function demoComment(overrides: Partial<Comment> = {}): Comment {
-  return {
-    id: 'comment-1',
-    targetKey: 'working',
-    filePath: 'src/App.tsx',
-    side: 'new',
-    startLine: 12,
-    endLine: 13,
-    codeSnippet: ['const total = items.reduce((sum, item) => sum + item.price, 0);'],
-    body: '请复用 **calcTotal**，确保折扣计算一致。',
-    status: 'active',
-    anchor: { hunkHash: 'demo', lineHashes: [], contextBefore: [], contextAfter: [], hunkLineOffset: 0 },
-    createdAt: timestamp,
-    updatedAt: timestamp,
-    ...overrides,
-  };
-}
-
 /** Shared in-memory fixtures. Every API-backed action reachable from these stories is mocked. */
 export function setupDemoStore() {
-  const comments = [
-    demoComment(),
-    demoComment({ id: 'comment-2', startLine: 25, endLine: 25, body: '请补充空列表的测试。', status: 'exported', exportedAt: timestamp }),
-    demoComment({ id: 'comment-3', filePath: 'src/utils/total.ts', body: '请补充金额舍入的边界测试。', status: 'orphaned' }),
-  ];
   const todos: Todo[] = [
     {
       id: 'todo-1',
@@ -36,12 +13,19 @@ export function setupDemoStore() {
       title: '统一金额计算逻辑',
       body: '复用 `calcTotal`，并补充边界情况测试。',
       status: 'open',
-      commentIds: ['comment-1', 'comment-3'],
       createdAt: timestamp,
       updatedAt: timestamp,
     },
     { id: 'todo-2', branch: 'main', title: '检查键盘操作', body: '已验证 Tab 和 Enter。', status: 'done', createdAt: timestamp, updatedAt: timestamp },
-    { id: 'todo-3', branch: 'feature/review', title: '完善评论导出', body: '保留文件名和行号。', status: 'open', createdAt: timestamp, updatedAt: timestamp },
+    {
+      id: 'todo-3',
+      branch: 'feature/review',
+      title: '完善文件位置复制',
+      body: '保留文件名和行号。',
+      status: 'open',
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    },
   ];
   let sequence = 0;
   const changeTarget = async (targetKey: string, options?: { reveal?: boolean }) => {
@@ -55,8 +39,6 @@ export function setupDemoStore() {
     panel: 'diff',
     root: '/workspace/warden',
     activeFile: 'src/App.tsx',
-    comments,
-    allComments: comments,
     todos,
     repo: {
       root: '/workspace/warden',
@@ -79,35 +61,8 @@ export function setupDemoStore() {
     refresh: fn(async () => {
       useStore.setState({ lastRefreshAt: new Date().toISOString() });
     }),
-    focusComment: fn<AppStore['focusComment']>(async (focusedCommentId) => {
-      useStore.setState({ focusedCommentId });
-    }),
-    jumpToComment: fn<AppStore['jumpToComment']>(async (comment) => {
-      useStore.setState({ activeFile: comment.filePath, focusedCommentId: comment.id, panel: 'diff' });
-    }),
-    createComment: fn<AppStore['createComment']>(async (request) => {
-      const comment = demoComment({ ...request, id: `new-comment-${++sequence}`, targetKey: useStore.getState().targetKey });
-      useStore.setState((s) => ({ comments: [...s.comments, comment], editor: null }));
-      return comment;
-    }),
-    updateComment: fn<AppStore['updateComment']>(async (id, patch) => {
-      useStore.setState((s) => ({ comments: s.comments.map((c) => (c.id === id ? { ...c, ...patch } : c)) }));
-      return useStore.getState().comments.find((c) => c.id === id);
-    }),
-    deleteComment: fn<AppStore['deleteComment']>(async (id) => {
-      useStore.setState((s) => ({ comments: s.comments.filter((c) => c.id !== id), selectedCommentIds: s.selectedCommentIds.filter((x) => x !== id) }));
-    }),
-    exportComments: fn(async () => {}),
-    copyAllComments: fn(async () => {}),
     loadTodos: fn(async () => {}),
     copyTodo: fn(async () => {}),
-    loadAllComments: fn(async () => {}),
-    linkComment: fn(async () => {}),
-    unlinkComment: fn<AppStore['unlinkComment']>(async (todoId, commentId) => {
-      useStore.setState((s) => ({
-        todos: s.todos.map((t) => (t.id === todoId ? { ...t, commentIds: (t.commentIds ?? []).filter((x) => x !== commentId) } : t)),
-      }));
-    }),
     createTodo: fn<AppStore['createTodo']>(async (request) => {
       const todo: Todo = {
         ...request,

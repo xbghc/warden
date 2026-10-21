@@ -17,9 +17,7 @@ export { RepoWatcher, statusPaths, DEFAULT_POLL_INTERVAL_MS } from './watcher.js
 export { HttpError } from './errors.js';
 export { runGit, GitError, assertAllowedGitArgs } from './git.js';
 export { parseUnifiedDiff } from './diffparse.js';
-export { buildAnchor, reanchorComment } from './anchor.js';
-export { formatCommentsExport, formatTodoExport, replyFooter, shortId } from './export.js';
-export { addReply, markHandedOver, takeFeedback } from './feedback.js';
+export { formatTodoExport } from './export.js';
 export { takeCheckpoint } from './checkpoints.js';
 export { WorkflowService } from './workflow.js';
 
@@ -55,8 +53,6 @@ export interface StartOptions {
   probeWindows?: (port: number, token: string) => Promise<boolean | undefined>;
   /** Handed to the page through GET /api/update; the CLI starts the check, the server only relays it. */
   update?: Promise<UpdateNotice | null>;
-  /** How an agent runs the CLI, for the reply line at the end of an export. */
-  replyCommand?: string;
 }
 
 export interface RunningServer {
@@ -76,7 +72,7 @@ export async function startServer(opts: StartOptions): Promise<RunningServer> {
   const stateFile = opts.stateFile ?? stateFilePath(repo.commonRoot);
   const store = new StateStore(stateFile, repo.commonRoot);
   const instanceToken = randomUUID();
-  const app = createApp({ repo, store, webDir: opts.webDir, instanceToken, update: opts.update, replyCommand: opts.replyCommand });
+  const app = createApp({ repo, store, webDir: opts.webDir, instanceToken, update: opts.update });
 
   const listen = (p: number): Promise<ServerType> =>
     new Promise((resolve, reject) => {

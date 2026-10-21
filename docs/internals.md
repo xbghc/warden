@@ -9,7 +9,7 @@ history or discarding a checkout. These are separate from review checkpoints and
 
 `~/.local/share/warden/<sha1(repoRoot)[:12]>/state.json` (respects `XDG_DATA_HOME`). Plain JSON with a
 `schemaVersion`, written atomically (temp file, fsync, rename) under a small lock file so multiple
-instances and the agent CLI can share it. The lock carries a token of its own and is refreshed while
+instances can share it. The lock carries a token of its own and is refreshed while
 held: one left by a process that died is taken over after 5 s, a slow holder's is not, and a holder
 whose lock was taken over meanwhile writes nothing. A file written by a newer warden is refused
 rather than read as empty; one that is not a state file at all is set aside as `.corrupt-<time>`;
@@ -17,19 +17,16 @@ top-level fields this version does not know are kept when it writes. `schemaVers
 warden up to 0.16 replaces a file with any other version by an empty state. Delete the directory to reset. Checkpoint objects live beside it in `checkpoints/objects`;
 deleting a checkpoint leaves them there, since another may share them.
 
-`targets` is keyed by target key, plus one *comment scope* per worktree — `local`, or
-`worktree:<path>:local` — holding the comments the three local views share and the HEAD sha the last
-re-anchor saw. `viewed` stays under the exact comparison key it was marked in, including local
-comparisons. Each mark is bound to that comparison's diff hash. `workflow.changes` holds the requirement's commit
-plans and their execution records. A planned or archived task has no worktree, branch or base;
-execution allocates those fields and acceptance records the final commit. Comment links, goal,
-acceptance criteria and dependencies stay with the same ID. `checkpoints` remains top level.
-Legacy `todos` matching the requirement or its task branches migrate on load, using stable
-`todo-<id>` IDs and preserving notes and comment links. Checked notes become archived plans,
-never accepted commits. Unrelated notes remain available for explicit import. State written by an older version is
-migrated on load: comments filed under `working` / `staged` / `all` move into the matching scope the
-first time the file is read. Viewed hashes stay under their original comparison keys; staging
-does not imply review and does not clear a mark when the displayed content is unchanged.
+`targets` is keyed by the exact comparison. Its `viewed` map binds each file's mark to the diff
+hash. Staging does not imply review and does not clear a mark when displayed content is unchanged.
+`workflow.changes` holds requirement plans and their delivery records. Legacy `todos` matching the
+requirement or its task branches migrate on load with stable `todo-<id>` IDs; checked notes become
+archived plans, never accepted commits. Unrelated notes require explicit import.
+
+Inline comment handling has been removed. Older target fields, linked-note metadata and delivery
+review records are retained as opaque historical data on unrelated writes. They are not moved,
+reanchored or copied into new deliveries. New targets contain only viewed marks. Checkpoints are
+created explicitly and retain the newest 20 per worktree, without comment-based retention.
 
 ## Security model
 
@@ -42,7 +39,7 @@ reads go through an argument whitelist (`rev-parse`, `diff`, `show`, `log`,
 that refuses option-looking refs and any write-capable
 flag; requests that would need anything else get HTTP 400. The writes are few and each composes its
 own arguments. Diff review is read-only: the legacy `POST /api/targets/:key/stage` endpoint and its
-partial index-patch writer have been removed. Viewed marks and comments write Warden state only.
+partial index-patch writer have been removed. Viewed marks write Warden state only.
 Formal delivery still prepares the primary index and commits through its validated workflow.
 `POST /api/worktrees`, `POST /api/worktrees/release` and `POST /api/worktrees/remove` run
 `git worktree add`, `git branch`, `git switch`, `git worktree remove` and `git branch -d` with a

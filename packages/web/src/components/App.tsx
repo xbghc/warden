@@ -107,11 +107,6 @@ export function App() {
           void store.openFile(next.path);
         }
       }
-      if (event.key === 'Escape') {
-        if (store.editor) store.setEditor(null);
-        else if (store.focusedCommentId) void store.focusComment(null);
-        else store.setRailOpen(false);
-      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);

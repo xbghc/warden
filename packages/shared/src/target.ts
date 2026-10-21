@@ -148,31 +148,7 @@ export function tryParseTargetKey(key: string): Target | undefined {
   }
 }
 
-/**
- * Working tree / index views of one worktree, as opposed to a commit, a range, a `base` or a
- * checkpoint target. `base` and `checkpoint` read the working tree too, but they are not local:
- * comments there must survive the commits an agent makes while the work is under review, so each
- * keeps its own pool instead of the shared one.
- */
+/** Working tree / index comparisons, without a separate baseline. */
 export function isLocalTarget(t: Target): boolean {
   return t.kind === 'working' || t.kind === 'staged' || t.kind === 'all';
-}
-
-/**
- * State key under which the comments of `key` live. The three local views of a worktree share a
- * single scope so a comment survives `git add` (it moves between views instead of being orphaned).
- * Commit, range, base and checkpoint targets keep their own key. Scope keys are state indices only — never targets,
- * so they are deliberately not parseable by `parseTargetKey`.
- */
-export function commentScopeKey(key: TargetKey): TargetKey {
-  const t = tryParseTargetKey(key);
-  if (!t || !isLocalTarget(t)) return key;
-  return t.worktree ? `worktree:${t.worktree}:local` : 'local';
-}
-
-/** The local view keys of the same worktree as `key`, in reanchor-candidate order. */
-export function localViewKeys(key: TargetKey): TargetKey[] {
-  const t = tryParseTargetKey(key);
-  const wt = t?.worktree ? { worktree: t.worktree } : {};
-  return [formatTargetKey({ kind: 'working', ...wt }), formatTargetKey({ kind: 'staged', ...wt }), formatTargetKey({ kind: 'all', ...wt })];
 }

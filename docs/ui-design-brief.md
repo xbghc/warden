@@ -56,10 +56,11 @@ to discuss. Do not invent a file-copy implementation or make preview a second ed
 
 ## Review and delivery
 
-Review the worktree before squash. Users can export comments to request more work with their own
-tools, then choose integration. The Web page supports commit-message entry and committing with normal Git
+Review the worktree before squash. Users request further work through their own tools, then choose
+integration. Review provides viewed marks and copyable file locations; inline comments are removed.
+The Web page supports commit-message entry and committing with normal Git
 hooks; terminal use is not required. The user runs tests in the primary directory; no mandatory
-test/agent handoff/cleared-comment gate is established by this brief.
+test or agent handoff gate is established by this brief.
 
 One task may deliver A1 and later A2, with another workspace's B1 between them. Make previously
 delivered versus undelivered changes clear. The next delivery must not silently repeat A1. The

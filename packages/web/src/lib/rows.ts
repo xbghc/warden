@@ -1,4 +1,4 @@
-import type { CommentSide, DiffLine, FileDiff, Hunk, ViewMode } from '@warden/shared';
+import type { DiffSide, DiffLine, FileDiff, Hunk, ViewMode } from '@warden/shared';
 
 export interface Gap {
   /** 0 = before the first hunk, i = between hunk i-1 and hunk i, hunks.length = after the last hunk */
@@ -87,7 +87,7 @@ export function blockEnds(texts: string[]): Map<number, number> {
 }
 
 /** Whether `lines` hold `line` on `side`. */
-function holds(lines: DiffLine[], side: CommentSide, line: number): boolean {
+function holds(lines: DiffLine[], side: DiffSide, line: number): boolean {
   return lines.some((l) => (side === 'new' ? l.type !== 'del' && l.newLineNo === line : l.type !== 'add' && l.oldLineNo === line));
 }
 
@@ -198,7 +198,7 @@ function foldRuns<T>(items: T[], isDebug: (t: T) => boolean, run: (from: number,
   }
 }
 
-/** Rows of the diff column. Comments never interrupt the code: they live in the comment rail. */
+/** Rows of the diff column, including expanded context and folded blocks. */
 export function buildRows({ diff, viewMode, expansions, fullLines, foldDebug = false, openDebug, shutBlocks }: BuildRowsInput): Row[] {
   const rows: Row[] = [];
   const canExpand = diff.status !== 'deleted' && diff.status !== 'added' && !diff.binary;
@@ -313,7 +313,7 @@ export function buildRows({ diff, viewMode, expansions, fullLines, foldDebug = f
  * Index of the row that shows `line` on `side` — or, when a fold hides it, of the shut debug fold
  * or the head of the shut code block that holds it — or -1.
  */
-export function findRowIndex(rows: Row[], side: CommentSide, line: number): number {
+export function findRowIndex(rows: Row[], side: DiffSide, line: number): number {
   return rows.findIndex((r) => {
     if (r.kind === 'line') return (side === 'new' ? r.line.newLineNo === line : r.line.oldLineNo === line) || hides(r.block, side, line);
     if (r.kind === 'pair') return (side === 'new' ? r.right?.newLineNo === line : r.left?.oldLineNo === line) || hides(r.block, side, line);
@@ -323,7 +323,7 @@ export function findRowIndex(rows: Row[], side: CommentSide, line: number): numb
 }
 
 /** A shut block hides `line` on `side`. */
-export function hides(block: Block | undefined, side: CommentSide, line: number): boolean {
+export function hides(block: Block | undefined, side: DiffSide, line: number): boolean {
   return !!block && !block.open && holds(block.lines, side, line);
 }
 
