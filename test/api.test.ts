@@ -1,7 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type {
   Comment,
@@ -18,7 +18,6 @@ import type {
   RemoveWorktreeResponse,
   RepoInfo,
   ReviewState,
-  StageResponse,
   Todo,
   TodosResponse,
   UpdateNotice,
@@ -85,7 +84,7 @@ describe('repo & targets', () => {
     expect(info.commonRoot).toBe(fx.root);
     expect(info.branch).toBe('main');
     expect(info.worktrees.map((w) => w.isMain)).toEqual([true]);
-    expect(info.defaultTarget).toBe('working');
+    expect(info.defaultTarget).toBe('all');
   });
 
   it('working target lists unstaged + untracked files; staged lists index', async () => {
@@ -282,7 +281,7 @@ describe('repo & targets', () => {
     fx.git('worktree', 'add', '-q', '--detach', wtPath);
     try {
       const wt = (await json<RepoInfo>(await get('/api/repo'))).worktrees.find((w) => !w.isMain)!;
-      const key = `worktree:${wt.path}:working`;
+      const key = `worktree:${wt.path}:all`;
       await send('PATCH', '/api/prefs', { lastTarget: key });
       expect((await json<RepoInfo>(await get('/api/repo'))).defaultTarget).toBe(key);
 
@@ -290,8 +289,8 @@ describe('repo & targets', () => {
       await rm(wtPath, { recursive: true, force: true });
       const info = await json<RepoInfo>(await get('/api/repo'));
       expect(info.worktrees.map((w) => w.isMain)).toEqual([true]);
-      expect(info.defaultTarget).toBe('working');
-      expect((await json<ReviewState>(await get('/api/state'))).prefs.lastTarget).toBe('working');
+      expect(info.defaultTarget).toBe('all');
+      expect((await json<ReviewState>(await get('/api/state'))).prefs.lastTarget).toBe('all');
       const res = await get(`/api/targets/${k(key)}/files`);
       expect(res.status).toBe(400);
       expect((await json<{ code: string }>(res)).code).toBe('unknown_worktree');
@@ -299,7 +298,7 @@ describe('repo & targets', () => {
 
       // A key that does not parse at all is not handed back either.
       await send('PATCH', '/api/prefs', { lastTarget: 'bogus' });
-      expect((await json<RepoInfo>(await get('/api/repo'))).defaultTarget).toBe('working');
+      expect((await json<RepoInfo>(await get('/api/repo'))).defaultTarget).toBe('all');
     } finally {
       await rm(wtPath, { recursive: true, force: true });
       fx.git('worktree', 'prune');
@@ -347,16 +346,31 @@ describe('viewed, comments, export, todos', () => {
     expect(again.files.find((f) => f.path === 'src/b.ts')).toMatchObject({ viewed: true, changed: false });
   });
 
-  it('keeps no viewed mark in the local views, where staged is what reviewed means', async () => {
-    for (const key of ['working', 'staged', 'all']) {
-      const res = await send('PUT', `/api/targets/${k(key)}/viewed`, { path: 'src/b.ts', viewed: true, contentHash: 'x' });
-      expect(res.status).toBe(400);
-      expect((await json<{ code: string }>(res)).code).toBe('viewed_not_tracked');
-    }
-    const state = await json<ReviewState>(await get('/api/state'));
-    expect(state.targets.working).toBeUndefined();
-    const listed = await json<FilesResponse>(await get(`/api/targets/${k('working')}/files`));
-    expect(listed.files.some((f) => f.viewed || f.changed)).toBe(false);
+  it('reviews current content regardless of staging and preserves the real index', async () => {
+    await prepareLocalChanges();
+    const list = async () => json<FilesResponse>(await get('/api/targets/all/files'));
+    const before = (await list()).files.find((f) => f.path === 'src/b.ts')!;
+    const indexPath = path.join(fx.root, '.git', 'index');
+    const index = await readFile(indexPath);
+    const head = fx.git('rev-parse', 'HEAD');
+    const working = await readFile(path.join(fx.root, 'src/b.ts'));
+    const full = await json<{ content: string }>(await get('/api/targets/all/file/full?path=src%2Fb.ts&side=new'));
+    expect(full.content).toBe('export const b = 21;\n');
+    expect(fx.git('show', ':src/b.ts')).toBe('export const b = 20;\n');
+    expect((await send('PUT', '/api/targets/all/viewed', { path: before.path, viewed: true, contentHash: before.contentHash })).status).toBe(200);
+    expect((await list()).files.find((f) => f.path === before.path)).toMatchObject({ viewed: true, changed: false });
+    expect(await readFile(indexPath)).toEqual(index);
+    expect(await readFile(path.join(fx.root, 'src/b.ts'))).toEqual(working);
+    expect(fx.git('rev-parse', 'HEAD')).toBe(head);
+
+    // External staging changes neither the current content nor its review hash.
+    fx.git('add', 'src/b.ts');
+    expect((await list()).files.find((f) => f.path === before.path)).toMatchObject({ contentHash: before.contentHash, viewed: true, changed: false });
+    fx.git('restore', '--staged', '--', 'src/b.ts');
+    expect((await list()).files.find((f) => f.path === before.path)).toMatchObject({ contentHash: before.contentHash, viewed: true, changed: false });
+
+    await fx.write('src/b.ts', 'export const b = 22;\n');
+    expect((await list()).files.find((f) => f.path === before.path)).toMatchObject({ viewed: false, changed: true });
   });
 
   it('creates a comment with anchor + snippet', async () => {
@@ -445,7 +459,7 @@ describe('viewed, comments, export, todos', () => {
   it('prefs are persisted', async () => {
     await send('PATCH', '/api/prefs', { viewMode: 'split', lastTarget: 'staged' });
     const info = await json<RepoInfo>(await get('/api/repo'));
-    expect(info.defaultTarget).toBe('staged');
+    expect(info.defaultTarget).toBe('all');
     const state = await json<ReviewState>(await get('/api/state'));
     expect(state.prefs.viewMode).toBe('split');
   });
@@ -456,184 +470,32 @@ describe('viewed, comments, export, todos', () => {
     await send('PATCH', '/api/prefs', { lastPanel: 'unknown' });
     const state = await json<ReviewState>(await get('/api/state'));
     expect(state.prefs.lastPanel).toBe('orchestration');
-    expect((await json<RepoInfo>(await get('/api/repo'))).defaultTarget).toBe('staged');
+    expect((await json<RepoInfo>(await get('/api/repo'))).defaultTarget).toBe('all');
     await send('PATCH', '/api/prefs', { lastPanel: 'commits' });
     expect((await json<ReviewState>(await get('/api/state'))).prefs.lastPanel).toBe('commits');
   });
 });
 
-describe('staging', () => {
-  const stage = (key: string, body: unknown) => send('POST', `/api/targets/${k(key)}/stage`, body);
-  const fileDiff = async (key: string, p: string) => json<FileDiff>(await get(`/api/targets/${k(key)}/file?path=${k(p)}`));
-  const indexOf = (p: string) => fx.git('show', `:${p}`);
-  const L = (n: number) => `line ${n}`;
-  const lib = 'stage/lib.ts';
-  const base = Array.from({ length: 30 }, (_, i) => L(i + 1));
-
-  async function prepareStage(indexed = base) {
-    await fx.write(lib, indexed.join('\n') + '\n');
-    fx.git('add', lib);
-    const edited = [...base];
-    edited[2] = 'line 3 changed';
-    edited.splice(15, 0, 'inserted after 15', 'inserted after 15 (b)');
-    edited.splice(edited.length - 2, 1);
-    await fx.write(lib, edited.join('\n') + '\n');
-  }
-
-  const withInsertion = () => [...base.slice(0, 15), 'inserted after 15', ...base.slice(15)];
-  const withHunks = () =>
-    withInsertion()
-      .map((line) => (line === L(3) ? 'line 3 changed' : line))
-      .filter((line) => line !== L(29));
-
-  it('stages a few lines of one hunk and leaves the rest unstaged', async () => {
-    await prepareStage();
-    const diff = await fileDiff('working', lib);
-    expect(diff.hunks).toHaveLength(3);
-    const h1 = diff.hunks[1]!;
-    const adds = h1.lines.map((l, i) => (l.type === 'add' ? i : -1)).filter((i) => i >= 0);
-    expect(adds).toHaveLength(2);
-    const res = await stage('working', { path: lib, contentHash: diff.contentHash, hunks: [{ index: 1, lines: [adds[0]] }] });
-    expect(res.status).toBe(200);
-    expect(await json<StageResponse>(res)).toEqual({ ok: true, lines: 1 });
-    const indexed = indexOf(lib).split('\n');
-    expect(indexed.slice(14, 17)).toEqual([L(15), 'inserted after 15', L(16)]);
-    expect(indexed[2]).toBe(L(3));
-    // The other addition is still there to stage, the first one moved to the staged view.
-    // (HEAD does not have the file, so the staged view shows all of the index as one addition.)
-    const staged = await fileDiff('staged', lib);
-    expect(staged.status).toBe('added');
-    const stagedLines = staged.hunks[0]!.lines.map((l) => l.content);
-    expect(stagedLines).toContain('inserted after 15');
-    expect(stagedLines).not.toContain('inserted after 15 (b)');
-    const working = await fileDiff('working', lib);
-    expect(working.hunks).toHaveLength(3);
-    expect(working.hunks[1]!.lines.filter((l) => l.type !== 'context').map((l) => l.content)).toEqual(['inserted after 15 (b)']);
-    // Nothing in the working tree moved.
-    expect(
-      (await json<{ content: string }>(await get(`/api/targets/${k('working')}/file/full?path=${k(lib)}&side=new`))).content.split('\n').slice(15, 17),
-    ).toEqual(['inserted after 15', 'inserted after 15 (b)']);
-  });
-
-  it('stages whole hunks, with later hunks placed by what earlier ones did', async () => {
-    await prepareStage(withInsertion());
-    const diff = await fileDiff('working', lib);
-    const res = await stage('working', { path: lib, contentHash: diff.contentHash, hunks: [{ index: 0 }, { index: 2 }] });
-    expect(res.status).toBe(200);
-    const indexed = indexOf(lib).split('\n').filter(Boolean);
-    expect(indexed[2]).toBe('line 3 changed');
-    expect(indexed).toHaveLength(30);
-    expect(indexed[indexed.length - 1]).toBe(L(30));
-    expect(indexed[indexed.length - 2]).toBe(L(28));
-    const working = await fileDiff('working', lib);
-    expect(working.hunks.flatMap((h) => h.lines.filter((l) => l.type !== 'context').map((l) => l.content))).toEqual(['inserted after 15 (b)']);
-  });
-
-  it('unstages a line from the staged view', async () => {
-    await prepareStage(withHunks());
-    const staged = await fileDiff('staged', lib);
-    const hunk = staged.hunks.findIndex((h) => h.lines.some((l) => l.content === 'line 3 changed'));
-    const line = staged.hunks[hunk]!.lines.findIndex((l) => l.content === 'line 3 changed');
-    const res = await stage('staged', { path: lib, contentHash: staged.contentHash, hunks: [{ index: hunk, lines: [line] }] });
-    expect(res.status).toBe(200);
-    const indexed = indexOf(lib).split('\n');
-    // Only the addition came out: the deletion of the old line 3 is still staged.
-    expect(indexed.slice(0, 4)).toEqual([L(1), L(2), L(4), L(5)]);
-    const working = await fileDiff('working', lib);
-    expect(working.hunks[0]!.lines.filter((l) => l.type === 'add').map((l) => l.content)).toEqual(['line 3 changed']);
-  });
-
-  it('refuses a stale selection, a view that cannot be staged from and a file outside the view', async () => {
-    await prepareStage(withHunks().filter((line) => line !== 'line 3 changed'));
-    const diff = await fileDiff('working', lib);
-    const stale = await stage('working', { path: lib, contentHash: 'nope', hunks: [{ index: 0 }] });
-    expect(stale.status).toBe(409);
-    expect((await json<{ code: string }>(stale)).code).toBe('diff_changed');
-    for (const key of ['all', 'base:main', `commit:${fx.git('rev-parse', 'HEAD').trim()}`]) {
-      const res = await stage(key, { path: lib, contentHash: diff.contentHash });
-      expect(res.status).toBe(400);
-      expect((await json<{ code: string }>(res)).code).toBe('not_stageable');
+describe('removed staging API', () => {
+  it.each(['working', 'staged'])('rejects writes through the old %s endpoint without changing Git content', async (key) => {
+    await prepareLocalChanges();
+    const diff = await json<FileDiff>(await get(`/api/targets/${key}/file?path=src%2Fb.ts`));
+    const indexPath = path.join(fx.root, '.git', 'index');
+    const index = await readFile(indexPath);
+    const working = await readFile(path.join(fx.root, 'src/b.ts'));
+    const head = fx.git('rev-parse', 'HEAD');
+    for (const hunks of [undefined, [{ index: 0 }], [{ index: 0, lines: [0] }]]) {
+      const res = await send('POST', `/api/targets/${key}/stage`, { path: diff.path, contentHash: diff.contentHash, hunks });
+      expect(res.status).toBe(404);
+      expect(await res.json()).toMatchObject({ code: 'not_found' });
     }
-    expect((await stage('working', { path: 'README.md', contentHash: 'x' })).status).toBe(400);
-    expect((await stage('working', { path: lib, contentHash: diff.contentHash, hunks: [{ index: 9 }] })).status).toBe(400);
-    expect((await stage('working', { path: lib, contentHash: diff.contentHash, hunks: 'all' })).status).toBe(400);
-    expect((await stage('working', { path: '../x', contentHash: 'x' })).status).toBe(400);
-    // Every rejected request leaves the index exactly as this test prepared it.
-    expect(indexOf(lib).split('\n').slice(0, 4)).toEqual([L(1), L(2), L(4), L(5)]);
-  });
-
-  it('stages part of an untracked file, then the rest of it, then takes it all back out', async () => {
-    const p = 'stage/docs/my notes 文档.md';
-    await fx.write(p, ['# title', '', 'first', 'second', ''].join('\n'));
-    let diff = await fileDiff('working', p);
-    expect(diff.untracked).toBe(true);
-    const res = await stage('working', { path: p, contentHash: diff.contentHash, hunks: [{ index: 0, lines: [0, 2] }] });
-    expect(res.status).toBe(200);
-    expect(indexOf(p)).toBe('# title\nfirst\n');
-    // Now tracked: the rest of it is an ordinary edit against the index.
-    diff = await fileDiff('working', p);
-    expect(diff.untracked).toBeUndefined();
-    expect(diff.status).toBe('modified');
-    expect((await stage('working', { path: p, contentHash: diff.contentHash })).status).toBe(200);
-    expect(indexOf(p)).toBe('# title\n\nfirst\nsecond\n');
-    expect((await fileDiff('staged', p)).status).toBe('added');
-    // Whole-file unstage of a new file removes it from the index; the working tree keeps it.
-    const staged = await fileDiff('staged', p);
-    expect((await stage('staged', { path: p, contentHash: staged.contentHash })).status).toBe(200);
-    expect(fx.git('ls-files', '--', p)).toBe('');
-    expect((await fileDiff('working', p)).untracked).toBe(true);
-  });
-
-  it('a staged deletion comes back whole, never in part', async () => {
-    const p = 'stage/gone.ts';
-    await fx.write(p, 'a\nb\nc\n');
-    fx.git('add', p);
-    await rm(path.join(fx.root, p));
-    let diff = await fileDiff('working', p);
-    expect(diff.status).toBe('deleted');
-    // Half the deletion: the index keeps the other half.
-    expect((await stage('working', { path: p, contentHash: diff.contentHash, hunks: [{ index: 0, lines: [0] }] })).status).toBe(200);
-    expect(indexOf(p)).toBe('b\nc\n');
-    diff = await fileDiff('working', p);
-    expect((await stage('working', { path: p, contentHash: diff.contentHash })).status).toBe(200);
-    expect(fx.git('ls-files', '--', p)).toBe('');
-    // That file was never committed, so once its deletion is staged there is nothing left to show.
-    // A committed file's staged deletion is the case that can be taken back: whole, not by line.
-    const a = 'src/a.ts';
-    fx.git('checkout', '--', a);
-    await rm(path.join(fx.root, a));
-    diff = await fileDiff('working', a);
-    expect((await stage('working', { path: a, contentHash: diff.contentHash })).status).toBe(200);
-    const staged = await fileDiff('staged', a);
-    expect(staged.status).toBe('deleted');
-    expect(staged.hunks[0]!.lines.length).toBeGreaterThan(1);
-    const part = await stage('staged', { path: a, contentHash: staged.contentHash, hunks: [{ index: 0, lines: [0] }] });
-    expect(part.status).toBe(400);
-    expect((await json<{ code: string }>(part)).code).toBe('whole_file_only');
-    expect((await stage('staged', { path: a, contentHash: staged.contentHash })).status).toBe(200);
-    expect(indexOf(a)).toBe(fx.git('show', `HEAD:${a}`));
-    fx.git('checkout', '--', a);
-  });
-
-  it('refuses to split a missing newline at the end of the file', async () => {
-    const p = 'stage/nonl.txt';
-    await fx.write(p, 'k\na');
-    fx.git('add', p);
-    await fx.write(p, 'k\na\nb');
-    const diff = await fileDiff('working', p);
-    // Lines: ctx k, -a (no newline), +a, +b (no newline).
-    const bad = await stage('working', { path: p, contentHash: diff.contentHash, hunks: [{ index: 0, lines: [3] }] });
-    expect(bad.status).toBe(400);
-    expect((await json<{ code: string }>(bad)).code).toBe('newline_split');
-    expect((await stage('working', { path: p, contentHash: diff.contentHash, hunks: [{ index: 0, lines: [1, 2] }] })).status).toBe(200);
-    expect(indexOf(p)).toBe('k\na\n');
-    fx.git('rm', '-q', '-f', '--cached', '--', p);
-    await rm(path.join(fx.root, p));
+    expect(await readFile(indexPath)).toEqual(index);
+    expect(await readFile(path.join(fx.root, 'src/b.ts'))).toEqual(working);
+    expect(fx.git('rev-parse', 'HEAD')).toBe(head);
   });
 });
 
 describe('debug code', () => {
-  const stage = (key: string, body: unknown) => send('POST', `/api/targets/${k(key)}/stage`, body);
   const fileDiff = async (key: string, p: string) => json<FileDiff>(await get(`/api/targets/${k(key)}/file?path=${k(p)}`));
   const entry = async (key: string, p: string) => (await json<FilesResponse>(await get(`/api/targets/${k(key)}/files`))).files.find((f) => f.path === p);
   // Put together at run time so that this file does not read as debug code itself.
@@ -666,27 +528,6 @@ describe('debug code', () => {
     ]);
     expect(await entry('working', file)).toMatchObject({ additions: 2, debugAdditions: 1, debugDeletions: 1 });
     expect(await entry('working', loose)).toMatchObject({ untracked: true, additions: 2, debugAdditions: 1 });
-  });
-
-  it('leaves debug lines out of a whole-file stage, and stages them when picked one by one', async () => {
-    let diff = await fileDiff('working', file);
-    expect((await stage('working', { path: file, contentHash: diff.contentHash, skipDebug: true })).status).toBe(200);
-    const indexed = fx.git('show', `:${file}`).split('\n');
-    expect(indexed[14]).toBe('line 15');
-    expect(indexed[39]).toBe('line 40 outside');
-    expect(await entry('working', file)).toMatchObject({ additions: 1, deletions: 1, debugAdditions: 1, debugDeletions: 1 });
-
-    diff = await fileDiff('working', file);
-    const refused = await stage('working', { path: file, contentHash: diff.contentHash, skipDebug: true });
-    expect(refused.status).toBe(400);
-    expect((await json<{ code: string }>(refused)).code).toBe('debug_only');
-
-    const lines = diff.hunks[0]!.lines.flatMap((l, i) => (l.type === 'context' ? [] : [i]));
-    const picked = await stage('working', { path: file, contentHash: diff.contentHash, skipDebug: true, hunks: [{ index: 0, lines }] });
-    expect(picked.status).toBe(200);
-    expect(fx.git('show', `:${file}`).split('\n')[14]).toBe('line 15 in the block');
-    // Staged, it is what the staged view warns about: HEAD lacks the file, so all of the block is new there.
-    expect((await entry('staged', file))?.debugAdditions).toBe(26);
   });
 });
 

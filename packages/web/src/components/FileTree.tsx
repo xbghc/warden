@@ -1,11 +1,10 @@
 import { Checkbox } from './ui/checkbox';
 import { Button } from './ui/button';
 import { NativeSelect } from './ui/native-select';
-import { ActionIcon } from './ActionIcon';
 import { useEffect, useMemo, useState } from 'react';
 import { FileIcon } from '@react-symbols/icons/utils';
 import type { Checkpoint, FileEntry, Target, TargetKey } from '@warden/shared';
-import { formatTargetKey, targetLabel, stageModeFor, commentScopeKey, isLocalTarget, tracksViewed, tryParseTargetKey } from '@warden/shared';
+import { formatTargetKey, targetLabel, commentScopeKey, tryParseTargetKey } from '@warden/shared';
 import { useStore } from '../store';
 import { allDirPaths, buildTree, type DirNode, type TreeNode } from '../lib/tree';
 
@@ -49,57 +48,37 @@ function TreeIcon({ kind }: { kind: 'folder' | 'expand' | 'collapse' | 'check' }
   );
 }
 
-/**
- * `marks` is whether the block's target keeps the 已读 mark (`tracksViewed`). Where it does not — the
- * 未暂存 / 已暂存 blocks — a row has no box to tick and never recedes: which block it sits in is the
- * whole of its review state, and the way to move it is to stage it.
- */
 interface RowProps {
   depth: number;
   view: TargetKey;
-  marks: boolean;
 }
 
-function FileRow({ node, depth, view, marks }: RowProps & { node: Extract<TreeNode, { kind: 'file' }> }) {
-  // A file staged halfway appears in both blocks; only the one in the view in front is highlighted.
+function FileRow({ node, depth, view }: RowProps & { node: Extract<TreeNode, { kind: 'file' }> }) {
   const active = useStore((s) => s.panel === 'diff' && s.activeFile === node.path && s.targetKey === view);
-  const inView = useStore((s) => s.targetKey === view);
   const openFile = useStore((s) => s.openFile);
-  const switchView = useStore((s) => s.switchView);
   const toggleViewed = useStore((s) => s.toggleViewed);
   const commentCount = useStore((s) => s.comments.filter((c) => c.filePath === node.path && c.targetKey === view).length);
-  const stageLines = useStore((s) => s.stageLines);
-  const staging = useStore((s) => s.staging);
-  const target = tryParseTargetKey(view);
-  const mode = target ? stageModeFor(target) : undefined;
   const e = node.entry;
-
-  const open = async () => {
-    if (!inView) await switchView(view, node.path);
-    await openFile(node.path);
-  };
 
   return (
     <div
-      className={`tree-row file ${active ? 'active' : ''} ${marks && e.viewed ? 'viewed' : ''}`}
+      className={`tree-row file ${active ? 'active' : ''} ${e.viewed ? 'viewed' : ''}`}
       style={{ paddingLeft: 10 + depth * 14 }}
       title={e.oldPath ? `${e.oldPath} → ${e.path}` : e.path}
     >
-      {marks && (
-        <Checkbox
-          className="viewed-box"
-          checked={e.viewed}
-          onClick={(ev) => ev.stopPropagation()}
-          onCheckedChange={() => void toggleViewed(node.path)}
-          title="标记为已读"
-          aria-label={`标记 ${node.path} 为已读`}
-        />
-      )}
+      <Checkbox
+        className="viewed-box"
+        checked={e.viewed}
+        onClick={(ev) => ev.stopPropagation()}
+        onCheckedChange={() => void toggleViewed(node.path)}
+        title="标记为已读"
+        aria-label={`标记 ${node.path} 为已读`}
+      />
       <Button
         variant="ghost"
         size="sm"
         className="tree-file-open"
-        onClick={() => void open()}
+        onClick={() => void openFile(node.path)}
         aria-current={active ? 'true' : undefined}
         aria-label={`打开 ${node.path}`}
         title={`${node.path} · ${STATUS_LABEL[e.status]} · ${e.binary ? '二进制文件' : `+${e.additions} −${e.deletions}`}`}
@@ -108,7 +87,7 @@ function FileRow({ node, depth, view, marks }: RowProps & { node: Extract<TreeNo
           <FileIcon fileName={node.name} autoAssign />
         </span>
         <span className="name">{node.name}</span>
-        {marks && e.changed && <span className="tree-changed" title="文件自上次标记已读后发生变化" aria-label="文件有新变化" />}
+        {e.changed && <span className="tree-changed" title="文件自上次标记已读后发生变化" aria-label="文件有新变化" />}
         {commentCount > 0 && (
           <span className="cc" title={`${commentCount} 条评论`}>
             {commentCount}
@@ -126,29 +105,15 @@ function FileRow({ node, depth, view, marks }: RowProps & { node: Extract<TreeNo
           )}
         </span>
       </Button>
-      {mode && !e.binary && (
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          className="link stage-file"
-          disabled={staging}
-          onClick={(event) => {
-            event.stopPropagation();
-            void stageLines(node.path, undefined, view);
-          }}
-        >
-          <ActionIcon name={mode === 'stage' ? 'add' : 'back'} label={mode === 'stage' ? '暂存文件' : '取消暂存文件'} />
-        </Button>
-      )}
     </div>
   );
 }
 
-function DirRow({ node, depth, view, marks, open, toggle }: RowProps & { node: DirNode; open: Set<string>; toggle: (p: string) => void }) {
+function DirRow({ node, depth, view, open, toggle }: RowProps & { node: DirNode; open: Set<string>; toggle: (p: string) => void }) {
   const isOpen = open.has(node.path);
   // Nothing below is left to review. The row has to say so itself: collapsed, it is the only sign,
   // and a directory that still hides an unread file looks exactly the same otherwise.
-  const done = marks && node.viewedCount === node.fileCount;
+  const done = node.viewedCount === node.fileCount;
   return (
     <>
       <Button
@@ -173,9 +138,9 @@ function DirRow({ node, depth, view, marks, open, toggle }: RowProps & { node: D
       {isOpen &&
         node.children.map((c) =>
           c.kind === 'dir' ? (
-            <DirRow key={c.path} node={c} depth={depth + 1} view={view} marks={marks} open={open} toggle={toggle} />
+            <DirRow key={c.path} node={c} depth={depth + 1} view={view} open={open} toggle={toggle} />
           ) : (
-            <FileRow key={c.path} node={c} depth={depth + 1} view={view} marks={marks} />
+            <FileRow key={c.path} node={c} depth={depth + 1} view={view} />
           ),
         )}
     </>
@@ -208,22 +173,6 @@ function useTreeState(tree: DirNode, view: TargetKey) {
   return { open, setOpen, toggle };
 }
 
-/**
- * Debug code that made it into the index: it is one `git commit` away from history, so the staged
- * block says so for as long as it is there — whether or not the diff folds it.
- */
-function StagedDebugMark({ files }: { files: FileEntry[] }) {
-  const holding = files.filter((f) => f.debugAdditions);
-  if (holding.length === 0) return null;
-  const lines = holding.reduce((n, f) => n + (f.debugAdditions ?? 0), 0);
-  const list = holding.map((f) => `${f.path}（${f.debugAdditions} 行）`).join('\n');
-  return (
-    <span className="block-warn" role="img" aria-label={`暂存区含 ${lines} 行调试代码`} title={`暂存区含调试代码，提交前请移出：\n${list}`}>
-      调试代码 {lines}
-    </span>
-  );
-}
-
 function TreeBlock({ title, view, files, empty }: { title: string; view: TargetKey; files: FileEntry[]; empty: string }) {
   const tree = useMemo(() => buildTree(files), [files]);
   const { open, setOpen, toggle } = useTreeState(tree, view);
@@ -232,19 +181,16 @@ function TreeBlock({ title, view, files, empty }: { title: string; view: TargetK
   const toggleLabel = hasExpandedDirectory ? '折叠全部目录' : '展开全部目录';
   const add = files.reduce((n, f) => n + f.additions, 0);
   const del = files.reduce((n, f) => n + f.deletions, 0);
-  const target = tryParseTargetKey(view);
-  const marks = !!target && tracksViewed(target);
 
   return (
     <section className="tree-block" aria-label={title}>
       <div className="block-head">
         <div className="block-heading">
-          <span className={`block-indicator ${target?.kind === 'staged' ? 'is-staged' : ''}`} aria-hidden="true" />
+          <span className="block-indicator" aria-hidden="true" />
           <span className="block-title">{title}</span>
           <span className="block-file-count" aria-label={`${files.length} 个文件`}>
             {files.length}
           </span>
-          {target?.kind === 'staged' && <StagedDebugMark files={files} />}
           <span className="spacer" />
           <span className="tree-tools">
             <Button
@@ -277,9 +223,9 @@ function TreeBlock({ title, view, files, empty }: { title: string; view: TargetK
         ) : (
           tree.children.map((c) =>
             c.kind === 'dir' ? (
-              <DirRow key={c.path} node={c} depth={0} view={view} marks={marks} open={open} toggle={toggle} />
+              <DirRow key={c.path} node={c} depth={0} view={view} open={open} toggle={toggle} />
             ) : (
-              <FileRow key={c.path} node={c} depth={0} view={view} marks={marks} />
+              <FileRow key={c.path} node={c} depth={0} view={view} />
             ),
           )
         )}
@@ -304,12 +250,11 @@ function ReviewProgress({ done, total, label, hint }: { done: number; total: num
   );
 }
 
-function DebugToggle({ local }: { local: boolean }) {
+function DebugToggle() {
   const on = useStore((s) => s.prefs.ignoreDebug);
   const setIgnoreDebug = useStore((s) => s.setIgnoreDebug);
-  const title = local ? '折叠调试块和标了 nocommit 的行；整个文件或整个 hunk 暂存时跳过它们；只剩调试代码的文件不算未审' : '折叠调试块和标了 nocommit 的行';
   return (
-    <label className="side-toggle" title={title}>
+    <label className="side-toggle" title="折叠调试块和标了 nocommit 的行">
       <Checkbox checked={on} onCheckedChange={() => setIgnoreDebug(!on)} />
       忽略调试代码
     </label>
@@ -391,24 +336,15 @@ function CheckpointBar({ target }: { target: Target }) {
   );
 }
 
-/** Every change of the file is debug code: nothing in it is left to review. */
-const debugOnly = (f: FileEntry) => (f.debugAdditions ?? 0) + (f.debugDeletions ?? 0) === f.additions + f.deletions && f.additions + f.deletions > 0;
-
 export function FileTree() {
   const files = useStore((s) => s.files);
-  const unstaged = useStore((s) => s.unstaged);
-  const staged = useStore((s) => s.staged);
   const loading = useStore((s) => s.filesLoading);
   const error = useStore((s) => s.filesError);
   const targetKey = useStore((s) => s.targetKey);
   const setTarget = useStore((s) => s.setTarget);
-  const ignoreDebug = useStore((s) => s.prefs.ignoreDebug);
 
   const target = useMemo(() => tryParseTargetKey(targetKey), [targetKey]);
-  const local = !!target && isLocalTarget(target);
-  const worktree = target?.worktree ? { worktree: target.worktree } : {};
-  // Remounts the blocks when the scope changes (another worktree), keeping the expanded
-  // directories across a plain view switch — which is not supposed to reset anything.
+  // Keep expanded directories while refreshing the same worktree's comparison.
   const scope = commentScopeKey(targetKey);
 
   if (error) {
@@ -424,7 +360,7 @@ export function FileTree() {
               {targetLabel(target)}
             </span>
             <span className="spacer" />
-            <Button variant="ghost" size="sm" className="link" onClick={() => void setTarget(formatTargetKey({ kind: 'working' }))} title="回到主仓库的工作区">
+            <Button variant="ghost" size="sm" className="link" onClick={() => void setTarget(formatTargetKey({ kind: 'all' }))} title="回到主仓库的工作区">
               ← 回到主仓库
             </Button>
           </div>
@@ -434,47 +370,10 @@ export function FileTree() {
     );
   }
 
-  if (local) {
-    // A file half staged sits in both blocks; it counts as read only once nothing of it is left
-    // in the working tree, which is exactly what "staged means reviewed" says. Debug code, when it
-    // is being ignored, is not what is left: it is never meant to be staged.
-    const left = new Set(unstaged.filter((f) => !(ignoreDebug && debugOnly(f))).map((f) => f.path));
-    const total = new Set([...left, ...staged.map((f) => f.path)]).size;
-    const done = staged.filter((f) => !left.has(f.path)).length;
-    return (
-      <>
-        <ReviewProgress
-          done={done}
-          total={total}
-          label="已审"
-          hint={`暂存即已审：一个文件的改动全部进了暂存区，就算审完了${ignoreDebug ? '（只剩调试代码的文件也算）' : ''}`}
-        />
-        <DebugToggle local />
-        <CheckpointBar target={target} />
-        <div className="tree-blocks">
-          <TreeBlock
-            key={`${scope}:unstaged`}
-            title="未暂存"
-            view={formatTargetKey({ kind: 'working', ...worktree })}
-            files={unstaged}
-            empty={loading ? '加载中…' : '暂无变更'}
-          />
-          <TreeBlock
-            key={`${scope}:staged`}
-            title="已暂存"
-            view={formatTargetKey({ kind: 'staged', ...worktree })}
-            files={staged}
-            empty={loading ? '加载中…' : '暂无变更'}
-          />
-        </div>
-      </>
-    );
-  }
-
   return (
     <>
       <ReviewProgress done={files.filter((f) => f.viewed).length} total={files.length} label="已读" hint="勾选文件旁的框，或用文件头的“已读”标记" />
-      <DebugToggle local={false} />
+      <DebugToggle />
       {target?.kind === 'checkpoint' && <CheckpointBar target={target} />}
       <div className="tree-blocks">
         <TreeBlock key={scope} title="变更" view={targetKey} files={files} empty={loading ? '加载中…' : '暂无变更'} />

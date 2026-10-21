@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { commentScopeKey, formatTargetKey, isLocalTarget, parseTargetKey, targetLabel, TargetKeyError, tracksViewed } from './target.js';
+import { commentScopeKey, formatTargetKey, isLocalTarget, parseTargetKey, targetLabel, TargetKeyError } from './target.js';
 
 describe('target keys', () => {
   it('parses simple kinds', () => {
@@ -32,12 +32,7 @@ describe('target keys', () => {
     for (const bad of ['checkpoint:', 'checkpoint:0', 'checkpoint:01', 'checkpoint:-1', 'checkpoint:1.5', 'checkpoint:x', 'worktree:/p:checkpoint:x'])
       expect(() => parseTargetKey(bad)).toThrow(TargetKeyError);
     expect(commentScopeKey('checkpoint:3')).toBe('checkpoint:3');
-    expect(tracksViewed(parseTargetKey('checkpoint:3'))).toBe(true);
     expect(targetLabel(parseTargetKey('worktree:/p/wt:checkpoint:2'))).toBe('[wt] Checkpoint #2');
-  });
-  it('keeps the viewed mark off the local views, where staging is the mark', () => {
-    for (const key of ['working', 'staged', 'all', 'worktree:/p/wt:staged']) expect(tracksViewed(parseTargetKey(key))).toBe(false);
-    for (const key of ['base:main', 'commit:abc1234', 'range:a..b', 'worktree:/p/wt:base:main']) expect(tracksViewed(parseTargetKey(key))).toBe(true);
   });
   it('parses worktree variants including paths with colons', () => {
     expect(parseTargetKey('worktree:/home/u/wt:working')).toEqual({ kind: 'working', worktree: '/home/u/wt' });

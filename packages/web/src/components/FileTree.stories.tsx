@@ -8,15 +8,13 @@ function file(path: string, status: FileEntry['status'], extra: Partial<FileEntr
   return { path, status, additions: 12, deletions: 3, binary: false, contentHash: path, viewed: false, changed: false, ...extra };
 }
 
-const unstaged = [
+const changes = [
   file('src/App.tsx', 'modified'),
   file('src/components/Empty.tsx', 'added', { untracked: true, deletions: 0 }),
   file('src/legacy.ts', 'deleted', { additions: 0 }),
   file('assets/logo.png', 'modified', { binary: true }),
   file('README.md', 'modified'),
 ];
-const staged = [file('src/App.tsx', 'modified'), file('src/utils/total.ts', 'renamed', { oldPath: 'src/total.ts' })];
-// 已读 and the 已变化 dot exist only off the local views, where nothing can be staged.
 const commitFiles = [
   file('src/App.tsx', 'modified'),
   file('src/components/Empty.tsx', 'added', { deletions: 0, viewed: true }),
@@ -35,16 +33,11 @@ const meta = {
   ],
   beforeEach() {
     useStore.setState({
-      stageLines: fn(async () => true),
-      unstaged,
-      staged,
-      files: unstaged,
+      files: changes,
+      targetKey: 'all',
       activeFile: 'src/App.tsx',
       openFile: fn(async (path: string) => {
         useStore.setState({ activeFile: path });
-      }),
-      switchView: fn(async (targetKey: string, activeFile?: string | null) => {
-        useStore.setState({ targetKey, activeFile, files: targetKey === 'staged' ? useStore.getState().staged : useStore.getState().unstaged });
       }),
       toggleViewed: fn(async (path: string) => {
         const files = useStore.getState().files.map((entry) => (entry.path === path ? { ...entry, viewed: !entry.viewed, changed: false } : entry));
@@ -73,7 +66,7 @@ export const FileTypes: Story = {
       'logo.svg',
       'data.unknown',
     ].map((path) => file(path, 'modified'));
-    useStore.setState({ files, unstaged: files, activeFile: 'App.tsx' });
+    useStore.setState({ files, activeFile: 'App.tsx' });
   },
 };
 export const LongPaths: Story = {
@@ -83,7 +76,7 @@ export const LongPaths: Story = {
       file('src/components/ReviewCommentAttachmentSelector.test.tsx', 'added', { additions: 240, deletions: 0 }),
       file('src/components/原始文件与新文件的差异比较.tsx', 'renamed', { oldPath: 'src/compare.tsx' }),
     ];
-    useStore.setState({ files, unstaged: files, activeFile: files[0]!.path });
+    useStore.setState({ files, activeFile: files[0]!.path });
   },
 };
 export const Narrow: Story = {
@@ -96,12 +89,12 @@ export const Narrow: Story = {
 };
 export const Empty: Story = {
   beforeEach: () => {
-    useStore.setState({ files: [], unstaged: [], staged: [], activeFile: null });
+    useStore.setState({ files: [], activeFile: null });
   },
 };
 export const Loading: Story = {
   beforeEach: () => {
-    useStore.setState({ files: [], unstaged: [], staged: [], filesLoading: true, activeFile: null });
+    useStore.setState({ files: [], filesLoading: true, activeFile: null });
   },
 };
 export const ErrorState: Story = {

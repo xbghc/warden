@@ -136,7 +136,7 @@ describe('checkpoints', () => {
 
   it('does not reopen a remembered checkpoint that is gone', async () => {
     await send('PATCH', '/api/prefs', { lastTarget: 'checkpoint:1' });
-    expect((await json<RepoInfo>(await get('/api/repo'))).defaultTarget).toBe('working');
+    expect((await json<RepoInfo>(await get('/api/repo'))).defaultTarget).toBe('all');
     await send('PATCH', '/api/prefs', { lastTarget: 'checkpoint:2' });
     expect((await json<RepoInfo>(await get('/api/repo'))).defaultTarget).toBe('checkpoint:2');
   });

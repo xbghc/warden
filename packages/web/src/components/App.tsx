@@ -29,7 +29,6 @@ export function App() {
     void useStore.getState().init();
     void useWorkflow.getState().refresh();
     void useWorkbenchData.getState().refresh();
-    useStore.setState({ reviewReadOnly: true });
     const interval = window.setInterval(() => {
       void useWorkflow.getState().refresh();
       void useWorkbenchData.getState().refresh();

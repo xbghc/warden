@@ -22,8 +22,8 @@ isolates this delivery in the primary index; the page supports a message and ord
 with hooks. No validation checkbox or readiness declaration is required. Failed hooks preserve
 files; successful delivery preserves the workspace. See [Squash acceptance](worktrees.md#squash-acceptance).
 
-The target APIs below remain available to older clients and underpin diff rendering. Some legacy
-staging/checkpoint navigation described here is not exposed in the new task-focused page.
+The read-only target APIs below underpin diff rendering and preserve historical comment locations.
+Checkpoint APIs remain available; the task page uses its delivery baseline for review.
 
 ## Targets (what is being reviewed)
 
@@ -54,25 +54,11 @@ Navigation stays together in the left sidebar: *主目录预览*, *提交历史*
 synchronization/settings sheets. Within a task, its file list selects the diff directly. Connection
 selection is independent and belongs to the primary preview page.
 
-*工作区*'s two blocks are the working tree, a commit is picked from the *提交历史* list, and the
-*审阅整条分支* and *对比两个 ref* forms below its filters open the other two. While a commit, range or branch is under review the picker gains an
-entry naming it — *提交 89d8ba2*, *main..feature*, *分支 vs main* — and reads that while its files are
-in front, so the control at the top of the column says what the files below belong to; *工作区* is
-then the way back.
-
-`working`, `staged` and `all` are the three **local views** of one worktree. While any of them is
-selected the sidebar shows two blocks — 未暂存 (`working`) and 已暂存 (`staged`) — instead of a
-single tree, and clicking a file switches to the view it belongs to. A file that is only partly
-staged appears in both. Above them sits the one figure in the app: how many of the files under review
-are fully staged, which is what "staged means reviewed" amounts to. Switching between the three keeps
-your comments, the draft you are typing and the current selection; only the diff is reloaded. `all`
-has no control of its own (a saved `lastTarget` can still restore it; *审阅整条分支* against `@` shows
-the same diff). Commit, range and `base` targets keep the single tree, and their figure counts 已读
-instead, since nothing can be staged there.
-
-So there is one mark of "done" per kind of target, never two. In the local views it is staging and
-nothing else: a row has no 已读 box, and which block a file sits in is the whole of its review state.
-Everywhere else it is the [已读 mark](#viewed-files).
+Review presents one file list for the current comparison. Staging does not mark a file reviewed;
+the [已读 mark](#viewed-files) records that separately and is invalidated when the diff changes.
+Local review opens `all`, including staged, unstaged and untracked content in the current working
+files. Saved `working` or `staged` startup targets open `all` in the same workspace. Their read-only
+APIs remain available so historical comments can still resolve against their original comparison.
 
 `base:<ref>` is for a branch a coding agent has been working on, committing as it goes: one tree with
 everything since the branch forked off `<ref>` — the commits plus whatever is still uncommitted or
@@ -87,31 +73,13 @@ pool of comments and a commit never deletes them: the round under review is not 
 commits, so a comment whose lines changed stays *orphaned*, snippet and all, until you have checked
 the fix and delete or re-attach it.
 
-## Staging
+## Read-only review
 
-The Staged block is the "reviewed" pile, and warden can move lines into it without a trip to the
-terminal. In the Unstaged view every changed line has a small box at the left edge; press it and drag
-to pick a range inside one hunk (in split view a replacement is one row, so its old and new line go
-together). The picked rows are outlined in ink, a bar at the bottom of the diff says how many lines
-are in, and `s` or the bar's button stages them. Each hunk header has *暂存此 hunk*, the file header
-and the sidebar rows have *暂存文件* / *暂存*. The Staged view has the same controls the other way
-round: *取消暂存* takes lines back out of the index.
-
-A partial pick is turned into the patch `git add -p`'s edit mode would want — the unpicked deletions
-stay as context and the unpicked additions are left out (the mirror image when unstaging) — and applied
-with `git apply --cached`. It never touches the working tree, so what you did not pick is still
-there to stage next. Comments on the lines you staged follow them into the Staged view (see
-[Re-anchoring](agent.md#re-anchoring)). Every page open on the worktree reloads at once.
-
-Limits, each reported as a plain error rather than a half-applied patch:
-
-- Only the Unstaged and Staged views stage; `all`, `base`, commits and ranges are read-only.
-- Binary files and mode-only changes go whole or not at all; a mode change rides along only with *暂存文件*.
-- A staged deletion can be unstaged whole, not by line: the index has nothing left to put lines back into.
-- A pick that would split a file's missing trailing newline from its neighbours is refused; include them.
-- The request carries the hash of the diff the pick was made on. If the file or the index moved since
-  (the agent kept editing), the server answers 409 and the page reloads instead of staging the wrong lines.
-- If another git process holds the index lock the server retries briefly, then gives up with 409.
+Review does not modify source files or the real index. File, hunk and line staging controls and the
+legacy `POST /api/targets/:key/stage` endpoint have been removed; requests to that endpoint return
+404. Staging and unstaging through external Git tools do not change the review scope or establish
+that content has been read. Formal delivery still prepares and commits the selected delivery in
+the primary checkout using the normal Git index and commit hooks.
 
 ## Debug code
 
@@ -125,17 +93,9 @@ single convention for this, so warden takes the ones in use, in any comment synt
 - a single line tagged `nocommit`, `no-commit` or `do not commit` (optionally `@nocommit` / `!nocommit`),
   the tag the usual pre-commit hooks look for.
 
-With *忽略调试代码* ticked in the sidebar (the default):
-
-- runs of debug lines in a hunk fold into one striped row that opens with a click; jumping to a comment
-  inside one opens it;
-- *暂存文件* and *暂存此 hunk* leave debug lines out. Lines picked one by one go in regardless — that
-  is how debug code is staged on purpose. A file whose changes are all debug code is refused with a
-  note to pick the lines instead;
-- a file whose unstaged changes are all debug code does not count as still to review.
-
-Whether it is ticked or not, the 已暂存 heading carries a *调试代码 N* mark while N added lines in the
-index are debug code, with the files in its tooltip.
+With *忽略调试代码* enabled (the default), runs of debug lines fold into one striped row that opens
+with a click; jumping to a comment inside a fold opens it. Folding changes presentation only: it
+does not filter delivery content, modify the index or count a file as reviewed.
 
 A hunk rarely shows the marker that opened the block its lines sit in, so warden reads both sides of a
 file whole — only for the files `git grep` finds a marker in. Marker detection is textual: a marker
@@ -143,7 +103,7 @@ inside a string literal that follows a comment leader counts too.
 
 ## Viewed files
 
-Commit, range and `base` targets cannot be staged from, so a file there is ticked *已读* instead — the
+A file in any comparison can be marked *已读* — the
 box beside it in the sidebar, or the one in the file header. A directory whose files are all read
 recedes with a check. The mark is bound to a hash of the file's diff: when the diff changes (a `base`
 target reads the working tree, so the agent's next edit does that) the mark is dropped and the file

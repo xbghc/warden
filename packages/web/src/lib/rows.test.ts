@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { FileDiff, Hunk } from '@warden/shared';
-import { blockEnds, buildRows, computeGaps, findRowIndex, pickedLineIndices } from './rows';
+import { blockEnds, buildRows, computeGaps, findRowIndex } from './rows';
 
 function hunk(oldStart: number, newStart: number, spec: string[]): Hunk {
   let o = oldStart;
@@ -80,40 +80,12 @@ describe('buildRows', () => {
     expect(tail && tail.kind === 'gap' ? tail.hidden : null).toBe(8);
   });
 
-  it('maps picked rows back to the changed lines of the hunk in either layout', () => {
-    // Hunk 0 lines: 0 ctx a, 1 del b, 2 add B, 3 add B2, 4 ctx c.
-    const unified = buildRows({ diff, viewMode: 'unified', expansions: {}, fullLines: null });
-    expect(unified.filter((r) => r.kind === 'line' && r.hunkIndex === 0).map((r) => (r.kind === 'line' ? [r.pos, r.indices] : null))).toEqual([
-      [0, []],
-      [1, [1]],
-      [2, [2]],
-      [3, [3]],
-      [4, []],
-    ]);
-    expect(pickedLineIndices(unified, 0, 3, 1)).toEqual([1, 2, 3]);
-    expect(pickedLineIndices(unified, 0, 0, 0)).toEqual([]);
-    // Split: the pair (b | B) is one row, so picking it picks both lines; the next row is B2 alone.
-    const split = buildRows({ diff, viewMode: 'split', expansions: {}, fullLines: null });
-    expect(split.filter((r) => r.kind === 'pair' && r.hunkIndex === 0).map((r) => (r.kind === 'pair' ? [r.pos, r.indices] : null))).toEqual([
-      [0, []],
-      [1, [1, 2]],
-      [2, [3]],
-      [3, []],
-    ]);
-    expect(pickedLineIndices(split, 0, 1, 1)).toEqual([1, 2]);
-    expect(pickedLineIndices(split, 0, 2, 3)).toEqual([3]);
-    // Expanded context has no position, so it can never be picked.
-    const fullLines = Array.from({ length: 40 }, (_, i) => `L${i + 1}`);
-    const expanded = buildRows({ diff, viewMode: 'unified', expansions: { 1: { top: 2, bottom: 0, all: false } }, fullLines });
-    expect(expanded.filter((r) => r.kind === 'line' && r.expanded).every((r) => r.kind === 'line' && r.pos === -1 && r.indices.length === 0)).toBe(true);
-  });
-
   it('added/deleted files have no expandable gaps', () => {
     const added = buildRows({ diff: { ...diff, status: 'added' }, viewMode: 'unified', expansions: {}, fullLines: null });
     expect(added.some((r) => r.kind === 'gap')).toBe(false);
   });
 
-  it('folds runs of debug lines into one row that opens again, and keeps them out of a dragged pick', () => {
+  it('folds runs of debug lines into one row that opens again', () => {
     // Hunk 0 is ' a', '-b', '+B', '+B2', ' c': make B, B2 and c debug code.
     const h = hunk(10, 10, [' a', '-b', '+B', '+B2', ' c']);
     for (const i of [2, 3, 4]) h.lines[i]!.debug = true;
@@ -123,23 +95,19 @@ describe('buildRows', () => {
 
     const shut = buildRows({ diff: d, viewMode: 'unified', expansions: {}, fullLines: null, foldDebug: true });
     expect(kinds(shut)).toEqual(['a', 'b', 'fold:3']);
-    expect(pickedLineIndices(shut, 0, 0, 4)).toEqual([1]);
     // A comment on a folded line finds the fold.
     expect(shut[findRowIndex(shut, 'new', 11)]?.kind).toBe('debug');
 
     const open = buildRows({ diff: d, viewMode: 'unified', expansions: {}, fullLines: null, foldDebug: true, openDebug: new Set(['0:2']) });
     expect(kinds(open)).toEqual(['a', 'b', 'fold:3', 'B', 'B2', 'c']);
-    expect(pickedLineIndices(open, 0, 0, 4)).toEqual([1, 2, 3]);
 
     expect(kinds(buildRows({ diff: d, viewMode: 'unified', expansions: {}, fullLines: null }))).toEqual(['a', 'b', 'B', 'B2', 'c']);
 
     // Split: the (b | B) pair keeps b, which is not debug code, so only B2 and c fold.
     const split = buildRows({ diff: d, viewMode: 'split', expansions: {}, fullLines: null, foldDebug: true });
-    expect(split.filter((r) => r.kind === 'pair' || r.kind === 'debug').map((r) => (r.kind === 'pair' ? r.pos : `fold:${r.lines.length}`))).toEqual([
-      0,
-      1,
-      'fold:2',
-    ]);
+    expect(
+      split.filter((r) => r.kind === 'pair' || r.kind === 'debug').map((r) => (r.kind === 'pair' ? (r.right ?? r.left)!.content : `fold:${r.lines.length}`)),
+    ).toEqual(['a', 'B', 'fold:2']);
   });
 });
 
@@ -165,14 +133,13 @@ describe('code blocks in rows', () => {
   const texts = (rows: ReturnType<typeof buildRows>) =>
     rows.flatMap((r) => (r.kind === 'line' ? [r.line.content] : r.kind === 'pair' ? [(r.right ?? r.left)!.content] : []));
 
-  it('marks the head, and a shut block hides its body and keeps it out of a pick', () => {
+  it('marks the head, and a shut block hides its body', () => {
     const open = buildRows({ diff: d, viewMode: 'unified', expansions: {}, fullLines: null });
     const head = open.find((r) => r.kind === 'line' && r.block);
     expect(head?.kind === 'line' && head.block).toMatchObject({ id: 'n1', open: true, adds: 1, dels: 1 });
 
     const shut = buildRows({ diff: d, viewMode: 'unified', expansions: {}, fullLines: null, shutBlocks: new Set(['n1']) });
     expect(texts(shut)).toEqual(['function f() {', '}', 'after();']);
-    expect(pickedLineIndices(shut, 0, 0, 5)).toEqual([]);
     // A line inside is found at the head, which is where a jump opens it.
     expect(findRowIndex(shut, 'old', 3)).toBe(findRowIndex(shut, 'new', 1));
     expect(findRowIndex(shut, 'new', 3)).toBe(findRowIndex(shut, 'new', 1));

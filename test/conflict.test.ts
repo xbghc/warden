@@ -7,7 +7,7 @@ import { createApp, resolveRepo, StateStore } from '@warden/server';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
 // A merge stopped on a conflict: the file that needs looking at most must not vanish from the
-// working view, and must not be staged from it either.
+// read-only diff.
 
 let fx: FixtureRepo;
 let app: ReturnType<typeof createApp>;
@@ -59,16 +59,5 @@ describe('a file in conflict', () => {
     expect(diff.conflicted).toBe(true);
     const added = diff.hunks.flatMap((h) => h.lines.filter((l) => l.type === 'add').map((l) => l.content));
     expect(added.some((l) => l.startsWith('<<<<<<<'))).toBe(true);
-  });
-
-  it('is not staged from the page', async () => {
-    const entry = (await files('working')).files.find((f) => f.path === 'src/a.ts')!;
-    const res = await app.request('/api/targets/working/stage', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ path: 'src/a.ts', contentHash: entry.contentHash }),
-    });
-    expect(res.status).toBe(409);
-    expect(((await res.json()) as { code: string }).code).toBe('conflicted');
   });
 });

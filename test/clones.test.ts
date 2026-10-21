@@ -270,7 +270,7 @@ describe('a clone slot', () => {
     const inClone = await resolveRepo(dir);
     expect(inClone).toEqual({ root: dir, commonRoot: await realpath(fx.root) });
     const there = createApp({ repo: inClone, store: new StateStore(path.join(dataDir, 'state.json'), inClone.commonRoot) });
-    expect((await json<RepoInfo>(await there.request('/api/repo'))).defaultTarget).toBe(`worktree:${dir}:working`);
+    expect((await json<RepoInfo>(await there.request('/api/repo'))).defaultTarget).toBe(`worktree:${dir}:all`);
 
     await writeFile(path.join(dir, 'src/b.ts'), 'export const b = 3;\n');
     const comment = await json<Comment>(

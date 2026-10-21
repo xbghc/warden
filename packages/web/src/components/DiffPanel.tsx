@@ -2,7 +2,7 @@ import { Button } from './ui/button';
 import { Checkbox } from './ui/checkbox';
 import { useMemo, useState } from 'react';
 import type { FileEntry } from '@warden/shared';
-import { useStageMode, useStore, useTracksViewed } from '../store';
+import { useStore } from '../store';
 import { ActionIcon } from './ActionIcon';
 import { DiffView } from './DiffView';
 import { STATUS_LETTER } from './FileTree';
@@ -24,11 +24,6 @@ function PathParts({ path }: { path: string }) {
 function FileHeader({ entry }: { entry: FileEntry }) {
   const toggleViewed = useStore((s) => s.toggleViewed);
   const copyToClipboard = useStore((s) => s.copyToClipboard);
-  const stageLines = useStore((s) => s.stageLines);
-  const staging = useStore((s) => s.staging);
-  const mode = useStageMode();
-  const marks = useTracksViewed();
-  const skipsDebug = useStore((s) => s.prefs.ignoreDebug) && !!entry.debugAdditions;
   return (
     <div className="file-head">
       {entry.conflicted ? (
@@ -59,63 +54,16 @@ function FileHeader({ entry }: { entry: FileEntry }) {
       <span className="counts">
         <span className="add">+{entry.additions}</span> <span className="del">-{entry.deletions}</span>
       </span>
-      {marks && entry.changed && (
+      {entry.changed && (
         <span className="changed" title="文件有新变更，已取消已读标记">
           已读已重置
         </span>
       )}
       <span className="spacer" />
-      {mode && (
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={staging || entry.binary}
-          onClick={() => void stageLines(entry.path)}
-          title={
-            entry.binary
-              ? '二进制文件无法从这里暂存，请用 git add / git restore --staged'
-              : mode === 'stage'
-                ? `把这个文件的全部改动放入暂存区（含模式变更${skipsDebug ? '，跳过调试代码' : ''}）`
-                : '把这个文件的全部改动移出暂存区'
-          }
-        >
-          {mode === 'stage' ? '暂存文件' : '取消暂存文件'}
-        </Button>
-      )}
-      {/* Where a file can be staged that is how it is marked done, by the button above; a second
-          tick beside it only ever disagreed with the first. */}
-      {marks && (
-        <label className="check">
-          <Checkbox checked={entry.viewed} onCheckedChange={() => void toggleViewed(entry.path)} />
-          已读
-        </label>
-      )}
-    </div>
-  );
-}
-
-/** Floats over the diff while rows are picked: what was picked, and the one thing to do with it. */
-function StageBar({ filePath }: { filePath: string }) {
-  const sel = useStore((s) => (s.stageSel?.filePath === filePath ? s.stageSel : null));
-  const staging = useStore((s) => s.staging);
-  const stageSelection = useStore((s) => s.stageSelection);
-  const setStageSel = useStore((s) => s.setStageSel);
-  const mode = useStageMode();
-  if (!sel || !mode) return null;
-  const n = sel.lines.length;
-  return (
-    <div className="stage-bar" role="toolbar" aria-label="暂存所选行">
-      <span className="stage-bar-count">
-        已选 <b>{n}</b> 行
-      </span>
-      <Button variant="default" size="sm" className="primary" disabled={staging || n === 0} onClick={() => void stageSelection()} title="s">
-        {staging ? '处理中…' : mode === 'stage' ? '暂存所选' : '取消暂存所选'}
-        <kbd>s</kbd>
-      </Button>
-      <Button variant="outline" size="sm" onClick={() => setStageSel(null)} title="Esc">
-        取消选择
-        <kbd>Esc</kbd>
-      </Button>
+      <label className="check">
+        <Checkbox checked={entry.viewed} onCheckedChange={() => void toggleViewed(entry.path)} />
+        已读
+      </label>
     </div>
   );
 }
@@ -177,7 +125,6 @@ export function DiffPanel() {
     <div className="diff-panel">
       <FileHeader entry={entry} />
       {body}
-      <StageBar filePath={activeFile} />
     </div>
   );
 }

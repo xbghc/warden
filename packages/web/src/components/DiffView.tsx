@@ -3,9 +3,9 @@ import { type MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, us
 import { ActionIcon } from './ActionIcon';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { CommentSide, DiffLine, FileDiff } from '@warden/shared';
-import { useStageMode, useStore } from '../store';
+import { useStore } from '../store';
 import { api } from '../api';
-import { type Block, buildRows, findRowIndex, hides, hunkRowIndices, pickedLineIndices, type Expansion, type Gap, type Row } from '../lib/rows';
+import { type Block, buildRows, findRowIndex, hides, hunkRowIndices, type Expansion, type Gap, type Row } from '../lib/rows';
 import { langForPath, tokenizeLines, type Token } from '../lib/highlight';
 
 interface Selection {
@@ -84,12 +84,6 @@ export function DiffView({ diff }: { diff: FileDiff }) {
   const showToast = useStore((s) => s.showToast);
   const reattaching = useStore((s) => s.reattaching);
   const jumpTo = useStore((s) => s.jumpTo);
-  const mode = useStageMode();
-  const pick = useStore((s) => (s.stageSel?.filePath === diff.path ? s.stageSel : null));
-  const setStageSel = useStore((s) => s.setStageSel);
-  const stageLines = useStore((s) => s.stageLines);
-  const staging = useStore((s) => s.staging);
-
   const [expansions, setExpansions] = useState<Record<number, Expansion>>({});
   const [openDebug, setOpenDebug] = useState<ReadonlySet<string>>(() => new Set());
   const toggleDebug = (id: string) =>
@@ -320,60 +314,6 @@ export function DiffView({ diff }: { diff: FileDiff }) {
     return () => window.removeEventListener('mouseup', up);
   }, [setSel, updateComment, setEditor, diff.path]);
 
-  // ---- picking rows to stage ------------------------------------------------------
-  // Like the comment selection, a drag inside one hunk; unlike it, the pick stays until it is
-  // staged or dismissed, and it goes by rows, so a replacement in split view is picked as one.
-  const pickDrag = useRef<{ hunkIndex: number; anchor: number } | null>(null);
-  const [picking, setPicking] = useState(false);
-  useEffect(() => {
-    const up = () => {
-      pickDrag.current = null;
-      setPicking(false);
-    };
-    window.addEventListener('mouseup', up);
-    return () => window.removeEventListener('mouseup', up);
-  }, []);
-  const setPick = (hunkIndex: number, anchor: number, head: number) =>
-    setStageSel({ filePath: diff.path, hunkIndex, anchor, head, lines: pickedLineIndices(rows, hunkIndex, anchor, head) });
-  const startPick = (e: React.MouseEvent, hunkIndex: number, pos: number) => {
-    if (e.button !== 0 || !mode) return;
-    e.preventDefault();
-    e.stopPropagation();
-    // The box of a lone picked row works as a checkbox: clicking it again unpicks.
-    if (pick && pick.hunkIndex === hunkIndex && pick.anchor === pos && pick.head === pos) {
-      setStageSel(null);
-      return;
-    }
-    pickDrag.current = { hunkIndex, anchor: pos };
-    setPicking(true);
-    setPick(hunkIndex, pos, pos);
-  };
-  const extendPick = (hunkIndex: number, pos: number) => {
-    const d = pickDrag.current;
-    if (!d || d.hunkIndex !== hunkIndex || pos < 0 || (pick && pick.head === pos)) return;
-    setPick(d.hunkIndex, d.anchor, pos);
-  };
-  const isPicked = (row: Extract<Row, { kind: 'line' | 'pair' }>): boolean =>
-    !!pick &&
-    row.hunkIndex === pick.hunkIndex &&
-    row.indices.length > 0 &&
-    row.pos >= Math.min(pick.anchor, pick.head) &&
-    row.pos <= Math.max(pick.anchor, pick.head);
-  const renderPickBox = (row: Extract<Row, { kind: 'line' | 'pair' }>, line: DiffLine | undefined, picked: boolean) => (
-    <span className="stagec">
-      {mode && !row.expanded && line && line.type !== 'context' && (
-        <Button
-          variant="outline"
-          size="sm"
-          className={`stage-box ${picked ? 'on' : ''}`}
-          onMouseDown={(e) => startPick(e, row.hunkIndex, row.pos)}
-          title={mode === 'stage' ? '选中要暂存的行（可拖选）' : '选中要取消暂存的行（可拖选）'}
-          aria-pressed={picked}
-        />
-      )}
-    </span>
-  );
-
   const startSel = (e: React.MouseEvent, side: CommentSide, hunkIndex: number, line: number) => {
     if (e.button !== 0) return;
     e.preventDefault();
@@ -533,16 +473,13 @@ export function DiffView({ diff }: { diff: FileDiff }) {
     const side: CommentSide = l.type === 'del' ? 'old' : 'new';
     const no = side === 'old' ? l.oldLineNo : l.newLineNo;
     const tokens = tokenCache.current.get(tokenKey(l, side));
-    const picked = isPicked(row);
     return (
       <div
-        className={`row line ${l.type} ${lineClasses(side, no)} ${row.expanded ? 'expanded' : ''} ${picked ? 'picked' : ''}`}
+        className={`row line ${l.type} ${lineClasses(side, no)} ${row.expanded ? 'expanded' : ''}`}
         onMouseEnter={() => {
           if (no !== undefined) extendSel(side, row.hunkIndex, no);
-          extendPick(row.hunkIndex, row.pos);
         }}
       >
-        {renderPickBox(row, l, picked)}
         <span className="gut" onClick={(e) => gutterClick(e, l, row.hunkIndex, 'old')} title={GUTTER_TITLE}>
           {l.oldLineNo ?? ''}
         </span>
@@ -572,7 +509,7 @@ export function DiffView({ diff }: { diff: FileDiff }) {
     );
   };
 
-  const renderSplitCell = (row: Extract<Row, { kind: 'pair' }>, l: DiffLine | undefined, side: CommentSide, picked: boolean) => {
+  const renderSplitCell = (row: Extract<Row, { kind: 'pair' }>, l: DiffLine | undefined, side: CommentSide) => {
     if (!l) return <span className="cell blank" />;
     const { hunkIndex, expanded } = row;
     const no = side === 'old' ? l.oldLineNo : l.newLineNo;
@@ -582,11 +519,7 @@ export function DiffView({ diff }: { diff: FileDiff }) {
     // deletion has nothing across from it.
     const block = (side === 'new') === !!row.right ? row.block : undefined;
     return (
-      <span
-        className={`cell ${type} ${lineClasses(side, no)} ${picked ? 'picked' : ''}`}
-        onMouseEnter={() => no !== undefined && extendSel(side, hunkIndex, no)}
-      >
-        {renderPickBox(row, l, picked)}
+      <span className={`cell ${type} ${lineClasses(side, no)}`} onMouseEnter={() => no !== undefined && extendSel(side, hunkIndex, no)}>
         <span className="gut" onClick={(e) => gutterClick(e, l, hunkIndex, side)} title={GUTTER_TITLE}>
           {no ?? ''}
         </span>
@@ -638,32 +571,15 @@ export function DiffView({ diff }: { diff: FileDiff }) {
             <span className="hunk-text">
               @@ -{row.hunk.oldStart},{row.hunk.oldLines} +{row.hunk.newStart},{row.hunk.newLines} @@ <span className="muted">{row.hunk.header}</span>
             </span>
-            {mode && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="link hunk-stage"
-                disabled={staging}
-                onClick={() => void stageLines(diff.path, [{ index: row.hunkIndex }])}
-                title={
-                  mode === 'stage'
-                    ? `把这个 hunk 的全部改动放入暂存区${foldDebug && row.hunk.lines.some((l) => l.debug) ? '（跳过调试代码）' : ''}`
-                    : '把这个 hunk 的全部改动移出暂存区'
-                }
-              >
-                {mode === 'stage' ? '暂存此段' : '取消暂存此段'}
-              </Button>
-            )}
           </div>
         );
       case 'line':
         return renderUnified(row);
       case 'pair': {
-        const picked = isPicked(row);
         return (
-          <div className={`row pair ${row.expanded ? 'expanded' : ''} ${picked ? 'picked' : ''}`} onMouseEnter={() => extendPick(row.hunkIndex, row.pos)}>
-            {renderSplitCell(row, row.left, 'old', picked)}
-            {renderSplitCell(row, row.right, 'new', picked)}
+          <div className={`row pair ${row.expanded ? 'expanded' : ''}`}>
+            {renderSplitCell(row, row.left, 'old')}
+            {renderSplitCell(row, row.right, 'new')}
           </div>
         );
       }
@@ -672,7 +588,7 @@ export function DiffView({ diff }: { diff: FileDiff }) {
 
   const items = virtualizer.getVirtualItems();
   return (
-    <div ref={parentRef} className={`diff-scroll ${sel ? 'selecting' : ''} ${picking ? 'picking' : ''} ${reattaching ? 'reattaching' : ''}`}>
+    <div ref={parentRef} className={`diff-scroll ${sel ? 'selecting' : ''} ${reattaching ? 'reattaching' : ''}`}>
       <div className={`diff-list ${viewMode}`} style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
         {items.map((vi) => (
           <div

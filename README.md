@@ -94,7 +94,7 @@ The copy button beside the path in the file header copies the path, relative to 
 |---|---|
 | [Workflow](docs/workflow.md) | User-controlled development loop, current-version scope and implementation alignment |
 | [Interaction design](docs/design.md) | Agreed behavior, connection previews, commit arrangement and open product decisions |
-| [Reviewing](docs/reviewing.md) | Targets and the sidebar, staging, debug code, 已读, checkpoints, auto-refresh |
+| [Reviewing](docs/reviewing.md) | Read-only review, targets, debug code, 已读, checkpoints, auto-refresh |
 | [Comments and the agent](docs/agent.md) | Comments, the export format, `warden feedback` / `reply`, re-anchoring, task planning |
 | [Worktrees and tasks](docs/worktrees.md) | Commit plans, workspace hooks, squash acceptance and synchronization |
 | [Platform](docs/environment.md) | WSL2 and browser access |

@@ -140,10 +140,9 @@ function migrateTodoPlans(state: ReviewState): void {
 }
 
 /**
- * Nothing is kept under a local view key (`working` / `staged` / `all`) any more. Comments used to
- * live under the view they were written in; they now share one scope per worktree so they can
- * follow the code across `git add`, and are moved there. The 已读 marks of those views go with the
- * entry: a file there is reviewed once it is staged (see `tracksViewed`).
+ * Legacy local-view comments share one scope per worktree so they can follow code across git add.
+ * Viewed hashes remain under their original target: different comparisons have different hashes,
+ * and staging alone does not establish that a file has been reviewed.
  */
 function migrateLocalViews(targets: ReviewState['targets']): void {
   // Sorted so a state file with several stale views migrates in a stable order.
@@ -151,14 +150,16 @@ function migrateLocalViews(targets: ReviewState['targets']): void {
     const scope = commentScopeKey(key);
     if (scope === key) continue;
     const src = targets[key]!;
-    delete targets[key];
-    if (src.comments.length === 0) continue;
+    const comments = src.comments;
+    if (Object.keys(src.viewed).length === 0) delete targets[key];
+    else src.comments = [];
+    if (comments.length === 0) continue;
     let dst = targets[scope];
     if (!dst) {
       dst = { viewed: {}, comments: [] };
       targets[scope] = dst;
     }
-    dst.comments.push(...src.comments);
+    dst.comments.push(...comments);
   }
 }
 

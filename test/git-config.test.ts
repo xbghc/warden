@@ -3,22 +3,19 @@ import path from 'node:path';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Hono } from 'hono';
-import type { CommitsResponse, FilesResponse } from '@warden/shared';
+import type { CommitsResponse, FileDiff, FilesResponse } from '@warden/shared';
 import { createApp, resolveRepo, StateStore } from '@warden/server';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
 // The repository's own git config reaches every command warden parses. Each setting here once
-// changed that output: converted text staged into the index, broken paths, debug code staged as
-// code, fake rows in the history. The listing and staging must not notice any of them.
+// changed that output: converted text, broken paths, hidden debug markers and fake history rows.
+// Read-only review must continue to describe the actual repository content.
 
 let fx: FixtureRepo;
 let app: Hono;
 let dataDir: string;
 
 const files = async (key: string) => (await (await app.request(`/api/targets/${key}/files`)).json()) as FilesResponse;
-const stage = (body: unknown) =>
-  app.request('/api/targets/working/stage', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-
 beforeAll(async () => {
   fx = await makeFixtureRepo('warden-config-');
   dataDir = await mkdtemp(path.join(os.tmpdir(), 'warden-config-data-'));
@@ -51,12 +48,14 @@ describe('diffs under a hostile git config', () => {
     expect(listed.some((p) => /^[wicoab]\//.test(p))).toBe(false);
   });
 
-  it('stages the bytes on disk, not the textconv output', async () => {
+  it('shows the bytes on disk, not the textconv output', async () => {
     await fx.write('new.up', 'hello\nworld\n');
     const entry = (await files('working')).files.find((f) => f.path === 'new.up')!;
     expect(entry.untracked).toBe(true);
-    const res = await stage({ path: 'new.up', contentHash: entry.contentHash });
-    expect(res.status).toBe(200);
+    fx.git('add', 'new.up');
+    await fx.write('new.up', 'hello\nchanged\n');
+    const diff = (await (await app.request('/api/targets/all/file?path=new.up')).json()) as FileDiff;
+    expect(diff.hunks.flatMap((hunk) => hunk.lines.map((line) => line.content))).toEqual(['hello', 'changed']);
     expect(fx.git('show', ':new.up')).toBe('hello\nworld\n');
   });
 

@@ -124,10 +124,7 @@ export interface Prefs {
    * laptop in split view — so it stays shut until there is something to put in it.
    */
   railOpen: boolean;
-  /**
-   * Fold debug code in the diff, leave it out of whole-file and whole-hunk staging, and do not
-   * count a file whose only changes left unstaged are debug code as still to review.
-   */
+  /** Fold debug code in the diff without changing the review scope or file contents. */
   ignoreDebug: boolean;
   /** How the last new slot was made; the checkout form offers the same kind first next time. */
   slotKind?: SlotKind;
@@ -628,7 +625,7 @@ export interface RepoInfo {
   branch: string;
   head: string;
   worktrees: WorktreeInfo[];
-  /** Default target key (last used or `working`). */
+  /** Default target key (last used comparison or `all`). */
   defaultTarget: TargetKey;
   /** Trunk a `base` target is offered against by default: `main` or `master`, whichever exists. */
   defaultBase?: string;
@@ -736,31 +733,6 @@ export interface UpdateCommentRequest {
 }
 
 /** Lines of one hunk to stage or unstage; `lines` omitted means the whole hunk. */
-export interface HunkSelection {
-  /** Index of the hunk in the file diff. */
-  index: number;
-  /** Indices into `hunk.lines`; context lines are ignored. */
-  lines?: number[];
-}
-
-export interface StageRequest {
-  path: string;
-  /** `contentHash` of the diff the selection was made on; a different diff on the server is a 409. */
-  contentHash: string;
-  /** Omitted: the whole file, mode change included. */
-  hunks?: HunkSelection[];
-  /**
-   * Leave debug lines out of the whole file or of a hunk picked whole. Lines picked one by one go
-   * in regardless: that is how debug code is staged on purpose. Staging only; unstaging moves all.
-   */
-  skipDebug?: boolean;
-}
-
-export interface StageResponse {
-  ok: true;
-  /** Changed (add/del) lines the patch carried. */
-  lines: number;
-}
 
 export interface ReanchorRequest {
   files?: FileDiff[];

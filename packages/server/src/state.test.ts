@@ -172,8 +172,11 @@ describe('StateStore', () => {
     const s = await new StateStore(file, '/repo').load();
     // Sorted key order: staged before working.
     expect(s.targets.local!.comments.map((c) => c.id)).toEqual(['c2', 'c1']);
-    // The local views keep no viewed mark, so nothing is left to hold under their keys.
-    expect(Object.keys(s.targets).sort()).toEqual(['commit:abc', 'local']);
+    // Comments migrate, but hashes remain bound to the original comparison.
+    expect(Object.keys(s.targets).sort()).toEqual(['commit:abc', 'local', 'working']);
+    expect(s.targets.working).toEqual({ viewed: { 'a.ts': 'h' }, comments: [] });
+    await writeFile(file, JSON.stringify(s));
+    expect((await new StateStore(file, '/repo').load()).targets).toEqual(s.targets);
     // A commit target keeps its own comments and its marks.
     expect(s.targets['commit:abc']!.comments.map((c) => c.id)).toEqual(['c3']);
     expect(s.targets['commit:abc']!.viewed).toEqual({ 'a.ts': 'h' });

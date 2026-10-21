@@ -70,25 +70,17 @@ export async function setupWorkspaceStore() {
     todos: s.todos.map((todo) => (todo.branch === 'main' ? { ...todo, branch: 'feature/order' } : todo)),
     prefs: { ...s.prefs, railOpen: true, autoRefresh: false },
     files: [file],
-    unstaged: [file],
-    staged: [],
     activeFile: diff.path,
     diffs: { [diff.path]: { status: 'ok', diff } },
     init: fn(async () => {}),
     reloadRepo: fn(async () => {}),
     setTarget: fn(async (key, options) => {
       await setTarget(key, options);
-      const staged = key.endsWith('staged');
-      useStore.setState({ files: [file], unstaged: staged ? [] : [file], staged: staged ? [file] : [] });
+      useStore.setState({ files: [file] });
     }),
     loadCheckpoints: fn(async () => {}),
     createCheckpoint: fn(async () => {
       useStore.getState().showToast('预览：已记录当前工作区');
-    }),
-    stageLines: fn(async () => {
-      const staged = useStore.getState().targetKey.endsWith('staged');
-      useStore.setState({ unstaged: staged ? [file] : [], staged: staged ? [] : [file] });
-      return true;
     }),
     replyToComment: fn(async (id, body) => {
       useStore.setState((current) => ({

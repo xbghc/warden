@@ -212,6 +212,11 @@ establish that tests passed. The synchronization mechanism remains undecided.
 
 ## Selecting a file is review
 
+Present current undelivered content in one file list, including live uncommitted edits. Do not split
+review into staged and unstaged piles or offer line, hunk or file staging controls. Viewed marks
+record review independently of the index; staging through external tools does not change them
+when the displayed content is unchanged.
+
 The workspace detail directly presents its file list and diff. Clicking a file displays it without
 “进入审查”, “切换审查区” or “标记审查完成”. Local file selection does not create a second global
 navigation system, alter the connection set or implicitly narrow the delivery scope.

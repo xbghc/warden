@@ -30,8 +30,6 @@ import type {
   RepoInfo,
   ReviewState,
   StateEvent,
-  StageRequest,
-  StageResponse,
   Todo,
   TodosResponse,
   UpdateCommentRequest,
@@ -52,17 +50,14 @@ import {
   isValidRef,
   localViewKeys,
   moveBefore,
-  stageModeFor,
-  tracksViewed,
   tryParseTargetKey,
 } from '@warden/shared';
 import { badRequest, HttpError, notFound } from './errors.js';
 import { COMMIT_FORMAT, parseCommitLog } from './commits.js';
-import { applyToIndex, mergeBase, refExists, revParse, runGit } from './git.js';
+import { mergeBase, refExists, revParse, runGit } from './git.js';
 import { currentBranch, getRepoInfo, listWorktrees, remoteDefault, slotPath, type RepoContext } from './repo.js';
 import { annotateDebug, getFileDiff, getFullFile, listTargetDiffs, literal, resolveTargetContext, toSummary, type TargetContext } from './targets.js';
 import { buildAnchor, reanchorComment } from './anchor.js';
-import { buildStagePatch } from './patch.js';
 import { checkpointKey, checkpointStore, checkpointsOf, findCheckpoint, forgetCheckpoint, takeCheckpoint } from './checkpoints.js';
 import { checkoutWorktree, listBranches, listWorktreesDetailed, lookupRemoteBranches, nextSlot, releaseWorktree, removeWorktree } from './worktrees.js';
 import { ensureTarget, forgetWorktreeTargets, type StateStore, unlinkComments } from './state.js';
@@ -268,7 +263,7 @@ export function createApp(opts: AppOptions): WardenApp {
   const api = new Hono();
 
   // The server trusts the browser it was opened in; what it must not trust is a page from another
-  // origin driving that browser, which could stage lines or remove a worktree. Browsers label such
+  // origin driving that browser, which could commit changes or remove a worktree. Browsers label such
   // requests with Sec-Fetch-Site, and with Origin — the older and wider-supported of the two — so a
   // write carrying either sign of another origin is refused before any route sees it. Reads stay
   // open: with Host checked above, a page from elsewhere cannot read the response.
@@ -288,7 +283,7 @@ export function createApp(opts: AppOptions): WardenApp {
   api.get('/repo', async (c) => {
     const state = await store.load();
     // Started inside a linked worktree, the page opens that worktree: its own keys carry its path.
-    const own = repo.root === repo.commonRoot ? 'working' : formatTargetKey({ kind: 'working', worktree: repo.root });
+    const own = repo.root === repo.commonRoot ? 'all' : formatTargetKey({ kind: 'all', worktree: repo.root });
     const info: RepoInfo = await getRepoInfo(repo, own);
     worktreeCache = { at: Date.now(), list: info.worktrees };
     // The remembered target is handed back only while it can still be opened. One inside a
@@ -303,11 +298,11 @@ export function createApp(opts: AppOptions): WardenApp {
       // worktree's page last looked at: the preference is shared by every server on the repository.
       (repo.root === repo.commonRoot || target.worktree === repo.root) &&
       (target.kind !== 'checkpoint' || !!findCheckpoint(state, target.worktree, target.id));
-    if (last && usable) info.defaultTarget = last;
+    if (last && usable) info.defaultTarget = isLocalTarget(target) ? formatTargetKey({ kind: 'all', worktree: target.worktree }) : last;
     else if (last) {
       if (repo.root === repo.commonRoot) {
         await store.update((s) => {
-          s.prefs.lastTarget = 'working';
+          s.prefs.lastTarget = 'all';
         });
       }
     }
@@ -347,9 +342,7 @@ export function createApp(opts: AppOptions): WardenApp {
 
     const stale: string[] = [];
     const state = await store.load();
-    // The local views keep no 已读 mark (see `tracksViewed`), so there is nothing to check or to
-    // report as changed; whatever an older version left under their keys is dropped on load.
-    const viewed = tracksViewed(ctx.target) ? (state.targets[key]?.viewed ?? {}) : {};
+    const viewed = state.targets[key]?.viewed ?? {};
     for (const [p, h] of Object.entries(viewed)) {
       const f = diffs.find((d) => d.path === p);
       if (!f || f.contentHash !== h) stale.push(p);
@@ -402,8 +395,7 @@ export function createApp(opts: AppOptions): WardenApp {
 
   api.put('/targets/:key/viewed', async (c) => {
     const key = c.req.param('key');
-    const ctx = await targetCtx(key);
-    if (!tracksViewed(ctx.target)) throw badRequest(`${key} keeps no viewed mark: a file there is reviewed once it is staged`, 'viewed_not_tracked');
+    await targetCtx(key);
     const body = (await c.req.json()) as { path?: string; viewed?: boolean; contentHash?: string };
     if (!body.path) throw badRequest('missing path');
     const viewed = await store.update((s) => {
@@ -441,38 +433,6 @@ export function createApp(opts: AppOptions): WardenApp {
       forgetCheckpoint(s, cp);
     });
     return c.json({ ok: true });
-  });
-
-  // ---- staging -----------------------------------------------------------
-
-  // The only route that writes to the repository, and only to the index: the lines picked in the
-  // Unstaged view go in, the ones picked in the Staged view come back out. Staging is how a
-  // reviewer says "these lines are done", so it belongs next to reading them.
-  api.post('/targets/:key/stage', async (c) => {
-    const key = c.req.param('key');
-    const ctx = await targetCtx(key);
-    const mode = stageModeFor(ctx.target);
-    if (!mode) throw badRequest('only the working (stage) and staged (unstage) views can be staged from', 'not_stageable');
-    const body = (await c.req.json()) as StageRequest;
-    if (!body.path || typeof body.path !== 'string') throw badRequest('missing path');
-    if (!body.contentHash || typeof body.contentHash !== 'string') throw badRequest('contentHash is required');
-    if (body.hunks !== undefined && !Array.isArray(body.hunks)) throw badRequest('hunks must be an array', 'bad_selection');
-    if (body.skipDebug !== undefined && typeof body.skipDebug !== 'boolean') throw badRequest('skipDebug must be a boolean', 'bad_selection');
-    const diff = await fileDiffWithHints(ctx, body.path);
-    if (!diff) throw badRequest(`file ${body.path} is not part of ${key}`, 'no_diff');
-    if (diff.conflicted) throw new HttpError(409, `${body.path} is in conflict; resolve it and git add it in the terminal`, 'conflicted');
-    // The selection is a set of indices into a diff the client saw; against any other diff they
-    // would name the wrong lines. The agent may well have edited the file since.
-    if (diff.contentHash !== body.contentHash)
-      throw new HttpError(409, 'the diff changed since it was loaded; refresh and pick the lines again', 'diff_changed');
-    // Whether a line is debug code is read from the file as it is now, like the diff itself.
-    if (body.skipDebug) await annotateDebug(ctx, [diff]);
-    const { patch, lines } = buildStagePatch(diff, mode, body.hunks, { skipDebug: body.skipDebug });
-    await applyToIndex(ctx.cwd, patch, { reverse: mode === 'unstage' });
-    // Tell every page on this worktree straight away rather than at the next poll.
-    void watchers.get(ctx.cwd)?.poll();
-    const res: StageResponse = { ok: true, lines };
-    return c.json(res);
   });
 
   // ---- comments ----------------------------------------------------------

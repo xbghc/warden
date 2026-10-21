@@ -3,7 +3,7 @@ import path from 'node:path';
 import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeFixtureRepo, type FixtureRepo } from '../../../test/fixtures/make-repo.js';
-import { applyToIndex, runGit, runGitSnapshot, runGitWrite } from './git.js';
+import { runGit, runGitSnapshot, runGitWrite } from './git.js';
 
 let selected: FixtureRepo;
 let unrelated: FixtureRepo;
@@ -70,19 +70,6 @@ describe('Git repository environment isolation', () => {
     expect(unrelated.git('rev-parse', 'HEAD')).toBe(unrelatedHead);
     expect(await readFile(path.join(unrelated.root, '.git', 'index'))).toEqual(unrelatedIndex);
     expect(unrelated.git('status', '--porcelain')).toBe('');
-  });
-
-  it('applies a staging patch only to the selected index', async () => {
-    const unrelatedIndex = await readFile(path.join(unrelated.root, '.git', 'index'));
-    await selected.write('README.md', '# selected patch\n');
-    const patch = selected.git('diff', '--', 'README.md');
-    inheritUnrelatedRepository();
-
-    await applyToIndex(selected.root, patch);
-
-    expect(selected.git('show', ':README.md')).toBe('# selected patch\n');
-    expect(await readFile(path.join(unrelated.root, '.git', 'index'))).toEqual(unrelatedIndex);
-    expect(await readFile(path.join(selected.root, 'README.md'), 'utf8')).toBe('# selected patch\n');
   });
 
   it('uses explicit snapshot storage without touching either real index or inherited alternate objects', async () => {

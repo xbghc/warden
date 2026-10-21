@@ -125,6 +125,11 @@ contributing workspaces. Delivery preparation removes owned preview contribution
 
 ## Review first, then squash
 
+Review and connection previews use the workspace's current content, regardless of whether changes
+are staged. Review has one file list and hash-bound viewed marks; staging is not a review status.
+The legacy line/file staging API has been removed. Read-only comparison keys remain available for
+historical comments. Formal delivery continues to use the primary checkout's Git index and hooks.
+
 ```mermaid
 flowchart LR
   P[User plans and orders commits] --> W[Warden prepares a workspace]

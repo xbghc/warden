@@ -38,8 +38,6 @@ import type {
   RemoveWorktreeResponse,
   RepoInfo,
   ReviewState,
-  StageRequest,
-  StageResponse,
   TargetKey,
   Todo,
   TodosResponse,
@@ -128,8 +126,6 @@ export const api = {
   checkpoints: (key: TargetKey) => req<CheckpointsResponse>('GET', `/api/targets/${enc(key)}/checkpoints`),
   createCheckpoint: (key: TargetKey) => req<CreateCheckpointResponse>('POST', `/api/targets/${enc(key)}/checkpoints`),
   deleteCheckpoint: (key: TargetKey, id: number) => req<{ ok: true }>('DELETE', `/api/targets/${enc(key)}/checkpoints/${id}`),
-
-  stage: (key: TargetKey, body: StageRequest) => req<StageResponse>('POST', `/api/targets/${enc(key)}/stage`, body),
 
   createComment: (key: TargetKey, body: CreateCommentRequest) => req<Comment>('POST', `/api/targets/${enc(key)}/comments`, body),
   updateComment: (key: TargetKey, id: string, body: UpdateCommentRequest) => req<Comment>('PATCH', `/api/targets/${enc(key)}/comments/${enc(id)}`, body),

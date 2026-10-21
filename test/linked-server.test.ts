@@ -44,7 +44,7 @@ afterAll(async () => {
 describe('a server started inside a linked worktree', () => {
   it('opens that worktree by its own key', async () => {
     const info = (await (await inLinked.request('/api/repo')).json()) as RepoInfo;
-    expect(info.defaultTarget).toBe(`worktree:${linked}:working`);
+    expect(info.defaultTarget).toBe(`worktree:${linked}:all`);
   });
 
   it('neither sees nor deletes the main worktree’s comments', async () => {

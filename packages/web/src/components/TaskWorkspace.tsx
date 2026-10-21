@@ -3,7 +3,7 @@ import { ArrowLeft, ChevronDown, Columns2, FileCode2, GitBranch, MessageSquare, 
 import type { DevelopmentChange, WorkflowTask, SlotKind } from '@warden/shared';
 import { tryParseTargetKey } from '@warden/shared';
 import { api } from '../api';
-import { useStore, useTracksViewed } from '../store';
+import { useStore } from '../store';
 import { changeTarget, preparationTarget, useWorkflow, workflowAction } from '../workflow-store';
 import { errorMessage, useWorkbenchData } from '../workbench-data';
 import { Button } from './ui/button';
@@ -252,13 +252,12 @@ function TaskFiles() {
   const active = useStore((state) => state.activeFile);
   const loading = useStore((state) => state.filesLoading);
   const error = useStore((state) => state.filesError);
-  const tracks = useTracksViewed();
   return (
     <aside className="wb-files" aria-label="本次变更文件">
       <div className="wb-files-title">
         <strong>文件</strong>
         {!error && (!loading || files.length > 0) && (
-          <span>{tracks && files.length > 0 ? `已读 ${files.filter((file) => file.viewed).length}/${files.length}` : files.length}</span>
+          <span>{files.length > 0 ? `已读 ${files.filter((file) => file.viewed).length}/${files.length}` : files.length}</span>
         )}
       </div>
       <OperationError message={error} />
@@ -274,9 +273,7 @@ function TaskFiles() {
                 {file.conflicted ? 'U' : { added: 'A', modified: 'M', deleted: 'D', renamed: 'R' }[file.status]}
               </small>
             </button>
-            {tracks && (
-              <Checkbox aria-label={`${file.path} 已读`} checked={file.viewed} onCheckedChange={() => void useStore.getState().toggleViewed(file.path)} />
-            )}
+            <Checkbox aria-label={`${file.path} 已读`} checked={file.viewed} onCheckedChange={() => void useStore.getState().toggleViewed(file.path)} />
           </li>
         ))}
       </ul>
@@ -300,7 +297,7 @@ export function TaskWorkspace({ task, active }: { task: WorkflowTask; active: bo
   const target = task.worktree ? (isPrepared ? preparationTarget(task) : changeTarget(task)) : undefined;
   useEffect(() => {
     if (active && target && target !== useStore.getState().targetKey) void useStore.getState().setTarget(target);
-    if (active) useStore.setState({ reviewReadOnly: true, panel: 'diff' });
+    if (active) useStore.setState({ panel: 'diff' });
   }, [active, target]);
   useEffect(() => {
     if (activeFile) setMobileFileList(false);

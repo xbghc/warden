@@ -19,8 +19,8 @@ deleting a checkpoint leaves them there, since another may share them.
 
 `targets` is keyed by target key, plus one *comment scope* per worktree — `local`, or
 `worktree:<path>:local` — holding the comments the three local views share and the HEAD sha the last
-re-anchor saw. `viewed` sits on the key of the commit, range, `base` or checkpoint target it was
-ticked in; the local view keys hold nothing. `workflow.changes` holds the requirement's commit
+re-anchor saw. `viewed` stays under the exact comparison key it was marked in, including local
+comparisons. Each mark is bound to that comparison's diff hash. `workflow.changes` holds the requirement's commit
 plans and their execution records. A planned or archived task has no worktree, branch or base;
 execution allocates those fields and acceptance records the final commit. Comment links, goal,
 acceptance criteria and dependencies stay with the same ID. `checkpoints` remains top level.
@@ -28,7 +28,8 @@ Legacy `todos` matching the requirement or its task branches migrate on load, us
 `todo-<id>` IDs and preserving notes and comment links. Checked notes become archived plans,
 never accepted commits. Unrelated notes remain available for explicit import. State written by an older version is
 migrated on load: comments filed under `working` / `staged` / `all` move into the matching scope the
-first time the file is read, and the 已读 marks those views used to keep are dropped.
+first time the file is read. Viewed hashes stay under their original comparison keys; staging
+does not imply review and does not clear a mark when the displayed content is unchanged.
 
 ## Security model
 
@@ -40,10 +41,10 @@ reads go through an argument whitelist (`rev-parse`, `diff`, `show`, `log`,
 `--get-regexp` of one name or pattern; `var` only for `GIT_ATTR_GLOBAL` and `GIT_ATTR_SYSTEM`)
 that refuses option-looking refs and any write-capable
 flag; requests that would need anything else get HTTP 400. The writes are few and each composes its
-own arguments. `POST /api/targets/:key/stage` runs `git apply --cached` (with `--reverse` for the
-Staged view) on a patch the server itself builds from the diff it just produced — the patch is never
-taken from the request, only the line indices are, and they are checked against the diff's hash
-first. `POST /api/worktrees`, `POST /api/worktrees/release` and `POST /api/worktrees/remove` run
+own arguments. Diff review is read-only: the legacy `POST /api/targets/:key/stage` endpoint and its
+partial index-patch writer have been removed. Viewed marks and comments write Warden state only.
+Formal delivery still prepares the primary index and commits through its validated workflow.
+`POST /api/worktrees`, `POST /api/worktrees/release` and `POST /api/worktrees/remove` run
 `git worktree add`, `git branch`, `git switch`, `git worktree remove` and `git branch -d` with a
 branch name git has validated, a ref that resolves, and a slot path the server composes from a
 number — `<repo>-<n>` beside the main worktree; no request names a directory. The working tree and

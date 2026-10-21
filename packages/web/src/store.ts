@@ -8,7 +8,6 @@ import type {
   CreateTodoRequest,
   FileDiff,
   FileEntry,
-  HunkSelection,
   Panel,
   Prefs,
   RepoInfo,
@@ -19,19 +18,7 @@ import type {
   UpdateTodoRequest,
   ViewMode,
 } from '@warden/shared';
-import {
-  awaitsAgent,
-  commentScopeKey,
-  formatTargetKey,
-  insertAfter,
-  isLocalTarget,
-  localViewKeys,
-  moveBefore,
-  stageModeFor,
-  tracksViewed,
-  tryParseTargetKey,
-  type StageMode,
-} from '@warden/shared';
+import { awaitsAgent, commentScopeKey, formatTargetKey, insertAfter, moveBefore, tryParseTargetKey } from '@warden/shared';
 import { api, ApiError } from './api';
 import { copyText } from './lib/clipboard';
 
@@ -57,10 +44,7 @@ export interface Toast {
 }
 
 export interface EditorTarget {
-  /**
-   * The view the lines were picked in. Switching between the local views keeps the draft, but its
-   * line numbers belong to this view's diff: in another one they point at other code.
-   */
+  /** The comparison the selected line numbers belong to. */
   view: TargetKey;
   filePath: string;
   side: CommentSide;
@@ -70,37 +54,6 @@ export interface EditorTarget {
 
 export type RailFilter = 'file' | 'all' | 'unexported' | 'replied';
 
-/**
- * Rows picked for staging in the open diff: a drag over one hunk, kept as the positions it
- * started and ended on plus the changed lines those rows show (see `Row.indices`). Positions
- * mean nothing once the diff or the layout changes, so the pick is dropped with them.
- */
-export interface StageSelection {
-  filePath: string;
-  hunkIndex: number;
-  anchor: number;
-  head: number;
-  /** Indices into `hunk.lines` of the changed lines picked. */
-  lines: number[];
-}
-
-/** Whether the view in front stages, unstages, or neither (a commit, a range, `all`). */
-export function useStageMode(): StageMode | undefined {
-  return useStore((s) => {
-    if (s.reviewReadOnly) return undefined;
-    const t = tryParseTargetKey(s.targetKey);
-    return t ? stageModeFor(t) : undefined;
-  });
-}
-
-/** Whether the target in front keeps the 已读 mark; the local views leave that to staging. */
-export function useTracksViewed(): boolean {
-  return useStore((s) => {
-    const t = tryParseTargetKey(s.targetKey);
-    return !!t && tracksViewed(t);
-  });
-}
-
 export interface JumpTarget {
   file: string;
   side: CommentSide;
@@ -109,7 +62,6 @@ export interface JumpTarget {
 }
 
 export interface AppStore {
-  reviewReadOnly: boolean;
   repo: RepoInfo | null;
   /** A newer warden on npm, once the server's check has come back with one. */
   update: UpdateNotice | null;
@@ -117,14 +69,7 @@ export interface AppStore {
   prefs: Prefs;
   targetKey: TargetKey;
   root: string;
-  /** Files of the current view. For a local target this mirrors one of the three lists below. */
   files: FileEntry[];
-  /** Unstaged (index -> working tree); shown as its own sidebar block for local targets. */
-  unstaged: FileEntry[];
-  /** Staged (HEAD -> index); the reviewer's "already reviewed" pile. */
-  staged: FileEntry[];
-  /** HEAD -> working tree; only fetched while `all` is the active view. */
-  allFiles: FileEntry[];
   /** Checkpoints of the worktree under review, oldest first. */
   checkpoints: Checkpoint[];
   filesLoading: boolean;
@@ -153,7 +98,6 @@ export interface AppStore {
   /** Comment highlighted in both the rail and the diff. */
   focusedCommentId: string | null;
   railFilter: RailFilter;
-  stageSel: StageSelection | null;
   /** Width the sidebar was dragged to, in px; kept here so it survives a panel switch. */
   sidebarWidth: number;
   /**
@@ -163,16 +107,12 @@ export interface AppStore {
   sideSlot: HTMLElement | null;
   /** Portal host for the legacy checkout management preview. */
   worktreeSlot: HTMLElement | null;
-  /** A stage request is in flight; the controls wait for it rather than queue a second one. */
-  staging: boolean;
 
   init(): Promise<void>;
   setTarget(key: TargetKey, options?: { reveal?: boolean }): Promise<void>;
   /** Re-reads /api/repo after a worktree was made or removed; the target is left alone. */
   reloadRepo(): Promise<void>;
   copyUpdateCommand(): Promise<void>;
-  /** Move between the local views without dropping comments, selection or the editor draft. */
-  switchView(key: TargetKey, nextActiveFile?: string | null): Promise<void>;
   loadFiles(): Promise<void>;
   refresh(): Promise<void>;
   onRepoChanged(event: ChangeEvent): void;
@@ -187,7 +127,6 @@ export interface AppStore {
   openFile(path: string, force?: boolean): Promise<void>;
   setActiveFile(path: string | null): void;
   setViewMode(mode: ViewMode): void;
-  /** `view` defaults to the current one; the two sidebar blocks pass their own. */
   toggleViewed(path: string): Promise<void>;
   /** Posts to `view` (the one the lines were picked in), or to the view in front. */
   createComment(body: CreateCommentRequest, view?: TargetKey): Promise<Comment | undefined>;
@@ -227,15 +166,6 @@ export interface AppStore {
   moveTodo(id: string, before: string | null): Promise<void>;
   /** Copy one todo to the clipboard — its title and body, nothing about where it lives. */
   copyTodo(id: string): Promise<void>;
-  setStageSel(sel: StageSelection | null): void;
-  /**
-   * Stage (Unstaged view) or unstage (Staged view) lines of a file; no hunks means the whole file.
-   * `view` defaults to the one in front — the sidebar blocks pass their own. Resolves to whether
-   * the index changed.
-   */
-  stageLines(path: string, hunks?: HunkSelection[], view?: TargetKey): Promise<boolean>;
-  /** Stage or unstage whatever `stageSel` holds. */
-  stageSelection(): Promise<void>;
   showToast(message: string, kind?: Toast['kind'], action?: ToastAction): void;
   /** Copy a short piece of text (a path, a location) and say what went, or why it did not. */
   copyToClipboard(text: string): Promise<void>;
@@ -269,15 +199,6 @@ export const useStore = create<AppStore>((set, get) => {
     set((s) => ({ comments: s.comments.map(handed), allComments: s.allComments.map(handed) }));
   };
 
-  /** The listing behind a view key, whether or not it is the one in front. */
-  const entriesOf = (view: TargetKey): FileEntry[] => {
-    const s = get();
-    if (view === s.targetKey) return s.files;
-    const t = tryParseTargetKey(view);
-    if (!t || !isLocalTarget(t)) return [];
-    return t.kind === 'working' ? s.unstaged : t.kind === 'staged' ? s.staged : s.allFiles;
-  };
-
   /** The refresh in progress, which a refresh asked for meanwhile waits on (see refresh). */
   let refreshRun: Promise<void> | null = null;
 
@@ -299,17 +220,13 @@ export const useStore = create<AppStore>((set, get) => {
   };
 
   return {
-    reviewReadOnly: false,
     repo: null,
     update: null,
     initError: null,
     prefs: { viewMode: 'unified', autoRefresh: true, railOpen: false, ignoreDebug: true },
-    targetKey: 'working',
+    targetKey: 'all',
     root: '',
     files: [],
-    unstaged: [],
-    staged: [],
-    allFiles: [],
     checkpoints: [],
     filesLoading: false,
     filesError: null,
@@ -333,8 +250,6 @@ export const useStore = create<AppStore>((set, get) => {
     focusedCommentId: null,
     railFilter: 'file',
     stateSeq: 0,
-    stageSel: null,
-    staging: false,
     sidebarWidth: 280,
     sideSlot: null,
     worktreeSlot: null,
@@ -357,7 +272,7 @@ export const useStore = create<AppStore>((set, get) => {
           root: repo.root,
           initError: null,
         });
-        await get().setTarget(repo.defaultTarget || 'working', { reveal: false });
+        await get().setTarget(repo.defaultTarget || 'all', { reveal: false });
       } catch (e) {
         set({ initError: errMsg(e) });
       }
@@ -389,9 +304,6 @@ export const useStore = create<AppStore>((set, get) => {
       set({
         targetKey: key,
         files: [],
-        unstaged: [],
-        staged: [],
-        allFiles: [],
         ...(sameWorktree ? {} : { checkpoints: [] }),
         diffs: {},
         activeFile: null,
@@ -401,7 +313,6 @@ export const useStore = create<AppStore>((set, get) => {
         reattaching: null,
         editor: null,
         focusedCommentId: null,
-        stageSel: null,
       });
       api.patchPrefs({ lastTarget: key }).catch(() => undefined);
       await get().loadFiles();
@@ -413,30 +324,8 @@ export const useStore = create<AppStore>((set, get) => {
       if (first && !get().activeFile && get().panel === 'diff') await get().openFile(first.path);
     },
 
-    async switchView(key, nextActiveFile) {
-      const target = tryParseTargetKey(key);
-      // The cached lists and comments are the local views of the worktree in front. Anything else —
-      // a commit or checkpoint, or a local view of another worktree (a todo's comment can be in
-      // either) — is a new target altogether and is loaded as one.
-      if (!target || !isLocalTarget(target) || commentScopeKey(key) !== commentScopeKey(get().targetKey)) {
-        await get().setTarget(key);
-        return;
-      }
-      const { unstaged, staged, allFiles } = get();
-      const activeFile = nextActiveFile !== undefined ? nextActiveFile : get().activeFile;
-      const cached = target.kind === 'working' ? unstaged : target.kind === 'staged' ? staged : allFiles;
-      // A file present in both views has different hunks in each, so cached diffs cannot carry over.
-      // Everything else — comments, the editor draft, the selection — deliberately survives.
-      set({ targetKey: key, files: cached, diffs: {}, filesError: null, activeFile, stageSel: null });
-      api.patchPrefs({ lastTarget: key }).catch(() => undefined);
-      // `all` is only listed while it is the view in front, so it has to be fetched on arrival.
-      if (target.kind === 'all') await get().loadFiles();
-      if (activeFile && get().files.some((f) => f.path === activeFile)) await loadDiff(activeFile);
-    },
-
     async loadFiles() {
       const key = get().targetKey;
-      const target = tryParseTargetKey(key);
       set({ filesLoading: true, filesError: null });
       // Another page may have taken or dropped one; they are listed wherever the files are.
       void get().loadCheckpoints();
@@ -445,37 +334,10 @@ export const useStore = create<AppStore>((set, get) => {
         await api.reanchor(key).catch(() => undefined);
         const keep = (files: FileEntry[]) => (get().activeFile && files.some((f) => f.path === get().activeFile) ? get().activeFile : null);
 
-        if (target && isLocalTarget(target)) {
-          const [workingKey, stagedKey] = localViewKeys(key);
-          const [working, indexed, all] = await Promise.all([
-            api.files(workingKey!),
-            api.files(stagedKey!),
-            target.kind === 'all' ? api.files(key) : Promise.resolve(null),
-          ]);
-          if (get().targetKey !== key) return;
-          const files = target.kind === 'working' ? working.files : target.kind === 'staged' ? indexed.files : all!.files;
-          // Comments are scope-wide, so any of the three listings carries the same set.
-          const listing = all ?? working;
-          set({
-            unstaged: working.files,
-            staged: indexed.files,
-            allFiles: all?.files ?? [],
-            files,
-            root: listing.root,
-            comments: listing.comments,
-            filesLoading: false,
-            activeFile: keep(files),
-          });
-          return;
-        }
-
         const res = await api.files(key);
         if (get().targetKey !== key) return;
         set({
           files: res.files,
-          unstaged: [],
-          staged: [],
-          allFiles: [],
           root: res.root,
           comments: res.comments,
           filesLoading: false,
@@ -488,9 +350,7 @@ export const useStore = create<AppStore>((set, get) => {
     },
 
     async refresh() {
-      // A change landing mid-refresh is coalesced into a single follow-up pass, and whoever asked
-      // waits for that pass: a stage that refreshes to hand on to the next file must see the index
-      // it just wrote, not the listing of a pass that started before it.
+      // Coalesce changes arriving mid-refresh into one follow-up pass for all callers.
       if (get().refreshing) {
         set({ refreshPending: true });
         return refreshRun ?? undefined;
@@ -498,8 +358,8 @@ export const useStore = create<AppStore>((set, get) => {
       refreshRun = (async () => {
         const { activeFile, diffs } = get();
         // The open file's diff stays on screen while it reloads. An agent writing other files moves
-        // the listing, not this diff, and swapping it for a placeholder rebuilt the view: the lines
-        // being picked for staging, the context opened up and the folds were all lost with it.
+        // the listing, not this diff. Replacing it with a placeholder would discard expanded
+        // context and folds even when the displayed content is unchanged.
         const shown = activeFile ? diffs[activeFile] : undefined;
         const before = shown?.status === 'ok' ? shown.diff.contentHash : undefined;
         set({
@@ -511,10 +371,8 @@ export const useStore = create<AppStore>((set, get) => {
         try {
           await get().loadFiles();
           const after = activeFile && get().files.some((f) => f.path === activeFile) ? await loadDiff(activeFile, true) : undefined;
-          // Only a diff that changed invalidates the pick (it indexes lines of the diff it was made
-          // on) and remounts the view, which is what consumes restoreScroll.
+          // Only a changed diff remounts the view and consumes restoreScroll.
           if (after?.contentHash === before && before !== undefined) set({ restoreScroll: false });
-          else set({ stageSel: null });
           set({ lastRefreshAt: new Date().toISOString() });
         } finally {
           set({ refreshing: false });
@@ -566,7 +424,7 @@ export const useStore = create<AppStore>((set, get) => {
           const next = get()
             .checkpoints.filter((c) => c.id !== id)
             .at(-1);
-          await get().setTarget(formatTargetKey(next ? { kind: 'checkpoint', id: next.id, ...wt } : { kind: 'working', ...wt }));
+          await get().setTarget(formatTargetKey(next ? { kind: 'checkpoint', id: next.id, ...wt } : { kind: 'all', ...wt }));
         } else await get().loadCheckpoints();
       } catch (e) {
         fail(e);
@@ -602,7 +460,7 @@ export const useStore = create<AppStore>((set, get) => {
 
     async openFile(path, force = false) {
       get().setPanel('diff');
-      set((s) => ({ activeFile: path, stageSel: s.stageSel?.filePath === path ? s.stageSel : null }));
+      set({ activeFile: path });
       const cur = get().diffs[path];
       if (!force && cur && cur.status !== 'error') return;
       await loadDiff(path);
@@ -614,14 +472,12 @@ export const useStore = create<AppStore>((set, get) => {
     },
 
     setViewMode(mode) {
-      // Row positions are per layout, so a pick made in the other one no longer names anything.
-      set((s) => ({ prefs: { ...s.prefs, viewMode: mode }, stageSel: null }));
+      set((s) => ({ prefs: { ...s.prefs, viewMode: mode } }));
       api.patchPrefs({ viewMode: mode }).catch(fail);
     },
 
     async toggleViewed(path) {
-      // Only a target with a single tree keeps the mark (`tracksViewed`), so the listing in front is
-      // the one the entry is in — unless the target was switched while the request was out.
+      // Apply the response only if the user is still reviewing the same comparison.
       const key = get().targetKey;
       const entry = get().files.find((f) => f.path === path);
       if (!entry) return;
@@ -785,10 +641,9 @@ export const useStore = create<AppStore>((set, get) => {
     },
 
     async jumpToComment(comment) {
-      // The comment may have moved to another local view since it was written; follow it there
-      // rather than reloading the whole target.
+      // Historical comments retain the comparison their line numbers refer to.
       if (comment.targetKey !== get().targetKey) {
-        await get().switchView(comment.targetKey);
+        await get().setTarget(comment.targetKey);
       }
       await get().openFile(comment.filePath);
       openRail();
@@ -953,52 +808,6 @@ export const useStore = create<AppStore>((set, get) => {
       } catch (e) {
         fail(e);
       }
-    },
-
-    setStageSel(sel) {
-      set({ stageSel: sel });
-    },
-
-    async stageLines(path, hunks, view) {
-      const key = view ?? get().targetKey;
-      const target = tryParseTargetKey(key);
-      if (!target || !stageModeFor(target)) return false;
-      if (get().staging) return false;
-      // The diff in front is the freshest hash for the open file; the listing serves the others.
-      const open = key === get().targetKey ? get().diffs[path] : undefined;
-      const contentHash = open?.status === 'ok' ? open.diff.contentHash : entriesOf(key).find((f) => f.path === path)?.contentHash;
-      if (!contentHash) return false;
-      set({ staging: true });
-      try {
-        await api.stage(key, { path, contentHash, hunks, skipDebug: get().prefs.ignoreDebug });
-      } catch (e) {
-        set({ staging: false });
-        if (e instanceof ApiError && e.code === 'debug_only') {
-          get().showToast('剩下的改动都是调试代码，没有暂存；确实要暂存的话，展开后逐行选中', 'info');
-          return false;
-        }
-        fail(e);
-        // The selection was made on a diff that is no longer what git sees: show what is.
-        if (e instanceof ApiError && (e.code === 'diff_changed' || e.code === 'apply_failed')) void get().refresh();
-        return false;
-      }
-      const before = get().files.map((f) => f.path);
-      const active = get().activeFile;
-      set({ staging: false, stageSel: null });
-      await get().refresh();
-      // A file that left the view (all of it moved) hands over to its neighbour, as `j` would.
-      if (active && active === path && key === get().targetKey && !get().files.some((f) => f.path === active)) {
-        const files = get().files;
-        const next = files[Math.min(Math.max(before.indexOf(active), 0), files.length - 1)];
-        if (next && get().panel === 'diff') void get().openFile(next.path);
-      }
-      return true;
-    },
-
-    async stageSelection() {
-      const sel = get().stageSel;
-      if (!sel || sel.lines.length === 0) return;
-      await get().stageLines(sel.filePath, [{ index: sel.hunkIndex, lines: sel.lines }]);
     },
 
     showToast(message, kind = 'info', action) {

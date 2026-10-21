@@ -148,6 +148,6 @@ export async function setupWorkbenchFixture() {
   });
   await useWorkflow.getState().refresh();
   await useWorkbenchData.getState().refresh();
-  useStore.setState((state) => ({ reviewReadOnly: true, prefs: { ...state.prefs, railOpen: false }, panel: 'diff' }));
+  useStore.setState((state) => ({ prefs: { ...state.prefs, railOpen: false }, panel: 'diff' }));
   return cleanup;
 }
