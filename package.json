@@ -1,6 +1,6 @@
 {
   "name": "@xbghc/warden",
-  "version": "0.16.4",
+  "version": "0.17.0",
   "description": "Local web workbench to plan tasks, review git diffs, manage workspaces and integrate changes.",
   "type": "module",
   "license": "MIT",
