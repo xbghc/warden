@@ -22,6 +22,8 @@ const file = (root: string, name: string) => readFile(path.join(root, name), 'ut
 // Complete delivery and replay scenarios repeatedly start Git in several repositories.
 // Keep their Windows startup allowance local so other failures are still detected quickly.
 const longGitTimeout = process.platform === 'win32' ? 90_000 : 30_000;
+// The combined delivery, history replay and rebase path exceeds 30 seconds on Intel macOS runners.
+const historyRebaseTimeout = process.platform === 'darwin' ? 60_000 : longGitTimeout;
 
 beforeEach(async () => {
   fx = await makeFixtureRepo('warden-workbench-');
@@ -288,7 +290,7 @@ describe('commit history arrangement', () => {
     await deliver(a, 'A2');
     return { a, b };
   }
-  it('previews and applies A1,A2,B1 with a new message while keeping files and agent checkouts unchanged', { timeout: longGitTimeout }, async () => {
+  it('previews and applies A1,A2,B1 with a new message while keeping files and agent checkouts unchanged', { timeout: historyRebaseTimeout }, async () => {
     const { a, b } = await three();
     const current = await history.get();
     const entries = current.commits.slice(-3);

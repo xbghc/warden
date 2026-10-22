@@ -185,7 +185,8 @@ describe('a clone slot', () => {
     expect(existsSync(slotDir(2))).toBe(false);
   });
 
-  it('deletes a released branch only when its upstream has all of it', async () => {
+  // Four checkout/release cycles exceed the normal Windows budget through repeated Git process startup.
+  it('deletes a released branch only when its upstream has all of it', { timeout: process.platform === 'win32' ? 90_000 : 30_000 }, async () => {
     // Started from a sha: no upstream to say whether it was ever pushed.
     const loose = await checkout({ branch: 'agent/loose', kind: 'clone', base: git(fx.root, 'rev-parse', 'origin/main') });
     const dir = loose.worktree.path;

@@ -83,8 +83,11 @@ Vitest separates fast unit tests (5 seconds) from real Git integration tests (30
 Integration setup and teardown hooks also have a 30-second budget; the conflict fixture drains
 pending setup before cleanup even when setup times out, so Git never races deletion of its cwd.
 Windows uses at most two file workers to avoid overwhelming process startup. Only the measured
-long, multi-delivery and history workflows have a 90-second Windows budget; checks are not retried
-to hide failures. Use `pnpm exec vitest run --project=unit` or `--project=integration` to narrow a run.
+long, multi-delivery, repeated clone release and history workflows have a 90-second Windows budget.
+The combined delivery, history replay and rebase test has a 60-second macOS budget after exceeding
+30 seconds on Intel CI runners; other macOS integration tests keep their 30-second budget. Checks
+are not retried to hide failures. Use `pnpm exec vitest run --project=unit` or `--project=integration`
+to narrow a run.
 API cases each prepare an independent repository, index and review state, so they can run by name
 or in a different order. Asynchronous tests await observable completion rather than fixed sleeps;
 server cleanup drains requests, watchers and preview refreshes before deleting fixtures.
