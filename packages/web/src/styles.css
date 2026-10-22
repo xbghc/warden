@@ -2740,6 +2740,8 @@ button.link.danger:has(> .action-icon):hover:not(:disabled) {
   overflow-y: auto;
 }
 .wb-plan-list li {
+  display: flex;
+  align-items: flex-start;
   border-radius: 6px;
   position: relative;
   margin-bottom: 4px;
@@ -2754,8 +2756,12 @@ button.link.danger:has(> .action-icon):hover:not(:disabled) {
   display: flex;
   text-align: left;
   gap: 10px;
-  width: 100%;
+  flex: 1;
   min-width: 0;
+}
+.wb-plan-connection {
+  flex-shrink: 0;
+  margin: 14px 8px 24px 0;
 }
 .wb-plan-number {
   padding-top: 1px;

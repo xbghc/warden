@@ -45,7 +45,7 @@ shared review controls. The wireframes below describe workflows, not required li
 
 | Concept | Interface vocabulary |
 |---|---|
-| Ordered work and one item | 工作计划 / 任务; 新增任务 / 添加任务 |
+| Ordered work and one item | 工作区 / 任务; 新增任务 / 添加任务 |
 | Review content | 变更 for changed content; 差异 for its code comparison |
 | Delivery history and current scope | 交付 / 未交付 / 待提交 |
 | Workspace hooks | 工作区脚本; show script configuration, output and exit status |
@@ -60,9 +60,9 @@ interaction checks must continue to find controls by their accessible names afte
 The selected primary development branch is the current context. The only global navigation area
 is on the left, with three kinds of content:
 
-- **主目录预览**: the connected workspaces and what their combination actually presents.
+- **主目录预览**: the current combination, last successful update, refresh action and conflict feedback.
 - **提交历史**: accepted commits, message edits and history-arrangement drafts.
-- **工作计划**: an ordered task list; each item directly opens its workspace, commands and diff.
+- **工作区**: an ordered task list with connection switches; each item directly opens its workspace, commands and diff.
 
 The list itself is the orchestration entry point, not another page to enter before reaching work.
 Workspace creation, command invocation, review and delivery actions stay within the same task detail.
@@ -78,7 +78,7 @@ There is no separate review mode, allocation dashboard or delivery center.
 │ 主目录预览         2 │                                                     │
 │ 提交历史             │                                                     │
 │                      │                                                     │
-│ 工作计划          ＋ │                                                     │
+│ 工作区            ＋ │                                                     │
 │ ⋮⋮ 1 订单接口        │                                                     │
 │      4 个变更文件    │                                                     │
 │ ⋮⋮ 2 表单校验        │                                                     │
@@ -150,9 +150,14 @@ creation failing. Retrying a hook is explicit; do not roll back arbitrary user-s
 
 ## Compose the primary-directory preview
 
-“主目录预览” is the one place to manage the connection set. Task detail can show connection facts
-without another selector. This is a deliberate tradeoff: a visit to the preview page provides one
-complete explanation of what the primary directory currently contains.
+The left **工作区** list is the one place to manage workspace connections. Each allocated task
+has a switch for connecting to the primary directory, available while viewing preview, history or
+task details. Unallocated plans have no connection switch. Selecting a task still opens its review;
+changing its connection does not change the selected task or plan order.
+
+“主目录预览” shows the current combination, primary path, last successful update, refresh action
+and errors or conflicting paths. It has no duplicate workspace table or preview-file list; file
+review belongs to the selected workspace.
 
 ```text
 主目录预览                                            /project
@@ -160,18 +165,6 @@ complete explanation of what the primary directory currently contains.
 
 主目录当前呈现：订单接口 + 表单校验
 最近成功更新：10:42:16
-────────────────────────────────────────────────────────────────
-连接       工作区          已呈现内容                检查结果
-[开]       订单接口        10:42:16 的变更            当前
-[开]       表单校验        10:42:16 的变更            当前
-[关]       联调调整        —                         —
-────────────────────────────────────────────────────────────────
-组合涉及 12 个文件
-
-文件                       来源
-src/api/orders.ts          订单接口
-src/components/order.tsx   表单校验
-src/types/order.ts         订单接口、表单校验
 ```
 
 Connection membership, review selection and rebase batch selection are separate concepts with
@@ -427,7 +420,7 @@ the page with dashboard cards. Do not use green task-completion badges.
 | Files and diff | `ResizablePanelGroup`, `ScrollArea`, `Separator` |
 | Actions | `Button`, `DropdownMenu` |
 | Creation, delivery and rebase panels | `Sheet` |
-| Preview sources, rebase selection and commits | `Table`, `Checkbox` |
+| Rebase selection and commits | `Table`, `Checkbox` |
 | Connections | `Switch` with workspace labels and pending/error feedback |
 | Observable facts | Restrained `Badge`, `Alert`, `Tooltip` |
 | Notes, inputs and operation output | `Collapsible`, `Textarea` |

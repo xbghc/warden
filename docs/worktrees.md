@@ -7,7 +7,7 @@ Workspace creation does not install dependencies or launch an agent.
 
 ## Development workflow
 
-The left navigation holds the ordered work plan. Add a task and its notes, reorder it, and select
+The left navigation’s *工作区* list holds the ordered work plan. Add a task and its notes, reorder it, and select
 *创建工作区* when needed. Planning does not create a Git branch or pin a baseline. A task can use
 a new numbered worktree, an available detached slot, or a validated existing numbered checkout.
 The default is an independent clone, keeping agent development objects outside the primary
@@ -42,10 +42,14 @@ command in it operates on the assigned workspace. Normal identity and configurat
 
 ## Connected previews
 
-In *主目录预览*, select one or more task workspaces. Warden snapshots their live committed and
+Use the connection switches in the left *工作区* list to select one or more task workspaces. Warden snapshots their live committed and
 uncommitted changes relative to each workspace's undelivered baseline. It composes them with
 three-way patch application in an independent temporary repository. Only a complete, successful
 composition is applied to primary working files. Its real index and HEAD are unchanged.
+
+*主目录预览* shows the current combination, primary path, update time and refresh/error feedback.
+Workspace selection stays in the sidebar, and file review stays in each workspace’s detail; the
+preview page does not repeat either list.
 
 The running server refreshes connections approximately every two seconds. Initial conflicts fail
 the connection attempt and preserve the previous set and files. A later conflict preserves the last

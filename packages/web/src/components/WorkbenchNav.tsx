@@ -4,15 +4,30 @@ import { api } from '../api';
 import { useStore } from '../store';
 import { useWorkflow, workflowAction } from '../workflow-store';
 import { useWorkbench } from '../workbench-store';
+import { useWorkbenchData } from '../workbench-data';
 import { Button } from './ui/button';
+import { Switch } from './ui/switch';
 
 export function WorkbenchNav({ connected = 0, behind = 0 }: { connected?: number; behind?: number }) {
   const { data, busy } = useWorkflow();
+  const { preview, errors } = useWorkbenchData();
   const repo = useStore((state) => state.repo);
   const { view, taskId, navigationOpen, openView, openTask, setSheet } = useWorkbench();
   const [dragging, setDragging] = useState<string | null>(null);
   const tasks = data?.workflow?.changes.filter((task) => task.status !== 'archived' && task.developmentBranch === data.workflow?.developmentBranch) ?? [];
   const move = (id: string, before: string | null) => void workflowAction(() => api.moveChange(id, before));
+  const connect = (id: string, connected: boolean) =>
+    void workflowAction(async () => {
+      const current = useWorkbenchData.getState().preview;
+      if (!current) return;
+      try {
+        useWorkbenchData.setState({
+          preview: await api.connectPreview(connected ? [...current.connectedIds, id] : current.connectedIds.filter((value) => value !== id)),
+        });
+      } finally {
+        await useWorkbenchData.getState().refresh();
+      }
+    });
   return (
     <>
       {navigationOpen && (
@@ -62,13 +77,13 @@ export function WorkbenchNav({ connected = 0, behind = 0 }: { connected?: number
         </div>
         <div className="wb-plan-heading">
           <ListOrdered size={14} />
-          <span>工作计划</span>
+          <span>工作区</span>
           <span className="spacer" />
           <Button variant="ghost" size="icon-sm" title="新增任务" aria-label="新增任务" onClick={() => setSheet('plan')}>
             <Plus size={17} />
           </Button>
         </div>
-        <ol className="wb-plan-list" aria-label="工作计划" title="拖动或使用箭头调整计划顺序">
+        <ol className="wb-plan-list" aria-label="工作区" title="拖动或使用箭头调整计划顺序">
           {tasks.map((task, index) => (
             <li
               key={task.id}
@@ -95,6 +110,16 @@ export function WorkbenchNav({ connected = 0, behind = 0 }: { connected?: number
                   <small>{task.integration?.prepared && task.status === 'integrating' ? '待提交' : task.worktree ? task.branch : '未创建工作区'}</small>
                 </span>
               </button>
+              {task.worktree && task.status !== 'accepted' && (
+                <Switch
+                  className="wb-plan-connection"
+                  aria-label={`连接 ${task.title}`}
+                  title={preview?.connectedIds.includes(task.id) ? '断开主目录预览' : '连接到主目录预览，不创建提交'}
+                  checked={preview?.connectedIds.includes(task.id) ?? false}
+                  disabled={busy || !preview || preview.status === 'paused' || !!errors.preview}
+                  onCheckedChange={(connected) => connect(task.id, connected)}
+                />
+              )}
               <div className="wb-plan-order" aria-label="调整计划顺序">
                 <Button
                   variant="ghost"

@@ -122,7 +122,7 @@ Report the flows exercised and any flow that could not be reached.
 
 Run `pnpm storybook` for isolated review and layout components at http://127.0.0.1:6006. Stories use in-memory fixtures and include interaction checks. Run `pnpm build:storybook` to build the static preview.
 
-The new application uses one left navigation: *主目录预览*, *提交历史*, the ordered work plan,
+The new application uses one left navigation: *主目录预览*, *提交历史*, the ordered *工作区* list with connection switches,
 and bottom *同步工作区* / *设置* actions. A selected task contains its workspace path, hook results,
 notes, files and diff. There is no second review-mode switch or task-completion declaration.
 
