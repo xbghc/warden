@@ -66,6 +66,9 @@ rotate. It relies on a trusted publisher configured on the package's npmjs.com s
 automatic attestation does not fire through `pnpm publish` (0.2.0 shipped without one). CI runs lint,
 typecheck, tests, build, Storybook build and a package dry run on every push to `main` and every pull
 request. Publishing waits for every CI job to succeed; only the publishing job receives OIDC permission.
+CI also runs the package smoke test with the pinned publishing npm version (12.2.1), in addition
+to the version bundled with Node. The smoke test accepts both older array output and npm 12's
+package-name map from `npm pack --json`, then checks and exercises the same unpacked tarball.
 
 The full test suite runs on Linux x64 with Node 20, 22 and 24, and Linux arm64, Windows x64 and
 macOS x64/arm64 with Node 22. All platforms run the real Git workflow, workspace hooks, backups and failure recovery;

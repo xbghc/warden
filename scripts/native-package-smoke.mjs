@@ -33,13 +33,18 @@ async function waitForExit(timeoutMs) {
 try {
   // Exercise the actual npm allowlist and unpacked layout. Ignoring lifecycle scripts avoids
   // recursion when this check is invoked by prepublishOnly; nothing is sent to the registry.
-  const packed = JSON.parse(
-    execFileSync(process.execPath, [npmCli, 'pack', '--json', '--ignore-scripts', '--pack-destination', temporary], {
-      cwd: root,
-      encoding: 'utf8',
-      maxBuffer: 4 * 1024 * 1024,
-    }),
-  )[0];
+  // npm 12 keys its pack results by package name; earlier versions return an array.
+  const packs = Object.values(
+    JSON.parse(
+      execFileSync(process.execPath, [npmCli, 'pack', '--json', '--ignore-scripts', '--pack-destination', temporary], {
+        cwd: root,
+        encoding: 'utf8',
+        maxBuffer: 4 * 1024 * 1024,
+      }),
+    ),
+  );
+  assert.equal(packs.length, 1, 'The smoke test must pack exactly one package.');
+  const [packed] = packs;
   const paths = new Set(packed.files.map((file) => file.path));
   assert(paths.has('dist/cli.js'), 'The npm tarball must contain the CLI.');
   assert(paths.has('dist/web/index.html'), 'The npm tarball must contain the web assets.');

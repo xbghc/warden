@@ -48,7 +48,8 @@ jobs:
       # Node 22 bundles npm 10.x, but trusted publishing needs npm >= 11.5.1, and
       # `pnpm publish` shells out to the npm CLI — so this is what OIDC keys off.
       # An older npm silently falls back to token auth and then fails to authenticate.
-      - run: npm install -g npm@latest && npm --version
+      # The same version also exercises package smoke in ci.yml before a tag is published.
+      - run: npm install -g npm@12.2.1 && npm --version
       - run: pnpm install --frozen-lockfile
       - name: Download native modules tested by this tag's CI
         uses: actions/download-artifact@v8

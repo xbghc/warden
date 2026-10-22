@@ -40,6 +40,9 @@ jobs:
       - run: pnpm build:storybook
       - name: Check package contents
         run: pnpm check:package
+      # Keep this version aligned with publish.yml so npm output changes fail CI first.
+      - name: Check package with the publishing npm version
+        run: pnpm --package=npm@12.2.1 dlx npm run check:package
 
   test:
     name: Test (${{ matrix.os }}, Node ${{ matrix.node }})
