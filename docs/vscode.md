@@ -1,5 +1,7 @@
 # VS Code
 
+The Marketplace display name is **Warden Workspace Review**; the extension ID is `xbghc.warden`.
+
 Warden now has a desktop / remote workspace extension. ACP integration is deferred. The browser
 and CLI remain available and share the same repository state and mutation lock with the extension.
 No server port or browser is needed by the extension.
