@@ -48,9 +48,9 @@ changes accumulate. It need not be the repository's default branch.
 3. **Connect for preview.** Connect selected workspaces. Their committed and uncommitted
    increments are composed with saved primary edits in a separate preview directory for your dev server and tests.
    A conflicting connection fails and preserves the previous preview. HEAD and index stay unchanged.
-4. **Review and commit.** Click a task and its files to review directly. Prepare the complete
-   undelivered committed change, enter a message and commit in the page with normal Git hooks.
-   Preparation isolates other connected changes. The workspace remains available afterwards.
+4. **Review and commit.** Review the complete small delivery, enter a message and commit with normal Git hooks.
+   The action uses the reviewed source version; changes require fresh review. Other connections
+   remain in the independent preview. The workspace remains available afterwards.
 5. **Synchronize or arrange history when needed.** Checks do not change agent files. Rebase one,
    selected or all eligible workspaces explicitly. In *提交历史*, edit messages and reorder a
    selected linear range, preview it, then apply. There is no undo or automatic push.
@@ -84,7 +84,7 @@ The copy button beside the path in the file header copies the path, relative to 
 | [VS Code](docs/vscode.md) | Extension installation, native review, preview runtime, scripts and delivery |
 | [Workflow](docs/workflow.md) | User-controlled development loop, current-version scope and implementation alignment |
 | [Interaction design](docs/design.md) | Agreed behavior, connection previews, commit arrangement and open product decisions |
-| [Reviewing](docs/reviewing.md) | Read-only review, targets, debug code, checkpoints, auto-refresh |
+| [Reviewing](docs/reviewing.md) | Read-only review, pinned delivery versions, targets, auto-refresh |
 | [Working with agents](docs/agent.md) | Workspace boundaries, task briefs and external tools |
 | [Worktrees and tasks](docs/worktrees.md) | Commit plans, workspace hooks, squash acceptance and synchronization |
 | [Platform](docs/environment.md) | WSL2 and browser access |

@@ -5,8 +5,6 @@ import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type {
   ChangeEvent,
-  CheckpointsResponse,
-  CreateCheckpointResponse,
   CommitsResponse,
   CreateTodoRequest,
   CreateWorktreeRequest,
@@ -34,8 +32,7 @@ import { badRequest, HttpError, notFound } from './errors.js';
 import { COMMIT_FORMAT, parseCommitLog } from './commits.js';
 import { mergeBase, refExists, revParse, runGit } from './git.js';
 import { currentBranch, getRepoInfo, listWorktrees, remoteDefault, slotPath, type RepoContext } from './repo.js';
-import { annotateDebug, getFileDiff, getFullFile, listTargetDiffs, literal, resolveTargetContext, toSummary, type TargetContext } from './targets.js';
-import { checkpointKey, checkpointStore, checkpointsOf, findCheckpoint, forgetCheckpoint, takeCheckpoint } from './checkpoints.js';
+import { getFileDiff, getFullFile, listTargetDiffs, literal, resolveTargetContext, toSummary, type TargetContext } from './targets.js';
 import { checkoutWorktree, listBranches, listWorktreesDetailed, lookupRemoteBranches, nextSlot, releaseWorktree, removeWorktree } from './worktrees.js';
 import { forgetWorktreeTargets, type StateStore } from './state.js';
 import { formatTodoExport } from './export.js';
@@ -132,8 +129,6 @@ export function createApp(opts: AppOptions): WardenApp {
     return list;
   };
 
-  const checkpoints = checkpointStore(store.file);
-
   const stateStamp = (): Promise<number> => {
     const reading = stat(store.file)
       .then(
@@ -145,8 +140,8 @@ export function createApp(opts: AppOptions): WardenApp {
     return reading;
   };
 
-  /** The target and the directory it is read in; a checkpoint is not looked up (see `targetCtx`). */
-  const worktreeCtx = async (key: string): Promise<TargetContext> => {
+  /** The target and the directory it is read in; validated against the repository checkout listing. */
+  const targetCtx = async (key: string): Promise<TargetContext> => {
     let list = await worktrees();
     try {
       return resolveTargetContext(repo, list, key);
@@ -157,14 +152,6 @@ export function createApp(opts: AppOptions): WardenApp {
       }
       throw e;
     }
-  };
-
-  const targetCtx = async (key: string): Promise<TargetContext> => {
-    const ctx = await worktreeCtx(key);
-    if (ctx.target.kind !== 'checkpoint') return ctx;
-    const cp = findCheckpoint(await store.load(), ctx.target.worktree, ctx.target.id);
-    if (!cp) throw notFound(`no checkpoint #${ctx.target.id} in this worktree`, 'unknown_checkpoint');
-    return { ...ctx, checkpoint: { tree: cp.tree, store: checkpoints } };
   };
 
   const fileDiffWithHints = async (ctx: TargetContext, filePath: string, explicit?: { oldPath?: string; untracked?: boolean }) => {
@@ -232,8 +219,7 @@ export function createApp(opts: AppOptions): WardenApp {
       (!target.worktree || info.worktrees.some((w) => w.path === target.worktree)) &&
       // A server started in a linked worktree is there to review that one, not whatever the main
       // worktree's page last looked at: the preference is shared by every server on the repository.
-      (repo.root === repo.commonRoot || target.worktree === repo.root) &&
-      (target.kind !== 'checkpoint' || !!findCheckpoint(state, target.worktree, target.id));
+      (repo.root === repo.commonRoot || target.worktree === repo.root);
     if (last && usable) info.defaultTarget = isLocalTarget(target) ? formatTargetKey({ kind: 'all', worktree: target.worktree }) : last;
     else if (last) {
       if (repo.root === repo.commonRoot) {
@@ -258,7 +244,6 @@ export function createApp(opts: AppOptions): WardenApp {
       if (typeof body.lastTarget === 'string') s.prefs.lastTarget = body.lastTarget;
       if (body.lastPanel === 'orchestration' || body.lastPanel === 'diff' || body.lastPanel === 'commits') s.prefs.lastPanel = body.lastPanel;
       if (typeof body.autoRefresh === 'boolean') s.prefs.autoRefresh = body.autoRefresh;
-      if (typeof body.ignoreDebug === 'boolean') s.prefs.ignoreDebug = body.ignoreDebug;
       return s.prefs;
     });
     return c.json(prefs);
@@ -270,7 +255,6 @@ export function createApp(opts: AppOptions): WardenApp {
     const key = c.req.param('key');
     const ctx = await targetCtx(key);
     const diffs = await listTargetDiffs(ctx);
-    await annotateDebug(ctx, diffs);
     listings.set(key, { at: Date.now(), files: diffs });
     const files: FileEntry[] = diffs.map(toSummary);
     const res: FilesResponse = { targetKey: key, root: ctx.cwd, files };
@@ -286,7 +270,6 @@ export function createApp(opts: AppOptions): WardenApp {
     const untracked = c.req.query('untracked') === '1' ? true : undefined;
     const diff = await fileDiffWithHints(ctx, filePath, { oldPath, untracked });
     if (!diff) throw notFound(`no diff for ${filePath} in ${key}`, 'no_diff');
-    await annotateDebug(ctx, [diff]);
     return c.json(diff);
   });
 
@@ -299,33 +282,6 @@ export function createApp(opts: AppOptions): WardenApp {
     const content = await getFullFile(ctx, filePath, side);
     const res: FullFileResponse = { path: filePath, side, content };
     return c.json(res);
-  });
-
-  // ---- checkpoints -------------------------------------------------------
-
-  // Any target key names the worktree whose checkpoints are meant, a checkpoint's own included.
-  api.get('/targets/:key/checkpoints', async (c) => {
-    const ctx = await worktreeCtx(c.req.param('key'));
-    const res: CheckpointsResponse = { checkpoints: checkpointsOf(await store.load(), ctx.target.worktree) };
-    return c.json(res);
-  });
-
-  api.post('/targets/:key/checkpoints', async (c) => {
-    const ctx = await worktreeCtx(c.req.param('key'));
-    const { checkpoint, unchanged } = await takeCheckpoint(store, ctx.cwd, ctx.target.worktree);
-    const res: CreateCheckpointResponse = { checkpoint, unchanged, targetKey: checkpointKey(checkpoint) };
-    return c.json(res, unchanged ? 200 : 201);
-  });
-
-  api.delete('/targets/:key/checkpoints/:id', async (c) => {
-    const ctx = await worktreeCtx(c.req.param('key'));
-    const id = Number(c.req.param('id'));
-    await store.update((s) => {
-      const cp = Number.isInteger(id) ? findCheckpoint(s, ctx.target.worktree, id) : undefined;
-      if (!cp) throw notFound(`no checkpoint #${c.req.param('id')} in this worktree`, 'unknown_checkpoint');
-      forgetCheckpoint(s, cp);
-    });
-    return c.json({ ok: true });
   });
 
   // ---- todos ---------------------------------------------------------------
@@ -560,6 +516,8 @@ export function createApp(opts: AppOptions): WardenApp {
     worktreeCache = null;
     return c.json(result);
   });
+  api.post('/workflow/changes/:id/deliver', async (c) => c.json(await workflow.deliver(c.req.param('id'), await c.req.json())));
+
   api.post('/workflow/changes/:id/accept', async (c) => {
     const result = await workflow.accept(c.req.param('id'), await c.req.json());
     worktreeCache = null;

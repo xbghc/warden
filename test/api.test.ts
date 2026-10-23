@@ -373,7 +373,7 @@ describe('read-only review and preferences', () => {
     expect(await json<FilesResponse>(await get('/api/targets/all/files'))).not.toHaveProperty('comments');
   });
 
-  it('copies task notes without modifying state or taking a checkpoint', async () => {
+  it('copies task notes without modifying state', async () => {
     const created = await json<Todo>(await send('POST', '/api/todos', { title: 'Totals', body: 'desc' }));
     const before = await json<ReviewState>(await get('/api/state'));
     const response = await send('POST', `/api/todos/${created.id}/export`);
@@ -421,39 +421,21 @@ describe('removed staging API', () => {
   });
 });
 
-describe('debug code', () => {
-  const fileDiff = async (key: string, p: string) => json<FileDiff>(await get(`/api/targets/${k(key)}/file?path=${k(p)}`));
-  const entry = async (key: string, p: string) => (await json<FilesResponse>(await get(`/api/targets/${k(key)}/files`))).files.find((f) => f.path === p);
-  // Put together at run time so that this file does not read as debug code itself.
-  const mark = (m: string) => `// ${m}`;
-  const file = 'dbg/app.ts';
-  const loose = 'dbg/scratch.ts';
-  const base = Array.from({ length: 40 }, (_, i) => `line ${i + 1}`);
-  base[4] = mark('debug:start');
-  base[29] = mark('debug:end');
-
-  beforeEach(async () => {
-    // The block's markers are far from both edits: no hunk shows them.
-    await fx.write(file, base.join('\n') + '\n');
-    fx.git('add', file);
-    const edited = [...base];
-    edited[14] = 'line 15 in the block';
-    edited[39] = 'line 40 outside';
-    await fx.write(file, edited.join('\n') + '\n');
-    await fx.write(loose, `keep()\nprobe() ${mark('nocommit')}\n`);
+describe('ordinary review content', () => {
+  it('includes debug markers and mock code without annotations or filtering', async () => {
+    await fx.write('mock.ts', '// debug:start\nmock() // nocommit\n// debug:end\n');
+    const diff = await json<FileDiff>(await get('/api/targets/all/file?path=mock.ts'));
+    expect(diff.hunks.flatMap((h) => h.lines.map((l) => l.content))).toEqual(['// debug:start', 'mock() // nocommit', '// debug:end']);
+    expect(JSON.stringify(diff)).not.toContain('"debug":');
+    expect(diff).not.toHaveProperty('debugAdditions');
   });
 
-  it('flags lines inside a block whose markers lie outside the hunk, on both sides', async () => {
-    const diff = await fileDiff('working', file);
-    const changed = diff.hunks.flatMap((h) => h.lines.filter((l) => l.type !== 'context'));
-    expect(changed.map((l) => [l.type, l.content, !!l.debug])).toEqual([
-      ['del', 'line 15', true],
-      ['add', 'line 15 in the block', true],
-      ['del', 'line 40', false],
-      ['add', 'line 40 outside', false],
-    ]);
-    expect(await entry('working', file)).toMatchObject({ additions: 2, debugAdditions: 1, debugDeletions: 1 });
-    expect(await entry('working', loose)).toMatchObject({ untracked: true, additions: 2, debugAdditions: 1 });
+  it('rejects retired checkpoint endpoints and comparison keys', async () => {
+    for (const method of ['GET', 'POST', 'DELETE']) {
+      const suffix = method === 'DELETE' ? '/1' : '';
+      expect((await send(method, `/api/targets/all/checkpoints${suffix}`)).status).toBe(404);
+    }
+    expect((await get('/api/targets/checkpoint%3A1/files')).status).toBe(400);
   });
 });
 

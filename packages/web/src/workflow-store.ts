@@ -1,6 +1,5 @@
 import { create } from 'zustand';
-import type { DevelopmentChange, WorkflowTask, WorkflowResponse, WorktreesResponse } from '@warden/shared';
-import { formatTargetKey } from '@warden/shared';
+import type { DevelopmentChange, WorkflowResponse, WorktreesResponse } from '@warden/shared';
 import { api } from './api';
 import { useStore } from './store';
 import { copyText } from './lib/clipboard';
@@ -54,7 +53,7 @@ export async function copyTaskBrief(change: DevelopmentChange) {
         `临时分支：${change.branch}`,
         `主开发分支：${change.developmentBranch}`,
         '只在任务工作区开发。可以提交多个本地 commit，由用户审查后分批合入主开发分支。',
-        '用户在主目录自行运行测试。',
+        '用户在预览目录自行运行测试。',
       ]
         .filter(Boolean)
         .join('\n\n'),
@@ -80,28 +79,4 @@ export async function workflowAction<T>(action: () => Promise<T>): Promise<T | u
   } finally {
     useWorkflow.setState({ busy: false });
   }
-}
-
-export function changeTarget(change: WorkflowTask) {
-  if (!change.worktree) return undefined;
-  if (change.status === 'accepted' && change.integration?.commit) return formatTargetKey({ kind: 'commit', sha: change.integration.commit });
-  const checkout = useWorkflow.getState().checkouts?.worktrees.find((row) => row.path === change.worktree);
-  const head = checkout?.dirty === 0 ? checkout.head : undefined;
-  const base = change.sourceBase ?? change.base;
-  if (head) return formatTargetKey({ kind: 'range', base, head, worktree: change.worktree });
-  return formatTargetKey({ kind: 'base', ref: base, worktree: change.worktree });
-}
-
-export function preparationTarget(change: DevelopmentChange) {
-  const pending = useWorkflow.getState().data?.preparation;
-  if (pending?.changeId === change.id && pending.state === 'committed' && pending.head) return formatTargetKey({ kind: 'commit', sha: pending.head });
-  const path = pending?.worktree ?? change.integration?.worktree;
-  return formatTargetKey({ kind: 'staged', worktree: path === useStore.getState().repo?.root ? undefined : path });
-}
-
-export async function reviewChange(change: WorkflowTask) {
-  // setTarget opens the diff immediately. A late load must not reopen it after
-  // the user has already chosen another task or returned to orchestration.
-  const target = change.status === 'integrating' ? preparationTarget(change) : changeTarget(change);
-  if (target) await useStore.getState().setTarget(target);
 }

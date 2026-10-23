@@ -2,10 +2,8 @@ import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 import type { FileDiff, FileSummary, Target, TargetKey, WorktreeInfo, DiffSide } from '@warden/shared';
 import { parseTargetKey, TargetKeyError } from '@warden/shared';
-import { DIFF_OUTPUT_ARGS, EMPTY_TREE_SHA, mergeBase, refExists, revParse, runGit, type SnapshotEnv } from './git.js';
-import { checkpointObjects, withCheckpointIndex } from './checkpoints.js';
+import { DIFF_OUTPUT_ARGS, EMPTY_TREE_SHA, mergeBase, refExists, revParse, runGit } from './git.js';
 import { parseUnifiedDiff } from './diffparse.js';
-import { DEBUG_MARKER_STRINGS, debugLineNumbers, markDebugLines } from './debug.js';
 import { badRequest, HttpError } from './errors.js';
 import type { RepoContext } from './repo.js';
 
@@ -14,27 +12,10 @@ export interface TargetContext {
   target: Target;
   /** Working directory to run git in (worktree root or repo root). */
   cwd: string;
-  /** Filled in for a checkpoint target by whoever looked it up in the state (see app.ts). */
-  checkpoint?: { tree: string; store: string };
 }
 
-function checkpointOf(ctx: TargetContext): { tree: string; store: string } {
-  if (!ctx.checkpoint) throw new Error(`checkpoint of ${ctx.key} was not looked up`);
-  return ctx.checkpoint;
-}
-
-/** Git options that let a command read the checkpoint's objects; nothing for any other target. */
-async function objectsFor(ctx: TargetContext): Promise<{ snapshot?: SnapshotEnv }> {
-  return ctx.target.kind === 'checkpoint' ? { snapshot: await checkpointObjects(ctx.cwd, checkpointOf(ctx).store) } : {};
-}
-
-/**
- * Runs a diff of the target. A checkpoint's is `git diff <tree>` under an index that lists the
- * untracked files as well; everything else runs as it is.
- */
-async function runDiff(ctx: TargetContext, args: string[]): Promise<string> {
-  if (ctx.target.kind !== 'checkpoint') return (await runGit(args, { cwd: ctx.cwd })).stdout;
-  return withCheckpointIndex(ctx.cwd, checkpointOf(ctx).store, async (snapshot) => (await runGit(args, { cwd: ctx.cwd, snapshot })).stdout);
+async function runTargetDiff(ctx: TargetContext, args: string[]): Promise<string> {
+  return (await runGit(args, { cwd: ctx.cwd })).stdout;
 }
 
 const DIFF_BASE_ARGS = ['diff', ...DIFF_OUTPUT_ARGS, '-M', '--find-renames'];
@@ -122,8 +103,6 @@ async function diffArgs(ctx: TargetContext): Promise<string[]> {
     }
     case 'base':
       return [...DIFF_BASE_ARGS, await baseSha(ctx, t.ref)];
-    case 'checkpoint':
-      return [...DIFF_BASE_ARGS, checkpointOf(ctx).tree];
   }
 }
 
@@ -150,7 +129,7 @@ async function listUnmerged(cwd: string, file?: string): Promise<string[]> {
  */
 async function conflictDiff(ctx: TargetContext, file: string): Promise<FileDiff | undefined> {
   const base = (await hasHead(ctx.cwd)) ? 'HEAD' : EMPTY_TREE_SHA;
-  const f = parseUnifiedDiff(await runDiff(ctx, [...DIFF_BASE_ARGS, base, '--', literal(file)])).find((d) => d.path === file);
+  const f = parseUnifiedDiff(await runTargetDiff(ctx, [...DIFF_BASE_ARGS, base, '--', literal(file)])).find((d) => d.path === file);
   return f ? { ...f, conflicted: true } : undefined;
 }
 
@@ -192,7 +171,7 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
 export async function listTargetDiffs(ctx: TargetContext): Promise<FileDiff[]> {
   const args = await diffArgs(ctx);
   // `--` so that a file named like a revision (`HEAD`, a branch) is not read as one.
-  const files = parseUnifiedDiff(await runDiff(ctx, [...args, '--']));
+  const files = parseUnifiedDiff(await runTargetDiff(ctx, [...args, '--']));
   if (ctx.target.kind === 'working') {
     for (const path of await listUnmerged(ctx.cwd)) {
       const d = await conflictDiff(ctx, path);
@@ -232,7 +211,7 @@ export async function getFileDiff(ctx: TargetContext, filePath: string, hints: F
   const args = await diffArgs(ctx);
   const pathspec = [literal(filePath)];
   if (hints.oldPath && hints.oldPath !== filePath) pathspec.push(literal(hints.oldPath));
-  const files = parseUnifiedDiff(await runDiff(ctx, [...args, '--', ...pathspec]));
+  const files = parseUnifiedDiff(await runTargetDiff(ctx, [...args, '--', ...pathspec]));
   return files.find((f) => f.path === filePath) ?? files[0];
 }
 
@@ -255,8 +234,6 @@ async function refForSide(ctx: TargetContext, side: DiffSide): Promise<string | 
       return (await mergeBase(ctx.cwd, t.base, t.head)) ?? t.base;
     case 'base':
       return side === 'new' ? undefined : baseSha(ctx, t.ref);
-    case 'checkpoint':
-      return side === 'new' ? undefined : checkpointOf(ctx).tree;
   }
 }
 
@@ -273,70 +250,10 @@ export async function getFullFile(ctx: TargetContext, filePath: string, side: Di
     }
   }
   try {
-    const r = await runGit(['show', `${ref}:${filePath}`], { cwd: ctx.cwd, ...(await objectsFor(ctx)) });
+    const r = await runGit(['show', `${ref}:${filePath}`], { cwd: ctx.cwd });
     return r.stdout;
   } catch (e) {
     if (e instanceof HttpError && e.code === 'git_failed') return null;
     throw e;
   }
-}
-
-/** Paths are handed to `git grep` this many at a time, well inside any command-line limit. */
-const GREP_CHUNK = 500;
-
-/** Which of `paths` hold a debug marker on `side` of the target: the only ones worth reading whole. */
-async function pathsWithMarkers(ctx: TargetContext, side: DiffSide, paths: string[]): Promise<Set<string>> {
-  const found = new Set<string>();
-  if (paths.length === 0) return found;
-  const ref = await refForSide(ctx, side);
-  // color.ui=always would wrap each name in escapes, submodule.recurse would make --untracked fatal:
-  // either way no file would be found to hold a marker, and debug lines would be staged as code.
-  const args = ['grep', '--no-color', '--no-recurse-submodules', '-l', '-z', '-I', '-i', '-F', ...DEBUG_MARKER_STRINGS.flatMap((m) => ['-e', m])];
-  // The working tree includes the untracked files the listing shows; a tree prints `<ref>:<path>`.
-  if (ref === undefined) args.push('--untracked');
-  else if (ref === ':0') args.push('--cached');
-  else args.push(ref);
-  const prefix = ref === undefined || ref === ':0' ? '' : `${ref}:`;
-  const objects = await objectsFor(ctx);
-  for (let i = 0; i < paths.length; i += GREP_CHUNK) {
-    const chunk = paths.slice(i, i + GREP_CHUNK).map(literal);
-    // Exit 1 is "no match".
-    const r = await runGit([...args, '--', ...chunk], { cwd: ctx.cwd, okCodes: [0, 1], ...objects });
-    for (const p of r.stdout.split('\0')) if (p) found.add(p.startsWith(prefix) ? p.slice(prefix.length) : p);
-  }
-  return found;
-}
-
-/**
- * Flags the debug lines of `files` in place (`DiffLine.debug`, `debugAdditions` / `debugDeletions`).
- * A hunk seldom shows the marker that opened the block its lines sit in, so the sides of a file are
- * read whole — only for the files `git grep` finds a marker in, which is usually none of them.
- */
-export async function annotateDebug(ctx: TargetContext, files: FileDiff[]): Promise<void> {
-  const text = files.filter((f) => !f.binary && f.hunks.length > 0);
-  const oldPathOf = (f: FileDiff) => f.oldPath ?? f.path;
-  // A side git cannot search marks nothing rather than failing the listing: there is no such side
-  // to hold debug code when HEAD is unborn, which is where that happens.
-  const none = () => new Set<string>();
-  const [onNew, onOld] = await Promise.all([
-    pathsWithMarkers(
-      ctx,
-      'new',
-      text.filter((f) => f.status !== 'deleted').map((f) => f.path),
-    ).catch(none),
-    pathsWithMarkers(ctx, 'old', text.filter((f) => f.status !== 'added').map(oldPathOf)).catch(none),
-  ]);
-  const read = async (p: string, side: DiffSide, marked: Set<string>) => {
-    if (!marked.has(p)) return undefined;
-    const content = await getFullFile(ctx, p, side).catch(() => null);
-    return content === null ? undefined : debugLineNumbers(content);
-  };
-  await mapLimit(
-    text.filter((f) => onNew.has(f.path) || onOld.has(oldPathOf(f))),
-    8,
-    async (f) => {
-      const [n, o] = await Promise.all([read(f.path, 'new', onNew), read(oldPathOf(f), 'old', onOld)]);
-      markDebugLines(f, n, o);
-    },
-  );
 }

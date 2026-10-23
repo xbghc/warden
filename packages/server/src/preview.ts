@@ -1,5 +1,5 @@
 import type { DevelopmentChange, PreviewResponse, ReviewState } from '@warden/shared';
-import { checkpointObjects, checkpointStore, snapshotWorktree } from './checkpoints.js';
+import { snapshotObjects, snapshotStore, snapshotWorktree } from './snapshots.js';
 import { badRequest, HttpError } from './errors.js';
 import { runGit } from './git.js';
 import { applyPatch, GitSandbox, gitMessage, oid, patchBetween, deliveryBase } from './git-sandbox.js';
@@ -93,7 +93,7 @@ export class PreviewService {
       try {
         const inputs = await this.inputs(state, state.connectionPreview.connectedIds);
         const saved = state.connectionPreview;
-        if ((await snapshotWorktree(GitSandbox.open(this.store, saved.directory!).path, checkpointStore(this.store.file))) !== saved.tree)
+        if ((await snapshotWorktree(GitSandbox.open(this.store, saved.directory!).path, snapshotStore(this.store.file))) !== saved.tree)
           conflict('预览目录有额外改动，已停止同步；请在主目录编辑代码', 'preview_dirty');
         const unchanged =
           saved.baselineTree === inputs.baseline &&
@@ -152,7 +152,7 @@ export class PreviewService {
     await this.store.update((s) => {
       s.connectionPreview!.setup = { command, ...result };
     });
-    if ((await snapshotWorktree(directory, checkpointStore(this.store.file))) !== saved.tree)
+    if ((await snapshotWorktree(directory, snapshotStore(this.store.file))) !== saved.tree)
       await this.failed(new HttpError(409, 'setup 修改了预览代码；请让脚本仅管理被忽略的环境文件，并恢复预览代码后重试', 'preview_dirty'));
   }
 
@@ -166,7 +166,7 @@ export class PreviewService {
     if (saved.pending) {
       const pending = saved.pending;
       const oldSandbox = saved.sandbox;
-      const actual = await snapshotWorktree(primary.path, checkpointStore(this.store.file));
+      const actual = await snapshotWorktree(primary.path, snapshotStore(this.store.file));
       if (actual === pending.tree) {
         Object.assign(saved, pending.response, { tree: pending.tree, sandbox: pending.sandbox, snapshot: pending.snapshot });
       } else if (actual !== saved.tree) conflict('旧预览更新被中断；请先处理主目录改动后再迁移', 'preview_interrupted');
@@ -180,7 +180,7 @@ export class PreviewService {
     if (saved.tree && saved.developmentHead) {
       const baseline = await oid(primary.path, `${saved.developmentHead}^{tree}`);
       if (saved.tree !== baseline) {
-        const actual = await snapshotWorktree(primary.path, checkpointStore(this.store.file));
+        const actual = await snapshotWorktree(primary.path, snapshotStore(this.store.file));
         if (
           !saved.sandbox ||
           (await oid(primary.path, 'HEAD')) !== saved.developmentHead ||
@@ -206,7 +206,7 @@ export class PreviewService {
     const saved = state.connectionPreview;
     if (!saved?.pending || !saved.directory) return;
     const target = GitSandbox.open(this.store, saved.directory);
-    const actual = await snapshotWorktree(target.path, checkpointStore(this.store.file));
+    const actual = await snapshotWorktree(target.path, snapshotStore(this.store.file));
     const pending = saved.pending;
     if (actual === pending.tree) {
       await target.fetch(GitSandbox.open(this.store, pending.sandbox).path, pending.snapshot);
@@ -226,7 +226,7 @@ export class PreviewService {
     const workflow = state.workflow!;
     const primary = await primaryCheckout(this.repo, workflow.developmentBranch);
     const head = await oid(primary.path, 'HEAD');
-    const baseline = await snapshotWorktree(primary.path, checkpointStore(this.store.file));
+    const baseline = await snapshotWorktree(primary.path, snapshotStore(this.store.file));
     const checkouts = ids.length ? await listWorktreesDetailed(this.repo) : [];
     const sources = [];
     for (const id of ids) {
@@ -235,7 +235,7 @@ export class PreviewService {
       const checkout = checkouts.find((w) => w.path === change.worktree && w.branch === change.branch && !w.prunable && !w.foreign && !w.busy);
       if (!checkout || checkout.path === primary.path) conflict('工作区不可用或有未完成的 Git 操作', 'preview_source_busy');
       const from = await deliveryBase(change, await oid(checkout.path, 'HEAD'), head);
-      const tree = await snapshotWorktree(checkout.path, checkpointStore(this.store.file));
+      const tree = await snapshotWorktree(checkout.path, snapshotStore(this.store.file));
       sources.push({ change, from, tree });
     }
     return { primary, head, baseline, sources };
@@ -271,7 +271,7 @@ export class PreviewService {
     try {
       await applyPatch(
         sandbox.path,
-        await patchBetween(primary.path, head, baseline, await checkpointObjects(primary.path, checkpointStore(this.store.file))),
+        await patchBetween(primary.path, head, baseline, await snapshotObjects(primary.path, snapshotStore(this.store.file))),
         true,
       );
       if (previous?.directory && JSON.stringify(ids) === JSON.stringify(previous.connectedIds))
@@ -284,7 +284,7 @@ export class PreviewService {
         try {
           await applyPatch(
             sandbox.path,
-            await patchBetween(change.worktree, from, tree, await checkpointObjects(change.worktree, checkpointStore(this.store.file))),
+            await patchBetween(change.worktree, from, tree, await snapshotObjects(change.worktree, snapshotStore(this.store.file))),
             true,
             true,
           );
@@ -315,7 +315,7 @@ export class PreviewService {
         }
       }
       const target = GitSandbox.open(this.store, previous.directory!);
-      if ((await snapshotWorktree(target.path, checkpointStore(this.store.file))) !== previous.tree)
+      if ((await snapshotWorktree(target.path, snapshotStore(this.store.file))) !== previous.tree)
         conflict('预览目录有额外改动，已停止同步以保留这些文件；请在主目录编辑代码', 'preview_dirty');
       await sandbox.fetch(target.path, await oid(target.path, 'HEAD'));
       const patch = await patchBetween(sandbox.path, previous.tree!, tree);
@@ -341,7 +341,7 @@ export class PreviewService {
       });
       retained = true;
       await applyPatch(target.path, patch, true);
-      if ((await snapshotWorktree(target.path, checkpointStore(this.store.file))) !== tree)
+      if ((await snapshotWorktree(target.path, snapshotStore(this.store.file))) !== tree)
         conflict('同步期间预览目录发生变化，已停止继续同步，请检查文件', 'preview_interrupted');
       await target.write(['update-ref', 'HEAD', snapshot]);
       await this.store.update((s) => {

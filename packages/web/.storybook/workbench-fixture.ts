@@ -48,7 +48,7 @@ export async function setupWorkbenchFixture() {
   let preview: PreviewResponse = {
     developmentBranch: 'feature/order',
     developmentHead: 'abc1234',
-    worktree: '/workspace/warden',
+    worktree: '/warden-data/preview',
     connectedIds: ['orders'],
     status: 'current',
     updatedAt: '2026-10-16T10:42:16Z',

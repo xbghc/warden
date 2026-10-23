@@ -84,31 +84,6 @@ describe('buildRows', () => {
     const added = buildRows({ diff: { ...diff, status: 'added' }, viewMode: 'unified', expansions: {}, fullLines: null });
     expect(added.some((r) => r.kind === 'gap')).toBe(false);
   });
-
-  it('folds runs of debug lines into one row that opens again', () => {
-    // Hunk 0 is ' a', '-b', '+B', '+B2', ' c': make B, B2 and c debug code.
-    const h = hunk(10, 10, [' a', '-b', '+B', '+B2', ' c']);
-    for (const i of [2, 3, 4]) h.lines[i]!.debug = true;
-    const d: FileDiff = { ...diff, hunks: [h] };
-    const kinds = (rows: ReturnType<typeof buildRows>) =>
-      rows.filter((r) => r.kind === 'line' || r.kind === 'debug').map((r) => (r.kind === 'line' ? r.line.content : `fold:${r.lines.length}`));
-
-    const shut = buildRows({ diff: d, viewMode: 'unified', expansions: {}, fullLines: null, foldDebug: true });
-    expect(kinds(shut)).toEqual(['a', 'b', 'fold:3']);
-    // A scroll position inside a folded block finds the fold.
-    expect(shut[findRowIndex(shut, 'new', 11)]?.kind).toBe('debug');
-
-    const open = buildRows({ diff: d, viewMode: 'unified', expansions: {}, fullLines: null, foldDebug: true, openDebug: new Set(['0:2']) });
-    expect(kinds(open)).toEqual(['a', 'b', 'fold:3', 'B', 'B2', 'c']);
-
-    expect(kinds(buildRows({ diff: d, viewMode: 'unified', expansions: {}, fullLines: null }))).toEqual(['a', 'b', 'B', 'B2', 'c']);
-
-    // Split: the (b | B) pair keeps b, which is not debug code, so only B2 and c fold.
-    const split = buildRows({ diff: d, viewMode: 'split', expansions: {}, fullLines: null, foldDebug: true });
-    expect(
-      split.filter((r) => r.kind === 'pair' || r.kind === 'debug').map((r) => (r.kind === 'pair' ? (r.right ?? r.left)!.content : `fold:${r.lines.length}`)),
-    ).toEqual(['a', 'B', 'fold:2']);
-  });
 });
 
 describe('blockEnds', () => {
@@ -148,18 +123,5 @@ describe('code blocks in rows', () => {
   it('folds on the new side of a pair in split view', () => {
     const shut = buildRows({ diff: d, viewMode: 'split', expansions: {}, fullLines: null, shutBlocks: new Set(['n1']) });
     expect(texts(shut)).toEqual(['function f() {', '}', 'after();']);
-  });
-
-  it('takes debug runs from what a shut block left in view', () => {
-    const dh = hunk(1, 1, [' function f() {', '+  probe();', ' }', '+log();']);
-    dh.lines[1]!.debug = true;
-    dh.lines[3]!.debug = true;
-    const dd: FileDiff = { ...diff, hunks: [dh] };
-    const shut = buildRows({ diff: dd, viewMode: 'unified', expansions: {}, fullLines: null, foldDebug: true, shutBlocks: new Set(['n1']) });
-    expect(shut.filter((r) => r.kind === 'line' || r.kind === 'debug').map((r) => (r.kind === 'line' ? r.line.content : `fold:${r.id}`))).toEqual([
-      'function f() {',
-      '}',
-      'fold:0:3',
-    ]);
   });
 });

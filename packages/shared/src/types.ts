@@ -26,9 +26,6 @@ export interface FileSummary {
   conflicted?: boolean;
   oldMode?: string;
   newMode?: string;
-  /** Added / deleted lines that are debug code (see `debug.ts`); absent when there are none. */
-  debugAdditions?: number;
-  debugDeletions?: number;
 }
 
 export interface FileDiff extends FileSummary {
@@ -56,8 +53,6 @@ export interface DiffLine {
   content: string;
   /** Set when the line is the last of the file and has no trailing newline. */
   noNewline?: boolean;
-  /** Inside a debug block or tagged as not to be committed. */
-  debug?: boolean;
 }
 
 export type DiffSide = 'old' | 'new';
@@ -72,8 +67,6 @@ export interface Prefs {
   lastPanel?: Panel;
   /** Re-run the refresh cycle when the watcher reports a repository change. */
   autoRefresh: boolean;
-  /** Fold debug code in the diff without changing the review scope or file contents. */
-  ignoreDebug: boolean;
   /** How the last new slot was made; the checkout form offers the same kind first next time. */
   slotKind?: SlotKind;
 }
@@ -100,32 +93,12 @@ export interface Todo {
   updatedAt: string;
 }
 
-/**
- * The working tree of one worktree as it was at a moment the reviewer chose, tracked and untracked
- * files alike (ignored ones left out). Its content is a git tree warden wrote into an object store
- * of its own beside the state file, so taking one leaves the repository's index, refs and objects
- * as they were; the target `checkpoint:<id>` diffs it against the working tree.
- */
-export interface Checkpoint {
-  /** Counted per worktree from 1: the next one is one above the highest still kept. */
-  id: number;
-  /** The worktree it was taken in, as in its target keys; absent for the repository root. */
-  worktree?: string;
-  /** Tree sha, in warden's object store. */
-  tree: string;
-  /** HEAD when it was taken; empty on an unborn branch. */
-  head: string;
-  createdAt: string;
-}
-
 export interface ReviewState {
   schemaVersion: 1;
   repoRoot: string;
   /** Opaque historical target metadata retained for compatibility. */
   targets: Record<TargetKey, Record<string, unknown>>;
   todos: Todo[];
-  /** Oldest first. */
-  checkpoints: Checkpoint[];
   prefs: Prefs;
   /** A requirement branch and the small changes that are integrated into it. */
   workflow?: DevelopmentWorkflow;
@@ -213,6 +186,8 @@ export interface DevelopmentChange extends ChangePlan {
     source: string;
     sourceBase?: string;
     tree?: string;
+    /** Fingerprint of the composed delivery, before any user or hook edits. */
+    indexFingerprint?: string;
     parent: string;
     worktree?: string;
     prepared?: boolean;
@@ -358,6 +333,11 @@ export interface StartChangeRequest {
 export interface PrepareChangeRequest {
   sourceHead: string;
   developmentHead: string;
+  sourceBase?: string;
+}
+
+export interface DeliverChangeRequest extends PrepareChangeRequest {
+  message: string;
 }
 
 export type AcceptChangeRequest = { mode: 'commit'; developmentHead: string; indexFingerprint: string; message: string } | { mode: 'record'; commit: string };
@@ -607,19 +587,6 @@ export interface ForkPointResponse {
   ahead: number;
   /** Commits that landed on `base` after the fork. */
   behind: number;
-}
-
-/** The checkpoints of the worktree a target key names, oldest first. */
-export interface CheckpointsResponse {
-  checkpoints: Checkpoint[];
-}
-
-export interface CreateCheckpointResponse {
-  checkpoint: Checkpoint;
-  /** The working tree was just as the newest checkpoint has it, so that one is handed back instead of a copy. */
-  unchanged: boolean;
-  /** Target key that diffs the new checkpoint against the working tree. */
-  targetKey: TargetKey;
 }
 
 /** Reorder: put the item right before `before`, or last when null. */

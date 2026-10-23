@@ -18,7 +18,6 @@ export { HttpError } from './errors.js';
 export { runGit, GitError, assertAllowedGitArgs } from './git.js';
 export { parseUnifiedDiff } from './diffparse.js';
 export { formatTodoExport } from './export.js';
-export { takeCheckpoint } from './checkpoints.js';
 export { WorkflowService } from './workflow.js';
 
 export const HOST = '127.0.0.1';

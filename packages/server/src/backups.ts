@@ -87,7 +87,7 @@ async function writeDurable(file: string, value: unknown) {
 }
 
 /**
- * A full, independent copy before destructive operations. Checkpoints intentionally borrow Git
+ * A full, independent copy before destructive operations. Snapshots intentionally borrow Git
  * objects and omit ignored files; neither property is safe when deleting the original checkout.
  * The manifest is published only after every copied byte and the source inventory are checked.
  */

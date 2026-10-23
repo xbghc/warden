@@ -186,5 +186,14 @@ export async function setupWorkflowStore() {
     Object.assign(checkouts.worktrees[0]!, { dirty: 0, head: 'cafe123' });
     return structuredClone(change);
   });
+  api.deliverChange = fn(async (id, request) => {
+    await api.prepareChange(id, request);
+    return api.acceptChange(id, {
+      mode: 'commit',
+      developmentHead: request.developmentHead,
+      indexFingerprint: data.preparation!.indexFingerprint!,
+      message: request.message,
+    });
+  });
   useWorkflow.setState({ data: structuredClone(data), checkouts: structuredClone(checkouts), busy: false, error: null });
 }

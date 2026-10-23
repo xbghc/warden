@@ -1,9 +1,10 @@
 import * as vscode from 'vscode';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { formatTargetKey } from '@warden/shared';
+import { formatTargetKey, taskReview, sameReview } from '@warden/shared';
 import type {
   FileEntry,
+  TaskReview,
   FilesResponse,
   FullFileResponse,
   HistoryResponse,
@@ -39,7 +40,7 @@ type Node =
   | { kind: 'tasks' }
   | { kind: 'history' }
   | { kind: 'task'; task: WorkflowTask }
-  | { kind: 'file'; file: FileEntry; target: string; task?: WorkflowTask }
+  | { kind: 'file'; file: FileEntry; target: string; task?: WorkflowTask; review?: TaskReview }
   | { kind: 'commit'; sha: string; message: string };
 
 class Documents implements vscode.TextDocumentContentProvider {
@@ -67,8 +68,12 @@ export class Workbench implements vscode.TreeDataProvider<Node> {
   private preview?: PreviewResponse;
   private history?: HistoryResponse;
   private checks?: RebaseResponse;
+  private checkouts?: WorktreesResponse;
   private files = new Map<string, FileEntry[]>();
+  private taskTargets = new Map<string, string>();
   private documents = new Documents();
+  private reviews = new Map<string, TaskReview>();
+  private reviewUris = new Map<string, Set<string>>();
   private output = vscode.window.createOutputChannel('Warden');
   private status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 20);
   private active?: Promise<unknown>;
@@ -157,7 +162,11 @@ export class Workbench implements vscode.TreeDataProvider<Node> {
       this.preview = undefined;
       this.history = undefined;
       this.checks = undefined;
+      this.checkouts = undefined;
       this.files.clear();
+      this.taskTargets.clear();
+      this.reviews.clear();
+      this.reviewUris.clear();
       await this.refresh();
       this.backend.start(
         () => this.refresh(),
@@ -176,11 +185,16 @@ export class Workbench implements vscode.TreeDataProvider<Node> {
     if (this.reading) return this.reading;
     if (!this.backend || this.closing) return Promise.resolve();
     this.reading = (async () => {
-      const [data, preview] = await Promise.all([this.api<WorkflowResponse>('/workflow'), this.api<PreviewResponse>('/preview')]);
+      const [data, preview, checkouts] = await Promise.all([
+        this.api<WorkflowResponse>('/workflow'),
+        this.api<PreviewResponse>('/preview'),
+        this.api<WorktreesResponse>('/worktrees'),
+      ]);
       const changedHead = data.developmentHead !== this.data?.developmentHead;
-      let changed = JSON.stringify([data, preview]) !== JSON.stringify([this.data, this.preview]);
+      let changed = JSON.stringify([data, preview, checkouts]) !== JSON.stringify([this.data, this.preview, this.checkouts]);
       this.data = data;
       this.preview = preview;
+      this.checkouts = checkouts;
       if (data.workflow && (changedHead || !this.history)) {
         this.history = await this.api<HistoryResponse>('/history');
         this.checks = await this.api<RebaseResponse>('/workflow/rebase-checks');
@@ -239,6 +253,9 @@ export class Workbench implements vscode.TreeDataProvider<Node> {
         task.agent,
         task.worktree ? (connected ? (source ? statusLabels[source.status] : '待同步') : '未连接') : statusLabels[task.status],
         task.status === 'integrating' ? '待提交' : '',
+        this.reviews.has(task.id) && !sameReview(this.reviews.get(task.id), taskReview(this.data!, task.id, this.checkouts?.worktrees ?? []))
+          ? '审查版本已变化'
+          : '',
         sync && sync.status !== 'current' ? '可检查 rebase' : '',
       ]
         .filter(Boolean)
@@ -273,13 +290,20 @@ export class Workbench implements vscode.TreeDataProvider<Node> {
         .reverse()
         .map((c) => ({ kind: 'commit', sha: c.sha, message: c.message }));
     let target: string;
-    if (node.kind === 'task' && node.task.worktree) target = this.target(node.task);
-    else if (node.kind === 'commit') target = formatTargetKey({ kind: 'commit', sha: node.sha });
+    let review: TaskReview | undefined;
+    if (node.kind === 'task' && node.task.worktree) {
+      review = await this.readReview(node.task.id);
+      if (!review) return [];
+      target = review.targetKey;
+      const previous = this.taskTargets.get(node.task.id);
+      if (previous && previous !== target) this.files.delete(previous);
+      this.taskTargets.set(node.task.id, target);
+    } else if (node.kind === 'commit') target = formatTargetKey({ kind: 'commit', sha: node.sha });
     else return [];
     try {
       const response = await this.api<FilesResponse>(`/targets/${encodeURIComponent(target)}/files`);
       this.files.set(target, response.files);
-      return response.files.map((file) => ({ kind: 'file', file, target, ...(node.kind === 'task' ? { task: node.task } : {}) }));
+      return response.files.map((file) => ({ kind: 'file', file, target, ...(node.kind === 'task' ? { task: node.task, review } : {}) }));
     } catch (error) {
       this.output.appendLine(String(error));
       return [];
@@ -288,15 +312,22 @@ export class Workbench implements vscode.TreeDataProvider<Node> {
   private tasks() {
     return this.data?.workflow?.changes.filter((c) => c.developmentBranch === this.data?.workflow?.developmentBranch) ?? [];
   }
-  private target(task: WorkflowTask) {
-    if (!task.worktree) throw new Error('请先分配工作区');
-    if (task.status === 'integrating') {
-      const p = this.data?.preparation;
-      return p?.state === 'committed' && p.head
-        ? formatTargetKey({ kind: 'commit', sha: p.head })
-        : formatTargetKey({ kind: 'staged', worktree: task.integration?.worktree });
+  private async readReview(changeId: string) {
+    const [data, checkouts] = await Promise.all([this.api<WorkflowResponse>('/workflow'), this.api<WorktreesResponse>('/worktrees')]);
+    return taskReview(data, changeId, checkouts.worktrees);
+  }
+  private async rememberReview(review: TaskReview) {
+    const previous = this.reviews.get(review.changeId);
+    if (!sameReview(previous, review)) {
+      const uris = this.reviewUris.get(review.changeId);
+      const tabs = vscode.window.tabGroups.all
+        .flatMap((group) => group.tabs)
+        .filter((tab) => tab.input instanceof vscode.TabInputTextDiff && uris?.has(tab.input.modified.toString()));
+      await vscode.window.tabGroups.close(tabs, true);
+      this.reviewUris.delete(review.changeId);
+      if (previous) void vscode.window.showInformationMessage('审查版本已更新，请完整审查本次交付。');
     }
-    return formatTargetKey({ kind: 'base', ref: task.sourceBase ?? task.base, worktree: task.worktree });
+    this.reviews.set(review.changeId, review);
   }
   private async pickTask(node?: Node) {
     const task = node?.kind === 'task' ? node.task : node?.kind === 'file' ? node.task : undefined;
@@ -423,11 +454,16 @@ export class Workbench implements vscode.TreeDataProvider<Node> {
   }
   private async openDiff(node?: Node) {
     if (node?.kind !== 'file') return;
+    const review = node.review;
+    if (node.task && (!review || !sameReview(review, await this.readReview(node.task.id)))) throw new Error('审查版本已变化，请刷新文件列表并重新打开差异');
     const route = `/targets/${encodeURIComponent(node.target)}`;
     const latest = (await this.api<FilesResponse>(`${route}/files`)).files.find((f) => f.path === node.file.path);
     if (!latest) throw new Error('文件差异已变化，请刷新');
     if (latest.binary) {
-      void vscode.window.showInformationMessage('此文件包含二进制变化，无法显示文本差异。');
+      if (review) await this.rememberReview(review);
+      void vscode.window.showInformationMessage(
+        `此文件包含二进制变化，请使用外部工具审查此版本：${review?.sourceHead ?? review?.preparation?.head ?? node.target}`,
+      );
       return;
     }
     const read = (side: 'old' | 'new') =>
@@ -435,34 +471,62 @@ export class Workbench implements vscode.TreeDataProvider<Node> {
     const [old, current] = await Promise.all([read('old'), read('new')]);
     const after = (await this.api<FilesResponse>(`${route}/files`)).files.find((f) => f.path === latest.path);
     if (after?.contentHash !== latest.contentHash) throw new Error('读取期间文件发生变化，请重新打开差异');
+    if (review) {
+      if (!sameReview(review, await this.readReview(review.changeId))) throw new Error('读取期间审查版本发生变化，请重新打开差异');
+      await this.rememberReview(review);
+    }
     const left = this.documents.add(path.basename(latest.oldPath ?? latest.path), old.content ?? '');
     const right = this.documents.add(path.basename(latest.path), current.content ?? '');
-    await vscode.commands.executeCommand('vscode.diff', left, right, `${node.task?.title ?? '提交'} · ${latest.path}`, { preview: true });
+    if (review) {
+      const uris = this.reviewUris.get(review.changeId) ?? new Set<string>();
+      uris.add(right.toString());
+      this.reviewUris.set(review.changeId, uris);
+    }
+    const version = review?.sourceHead ?? review?.preparation?.head;
+    await vscode.commands.executeCommand(
+      'vscode.diff',
+      left,
+      right,
+      `${node.task?.title ?? '提交'} · ${latest.path}${version ? ` · ${version.slice(0, 8)}` : ''}`,
+      { preview: true },
+    );
   }
   private async deliver(node?: Node) {
     const task = await this.pickTask(node);
     if (!task?.worktree) return;
-    let current = await this.api<WorkflowResponse>('/workflow');
-    if (task.status !== 'integrating') {
-      const list = await this.api<WorktreesResponse>('/worktrees');
-      const sourceHead = list.worktrees.find((w) => w.path === task.worktree)?.head;
-      await this.api(`/workflow/changes/${task.id}/prepare`, 'POST', { sourceHead, developmentHead: current.developmentHead });
-      current = await this.api<WorkflowResponse>('/workflow');
-    }
-    const p = current.preparation;
-    if (!p || p.changeId !== task.id) throw new Error('未找到此任务的提交准备');
-    if (p.canRecord) {
-      await this.api(`/workflow/changes/${task.id}/accept`, 'POST', { mode: 'record', commit: p.head });
+    const current = await this.readReview(task.id);
+    if (task.integration && !task.integration.prepared && !current?.preparation) {
+      await this.api(`/workflow/changes/${task.id}/prepare`, 'POST', {
+        sourceHead: task.integration.source,
+        developmentHead: task.integration.parent,
+      });
+      this.reviews.delete(task.id);
+      void vscode.window.showInformationMessage('提交准备已恢复，请重新打开差异审查主目录中保留的内容。');
       return;
     }
-    if (!p.canCommit) throw new Error(p.message ?? '主目录暂存内容已变化，请检查后重试');
-    const message = await vscode.window.showInputBox({
-      prompt: '交付提交信息（取消会保留已准备的暂存内容，可稍后重试）',
-      value: task.title,
-      ignoreFocusOut: true,
-    });
+    const review = this.reviews.get(task.id);
+    if (!review || !sameReview(review, current)) throw new Error('请重新打开任务差异，完整审查当前版本后再交付');
+    const p = review.preparation;
+    if (p?.canRecord && p.head) {
+      await this.api(`/workflow/changes/${task.id}/accept`, 'POST', { mode: 'record', commit: p.head });
+      this.reviews.delete(task.id);
+      return;
+    }
+    if (p ? !p.canCommit : !review.sourceHead || !review.developmentHead) throw new Error(p?.message ?? '请先在任务工作区提交变更，再重新打开差异审查');
+    const message = await vscode.window.showInputBox({ prompt: '提交到主开发分支', value: task.title, ignoreFocusOut: true });
     if (!message?.trim()) return;
-    await this.api(`/workflow/changes/${task.id}/accept`, 'POST', { mode: 'commit', developmentHead: p.head, indexFingerprint: p.indexFingerprint, message });
+    if (!sameReview(review, await this.readReview(task.id))) throw new Error('审查版本已变化，请重新打开差异后交付');
+    if (p) {
+      await this.api(`/workflow/changes/${task.id}/accept`, 'POST', { mode: 'commit', developmentHead: p.head, indexFingerprint: p.indexFingerprint, message });
+    } else {
+      await this.api(`/workflow/changes/${task.id}/deliver`, 'POST', {
+        sourceHead: review.sourceHead,
+        sourceBase: review.sourceBase,
+        developmentHead: review.developmentHead,
+        message,
+      });
+    }
+    this.reviews.delete(task.id);
   }
   private async taskOperation(node: Node | undefined, operation: string) {
     const task = await this.pickTask(node);

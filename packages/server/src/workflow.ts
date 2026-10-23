@@ -3,6 +3,7 @@ import path from 'node:path';
 import { readFile, realpath, stat } from 'node:fs/promises';
 import type {
   AcceptChangeRequest,
+  DeliverChangeRequest,
   CreateChangeRequest,
   PlannedChange,
   StartChangeRequest,
@@ -38,6 +39,8 @@ function fail(message: string, code: string): never {
 async function revParse(cwd: string, ref: string): Promise<string> {
   return (await runGit(['rev-parse', '--verify', ref], { cwd })).stdout.trim();
 }
+const INDEX_DIFF_FLAGS = ['--raw', '--no-color', '--ignore-submodules=none', '--no-abbrev', '--no-renames', '--no-ext-diff', '--no-textconv', '-z'];
+const fingerprint = (diff: string) => createHash('sha256').update(diff).digest('hex');
 const errorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error));
 const active = (change: WorkflowTask): change is DevelopmentChange =>
   change.status === 'working' || change.status === 'ready' || change.status === 'integrating';
@@ -727,12 +730,12 @@ export class WorkflowService {
 
   private async indexState(cwd: string) {
     const [diff, unstaged, untracked] = await Promise.all([
-      runGit(['diff', '--cached', '--binary', '--full-index', '--no-renames', '--no-ext-diff', '--no-textconv', 'HEAD', '--'], { cwd }),
+      runGit(['diff', '--cached', ...INDEX_DIFF_FLAGS, 'HEAD', '--'], { cwd }),
       runGit(['diff', '--quiet', '--no-ext-diff', '--no-textconv', '--'], { cwd, okCodes: [0, 1] }),
       runGit(['ls-files', '--others', '--exclude-standard', '-z'], { cwd }),
     ]);
     return {
-      fingerprint: createHash('sha256').update(diff.stdout).digest('hex'),
+      fingerprint: fingerprint(diff.stdout),
       staged: !!diff.stdout,
       unstaged: unstaged.code !== 0 || !!untracked.stdout,
     };
@@ -777,129 +780,153 @@ export class WorkflowService {
   }
 
   prepare(id: string, request: PrepareChangeRequest) {
-    return this.store.withRepositoryLock(async () => {
-      const state = await this.store.load();
-      const workflow = workflowOf(state);
-      const change = changeOf(state, id);
-      if (change.developmentBranch !== workflow.developmentBranch) fail('请先切换到工作区所属的主开发分支', 'requirement_changed');
-      if (workflow.changes.some((row) => row.id !== id && row.status === 'integrating')) fail('请先完成主目录上正在准备的提交', 'development_in_use');
-      if (change.integration?.prepared) return change;
-      if (change.status === 'accepted') fail('旧版本交付记录不可再次提交', 'change_closed');
-      const target = await this.developmentHead(change.developmentBranch);
-      const checkout = await this.checkout(change);
-      await this.assertClean(checkout.path);
-      const source = await revParse(checkout.path, 'HEAD');
-      if (source !== request?.sourceHead || target !== request?.developmentHead) fail('代码或主开发分支已变化，请刷新后重新审查', 'review_changed');
-      const boundary = await deliveryBase(change, source, target);
-      if (!(await this.ancestor(checkout.path, boundary, source))) fail('工作区历史已变化，请先手动处理同步基点', 'base_changed');
-      const preview = new PreviewService(this.repo, this.store);
-      const sandbox = await GitSandbox.create(this.store, this.repo.commonRoot, target);
+    return this.store.withRepositoryLock(() => this.prepareLocked(id, request));
+  }
+
+  private async prepareLocked(id: string, request: PrepareChangeRequest) {
+    const state = await this.store.load();
+    const workflow = workflowOf(state);
+    const change = changeOf(state, id);
+    if (change.developmentBranch !== workflow.developmentBranch) fail('请先切换到工作区所属的主开发分支', 'requirement_changed');
+    if (workflow.changes.some((row) => row.id !== id && row.status === 'integrating')) fail('请先完成主目录上正在准备的提交', 'development_in_use');
+    if (change.integration?.prepared) return change;
+    if (change.status === 'accepted') fail('旧版本交付记录不可再次提交', 'change_closed');
+    const target = await this.developmentHead(change.developmentBranch);
+    const checkout = await this.checkout(change);
+    await this.assertClean(checkout.path);
+    const source = await revParse(checkout.path, 'HEAD');
+    if (source !== request?.sourceHead || target !== request?.developmentHead) fail('代码或主开发分支已变化，请刷新后重新审查', 'review_changed');
+    if (request.sourceBase !== undefined && request.sourceBase !== (change.sourceBase ?? change.base)) fail('交付基点已变化，请重新审查', 'review_changed');
+    const boundary = await deliveryBase(change, source, target);
+    if (!(await this.ancestor(checkout.path, boundary, source))) fail('工作区历史已变化，请先手动处理同步基点', 'base_changed');
+    const preview = new PreviewService(this.repo, this.store);
+    const sandbox = await GitSandbox.create(this.store, this.repo.commonRoot, target);
+    try {
+      await sandbox.fetch(checkout.path, source);
       try {
-        await sandbox.fetch(checkout.path, source);
-        try {
-          await applyPatch(sandbox.path, await patchBetween(checkout.path, boundary, source), true, true);
-        } catch (error) {
-          fail(`合入存在冲突，请先在工作区处理：${(await sandbox.conflicts()).join('、') || errorMessage(error)}`, 'delivery_conflict');
-        }
-        const composed = await sandbox.commit();
-        const tree = await oid(sandbox.path, 'HEAD^{tree}');
-        const patch = await patchBetween(sandbox.path, target, composed);
-        if (!patch) fail('工作区没有尚未交付的改动', 'empty_change');
-        await preview.suspend();
-        const destination = await this.destination(change.developmentBranch, !change.integration, change.integration?.worktree);
-        if (change.integration && (await dirtyCount(destination.path))) {
-          const index = await this.indexState(destination.path);
-          // Compare index entries without importing the trial commit or its history into the
-          // primary repository. NUL-delimited raw diffs also ignore display-only diff settings.
-          const flags = ['--raw', '--no-abbrev', '--no-renames', '--no-ext-diff', '--no-textconv', '-z'];
-          const [staged, expected] = await finishReads([
-            runGit(['diff', '--cached', ...flags, target, '--'], { cwd: destination.path }),
-            runGit(['diff', ...flags, target, composed, '--'], { cwd: sandbox.path }),
-          ]);
-          if (index.unstaged || staged.stdout !== expected.stdout) fail('准备被中断，主目录有其他改动，请手动处理后重试', 'development_dirty');
-        } else {
-          change.integration = { id: randomUUID(), source, sourceBase: boundary, tree, parent: target, worktree: destination.path, message: change.title };
-          change.status = 'integrating';
-          await this.save(change);
-          await this.destination(change.developmentBranch, true, destination.path);
-          if ((await this.developmentHead(change.developmentBranch)) !== target) fail('主开发分支已变化，请刷新后重试', 'review_changed');
-          await applyPatch(destination.path, patch, true);
-        }
-        change.integration!.prepared = true;
-        delete change.integration!.error;
-        await this.save(change);
-        return change;
+        await applyPatch(sandbox.path, await patchBetween(checkout.path, boundary, source), true, true);
       } catch (error) {
-        if (change.integration) {
-          change.integration.error = errorMessage(error);
-          await this.save(change);
-        } else await preview.resume();
-        throw error;
-      } finally {
-        await sandbox.dispose();
+        fail(`合入存在冲突，请先在工作区处理：${(await sandbox.conflicts()).join('、') || errorMessage(error)}`, 'delivery_conflict');
       }
+      const composed = await sandbox.commit();
+      const tree = await oid(sandbox.path, 'HEAD^{tree}');
+      const patch = await patchBetween(sandbox.path, target, composed);
+      if (!patch) fail('工作区没有尚未交付的改动', 'empty_change');
+      await preview.suspend();
+      const destination = await this.destination(change.developmentBranch, !change.integration, change.integration?.worktree);
+      if (change.integration && (await dirtyCount(destination.path))) {
+        const index = await this.indexState(destination.path);
+        // Compare index entries without importing the trial commit or its history into the
+        // primary repository. NUL-delimited raw diffs also ignore display-only diff settings.
+        const flags = INDEX_DIFF_FLAGS;
+        const [staged, expected] = await finishReads([
+          runGit(['diff', '--cached', ...flags, target, '--'], { cwd: destination.path }),
+          runGit(['diff', ...flags, target, composed, '--'], { cwd: sandbox.path }),
+        ]);
+        if (index.unstaged || staged.stdout !== expected.stdout) fail('准备被中断，主目录有其他改动，请手动处理后重试', 'development_dirty');
+      } else {
+        change.integration = { id: randomUUID(), source, sourceBase: boundary, tree, parent: target, worktree: destination.path, message: change.title };
+        change.status = 'integrating';
+        await this.save(change);
+        await this.destination(change.developmentBranch, true, destination.path);
+        if ((await this.developmentHead(change.developmentBranch)) !== target) fail('主开发分支已变化，请刷新后重试', 'review_changed');
+        await applyPatch(destination.path, patch, true);
+      }
+      const expected = await runGit(['diff', ...INDEX_DIFF_FLAGS, target, composed, '--'], { cwd: sandbox.path });
+      change.integration!.indexFingerprint = fingerprint(expected.stdout);
+      change.integration!.prepared = true;
+      delete change.integration!.error;
+      await this.save(change);
+      return change;
+    } catch (error) {
+      if (change.integration) {
+        change.integration.error = errorMessage(error);
+        await this.save(change);
+      } else await preview.resume();
+      throw error;
+    } finally {
+      await sandbox.dispose();
+    }
+  }
+
+  /** Normal delivery keeps preparation and commit under one lock; failures retain the journal. */
+  deliver(id: string, request: DeliverChangeRequest) {
+    return this.store.withRepositoryLock(async () => {
+      if (typeof request?.message !== 'string' || !request.message.trim() || request.message.length > 10000)
+        throw badRequest('请填写提交信息', 'invalid_commit_message');
+      const current = changeOf(await this.store.load(), id);
+      if (current.integration) fail('请审查主目录中保留的交付内容后继续提交', 'change_already_prepared');
+      const change = await this.prepareLocked(id, request);
+      return this.acceptLocked(id, {
+        mode: 'commit',
+        developmentHead: request.developmentHead,
+        indexFingerprint: change.integration!.indexFingerprint!,
+        message: request.message,
+      });
     });
   }
 
   /** The reviewer validates the development checkout before either committing or recording a manual commit. */
   accept(id: string, request: AcceptChangeRequest) {
-    return this.store.withRepositoryLock(async () => {
-      const change = changeOf(await this.store.load(), id);
-      if (!change.integration && change.deliveries?.length) {
-        const last = change.deliveries.at(-1)!;
-        if ((request?.mode === 'record' && request.commit === last.commit) || (request?.mode === 'commit' && request.developmentHead === last.parent)) {
-          await retireWorkflowRefs(this.repo.commonRoot);
-          await new PreviewService(this.repo, this.store).resume().catch(() => {});
-          return change;
-        }
+    return this.store.withRepositoryLock(() => this.acceptLocked(id, request));
+  }
+
+  private async acceptLocked(id: string, request: AcceptChangeRequest) {
+    const change = changeOf(await this.store.load(), id);
+    if (!change.integration && change.deliveries?.length) {
+      const last = change.deliveries.at(-1)!;
+      if ((request?.mode === 'record' && request.commit === last.commit) || (request?.mode === 'commit' && request.developmentHead === last.parent)) {
+        await retireWorkflowRefs(this.repo.commonRoot);
+        await new PreviewService(this.repo, this.store).resume().catch(() => {});
+        return change;
       }
-      const integration = change.integration;
-      if (change.status !== 'integrating' || !integration) fail('请先将改动准备到主开发分支并验证', 'change_not_prepared');
-      const destination = await this.destination(change.developmentBranch, false, integration.worktree);
-      let head = await this.developmentHead(change.developmentBranch);
-      if (request?.mode === 'commit') {
-        if (typeof request.message !== 'string' || !request.message.trim() || request.message.length > 10000)
-          throw badRequest('请填写提交信息', 'invalid_commit_message');
-        // A retry after publication must never run commit a second time. The recorded SHA is
-        // evidence of our successful command; unrecorded manual commits need explicit review.
-        if (head !== integration.commit) {
-          if (!integration.prepared || head !== integration.parent || head !== request.developmentHead)
-            fail('主开发分支已有变化，请查看最新状态；已有提交需审查后确认', 'review_changed');
-          const index = await this.indexState(destination.path);
-          if (index.unstaged) fail('请先检查并暂存主开发分支上的所有修改，再验证和提交', 'development_unstaged');
-          if (!index.staged) fail('主开发分支暂存区为空', 'empty_change');
-          if (index.fingerprint !== request.indexFingerprint) fail('暂存内容已变化，请刷新并重新验证', 'review_changed');
-          integration.message = request.message.trim();
-          delete integration.error;
+    }
+    const integration = change.integration;
+    if (change.status !== 'integrating' || !integration) fail('请先将改动准备到主开发分支并验证', 'change_not_prepared');
+    const destination = await this.destination(change.developmentBranch, false, integration.worktree);
+    let head = await this.developmentHead(change.developmentBranch);
+    if (request?.mode === 'commit') {
+      if (typeof request.message !== 'string' || !request.message.trim() || request.message.length > 10000)
+        throw badRequest('请填写提交信息', 'invalid_commit_message');
+      // A retry after publication must never run commit a second time. The recorded SHA is
+      // evidence of our successful command; unrecorded manual commits need explicit review.
+      if (head !== integration.commit) {
+        if (!integration.prepared || head !== integration.parent || head !== request.developmentHead)
+          fail('主开发分支已有变化，请查看最新状态；已有提交需审查后确认', 'review_changed');
+        const index = await this.indexState(destination.path);
+        if (index.unstaged) fail('请先检查并暂存主开发分支上的所有修改，再验证和提交', 'development_unstaged');
+        if (!index.staged) fail('主开发分支暂存区为空', 'empty_change');
+        if (index.fingerprint !== request.indexFingerprint) fail('暂存内容已变化，请刷新并重新验证', 'review_changed');
+        integration.message = request.message.trim();
+        delete integration.error;
+        await this.save(change);
+        try {
+          // Ordinary commit, in the actual development checkout: local hooks, identity,
+          // signing and hook edits all follow Git's normal behavior. Never --no-verify.
+          await runGitWrite(['commit', '-m', integration.message], { cwd: destination.path, timeoutMs: LONG_GIT_TIMEOUT_MS });
+        } catch (error) {
+          integration.error = (error instanceof GitError ? error.stderr.trim() || error.message : errorMessage(error)).slice(0, 8000);
           await this.save(change);
-          try {
-            // Ordinary commit, in the actual development checkout: local hooks, identity,
-            // signing and hook edits all follow Git's normal behavior. Never --no-verify.
-            await runGitWrite(['commit', '-m', integration.message], { cwd: destination.path, timeoutMs: LONG_GIT_TIMEOUT_MS });
-          } catch (error) {
-            integration.error = (error instanceof GitError ? error.stderr.trim() || error.message : errorMessage(error)).slice(0, 8000);
-            await this.save(change);
-            fail(`提交未完成，已保留改动，请处理后重新验证。${integration.error}`, 'commit_failed');
-          }
-          head = await this.developmentHead(change.developmentBranch);
-          integration.commit = head;
-          await this.save(change);
+          fail(`提交未完成，已保留改动，请处理后重新验证。${integration.error}`, 'commit_failed');
         }
-      } else if (request?.mode === 'record') {
-        if (request.commit !== head) fail('提交已变化，请打开最新提交重新确认', 'review_changed');
-      } else throw badRequest('请选择验证后提交或确认已有提交', 'invalid_accept_mode');
-      if (!(await this.singleCommit(change, head))) fail('请将本次改动整理为基于原主开发分支的单个提交后确认', 'development_history_changed');
-      await this.destination(change.developmentBranch, true, destination.path);
-      integration.commit = head;
-      integration.message = (await runGit(['log', '-1', '--format=%B', head], { cwd: destination.path })).stdout.trim();
-      delete integration.error;
-      integration.id ??= randomUUID();
-      await this.save(change);
-      await this.recordAccepted(change);
-      await retireWorkflowRefs(this.repo.commonRoot);
-      await new PreviewService(this.repo, this.store).resume().catch(() => {});
-      return change;
-    });
+        head = await this.developmentHead(change.developmentBranch);
+        integration.commit = head;
+        await this.save(change);
+      }
+    } else if (request?.mode === 'record') {
+      if (request.commit !== head) fail('提交已变化，请打开最新提交重新确认', 'review_changed');
+    } else throw badRequest('请选择验证后提交或确认已有提交', 'invalid_accept_mode');
+    if (!(await this.singleCommit(change, head))) fail('请将本次改动整理为基于原主开发分支的单个提交后确认', 'development_history_changed');
+    await this.destination(change.developmentBranch, true, destination.path);
+    integration.commit = head;
+    integration.message = (await runGit(['log', '-1', '--format=%B', head], { cwd: destination.path })).stdout.trim();
+    delete integration.error;
+    integration.id ??= randomUUID();
+    await this.save(change);
+    await this.recordAccepted(change);
+    await retireWorkflowRefs(this.repo.commonRoot);
+    await new PreviewService(this.repo, this.store).resume().catch(() => {});
+    return change;
   }
 
   private async recordAccepted(change: DevelopmentChange) {

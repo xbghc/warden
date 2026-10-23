@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 import type {
   ChangeEvent,
-  Checkpoint,
   CreateTodoRequest,
   FileDiff,
   FileEntry,
@@ -14,7 +13,7 @@ import type {
   UpdateTodoRequest,
   ViewMode,
 } from '@warden/shared';
-import { formatTargetKey, insertAfter, moveBefore, tryParseTargetKey } from '@warden/shared';
+import { insertAfter, moveBefore } from '@warden/shared';
 import { api, ApiError } from './api';
 import { copyText } from './lib/clipboard';
 
@@ -48,8 +47,6 @@ export interface AppStore {
   targetKey: TargetKey;
   root: string;
   files: FileEntry[];
-  /** Checkpoints of the worktree under review, oldest first. */
-  checkpoints: Checkpoint[];
   filesLoading: boolean;
   filesError: string | null;
   activeFile: string | null;
@@ -82,12 +79,7 @@ export interface AppStore {
   loadFiles(): Promise<void>;
   refresh(): Promise<void>;
   onRepoChanged(event: ChangeEvent): void;
-  loadCheckpoints(): Promise<void>;
-  /** Takes the worktree as it is now; a checkpoint target in front moves on to the new one. */
-  createCheckpoint(): Promise<void>;
-  deleteCheckpoint(id: number): Promise<void>;
   setAutoRefresh(on: boolean): void;
-  setIgnoreDebug(on: boolean): void;
   consumeRestoreScroll(): boolean;
   openFile(path: string, force?: boolean): Promise<void>;
   setActiveFile(path: string | null): void;
@@ -123,19 +115,21 @@ export const useStore = create<AppStore>((set, get) => {
 
   /** The refresh in progress, which a refresh asked for meanwhile waits on (see refresh). */
   let refreshRun: Promise<void> | null = null;
+  let targetVersion = 0;
 
   /** `keep` leaves a diff already on screen there while the new one loads, rather than a placeholder. */
   const loadDiff = async (path: string, keep = false): Promise<FileDiff | undefined> => {
     const { targetKey, files } = get();
+    const version = targetVersion;
     const entry = files.find((f) => f.path === path);
     if (!(keep && get().diffs[path]?.status === 'ok')) set((s) => ({ diffs: { ...s.diffs, [path]: { status: 'loading' } } }));
     try {
       const diff = await api.file(targetKey, path, { oldPath: entry?.oldPath, untracked: entry?.untracked });
-      if (get().targetKey !== targetKey) return undefined;
+      if (get().targetKey !== targetKey || version !== targetVersion) return undefined;
       set((s) => ({ diffs: { ...s.diffs, [path]: { status: 'ok', diff } } }));
       return diff;
     } catch (e) {
-      if (get().targetKey !== targetKey) return undefined;
+      if (get().targetKey !== targetKey || version !== targetVersion) return undefined;
       set((s) => ({ diffs: { ...s.diffs, [path]: { status: 'error', message: errMsg(e) } } }));
       return undefined;
     }
@@ -145,11 +139,10 @@ export const useStore = create<AppStore>((set, get) => {
     repo: null,
     update: null,
     initError: null,
-    prefs: { viewMode: 'unified', autoRefresh: true, ignoreDebug: true },
+    prefs: { viewMode: 'unified', autoRefresh: true },
     targetKey: 'all',
     root: '',
     files: [],
-    checkpoints: [],
     filesLoading: false,
     filesError: null,
     activeFile: null,
@@ -209,20 +202,18 @@ export const useStore = create<AppStore>((set, get) => {
     },
 
     async setTarget(key, options) {
+      const version = ++targetVersion;
       if (options?.reveal !== false) get().setPanel('diff');
-      // The checkpoints are the worktree's, not the target's: moving between its targets keeps them.
-      const sameWorktree = tryParseTargetKey(key)?.worktree === tryParseTargetKey(get().targetKey)?.worktree;
       set({
         targetKey: key,
         files: [],
-        ...(sameWorktree ? {} : { checkpoints: [] }),
         diffs: {},
         activeFile: null,
         filesError: null,
       });
       api.patchPrefs({ lastTarget: key }).catch(() => undefined);
       await get().loadFiles();
-      if (get().targetKey !== key) return;
+      if (get().targetKey !== key || version !== targetVersion) return;
       // A review starts by reading, so the diff opens on the first file rather than on a page
       // that explains how to open one. Refreshes keep whatever is already in front.
       const first = get().files[0];
@@ -232,14 +223,13 @@ export const useStore = create<AppStore>((set, get) => {
 
     async loadFiles() {
       const key = get().targetKey;
+      const version = targetVersion;
       set({ filesLoading: true, filesError: null });
-      // Another page may have taken or dropped one; they are listed wherever the files are.
-      void get().loadCheckpoints();
       try {
         const keep = (files: FileEntry[]) => (get().activeFile && files.some((f) => f.path === get().activeFile) ? get().activeFile : null);
 
         const res = await api.files(key);
-        if (get().targetKey !== key) return;
+        if (get().targetKey !== key || version !== targetVersion) return;
         set({
           files: res.files,
           root: res.root,
@@ -247,7 +237,7 @@ export const useStore = create<AppStore>((set, get) => {
           activeFile: keep(res.files),
         });
       } catch (e) {
-        if (get().targetKey !== key) return;
+        if (get().targetKey !== key || version !== targetVersion) return;
         set({ filesLoading: false, filesError: errMsg(e), files: [] });
       }
     },
@@ -292,48 +282,6 @@ export const useStore = create<AppStore>((set, get) => {
       }
     },
 
-    async loadCheckpoints() {
-      const key = get().targetKey;
-      try {
-        const { checkpoints } = await api.checkpoints(key);
-        if (get().targetKey === key) set({ checkpoints });
-      } catch {
-        // A worktree that is gone fails its listing too, which says so; this has nothing to add.
-      }
-    },
-
-    async createCheckpoint() {
-      const key = get().targetKey;
-      try {
-        const res = await api.createCheckpoint(key);
-        get().showToast(res.unchanged ? `工作区和检查点 #${res.checkpoint.id} 一样，没有新建` : `已建检查点 #${res.checkpoint.id}`);
-        // Taking one from a checkpoint view is closing that round: the next starts from the new one.
-        if (tryParseTargetKey(key)?.kind === 'checkpoint' && res.targetKey !== key) await get().setTarget(res.targetKey);
-        else await get().loadCheckpoints();
-      } catch (e) {
-        fail(e);
-      }
-    },
-
-    async deleteCheckpoint(id) {
-      const key = get().targetKey;
-      const target = tryParseTargetKey(key);
-      try {
-        await api.deleteCheckpoint(key, id);
-        get().showToast(`已删除检查点 #${id}`);
-        if (target?.kind === 'checkpoint' && target.id === id) {
-          // Back to the newest one left, or to the working tree when that was the last.
-          const wt = target.worktree ? { worktree: target.worktree } : {};
-          const next = get()
-            .checkpoints.filter((c) => c.id !== id)
-            .at(-1);
-          await get().setTarget(formatTargetKey(next ? { kind: 'checkpoint', id: next.id, ...wt } : { kind: 'all', ...wt }));
-        } else await get().loadCheckpoints();
-      } catch (e) {
-        fail(e);
-      }
-    },
-
     onRepoChanged(event) {
       const root = get().root;
       set((s) => {
@@ -348,11 +296,6 @@ export const useStore = create<AppStore>((set, get) => {
     setAutoRefresh(on) {
       set((s) => ({ prefs: { ...s.prefs, autoRefresh: on } }));
       api.patchPrefs({ autoRefresh: on }).catch(fail);
-    },
-
-    setIgnoreDebug(on) {
-      set((s) => ({ prefs: { ...s.prefs, ignoreDebug: on } }));
-      api.patchPrefs({ ignoreDebug: on }).catch(fail);
     },
 
     consumeRestoreScroll() {

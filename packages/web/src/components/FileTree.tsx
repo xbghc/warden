@@ -1,9 +1,7 @@
-import { Checkbox } from './ui/checkbox';
 import { Button } from './ui/button';
-import { NativeSelect } from './ui/native-select';
 import { useEffect, useMemo, useState } from 'react';
 import { FileIcon } from '@react-symbols/icons/utils';
-import type { Checkpoint, FileEntry, Target, TargetKey } from '@warden/shared';
+import type { FileEntry, TargetKey } from '@warden/shared';
 import { formatTargetKey, targetLabel, tryParseTargetKey } from '@warden/shared';
 import { useStore } from '../store';
 import { allDirPaths, buildTree, type DirNode, type TreeNode } from '../lib/tree';
@@ -207,92 +205,6 @@ function TreeBlock({ title, view, files, empty }: { title: string; view: TargetK
   );
 }
 
-function DebugToggle() {
-  const on = useStore((s) => s.prefs.ignoreDebug);
-  const setIgnoreDebug = useStore((s) => s.setIgnoreDebug);
-  return (
-    <label className="side-toggle" title="折叠调试块和标了 nocommit 的行">
-      <Checkbox checked={on} onCheckedChange={() => setIgnoreDebug(!on)} />
-      忽略调试代码
-    </label>
-  );
-}
-
-/** What a checkpoint is called in a list: its number, its time, and why it exists when warden took it. */
-function checkpointName(c: Checkpoint): string {
-  return `#${c.id} · ${checkpointTime(c.createdAt)}`;
-}
-
-/** 14:05 for today, 9/21 14:05 before that. */
-function checkpointTime(iso: string): string {
-  const d = new Date(iso);
-  const hm = d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
-  return d.toDateString() === new Date().toDateString() ? hm : `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
-}
-
-/**
- * A checkpoint is the working tree as it was when the reviewer said "from here": whatever the agent
- * does next, staged, committed or neither, is then one diff against it. In the local views the bar
- * takes one and opens the newest; in a checkpoint's own view it switches between them, and taking
- * one there closes the round and moves on to the new one.
- */
-function CheckpointBar({ target }: { target: Target }) {
-  const checkpoints = useStore((s) => s.checkpoints);
-  const setTarget = useStore((s) => s.setTarget);
-  const createCheckpoint = useStore((s) => s.createCheckpoint);
-  const deleteCheckpoint = useStore((s) => s.deleteCheckpoint);
-  const wt = target.worktree ? { worktree: target.worktree } : {};
-  const open = (id: number) => void setTarget(formatTargetKey({ kind: 'checkpoint', id, ...wt }));
-  const take = (
-    <Button variant="outline" size="sm" onClick={() => void createCheckpoint()} title="记录工作区快照（含未跟踪文件），用于比较后续变更；不写入仓库">
-      新建检查点
-    </Button>
-  );
-
-  if (target.kind === 'checkpoint') {
-    const remove = () => {
-      if (window.confirm(`删除检查点 #${target.id}？`)) void deleteCheckpoint(target.id);
-    };
-    return (
-      <div className="checkpoint-bar">
-        <NativeSelect className="checkpoint-select" aria-label="对比的检查点" value={target.id} onChange={(e) => open(Number(e.target.value))}>
-          {/* Listed before the checkpoints arrive, so the control never reads blank. */}
-          {!checkpoints.some((c) => c.id === target.id) && <option value={target.id}>#{target.id}</option>}
-          {checkpoints.map((c) => (
-            <option key={c.id} value={c.id}>
-              {checkpointName(c)}
-            </option>
-          ))}
-        </NativeSelect>
-        {take}
-        <Button variant="ghost" size="sm" className="link" onClick={remove} title="删除这个检查点">
-          删除
-        </Button>
-      </div>
-    );
-  }
-
-  const newest = checkpoints.at(-1);
-  return (
-    <div className="checkpoint-bar">
-      {newest ? (
-        <Button
-          variant="outline"
-          size="sm"
-          className="checkpoint-open"
-          onClick={() => open(newest.id)}
-          title={`只看检查点 ${checkpointName(newest)} 以后的改动`}
-        >
-          对比检查点 #{newest.id} · {checkpointTime(newest.createdAt)}
-        </Button>
-      ) : (
-        <span className="checkpoint-none">暂无检查点</span>
-      )}
-      {take}
-    </div>
-  );
-}
-
 export function FileTree() {
   const files = useStore((s) => s.files);
   const loading = useStore((s) => s.filesLoading);
@@ -328,12 +240,8 @@ export function FileTree() {
   }
 
   return (
-    <>
-      <DebugToggle />
-      {target?.kind === 'checkpoint' && <CheckpointBar target={target} />}
-      <div className="tree-blocks">
-        <TreeBlock key={scope} title="变更" view={targetKey} files={files} empty={loading ? '加载中…' : '暂无变更'} />
-      </div>
-    </>
+    <div className="tree-blocks">
+      <TreeBlock key={scope} title="变更" view={targetKey} files={files} empty={loading ? '加载中…' : '暂无变更'} />
+    </div>
   );
 }

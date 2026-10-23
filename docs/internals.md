@@ -3,7 +3,7 @@
 Where the review state lives, and what warden will and will not do to the repository.
 
 High-risk operations also create [verified independent backups](backups.md) before changing Git
-history or discarding a checkout. These are separate from review checkpoints and ordinary Git reflogs.
+history or discarding a checkout. These are separate from preview snapshots and ordinary Git reflogs.
 
 ## State
 
@@ -14,8 +14,8 @@ held: one left by a process that died is taken over after 5 s, a slow holder's i
 whose lock was taken over meanwhile writes nothing. A file written by a newer warden is refused
 rather than read as empty; one that is not a state file at all is set aside as `.corrupt-<time>`;
 top-level fields this version does not know are kept when it writes. `schemaVersion` stays 1: every
-warden up to 0.16 replaces a file with any other version by an empty state. Delete the directory to reset. Checkpoint objects live beside it in `checkpoints/objects`;
-deleting a checkpoint leaves them there, since another may share them.
+warden up to 0.16 replaces a file with any other version by an empty state. Delete the directory to reset. Internal snapshot objects live beside it in `checkpoints/objects`. This historical directory name
+is retained because preview and recovery journals can still reference its trees.
 
 `targets` retains opaque historical metadata keyed by the exact comparison. Legacy `viewed` maps
 are discarded on load and removed on the next state write; empty target records are omitted.
@@ -27,8 +27,9 @@ archived plans, never accepted commits. Unrelated notes require explicit import.
 
 Inline comment handling has been removed. Older target fields, linked-note metadata and delivery
 review records are retained as opaque historical data on unrelated writes. They are not moved,
-reanchored or copied into new deliveries. New comparisons create no target state. Checkpoints are
-created explicitly and retain the newest 20 per worktree, without comment-based retention.
+reanchored or copied into new deliveries. New comparisons create no target state. User checkpoint records and the `ignoreDebug` preference
+are retired on load and removed on the next write. Old checkpoint selections migrate to `all` in
+the same workspace. Unrelated historical metadata and internal snapshot objects are retained.
 
 ## Security model
 
@@ -61,9 +62,10 @@ only on a removal the reviewer confirmed after being told what only it holds, an
 still a clone of this repository. Legacy checkout refs change when a branch is made for a checkout (plus its upstream setting when it comes
 from a remote) — undone with `branch -D` should the switch into the slot then fail — or deleted on
 request after a release or removal (`-d`, so only a merged one), and the review state lives outside
-the repository. A checkpoint writes only there: `git add --all [--intent-to-add]` and
+the repository. Internal snapshots write only there: `git add --all` and
 `git write-tree --missing-ok`, with `GIT_INDEX_FILE` and `GIT_OBJECT_DIRECTORY` set to files in
-warden's data directory and no alternates (see [Checkpoints](reviewing.md#checkpoints)).
+Warden's data directory and no alternates. Reads add the repository's objects as alternates;
+writes must not, because Git can freshen alternate objects. `snapshots.ts` owns these operations.
 
 New clone workspaces copy the primary repository's effective `user.name` and `user.email` with
 fixed `git config` writes only when they differ from the clone's inherited defaults. This preserves
@@ -122,7 +124,7 @@ and checkout state. A retry after successful rebase but failed state persistence
 already-incorporated target and repairs bookkeeping without executing rebase hooks again.
 
 `PUT /preview` and the refresh timer snapshot saved primary content and selected workspaces into
-Warden's external checkpoint store. Binary patches compose with `apply --index --3way` in a temporary
+Warden's external snapshot store. Binary patches compose with `apply --index --3way` in a temporary
 independent repository. A persistent independent runtime repository then fetches only that candidate,
 checks its previous ownership tree, applies the old/new patch with `apply --index`, and advances its
 own detached HEAD. Primary files, HEAD and index are not touched. Ignored runtime dependencies and
@@ -143,7 +145,12 @@ files; source mutations make the preview stale. The VS Code workspace extension 
 Hono API in process, registers read-only native review documents, and opens terminals/tasks with the
 preview cwd. Workspace Trust is required. It does not add preview to the editor's workspace roots.
 
-`POST /workflow/changes/:id/prepare` pins a clean source and primary HEAD, composes the undelivered
+`POST /workflow/changes/:id/deliver` validates the message, then prepares and commits under one
+repository lock. The client sends its reviewed source, source boundary and primary HEAD. Preparation
+records the expected composed index fingerprint; commit checks that fingerprint rather than adopting
+a newer index inspection. It preserves the ordinary hooks/signing and recovery journal described below.
+
+`POST /workflow/changes/:id/prepare` remains for recovery and compatibility. It pins a clean source and primary HEAD, composes the undelivered
 range in isolation, and stages only that delivery. Existing primary user edits are rejected without
 being changed. The independent runtime remains available throughout delivery. `update-index --refresh`
 refreshes stat metadata before explicit `apply --index`; preview never refreshes the primary index.
@@ -158,11 +165,11 @@ Preview and delivery patches share the review diff's fixed `a/` and `b/` prefixe
 three context lines and short submodule format, with external diff and textconv disabled. Local
 and global Git display settings cannot redirect delivered paths or replace the file bytes.
 
-`POST /workflow/changes/:id/accept` checks HEAD and the staged binary-diff fingerprint, then runs
+`POST /workflow/changes/:id/accept` checks HEAD and the staged raw-diff fingerprint, then runs
 ordinary `git commit -m` in the primary checkout. Identity, signing and Git hooks are preserved.
 `record` instead records a user-reviewed manual commit pinned by SHA. Both require a single child
 of the prepared parent and clean files. Successful delivery appends a record, preserves the source
-workspace and resumes connections. No `reset`, `clean`, `commit-tree` or hook bypass is used.
+workspace and refreshes connections against the new baseline. No `reset`, `clean`, `commit-tree` or hook bypass is used.
 
 History preview uses isolated `cherry-pick` and message amendments. Applying a validated linear
 candidate requires the same final tree and original HEAD. Only the selected replacement commit

@@ -91,7 +91,7 @@ describe('verified safety backups', () => {
     expect(backup).toMatchObject({ head: originalHead, reason: 'remove' });
     expect(existsSync(slot)).toBe(false);
     const recovered = await recover(backup);
-    // Deleting the original object store proves this is not a checkpoint or hard-linked copy.
+    // Deleting the original object store proves this is not a snapshot or hard-linked copy.
     const object = path.join(backup.path, 'git-common/objects', originalHead.slice(0, 2), originalHead.slice(2));
     expect((await fs.stat(object)).nlink).toBe(1);
     await fx.cleanup();

@@ -8,7 +8,7 @@ import { createApp, resolveRepo, StateStore } from '@warden/server';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
 // The repository's own git config reaches every command warden parses. Each setting here once
-// changed that output: converted text, broken paths, hidden debug markers and fake history rows.
+// changed that output: converted text, broken paths, fake history rows.
 // Read-only review must continue to describe the actual repository content.
 
 let fx: FixtureRepo;
@@ -57,12 +57,6 @@ describe('diffs under a hostile git config', () => {
     const diff = (await (await app.request('/api/targets/all/file?path=new.up')).json()) as FileDiff;
     expect(diff.hunks.flatMap((hunk) => hunk.lines.map((line) => line.content))).toEqual(['hello', 'changed']);
     expect(fx.git('show', ':new.up')).toBe('hello\nworld\n');
-  });
-
-  it('still finds debug markers with color.ui=always and submodule.recurse', async () => {
-    await fx.write('src/b.ts', 'export const b = 2;\nconsole.log(b); // nocommit\n');
-    const entry = (await files('working')).files.find((f) => f.path === 'src/b.ts')!;
-    expect(entry.debugAdditions).toBe(1);
   });
 
   it('lists only commits in the history', async () => {

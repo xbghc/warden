@@ -38,8 +38,7 @@ describe('StateStore', () => {
       repoRoot: '/repo',
       targets: {},
       todos: [],
-      checkpoints: [],
-      prefs: { viewMode: 'unified', autoRefresh: true, ignoreDebug: true },
+      prefs: { viewMode: 'unified', autoRefresh: true },
     });
   });
 
@@ -95,6 +94,34 @@ describe('StateStore', () => {
     expect(saved.prefs.lastPanel).toBe(panel);
     expect(saved.prefs).not.toHaveProperty('lastArea');
   });
+
+  it.each(['checkpoint:1', 'worktree:/repo-1:checkpoint:2'])(
+    'retires checkpoint and debug preferences from %s without losing other data',
+    async (lastTarget) => {
+      const file = path.join(dir, 'state.json');
+      await writeFile(
+        file,
+        JSON.stringify({
+          ...defaultState('/repo'),
+          checkpoints: [{ id: 1, tree: 'old-tree' }],
+          prefs: { viewMode: 'split', ignoreDebug: true, lastTarget },
+          connectionPreview: { tree: 'retained-tree', directory: 'runtime' },
+          futureField: { keep: true },
+          targets: { [lastTarget]: { comments: ['historical'] } },
+        }),
+      );
+      const store = new StateStore(file, '/repo');
+      await store.update(() => {});
+      const saved = JSON.parse(await readFile(file, 'utf8'));
+      expect(saved).not.toHaveProperty('checkpoints');
+      expect(saved.prefs).not.toHaveProperty('ignoreDebug');
+      expect(saved.prefs.lastTarget).toBe(lastTarget.replace(/checkpoint:\d+$/, 'all'));
+      expect(saved.prefs.viewMode).toBe('split');
+      expect(saved.connectionPreview.tree).toBe('retained-tree');
+      expect(saved.futureField).toEqual({ keep: true });
+      expect(saved.targets[lastTarget]).toEqual({ comments: ['historical'] });
+    },
+  );
 
   it('merges concurrent updates from two instances (read-before-write)', async () => {
     const file = path.join(dir, 'state.json');

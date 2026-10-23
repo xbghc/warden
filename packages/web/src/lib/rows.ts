@@ -29,12 +29,7 @@ export type Row =
       hunkIndex: number;
       expanded: boolean;
       block?: Block;
-    }
-  /**
-   * A run of debug lines in a hunk: shut, it stands in for them (`lines`); open, it sits above them
-   * as the way to shut it again. `id` is what the open ones are remembered by.
-   */
-  | { key: string; kind: 'debug'; id: string; hunkIndex: number; lines: DiffLine[]; open: boolean };
+    };
 
 /**
  * The code block a row heads: the lines under it, and how many of them are changes. The header
@@ -173,33 +168,12 @@ export interface BuildRowsInput {
   viewMode: ViewMode;
   expansions: Record<number, Expansion>;
   fullLines: string[] | null;
-  /** Fold runs of debug lines; `openDebug` holds the ids of the runs opened again. */
-  foldDebug?: boolean;
-  openDebug?: ReadonlySet<string>;
   /** Ids of the code blocks shut (`Block.id`). */
   shutBlocks?: ReadonlySet<string>;
 }
 
-/**
- * Splits `items` into runs of debug items and the rest, calling `run` once per debug run and
- * `each` for everything else, in order.
- */
-function foldRuns<T>(items: T[], isDebug: (t: T) => boolean, run: (from: number, to: number) => void, each: (t: T, i: number) => void): void {
-  for (let i = 0; i < items.length; ) {
-    if (!isDebug(items[i]!)) {
-      each(items[i]!, i);
-      i++;
-      continue;
-    }
-    let j = i;
-    while (j < items.length && isDebug(items[j]!)) j++;
-    run(i, j);
-    i = j;
-  }
-}
-
 /** Rows of the diff column, including expanded context and folded blocks. */
-export function buildRows({ diff, viewMode, expansions, fullLines, foldDebug = false, openDebug, shutBlocks }: BuildRowsInput): Row[] {
+export function buildRows({ diff, viewMode, expansions, fullLines, shutBlocks }: BuildRowsInput): Row[] {
   const rows: Row[] = [];
   const canExpand = diff.status !== 'deleted' && diff.status !== 'added' && !diff.binary;
   const gaps = canExpand ? computeGaps(diff, fullLines ? fullLines.length : null) : [];
@@ -209,11 +183,9 @@ export function buildRows({ diff, viewMode, expansions, fullLines, foldDebug = f
       items: T[],
       text: (t: T) => string,
       head: (t: T) => DiffLine,
-      isDebug: (t: T) => boolean,
       shows: (t: T) => DiffLine[],
       emit: (t: T, i: number, block?: Block) => void,
     ) => {
-      // Shut code blocks first: what they hide is gone before debug runs are looked for.
       const ends = blockEnds(items.map(text));
       const visible: { item: T; i: number; block?: Block }[] = [];
       let hideUntil = -1;
@@ -233,18 +205,9 @@ export function buildRows({ diff, viewMode, expansions, fullLines, foldDebug = f
         const dels = inside.filter((l) => l.type === 'del').length;
         visible.push({ item, i, block: { id, open, lines: inside, adds, dels } });
       });
-      const put = (v: (typeof visible)[number]) => emit(v.item, v.i, v.block);
-      if (!foldDebug || expanded) {
-        visible.forEach(put);
-        return;
-      }
-      const run = (from: number, to: number) => {
-        const id = `${hunkIndex}:${visible[from]!.i}`;
-        const open = !!openDebug?.has(id);
-        rows.push({ key: `d:${id}`, kind: 'debug', id, hunkIndex, lines: visible.slice(from, to).flatMap((v) => shows(v.item)), open });
-        if (open) visible.slice(from, to).forEach(put);
-      };
-      foldRuns(visible, (v) => isDebug(v.item), run, put);
+      visible.forEach((v) => {
+        emit(v.item, v.i, v.block);
+      });
     };
     if (viewMode === 'unified') {
       const emit = (l: DiffLine, _i: number, block?: Block) => {
@@ -261,7 +224,6 @@ export function buildRows({ diff, viewMode, expansions, fullLines, foldDebug = f
         lines,
         (l) => l.content,
         (l) => l,
-        (l) => !!l.debug,
         (l) => [l],
         emit,
       );
@@ -282,10 +244,8 @@ export function buildRows({ diff, viewMode, expansions, fullLines, foldDebug = f
       // The new side is what the code now reads as; a deletion with nothing across from it is
       // judged by what it was.
       const side = (p: Pair) => (p.right ?? p.left)!;
-      // A pair folds when every line in it is debug code: half of a replacement stays in view.
-      const debugPair = (p: Pair) => (!p.left || !!p.left.debug) && (!p.right || !!p.right.debug);
       const shows = (p: Pair) => (p.left === p.right ? [p.left!] : [p.left, p.right].filter((l): l is DiffLine => !!l));
-      withFolds(pairs, (p) => side(p).content, side, debugPair, shows, emit);
+      withFolds(pairs, (p) => side(p).content, side, shows, emit);
     }
   };
 
@@ -310,14 +270,12 @@ export function buildRows({ diff, viewMode, expansions, fullLines, foldDebug = f
 }
 
 /**
- * Index of the row that shows `line` on `side` — or, when a fold hides it, of the shut debug fold
- * or the head of the shut code block that holds it — or -1.
+ * Index of the row showing `line` on `side`, its enclosing shut code block, or -1.
  */
 export function findRowIndex(rows: Row[], side: DiffSide, line: number): number {
   return rows.findIndex((r) => {
     if (r.kind === 'line') return (side === 'new' ? r.line.newLineNo === line : r.line.oldLineNo === line) || hides(r.block, side, line);
     if (r.kind === 'pair') return (side === 'new' ? r.right?.newLineNo === line : r.left?.oldLineNo === line) || hides(r.block, side, line);
-    if (r.kind === 'debug') return !r.open && holds(r.lines, side, line);
     return false;
   });
 }

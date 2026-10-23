@@ -20,13 +20,6 @@ describe('target keys', () => {
     expect(() => parseTargetKey('base:-x')).toThrow(TargetKeyError);
     expect(() => parseTargetKey('base:a..b')).toThrow(TargetKeyError);
   });
-  it('parses checkpoint comparisons', () => {
-    expect(parseTargetKey('checkpoint:3')).toEqual({ kind: 'checkpoint', id: 3 });
-    expect(parseTargetKey('worktree:/p/a:b:checkpoint:12')).toEqual({ kind: 'checkpoint', id: 12, worktree: '/p/a:b' });
-    for (const bad of ['checkpoint:', 'checkpoint:0', 'checkpoint:01', 'checkpoint:-1', 'checkpoint:1.5', 'checkpoint:x', 'worktree:/p:checkpoint:x'])
-      expect(() => parseTargetKey(bad)).toThrow(TargetKeyError);
-    expect(targetLabel(parseTargetKey('worktree:/p/wt:checkpoint:2'))).toBe('[wt] Checkpoint #2');
-  });
   it('parses worktree variants including paths with colons', () => {
     expect(parseTargetKey('worktree:/home/u/wt:working')).toEqual({ kind: 'working', worktree: '/home/u/wt' });
     expect(parseTargetKey('worktree:/home/u/a:b/wt:range:main..dev')).toEqual({
@@ -41,7 +34,7 @@ describe('target keys', () => {
   it.each([String.raw`C:\Workspaces\中文 project`, 'D:/Workspaces/project', String.raw`\\server\share\project`])(
     'round-trips every target kind for the Windows absolute path %s',
     (worktree) => {
-      for (const suffix of ['working', 'staged', 'all', 'commit:abc123', 'range:main..HEAD', 'base:main', 'checkpoint:1']) {
+      for (const suffix of ['working', 'staged', 'all', 'commit:abc123', 'range:main..HEAD', 'base:main']) {
         const key = `worktree:${worktree}:${suffix}`;
         expect(parseTargetKey(key).worktree).toBe(worktree);
         expect(formatTargetKey(parseTargetKey(key))).toBe(key);
@@ -72,8 +65,6 @@ describe('target keys', () => {
       'worktree:/p/q:staged',
       'worktree:/p/q:range:x..y',
       'worktree:/p/q:base:origin/main',
-      'checkpoint:7',
-      'worktree:/p/q:checkpoint:7',
     ]) {
       expect(formatTargetKey(parseTargetKey(key))).toBe(key);
     }

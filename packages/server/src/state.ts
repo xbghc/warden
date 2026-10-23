@@ -2,7 +2,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, rename, stat, unlink, utimes } from 'node:fs/promises';
-import type { Checkpoint, Prefs, ReviewState } from '@warden/shared';
+import type { Prefs, ReviewState } from '@warden/shared';
 import { sha1 } from './hash.js';
 import { HttpError } from './errors.js';
 
@@ -21,20 +21,15 @@ export function stateFilePath(repoRoot: string, baseDir = dataDir()): string {
 }
 
 export function defaultPrefs(): Prefs {
-  return { viewMode: 'unified', autoRefresh: true, ignoreDebug: true };
+  return { viewMode: 'unified', autoRefresh: true };
 }
 
 export function defaultState(repoRoot: string): ReviewState {
-  return { schemaVersion: 1, repoRoot, targets: {}, todos: [], checkpoints: [], prefs: defaultPrefs() };
+  return { schemaVersion: 1, repoRoot, targets: {}, todos: [], prefs: defaultPrefs() };
 }
 
 /** The fields the rest of the server dereferences without checking; anything else is a corrupt row. */
 const usable = (v: unknown): boolean => !!v && typeof v === 'object' && typeof (v as { id?: unknown }).id === 'string';
-const usableCheckpoint = (v: unknown): boolean => {
-  const c = v as Partial<Checkpoint> | null;
-  return !!c && typeof c === 'object' && Number.isInteger(c.id) && typeof c.tree === 'string' && (c.worktree === undefined || typeof c.worktree === 'string');
-};
-
 /**
  * The schema this build reads and writes. It must stay 1: every warden up to 0.16 replaces a file
  * with any other version by an empty state on its next write, so bumping it would let an older copy
@@ -70,14 +65,16 @@ function normalise(raw: unknown, repoRoot: string, file: string): ReviewState {
   }
   // Older builds remembered a separate review area. Fold it into the content destination and
   // leave the selected target intact; there is no longer an extra mode to enter before reading.
-  const { lastArea, ...prefs } = (r.prefs ?? {}) as Partial<Prefs> & { lastArea?: unknown };
+  const { lastArea, ignoreDebug: _ignoreDebug, ...prefs } = (r.prefs ?? {}) as Partial<Prefs> & { lastArea?: unknown; ignoreDebug?: unknown };
+  if (typeof prefs.lastTarget === 'string' && /(?:^|:)checkpoint:\d+$/.test(prefs.lastTarget)) {
+    prefs.lastTarget = prefs.lastTarget.replace(/checkpoint:\d+$/, 'all');
+  }
   const state: ReviewState = {
     ...extra,
     schemaVersion: SCHEMA_VERSION,
     repoRoot: r.repoRoot ?? repoRoot,
     targets,
     todos: Array.isArray(r.todos) ? r.todos.filter(usable) : [],
-    checkpoints: Array.isArray(r.checkpoints) ? r.checkpoints.filter(usableCheckpoint) : [],
     prefs: {
       ...defaultPrefs(),
       ...prefs,
@@ -90,7 +87,6 @@ function normalise(raw: unknown, repoRoot: string, file: string): ReviewState {
       slotKind: undefined,
       ...(r.prefs?.slotKind === 'clone' || r.prefs?.slotKind === 'worktree' ? { slotKind: r.prefs.slotKind } : {}),
       autoRefresh: typeof r.prefs?.autoRefresh === 'boolean' ? r.prefs.autoRefresh : true,
-      ignoreDebug: typeof r.prefs?.ignoreDebug === 'boolean' ? r.prefs.ignoreDebug : true,
     },
   };
   migrateTodoPlans(state);
@@ -278,12 +274,11 @@ export class StateStore {
   }
 }
 
-/** A reused slot drops historical target metadata and checkpoint baselines. */
+/** A reused slot drops historical target metadata. */
 export function forgetWorktreeTargets(state: ReviewState, worktreePath: string): void {
   const prefix = `worktree:${worktreePath}:`;
   for (const key of Object.keys(state.targets)) {
     if (!key.startsWith(prefix)) continue;
     delete state.targets[key];
   }
-  state.checkpoints = state.checkpoints.filter((c) => c.worktree !== worktreePath);
 }

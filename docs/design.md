@@ -1,13 +1,8 @@
 # Warden page design
 
-The browser layouts below are retained for compatibility. The current primary/preview directory
-boundary and native extension workflow are defined in [Workflow](workflow.md) and [VS Code](vscode.md);
-they supersede references here to composing into primary or building a new preview diff view.
-
-
-Status: interaction design, updated 2026-10-20. The new page is implemented in the working copy.
-The [workflow](workflow.md) owns agreed behavior; [first-version boundaries](#first-version-boundaries-and-explicit-exclusions)
-record the implementation choices. Original wireframes describe intent rather than exact labels.
+The browser and native VS Code extension share the [workflow](workflow.md). Human editing uses
+primary; runtime composition uses the independent preview directory. The new page is implemented.
+Wireframes describe intent rather than exact labels. Updated 2026-10-23.
 
 ## Design method
 
@@ -27,7 +22,7 @@ These rules apply across navigation, task review, preview, history, synchronizat
 shared review controls. The wireframes below describe workflows, not required literal strings.
 
 - Give each fact one primary location. Delivery counts belong to the delivery disclosure; file
-  progress belongs to the file-list heading. Remove duplicate summaries, subtitle explanations
+  count belongs to the file-list heading. Remove duplicate summaries, subtitle explanations
   of the page title and notes that merely restate the adjacent action.
 - Use nouns for headings and verbs for actions. Within an identified object, shorten labels to
   the needed distinction: **说明**, **起点**, **调整历史**. Keep destinations on actions
@@ -41,8 +36,7 @@ shared review controls. The wireframes below describe workflows, not required li
 - Empty states give one next step or a short fact, such as **请选择任务** or **暂无变更**. Loading,
   unavailable data, stale checks and empty results are distinct; do not turn unknown data into
   a zero count or claim successful synchronization before it runs.
-- State operation consequences once, beside the relevant action. Keep temporary removal of
-  connected previews during preparation, normal commit hooks, rebase semantics, history rewriting
+- State operation consequences once, beside the relevant action. Keep normal commit hooks, recovery after failure, rebase semantics, history rewriting
   and no automatic push explicit. Preserve failure reasons, conflicting paths and recovery steps.
   Product philosophy and internal allocation mechanics belong in documentation.
 - Toasts report the outcome, not a second description of the workflow. **已复制** does not repeat
@@ -65,7 +59,7 @@ interaction checks must continue to find controls by their accessible names afte
 The selected primary development branch is the current context. The only global navigation area
 is on the left, with three kinds of content:
 
-- **主目录预览**: the current combination, last successful update, refresh action and conflict feedback.
+- **预览**: the current combination, last successful update, refresh action and conflict feedback.
 - **提交历史**: accepted commits, message edits and history-arrangement drafts.
 - **工作区**: an ordered task list with connection switches; each item directly opens its workspace, commands and diff.
 
@@ -80,7 +74,7 @@ There is no separate review mode, allocation dashboard or delivery center.
 │ feature/order     ⋯  │ No second workspace picker or global page tabs     │
 │ /project             │                                                     │
 │                      │                                                     │
-│ 主目录预览         2 │                                                     │
+│ 预览         2 │                                                     │
 │ 提交历史             │                                                     │
 │                      │                                                     │
 │ 工作区            ＋ │                                                     │
@@ -141,9 +135,9 @@ After creation, the same task detail becomes the working surface:
 src/api/orders.ts      M  │
 src/types/order.ts     M  │   - 原内容
 src/api/filter.ts      A  │   + 新内容
-                          │                            [添加评论]
+                          │                            [复制位置]
 ────────────────────────────────────────────────────────────────
-相对于已记录交付的未交付变化                             [合入…]
+相对于已记录交付的未交付变化                             [提交到主开发分支…]
 ```
 
 Warden creates the workspace and runs any configured creation/reuse hook. Agent launch, prompt
@@ -153,22 +147,22 @@ terminal controls or agent-session state.
 Show a hook's output and exit code. Distinguish “工作区已创建；hook 退出码 1” from workspace
 creation failing. Retrying a hook is explicit; do not roll back arbitrary user-script modifications.
 
-## Compose the primary-directory preview
+## Compose the independent preview
 
 The left **工作区** list is the one place to manage workspace connections. Each allocated task
-has a switch for connecting to the primary directory, available while viewing preview, history or
+has a switch for connecting to the independent preview, available while viewing preview, history or
 task details. Unallocated plans have no connection switch. Selecting a task still opens its review;
 changing its connection does not change the selected task or plan order.
 
-“主目录预览” shows the current combination, primary path, last successful update, refresh action
+“预览” shows the current combination, runtime path, last successful update, refresh action
 and errors or conflicting paths. It has no duplicate workspace table or preview-file list; file
 review belongs to the selected workspace.
 
 ```text
-主目录预览                                            /project
+预览                                    /warden-data/preview
 主开发分支：feature/order
 
-主目录当前呈现：订单接口 + 表单校验
+预览目录当前呈现：订单接口 + 表单校验
 最近成功更新：10:42:16
 ```
 
@@ -190,12 +184,12 @@ Other proposed behavior, including later updates to an already established conne
   mark its content stale. Show the last successfully presented snapshot and affected files.
 - Two workspaces touching one file do not automatically conflict. Show the composition result,
   including unknown or failed checks.
-- Preserve unexpected primary-directory edits and pause writes that could overwrite them. Name the
+- Preserve unexpected preview-directory edits and pause writes that could overwrite them. Name the
   affected files. Dependencies, ignored files and the user's running processes are not contributions.
 
 ```text
 预览未更新
-主目录仍呈现 10:42:16 的组合。
+预览目录仍呈现 10:42:16 的组合。
 
 表单校验的新变化与订单接口冲突：
 src/types/order.ts
@@ -203,9 +197,10 @@ src/types/order.ts
 [重新检查]
 ```
 
-The page neither edits code nor encourages fixes in the primary directory. Users run their own
-dev server, lint and tests there, and fix code in the responsible worktree. Connection health cannot
-establish that tests passed. The synchronization mechanism remains undecided.
+Human code is edited in primary and agent code in task workspaces. Users run dev servers, lint
+and tests in preview. Saved primary content forms the baseline; content-based observation and
+debouncing update each workspace’s synchronization status. Connection health cannot establish that
+tests passed. Preview files are generated and cannot be edited through Warden.
 
 ## Selecting a file is review
 
@@ -240,48 +235,21 @@ previews continue to include uncommitted edits. `sourceBase` records the last de
 
 ## Integrate a reviewed delivery
 
-“合入…” opens the operation's scope and controls within the current task context. It is not a
-new task phase, a separate delivery destination or a mandatory approval ceremony.
+“提交到主开发分支…” opens a message field and identifies the complete small delivery. The source
+commit, delivery boundary and primary HEAD are fixed by the review. Background refresh cannot
+silently move this version; changes require refreshing the comparison and reviewing the full range.
+No read markers, checkpoints, test-passed checkboxes or agent-idle declarations are required.
 
-```text
-合入订单接口
+Submitting the message composes and commits the reviewed increment in one action. Canceling before
+submission leaves Git untouched. Other connections remain in the independent preview, where tests
+and dev servers keep running. Unrelated primary edits or Git operations block delivery and are
+preserved. Warden does not stage them into the task’s commit.
 
-目标分支       feature/order
-已记录交付     A1
-本次范围       未交付的变化 · 4 个文件
-
-主目录当前连接：订单接口、表单校验
-执行时，主目录将只呈现本次交付与主开发分支；
-表单校验的预览贡献将暂时移除。
-
-[取消]                                            [执行合入]
-```
-
-**Agreed:** Warden supports committing directly from its Web page, with a commit-message field and
-a user-triggered commit action that runs normal Git hooks. Terminal use must not be required to
-complete the ordinary Web flow. The placement and labels of the scope panel remain proposals. Do
-not turn opening it into a readiness state or add a second confirmation just to satisfy the tool.
-No “已测试通过”, “已审查” or “agent 已停止” declaration is required. Revision checks guard the actual
-operation from silently using a different source or destination.
-
-Proposed operation feedback:
-
-1. Isolate the reviewed contribution from other connections and pause preview writes into the
-   commit preparation. Show why the primary directory no longer contains the full combination.
-2. Name unrelated local edits, unfinished Git operations or changed source that block the action.
-   Do not clean or overwrite them.
-3. Users test in the primary directory themselves. Warden adds no test runner or test gate.
-4. Ordinary Git commit hooks run. Show failure and preserve work for the user's next action.
-5. Success records this delivery; the task workspace remains available for A2 and A3.
-6. Preserve the intended connection set. Recheck before restoring the combination and report the
-   actual result. A failed preview restore must not obscure the successful commit or overwrite
-   primary-directory changes made meanwhile.
-
-The proposed page flow shows the isolated delivery, its commit message and “提交到主开发分支”. The
-user chooses commit timing and can run tests in the primary directory themselves. A failed hook
-leaves the prepared content available and shows the error for retry. Whether source commits are
-required is still open; it is separate from the now-settled Web commit capability. Squash preparation
-alone is not a recorded delivery. A terminal commit remains ordinary Git usage, not a prerequisite.
+Preparation is journaled internally. A failed hook or interrupted operation leaves its contents
+available, with the error and a recovery action. Recovery reviews the retained index fingerprint
+or exact manual commit before accepting it. Successful commit advances the baseline and records
+the delivery; the task workspace remains available for A2 and A3. Preview update failure is reported
+separately and cannot turn a successful commit into an apparent failed delivery.
 
 ## Check automatically; rebase on request
 
@@ -365,7 +333,7 @@ This draft adds no embedded conflict editor. Users can revise the arrangement an
 the external conflict-resolution interaction is still open.
 
 For a valid preview, “应用到 feature/order” requires the same branch revision,
-isolation from connected preview files and application of exactly the reviewed candidate. If B2
+a clean primary checkout and application of exactly the reviewed candidate. If B2
 arrived while the draft was open, retain the draft and expose its stale basis:
 
 ```text
@@ -383,7 +351,7 @@ application, they arrange the current history or edit its messages again. Do not
 picker, rollback action or undo timeline. Discarding an unapplied draft remains possible because it
 has not changed Git history. A failed preview leaves the original history intact.
 
-Reapplying temporary connections after a commit remains part of preview behavior; it does not undo
+Updating the independent preview after a commit remains part of preview behavior; it does not undo
 the commit or require a new user-maintained task state. Handling interrupted Git operations must
 report the actual state and preserve work, without becoming a history-undo product feature.
 
@@ -446,7 +414,7 @@ rows wrap without hiding selection, uncertainty or errors.
 The implementation follows these bounded choices:
 
 1. Later connection conflicts preserve the last coherent preview and mark it stale. Unexpected
-   primary-directory edits block replacement; the user handles them before reconnecting.
+   preview-directory edits block replacement; saved primary edits are baseline inputs.
 2. Each delivery includes all undelivered changes from a clean committed source. Delivery records
    preserve source boundaries independently of squash/rewrite SHAs. There is no subset picker.
 3. The page creates the primary commit with ordinary Git hooks. No terminal-only commit requirement.
@@ -455,16 +423,16 @@ The implementation follows these bounded choices:
 5. Rebase checks run in independent temporary repositories; explicit execution leaves actual
    conflicts for manual handling. Batch results are per workspace.
 6. The Git mechanism remains an internal server module. No separate repository or Git library has
-   been introduced. Backup refs and operation journals support interrupted operations, not undo UI.
+   been introduced. External backups and operation journals support interrupted operations, not undo UI.
 
 Do not add task branching, dependency scheduling, completion declarations, agent-specific SDKs,
-editor integration, default dependency installation, test gates, automatic rebase/stash/recycling,
+ACP integration, default dependency installation, test gates, automatic rebase/stash/recycling,
 history undo/restore, automatic force-push or general project management.
 
 ## Design review
 
-Centralized connection control requires visiting “主目录预览”, but gives one trustworthy explanation
-of the combination. The plan list opens work directly without planning/allocation/review/delivery
+Connection switches in the navigation stay available from every page. “预览” explains the
+current combination and runtime path. The plan list opens work directly without planning/allocation/review/delivery
 navigation layers.
 
 The proposal keeps these operations independent:
@@ -478,7 +446,7 @@ The proposal keeps these operations independent:
 
 Remaining complexity explains real operations: stale preview content, source ranges, replay conflicts
 and previewed history edits. It must not become extra lifecycle bookkeeping. Implementation and
-browser validation remain paused; the document is the reviewable design result.
+browser verification follow these boundaries.
 
 ## Research references
 

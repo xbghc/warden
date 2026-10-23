@@ -18,13 +18,17 @@ the total number of changed files; layout controls use icons with accessible lab
 The same [interface copy rules](design.md#interface-copy) apply to preview, history, synchronization
 and settings. Operational consequences and recovery instructions stay beside their actions.
 
-The task page is read-only for source files. Preparation
-isolates this delivery in the primary index; the page supports a message and ordinary Git commit
-with hooks. No validation checkbox or readiness declaration is required. Failed hooks preserve
+The task page is read-only for source files. Enter a message and choose **提交到主开发分支**
+to deliver the complete reviewed increment with ordinary Git hooks. Preparation is internal to that
+action, with recovery controls shown only when interrupted. No validation checkbox or readiness declaration is required. Failed hooks preserve
 files; successful delivery preserves the workspace. See [Squash acceptance](worktrees.md#squash-acceptance).
 
 The read-only target APIs below underpin diff rendering.
-Checkpoint APIs remain available; the task page uses its delivery baseline for review.
+Task review pins the source commit, delivery boundary and primary HEAD. Background refresh does
+not advance a committed comparison. If any version changes, refresh the task review and inspect the
+complete new delivery. VS Code closes the task’s older diff tabs when a newer review version opens.
+Recovery review pins the primary HEAD and index fingerprint, or the exact manual commit.
+These checks bind content versions; they do not count viewed files or certify a completed review.
 
 ## Targets (what is being reviewed)
 
@@ -39,8 +43,6 @@ Checkpoint APIs remain available; the task page uses its delivery baseline for r
 | Worktree, working tree | `worktree:<path>:working` | same, run inside the worktree |
 | Worktree, branch vs base | `worktree:<path>:range:<base>..<head>` | same, run inside the worktree |
 | Worktree, everything since base | `worktree:<path>:base:<ref>` | same, run inside the worktree |
-| Working tree since a checkpoint (incl. untracked) | `checkpoint:<n>` | `git diff <checkpoint tree>`, see [Checkpoints](#checkpoints) |
-| Worktree, since one of its checkpoints | `worktree:<path>:checkpoint:<n>` | same, run inside the worktree |
 
 Refs accept anything git can resolve (`main`, `v1.2`, `HEAD~3`, a sha). `@` is `HEAD`.
 Worktrees are discovered with `git worktree list`, and clone slots beside the main worktree (see
@@ -48,11 +50,11 @@ Worktrees are discovered with `git worktree list`, and clone slots beside the ma
 state of the main repository.
 One whose directory is gone (git lists it as *prunable*) is not offered, and a remembered target
 inside a removed worktree falls back to the working tree on the next load. Reusing a slot for another
-branch clears its historical target metadata and checkpoints.
+branch clears its historical target metadata.
 
-Navigation stays together in the left sidebar: *主目录预览*, *提交历史*, ordered tasks and the
+Navigation stays together in the left sidebar: *预览*, *提交历史*, ordered tasks and the
 synchronization/settings sheets. Within a task, its file list selects the diff directly. Connection
-selection is independent and belongs to the primary preview page.
+selection is independent and belongs to the independent preview page.
 
 Review presents the complete file list for the current comparison. Staging does not establish that
 a file has been reviewed.
@@ -83,60 +85,27 @@ legacy `POST /api/targets/:key/stage` endpoint have been removed; requests to th
 that content has been read. Formal delivery still prepares and commits the selected delivery in
 the primary checkout using the normal Git index and commit hooks.
 
-## Debug code
+## Complete delivery content
 
-Code written to poke at a problem and not meant to be committed can be marked in a comment. There is no
-single convention for this, so warden takes the ones in use, in any comment syntax (`//`, `/*`, `#`,
-`--`, `<!--`, `;`, `%`) and any case, as long as the marker opens the comment:
+Warden recommends small deliveries that can be reviewed in full. An accepted commit advances the
+primary baseline; the next delivery excludes the previous one. There is no “since I last looked”
+checkpoint comparison. Checkpoint routes return 404 and checkpoint target keys are unsupported.
+Old checkpoint selections migrate to the full working-tree comparison in the same workspace.
+Internal snapshots still support preview composition and recovery; they are not review controls.
 
-- a block between `debug:start` and `debug:end`, or `develblock:start` and `develblock:end` (the
-  webpack-strip-block / gulp-strip-block spelling); markers included, blocks nest, and a block left
-  open runs to the end of the file;
-- a single line tagged `nocommit`, `no-commit` or `do not commit` (optionally `@nocommit` / `!nocommit`),
-  the tag the usual pre-commit hooks look for.
-
-With *忽略调试代码* enabled (the default), runs of debug lines fold into one striped row that opens
-with a click. Folding changes presentation only: it
-does not filter delivery content, modify the index or count a file as reviewed.
-
-A hunk rarely shows the marker that opened the block its lines sit in, so warden reads both sides of a
-file whole — only for the files `git grep` finds a marker in. Marker detection is textual: a marker
-inside a string literal that follows a comment leader counts too.
-
-## Checkpoints
-
-An agent works in rounds, and after the first one the question is no longer "what is uncommitted"
-but "what did it do since I last looked". The working tree answers that only while the agent
-neither stages nor commits, and a `base` target shows the whole branch every time. A checkpoint is
-the working tree noted at the moment you choose, and `checkpoint:<n>` is one diff from it to the
-working tree now — whatever was staged or committed in between does not show, only what changed.
-
-- *新建检查点*, in the local review controls, takes one: tracked and untracked files as they are
-  on disk, ignored ones left out. *对比检查点 #n* beside it opens the newest. A checkpoint of a working
-  tree that has not changed since the newest one is not taken twice; that one is handed back.
-- In a checkpoint's view the picker reads *检查点 #n*, and the checkpoint toolbar switches to another
-  checkpoint, takes a new one — the round is over, so the view moves on to it, empty — or deletes
-  the one in front after asking.
-- Checkpoints are numbered per worktree. Each worktree retains its newest 20; older checkpoints
-  are dropped. Reusing a slot for another branch clears its checkpoints.
-
-Nothing of this is written to the repository. The snapshot is `git add --all` plus
-`git write-tree` run against a copy of the index kept in warden's data directory, with
-`GIT_OBJECT_DIRECTORY` pointing there too, so the tree and every blob git hashes for it land beside
-the state file; files the index already has right are not hashed again, so taking one costs about
-what changed. A diff runs `git diff <tree>` under another throwaway copy of the index with the
-untracked files added as intent-to-add (which hashes nothing), reading the repository's objects
-through `GIT_ALTERNATE_OBJECT_DIRECTORIES`. The alternates are only ever set for reads: git refreshes
-the mtime of an object it finds in one while writing, and that would be a write to `.git`. Clean
-filters configured for the repository run as they do for any `git add` (Git LFS keeps its cache in
-`.git/lfs`).
+Mock code is edited in primary alongside other human code. Content already incorporated by a task
+belongs to its baseline. Uncommitted primary edits block task delivery until the user handles them.
+Comments such as `debug:start`, `debug:end` and `nocommit` have no special meaning to Warden:
+all changed lines remain ordinary review and delivery content. Context expansion and manual code
+folding remain available.
 
 ## Auto-refresh
 
 warden polls the worktree every 1.5 s while the page is open (`git status --porcelain
 --untracked-files=all`, HEAD, the branch name, plus mtime and size of the paths status reports — enough to notice a second edit to an
 already-modified file) and pushes a change event over `GET /api/events` (SSE). The page then re-runs
-the normal refresh: reload the file list and the open diff. The current view and current file
+the normal refresh for the selected comparison: reload its file list and open diff. A committed
+task comparison stays pinned until its explicit refresh action. The current view and current file
 are left alone, and the diff is scrolled back to where you were reading.
 Turn it off with the *自动* toggle next to the refresh button; `r` still
 refreshes by hand.

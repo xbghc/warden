@@ -52,8 +52,8 @@ export class GitError extends HttpError {
 /**
  * Points git at warden's own object store instead of the repository's for one command. New objects
  * land in `objects`, the repository's are still read through `alternates`, and `index`, when given,
- * stands in for the real index. This is how checkpoints are taken and read without the repository
- * seeing any of it (see checkpoints.ts).
+ * stands in for the real index. This is how snapshots are taken and read without the repository
+ * seeing any of it (see snapshots.ts).
  */
 export interface SnapshotEnv {
   objects: string;
@@ -253,12 +253,12 @@ export async function runGitWrite(args: readonly string[], opts: { cwd: string; 
 export const LONG_GIT_TIMEOUT_MS = 10 * 60_000;
 
 /**
- * The writes a checkpoint needs, and nothing else: `add --all` (with `--intent-to-add` for a diff)
+ * The writes a snapshot needs, and nothing else: `add --all` (with `--intent-to-add` for a diff)
  * and `write-tree --missing-ok`, always into an index and an object directory of warden's own. No
  * alternates are set here, deliberately: git "freshens" an object it finds in one — touches its
  * mtime — so the repository's objects would be written after all. Without them the entries git
  * does not re-hash point at objects this store lacks, which `--missing-ok` allows; reads of the
- * tree pass the alternates (see `SnapshotEnv`). Only checkpoints.ts calls it, with fixed arguments.
+ * tree pass the alternates (see `SnapshotEnv`). Only snapshots.ts calls it, with fixed arguments.
  */
 export async function runGitSnapshot(args: readonly string[], opts: { cwd: string; objects: string; index: string; timeoutMs?: number }): Promise<GitResult> {
   const allowed =

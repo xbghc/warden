@@ -773,25 +773,6 @@ kbd {
 .gap-row .link {
   color: var(--muted-foreground);
 }
-/* Debug code folded out of the way: quiet, like a gap, but striped so it never reads as one. */
-.row.debug-row {
-  background: repeating-linear-gradient(-45deg, var(--surface-2) 0 6px, var(--surface) 6px 12px);
-  border-top: 1px dashed var(--line-strong);
-  border-bottom: 1px dashed var(--line-strong);
-  padding: 2px 0 2px 60px;
-  font-family: var(--sans);
-  font-size: 12px;
-}
-.row.debug-row.open {
-  border-bottom-style: none;
-}
-.debug-row .link {
-  color: var(--muted-foreground);
-  text-decoration: none;
-}
-.debug-row .link:hover {
-  color: var(--ink);
-}
 .gut {
   flex: 0 0 48px;
   text-align: right;
@@ -1800,34 +1781,6 @@ button.link.danger:has(> .action-icon):hover:not(:disabled) {
   font-size: var(--t-meta);
   cursor: pointer;
 }
-.checkpoint-bar {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 12px 10px;
-  color: var(--ink-2);
-  font-size: var(--t-meta);
-}
-.checkpoint-bar button,
-.checkpoint-select {
-  font-size: var(--t-meta);
-}
-.checkpoint-open,
-.checkpoint-select,
-.checkpoint-none {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.checkpoint-open {
-  text-align: left;
-}
-.checkpoint-none {
-  color: var(--muted-foreground);
-}
 .block-file-count {
   padding: 0 6px;
   border: 1px solid var(--line);
@@ -1936,9 +1889,6 @@ button.link.danger:has(> .action-icon):hover:not(:disabled) {
 .field > [data-slot="native-select-wrapper"],
 .nav-field > [data-slot="native-select-wrapper"] {
   width: 100%;
-}
-.checkpoint-bar > [data-slot="native-select-wrapper"] {
-  flex: 1;
 }
 .check,
 .side-toggle {

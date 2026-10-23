@@ -78,10 +78,6 @@ export async function setupWorkspaceStore() {
       await setTarget(key, options);
       useStore.setState({ files: [file] });
     }),
-    loadCheckpoints: fn(async () => {}),
-    createCheckpoint: fn(async () => {
-      useStore.getState().showToast('预览：已记录当前工作区');
-    }),
   }));
   return cleanup;
 }

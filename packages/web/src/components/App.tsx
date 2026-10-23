@@ -94,8 +94,11 @@ export function App() {
       const store = useStore.getState();
       if (event.key === 'r') {
         event.preventDefault();
-        void store.refresh();
-        void useWorkflow.getState().refresh();
+        if (useWorkbench.getState().view === 'task') window.dispatchEvent(new Event('warden:refresh-review'));
+        else {
+          void store.refresh();
+          void useWorkflow.getState().refresh();
+        }
         void useWorkbenchData.getState().refresh();
       }
       if (useWorkbench.getState().view !== 'task') return;

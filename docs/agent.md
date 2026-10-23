@@ -13,8 +13,8 @@ Plan and order small changes in the left navigation. Allocate a workspace when n
 its task brief to the assigned agent. The brief includes the task title, goal, acceptance notes,
 assignment, workspace path, development branch and development instructions.
 
-Copying a brief only writes text to the clipboard. It does not launch an agent, update review state
-or take a checkpoint. Review feedback is exchanged through the user's own tools. Click a diff line
+Copying a brief only writes text to the clipboard. It does not launch an agent or update review state.
+Review feedback is exchanged through the user's own tools. Click a diff line
 number to copy its location; Shift-click extends the copied range on the same side.
 
 Inline comments, comment exports and the `warden feedback` / `warden reply` commands have been

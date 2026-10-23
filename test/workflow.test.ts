@@ -81,6 +81,66 @@ const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 const shellCheckout = (cwd: string) => shellQuote(fx.git('-C', cwd, 'rev-parse', '--show-toplevel').trim());
 
 describe('requirement development workflow', () => {
+  it('delivers one reviewed increment in one action and advances its baseline', async () => {
+    const change = await task('Small delivery', 'clone');
+    await commit(change);
+    const sourceHead = gitAt(change, 'rev-parse', 'HEAD');
+    const delivered = await workflow.deliver(change.id, {
+      sourceHead,
+      sourceBase: change.base,
+      developmentHead: change.base,
+      message: 'Deliver reviewed content',
+    });
+    expect(delivered.status).toBe('working');
+    expect(delivered.integration).toBeUndefined();
+    expect(delivered.sourceBase).toBe(sourceHead);
+    expect(delivered.deliveries).toHaveLength(1);
+    expect(fx.git('log', '-1', '--format=%s').trim()).toBe('Deliver reviewed content');
+    expect(fx.git('status', '--porcelain')).toBe('');
+    expect(() => fx.git('cat-file', '-e', sourceHead)).toThrow();
+  });
+
+  it('rejects stale source, baseline and primary versions without staging anything', async () => {
+    const change = await task('Pinned delivery');
+    await commit(change);
+    const request = { sourceHead: gitAt(change, 'rev-parse', 'HEAD'), sourceBase: change.base, developmentHead: change.base, message: 'Reviewed' };
+    await commit(change, 'later.txt', 'Not reviewed\n');
+    await expect(workflow.deliver(change.id, request)).rejects.toMatchObject({ code: 'review_changed' });
+    request.sourceHead = gitAt(change, 'rev-parse', 'HEAD');
+    await expect(workflow.deliver(change.id, { ...request, sourceBase: 'outdated' })).rejects.toMatchObject({ code: 'review_changed' });
+    await expect(workflow.deliver(change.id, { ...request, developmentHead: 'outdated' })).rejects.toMatchObject({ code: 'review_changed' });
+    expect(fx.git('status', '--porcelain')).toBe('');
+    expect((await workflow.get()).preparation).toBeUndefined();
+  });
+
+  it('validates the message before staging and retains hook failures for reviewed recovery', async () => {
+    const change = await task('Recover delivery');
+    await commit(change);
+    const request = { sourceHead: gitAt(change, 'rev-parse', 'HEAD'), developmentHead: change.base, message: '' };
+    await expect(workflow.deliver(change.id, request)).rejects.toMatchObject({ code: 'invalid_commit_message' });
+    expect(fx.git('status', '--porcelain')).toBe('');
+    await hook('pre-commit', 'exit 1');
+    await expect(workflow.deliver(change.id, { ...request, message: 'Reviewed' })).rejects.toMatchObject({ code: 'commit_failed' });
+    const reviewed = (await workflow.get()).preparation!;
+    expect(reviewed.canCommit).toBe(true);
+    await expect(workflow.deliver(change.id, { ...request, message: 'Retry' })).rejects.toMatchObject({ code: 'change_already_prepared' });
+    await fx.write('task.txt', 'Changed after recovery review\n');
+    fx.git('add', 'task.txt');
+    await hook('pre-commit', 'exit 0');
+    await expect(
+      workflow.accept(change.id, { mode: 'commit', developmentHead: reviewed.head!, indexFingerprint: reviewed.indexFingerprint!, message: 'Retry' }),
+    ).rejects.toMatchObject({ code: 'review_changed' });
+    const latest = (await workflow.get()).preparation!;
+    const done = await workflow.accept(change.id, {
+      mode: 'commit',
+      developmentHead: latest.head!,
+      indexFingerprint: latest.indexFingerprint!,
+      message: 'Reviewed recovery',
+    });
+    expect(done.deliveries).toHaveLength(1);
+    expect(await readFile(path.join(fx.root, 'task.txt'), 'utf8')).toBe('Changed after recovery review\n');
+  });
+
   it('preserves hooks from saved configuration while omitting obsolete settings', async () => {
     const hooks = { create: 'echo setup', reuse: 'echo reuse' };
     await store.update((state) => {

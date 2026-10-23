@@ -14,11 +14,10 @@ import type {
   UpdateChangeRequest,
   CreateChangeRequest,
   PrepareChangeRequest,
+  DeliverChangeRequest,
   AcceptChangeRequest,
-  CheckpointsResponse,
   DiffSide,
   CommitsResponse,
-  CreateCheckpointResponse,
   CreateTodoRequest,
   CreateWorktreeRequest,
   CreateWorktreeResponse,
@@ -106,6 +105,7 @@ export const api = {
   importTodo: (id: string) => req<WorkflowResponse>('POST', `/api/workflow/import-todos/${enc(id)}`),
   syncChange: (id: string, sourceHead: string) => req<DevelopmentChange>('POST', `/api/workflow/changes/${enc(id)}/sync`, { sourceHead }),
   prepareChange: (id: string, body: PrepareChangeRequest) => req<DevelopmentChange>('POST', `/api/workflow/changes/${enc(id)}/prepare`, body),
+  deliverChange: (id: string, body: DeliverChangeRequest) => req<DevelopmentChange>('POST', `/api/workflow/changes/${enc(id)}/deliver`, body),
   acceptChange: (id: string, body: AcceptChangeRequest) => req<DevelopmentChange>('POST', `/api/workflow/changes/${enc(id)}/accept`, body),
   repo: () => req<RepoInfo>('GET', '/api/repo'),
   state: () => req<ReviewState>('GET', '/api/state'),
@@ -116,10 +116,6 @@ export const api = {
   file: (key: TargetKey, path: string, hints: { oldPath?: string; untracked?: boolean } = {}) =>
     req<FileDiff>('GET', `/api/targets/${enc(key)}/file${q({ path, old: hints.oldPath, untracked: hints.untracked })}`),
   fullFile: (key: TargetKey, path: string, side: DiffSide) => req<FullFileResponse>('GET', `/api/targets/${enc(key)}/file/full${q({ path, side })}`),
-
-  checkpoints: (key: TargetKey) => req<CheckpointsResponse>('GET', `/api/targets/${enc(key)}/checkpoints`),
-  createCheckpoint: (key: TargetKey) => req<CreateCheckpointResponse>('POST', `/api/targets/${enc(key)}/checkpoints`),
-  deleteCheckpoint: (key: TargetKey, id: number) => req<{ ok: true }>('DELETE', `/api/targets/${enc(key)}/checkpoints/${id}`),
 
   todos: (branch?: string) => req<TodosResponse>('GET', `/api/todos${q({ branch })}`),
   createTodo: (body: CreateTodoRequest) => req<Todo>('POST', '/api/todos', body),

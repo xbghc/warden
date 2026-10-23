@@ -1,8 +1,8 @@
 # Worktrees and tasks
 
 Warden follows the [workflow contract](workflow.md). Choose an explicit local **primary development
-branch** (主开发分支), such as `feature/order`, for one requirement. All edits belong in task
-worktrees; dependencies, development servers and user-run validation belong in its primary directory.
+branch** (主开发分支), such as `feature/order`, for one requirement. Human edits belong in primary and agent edits in task
+workspaces. Dependencies, development servers and user-run validation belong in the independent preview directory.
 Workspace creation does not install dependencies or launch an agent.
 
 ## Development workflow
@@ -18,13 +18,13 @@ deliveries without being recycled. There is no task-complete declaration or rele
 notes and ordering remain available while work is in progress. Historical TODO descriptions and
 historical metadata is retained; old checked items migrate as archived notes, not accepted commits.
 
-The primary branch can change when no integration or connection is using the primary directory.
+The primary branch can change when no integration or active connection belongs to it.
 Tasks remain associated with the branch for which they were created.
 
 ## Workspace hooks
 
 Settings contain local repository configuration, outside task branches. The configuration contains
-only a `hooks` object. Warden creates workspaces and runs these user-provided scripts; users choose
+a `hooks` object and an optional idempotent `previewSetup` command. Warden creates workspaces and runs these user-provided scripts; users choose
 external tools for agent execution and interaction.
 
 `hooks.create` and `hooks.reuse` are optional POSIX shell commands executed after the assignment is
@@ -45,9 +45,10 @@ command in it operates on the assigned workspace. Normal identity and configurat
 Use the connection switches in the left *工作区* list to select one or more task workspaces. Warden snapshots their live committed and
 uncommitted changes relative to each workspace's undelivered baseline. It composes them with
 three-way patch application in an independent temporary repository. Only a complete, successful
-composition is applied to primary working files. Its real index and HEAD are unchanged.
+composition is published to the independent preview directory, including saved primary content
+as its baseline. Primary files, index and HEAD are unchanged by connections.
 
-*主目录预览* shows the current combination, primary path, update time and refresh/error feedback.
+*预览* shows the current combination, runtime path, update time and refresh/error feedback.
 Workspace selection stays in the sidebar, and file review stays in each workspace’s detail; the
 preview page does not repeat either list.
 
@@ -56,37 +57,40 @@ the connection attempt and preserve the previous set and files. A later conflict
 coherent preview and marks it stale. Adjust the source edits or selection, then refresh. Disconnecting
 recomposes the remaining contributions; it does not discard unexpected user or tool edits.
 
-Before replacing files, Warden verifies the primary HEAD, index and complete nonignored working
-snapshot against its ownership record. Unexpected modifications block synchronization and identify
-why. The user handles those changes. Primary dependency directories remain outside the preview
-when ignored by Git. This version conservatively blocks unrelated nonignored files too.
+Before replacing preview files, Warden verifies its saved ownership tree. Unexpected preview edits
+block synchronization and remain available for manual repair. Edit human code in primary and agent
+code in task workspaces. Ignored dependencies and caches persist in preview. Saved primary edits
+are observed by content and debounced into preview; they are not unexpected edits to discard.
 
 ## Squash acceptance
 
-Select a task and file to review directly. *准备合入…* accepts all current undelivered changes from
-a **clean committed source**, pinned to the reviewed source and primary HEAD. Source commits may
+Select a task and file to review directly. *提交到主开发分支…* accepts all current undelivered changes from
+a **clean committed source**, pinned to the reviewed source, delivery boundary and primary HEAD. Source commits may
 continue from the previous delivery without first rebasing. `sourceBase` records that previous
 source tip so A1 is excluded when delivering A2.
 
 Preparation first composes the delivery in an isolated repository. It leaves the independent preview running and stages only that delivery in the checked-out
 primary branch. Existing primary user edits must be handled first.
 Only one preparation uses that directory at a time. Other connected workspaces cannot enter the
-resulting commit. Review takes place before preparation; the page shows the resulting staged diff.
+resulting commit. Review takes place before preparation; normal delivery prepares and commits
+in one operation. The staged diff is shown for recovery after an interrupted operation.
 
-Run tests in the preview directory when needed, enter a message, and choose *提交到主开发分支*.
+Run tests in the preview directory when needed, review the complete delivery, enter a message,
+and choose *提交到主开发分支*. Canceling message entry does not stage anything.
 There is no test-passed checkbox. Warden runs ordinary `git commit -m` with the checkout's identity,
 signing, `core.hooksPath`, `pre-commit`, `prepare-commit-msg`, `commit-msg` and `post-commit` behavior.
 It never uses `--no-verify` or `commit-tree` for delivery. The server checks the current HEAD and
 staged-diff fingerprint again before committing.
 
-Hook failure preserves files/index and displays the output. Handle any hook edits and retry.
+Hook failure preserves files/index and displays the output. Handle any hook edits, refresh the
+retained staged comparison and review it before retrying against that exact fingerprint.
 A successful commit with uncommitted leftovers stays pending until those files are handled.
 A manual terminal commit can be recorded from the page after checking its exact SHA; it must be a
 single child of the prepared parent. Interrupted preparation can be retried only against its known
 snapshot. Unexpected changes are preserved. No reset/clean or undo action is involved.
 
 A completed delivery appends a stable record containing its source range, primary parent, commit,
-message and creation time. It leaves the task worktree and branch in place. Connections resume
+message and creation time. It leaves the task worktree and branch in place. Connections update
 against the new primary baseline; if their current contributions conflict, the page reports that
 separately from the successful commit. New plans do not inherit the occupied workspace.
 

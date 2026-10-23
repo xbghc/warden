@@ -24,8 +24,12 @@ Edit and save human code in the primary directory. Agents work in numbered task 
 Expand a task to see its undelivered file list; opening a file uses VS Code's native diff editor.
 Both sides are read-only review documents. Users must review the entire intended delivery; Warden
 does not track read markers or review progress.
-Reopening a diff reads the latest contents; an already open diff is a captured review, not an editor
-for the task workspace. Binary changes are listed but do not have a text preview.
+Clean task diffs pin the source commit, delivery boundary and primary HEAD; their titles identify
+the source version. An open diff is immutable. A version change blocks delivery until a task diff
+is reopened; opening the newer version closes that task’s older diff tabs and starts a new complete
+review. Background refresh alone does not advance the review. Binary changes list the pinned
+version for review with external tools. Live uncommitted content remains readable, but must be
+committed and reopened for delivery review.
 
 Connect tasks using their context menu. The preview is an independent, persistent repository in
 Warden's external data directory. Its path is displayed by the preview item and can be copied with
@@ -75,11 +79,13 @@ updates, disconnects and extension restarts.
 
 ## Delivery and history
 
-**交付提交** prepares only that task's undelivered committed increment, then asks for a commit message
-and runs ordinary Git commit hooks/signing in primary. Genuine primary edits must be handled by
+**交付提交** asks for a message first, then prepares and commits only the reviewed undelivered
+increment in one operation, with ordinary Git hooks/signing in primary. Genuine primary edits must be handled by
 the user first; they are not staged into the task's commit. Other connections remain in preview.
-Canceling message entry leaves preparation intact for retry; Warden never silently resets it.
-After a hook failure, correct the cause and retry. **结束已恢复的提交准备** is only available after the
+Canceling message entry leaves Git untouched. After a hook failure, correct the cause, reopen
+the retained staged diff and retry against that reviewed fingerprint. A manual commit must also
+be reopened for review before recording its exact SHA. Interrupted preparation can be retried
+through **交付提交**; review its recovered staged contents before committing. **结束已恢复的提交准备** is only available after the
 user has restored the preparation's original primary content, preserving the existing recovery checks.
 
 Use **检查并 rebase 工作区** to inspect and select one, several or all workspaces. Rebase remains an

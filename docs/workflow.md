@@ -119,9 +119,10 @@ view is deliberately omitted. See [VS Code](vscode.md) for installation and runt
 
 ## Review first, then squash
 
-Review and connection previews use the workspace's current content, regardless of whether changes
-are staged. Review has one complete file list. Users must review all content they intend to commit.
-Warden does not track per-file read status or require a review-completion declaration. Staging is not
+Live review and connection previews include uncommitted workspace content. Delivery review uses
+a pinned committed range, its delivery boundary and the primary HEAD. Review has one complete file list. Users must review all content they intend to commit.
+Warden recommends small deliveries that the user can review in full. It does not track per-file
+read status, provide review checkpoints, or require a review-completion declaration. Staging is not
 a review status.
 The legacy line/file staging API has been removed. Read-only comparison keys remain available for
 explicit comparisons. Formal delivery continues to use the primary checkout's Git index and hooks.
@@ -134,8 +135,7 @@ flowchart LR
   E --> R[User reviews worktree changes]
   V --> R[User reviews worktree changes]
   R -->|More work needed| E
-  R -->|User chooses to integrate| S[Squash into the development branch]
-  S --> C[User validates and commits with normal Git hooks]
+  R -->|User enters a message and commits| C[Squash and commit with normal Git hooks]
   C --> E
   C --> N[Show workspace synchronization conditions]
   N -->|User chooses one, several or all| B[Rebase selected workspaces]
@@ -156,12 +156,15 @@ to prevent an operation from silently using changed source content, overwriting 
 work, or modifying files while the user expects an agent to be working on them. These are
 operation checks and visible errors, not an additional agent-delivery or approval workflow.
 
-Squash collects the reviewed change into the development checkout. The user controls testing
-and commit timing. Warden must support entering the commit message and committing directly in the
-Web page, running ordinary Git commit hooks. Terminal use is not required for the Web workflow.
-Preserve normal hooks when the user also chooses to use Git in the terminal.
-Validation on the development branch is not a second product approval
-stage, and inspecting the final content does not change the rule that task review precedes squash.
+After complete review, one delivery action composes the increment and commits it in the primary
+checkout with normal Git hooks and signing. Message entry happens before any staging; cancellation
+leaves Git untouched. Source, delivery boundary or primary-version changes require fresh review.
+Tests and dev servers continue in the independent preview, whose connection set stays intact.
+Human primary edits must be handled before delivery and cannot be silently included.
+
+Preparation remains an internal journaled step, with explicit recovery after interruption or hook
+failure. Recovery shows the retained staged contents or manual commit for review before accepting
+that exact version. The Web page supports this entire flow without requiring a terminal.
 
 ## Continued work and synchronization
 
@@ -263,7 +266,7 @@ The working copy implements the workflow above. It has not been published as a r
 | Workspace hooks | Generic creation/reuse scripts with cwd, environment, output and status. Agent execution stays in user tools. |
 | Connection | Live committed/uncommitted changes composed in an independent temporary Git repository, then published only to the persistent preview directory. Failed initial connections preserve the prior set and files. |
 | Later connection conflict | Preserve the last coherent preview and display stale status; user changes the connections or source work. |
-| Delivery | All current undelivered changes from a clean committed source, pinned by source and primary HEAD. No file/commit subset picking in this version. |
+| Delivery | All current undelivered changes from a clean committed source, pinned by reviewed source, delivery boundary and primary HEAD. No file/commit subset picking in this version. |
 | Web commit | Normal primary-directory Git commit with hooks/signing. Failed hooks retain files/index. No test-passed checkbox or agent handoff. |
 | Rebase | Isolated checks and explicit single/selected/all execution, with per-workspace results and pinned heads. Actual conflicts are left for the user to handle. |
 | History | Select a start through HEAD within the latest 100 commits. Reorder/reword in an isolated cherry-pick preview; apply only linear ranges with identical final tree. No undo or remote push. |

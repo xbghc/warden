@@ -35,7 +35,7 @@ export const StalePreview: Story = {
     api.preview = fn(async () => ({
       ...current,
       status: 'stale' as const,
-      message: '后续变更与现有组合冲突；主目录仍呈现最近成功的预览。',
+      message: '后续变更与现有组合冲突；预览目录仍呈现最近成功的组合。',
       conflicts: ['src/order.ts'],
     }));
     await useWorkbenchData.getState().refresh();
@@ -58,11 +58,10 @@ export const WebCommit: Story = {
   ...TaskReview,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await userEvent.click(await canvas.findByRole('button', { name: '准备合入…' }));
+    await userEvent.click(await canvas.findByRole('button', { name: '提交到主开发分支…' }));
     const dialog = within(await within(document.body).findByRole('dialog'));
-    await userEvent.click(dialog.getByRole('button', { name: '准备合入' }));
     await userEvent.click(await dialog.findByRole('button', { name: '提交到主开发分支' }));
-    await waitFor(() => expect(api.acceptChange).toHaveBeenCalled());
+    await waitFor(() => expect(api.deliverChange).toHaveBeenCalled());
     await expect(useWorkflow.getState().data!.workflow!.changes.find((task) => task.id === 'orders')!.status).toBe('working');
   },
 };
@@ -122,10 +121,11 @@ export const InterruptedPreparation: Story = {
     useWorkbench.getState().openTask('orders');
   },
   play: async ({ canvasElement }) => {
-    await userEvent.click(await within(canvasElement).findByRole('button', { name: '重试准备…' }));
+    await userEvent.click(await within(canvasElement).findByRole('button', { name: '恢复提交…' }));
     const dialog = within(await within(document.body).findByRole('dialog'));
     await userEvent.click(dialog.getByRole('button', { name: '重试准备' }));
     await waitFor(() => expect(api.prepareChange).toHaveBeenCalledWith('orders', { sourceHead: 'def5678', developmentHead: 'abc1234' }));
-    await expect(await dialog.findByRole('button', { name: '提交到主开发分支' })).toBeEnabled();
+    await userEvent.click(await within(canvasElement).findByRole('button', { name: '提交到主开发分支…' }));
+    await expect(await within(await within(document.body).findByRole('dialog')).findByRole('button', { name: '提交到主开发分支' })).toBeEnabled();
   },
 };

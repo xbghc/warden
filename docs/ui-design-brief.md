@@ -21,9 +21,10 @@ of the current implementation. The scope is interaction design using shadcn/ui, 
 
 The requirement has an explicitly chosen **primary development branch** (主开发分支), such as
 `feature/order`, distinct from the company's default branch. Its checkout is the **primary
-directory** (主目录), holding dependencies and user-operated dev server, lint and tests.
+directory** (主目录), where the user edits human code. Dependencies and user-operated dev servers,
+lint and tests use the independent preview directory.
 
-All code edits happen in task worktrees. A worktree corresponds to one linear task. It can have
+Agent edits happen in task workspaces; human edits happen in primary. A worktree corresponds to one linear task. It can have
 multiple local commits and deliver multiple commits to the primary development branch. Workspaces
 remain available across deliveries. No automatic recycling, release step or task-end declaration.
 Task branching/splitting into execution paths is outside the current scope.
@@ -39,20 +40,18 @@ installation, required agent tests, embedded editing or Neovim launch/jump integ
 
 ## Connections
 
-The user connects one or more worktrees to compose their live changes temporarily into the primary
-directory. Existing tools can preview the combined result there. Connection does not mean commit,
+The user connects one or more worktrees to compose their live changes temporarily into an independent preview
+directory, with saved primary content as baseline. Existing tools can preview the combined result there. Connection does not mean commit,
 squash or acceptance. Selecting a workspace or file for review must not alter the connected set.
 
 Disconnect removes that contribution. If establishing a connection conflicts, notify the user and
 fail that attempt, leaving the workspace unconnected and the previous valid preview intact.
 Conflicts cannot silently overwrite another contribution.
 The UI must distinguish desired connections from what was actually synchronized and expose stale
-preview content. Source worktrees remain intact. Unexpected primary-directory edits must be
-preserved. Connection writes are one-way; code fixes belong in the responsible worktree.
+preview content. Source worktrees remain intact. Unexpected preview-directory edits must be
+preserved; primary edits are baseline inputs. Connection writes are one-way; agent fixes belong in task workspaces and human fixes in primary.
 
-Formal integration isolates the reviewed delivery from other connected workspaces. The precise
-pause/resume behavior around integration and handling tool-generated local edits remain proposals
-to discuss. Do not invent a file-copy implementation or make preview a second editing environment.
+Formal integration isolates the reviewed delivery from other connected workspaces. Preview keeps running while delivery prepares and commits only the reviewed increment in primary. Do not invent a file-copy implementation or make preview a second editing environment.
 
 ## Review and delivery
 
@@ -60,7 +59,7 @@ Review the worktree before squash. Users request further work through their own 
 integration. Review presents the complete delivery diff and copyable file locations. Users review the entire
 intended delivery; there are no read markers or review-completion declarations. Inline comments are removed.
 The Web page supports commit-message entry and committing with normal Git
-hooks; terminal use is not required. The user runs tests in the primary directory; no mandatory
+hooks; terminal use is not required. The user runs tests in the preview directory; no mandatory
 test or agent handoff gate is established by this brief.
 
 One task may deliver A1 and later A2, with another workspace's B1 between them. Make previously

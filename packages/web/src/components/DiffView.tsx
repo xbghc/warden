@@ -53,7 +53,6 @@ function estimateRow(row: Row): number {
   switch (row.kind) {
     case 'hunk':
     case 'gap':
-    case 'debug':
       return 26;
     default:
       return 22;
@@ -62,19 +61,10 @@ function estimateRow(row: Row): number {
 
 export function DiffView({ diff }: { diff: FileDiff }) {
   const viewMode = useStore((s) => s.prefs.viewMode);
-  const foldDebug = useStore((s) => s.prefs.ignoreDebug);
   const targetKey = useStore((s) => s.targetKey);
   const copyToClipboard = useStore((s) => s.copyToClipboard);
   const showToast = useStore((s) => s.showToast);
   const [expansions, setExpansions] = useState<Record<number, Expansion>>({});
-  const [openDebug, setOpenDebug] = useState<ReadonlySet<string>>(() => new Set());
-  const toggleDebug = (id: string) =>
-    setOpenDebug((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
   const [shutBlocks, setShutBlocks] = useState<ReadonlySet<string>>(() => new Set());
   const toggleBlock = (id: string) =>
     setShutBlocks((prev) => {
@@ -85,10 +75,7 @@ export function DiffView({ diff }: { diff: FileDiff }) {
     });
   const [fullLines, setFullLines] = useState<string[] | null>(null);
   const fullLoading = useRef<Promise<string[] | null> | null>(null);
-  const rows = useMemo(
-    () => buildRows({ diff, viewMode, expansions, fullLines, foldDebug, openDebug, shutBlocks }),
-    [diff, viewMode, expansions, fullLines, foldDebug, openDebug, shutBlocks],
-  );
+  const rows = useMemo(() => buildRows({ diff, viewMode, expansions, fullLines, shutBlocks }), [diff, viewMode, expansions, fullLines, shutBlocks]);
 
   // ---- syntax highlighting -------------------------------------------------
   const lang = useMemo(() => langForPath(diff.path), [diff.path]);
@@ -378,31 +365,10 @@ export function DiffView({ diff }: { diff: FileDiff }) {
     );
   };
 
-  const renderDebug = (row: Extract<Row, { kind: 'debug' }>) => {
-    const changed = row.lines.filter((l) => l.type !== 'context').length;
-    const what = changed === row.lines.length ? `${changed} 行调试代码改动` : `${row.lines.length} 行调试代码（${changed} 行改动）`;
-    return (
-      <div className={`row debug-row ${row.open ? 'open' : ''}`}>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="link"
-          onClick={() => toggleDebug(row.id)}
-          aria-expanded={row.open}
-          title="调试块或标了 nocommit 的行；折叠仅影响显示"
-        >
-          {row.open ? `收起 ${what}` : `已折叠 ${what}`}
-        </Button>
-      </div>
-    );
-  };
-
   const renderRow = (row: Row) => {
     switch (row.kind) {
       case 'gap':
         return renderGap(row);
-      case 'debug':
-        return renderDebug(row);
       case 'hunk':
         return (
           <div className="row hunk-head">
