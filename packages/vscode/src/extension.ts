@@ -404,8 +404,8 @@ export class Workbench implements vscode.TreeDataProvider<Node> {
     const task = await this.pickTask(node);
     if (!task) return;
     const choice = await vscode.window.showQuickPick([
-      { label: '独立 clone', slotKind: 'clone' },
-      { label: 'Git worktree', slotKind: 'worktree' },
+      { label: '共享 Git 工作区', slotKind: 'shared' },
+      { label: '独立 clone（兼容模式）', slotKind: 'clone' },
       { label: '复用已有工作区', slotKind: 'reuse' },
     ]);
     if (!choice) return;

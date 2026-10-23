@@ -9,6 +9,7 @@ import { createApp, resolveRepo, StateStore, WorkflowService } from '@warden/ser
 import { HistoryService } from '../packages/server/src/history.js';
 import { assertSafetyBackupCurrent, createSafetyBackup, discardOperationBackup, listSafetyBackups } from '../packages/server/src/backups.js';
 import * as backups from '../packages/server/src/backups.js';
+import * as gitCommands from '../packages/server/src/git.js';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
 vi.mock('node:fs/promises', async (original) => {
@@ -39,7 +40,7 @@ afterEach(async () => {
   await fs.rm(data, { recursive: true, force: true });
 });
 
-async function checkout(kind: 'clone' | 'worktree' = 'clone') {
+async function checkout(kind: 'clone' | 'worktree' | 'shared' = 'clone') {
   const response = await send('', { branch: 'agent/backup', base: 'main', kind });
   expect(response.status, await response.clone().text()).toBe(201);
 }
@@ -124,6 +125,136 @@ describe('verified safety backups', () => {
     await fs.mkdir(path.join(data, 'backups', '.pending-interrupted'));
     const restarted = createApp({ repo: await resolveRepo(fx.root), store: new StateStore(store.file, fx.root) });
     expect(((await (await restarted.request('/api/backups')).json()) as { backups: SafetyBackup[] }).backups).toEqual([backup]);
+  });
+
+  it('keeps a shared backup current across sibling commits and preview worktree changes', async () => {
+    await checkout('shared');
+    const common = path.resolve(slot, fx.git('-C', slot, 'rev-parse', '--git-common-dir').trim());
+    const sibling = `${fx.root}-2`;
+    const preview = path.join(data, 'preview');
+    try {
+      fx.git('-C', common, 'worktree', 'add', '-qb', 'agent/sibling', sibling, fx.git('-C', slot, 'rev-parse', 'HEAD').trim());
+      fx.git('-C', common, 'worktree', 'add', '-q', '--detach', preview, fx.git('-C', slot, 'rev-parse', 'HEAD').trim());
+      await fs.writeFile(path.join(slot, 'selected.txt'), 'selected change\n');
+      const backup = await createSafetyBackup(store, slot, 'rebase');
+      await fs.writeFile(path.join(sibling, 'sibling.txt'), 'another task\n');
+      fx.git('-C', sibling, 'add', '.');
+      fx.git('-C', sibling, 'commit', '-qm', 'Sibling commit');
+      await fs.writeFile(path.join(preview, 'preview.txt'), 'new preview\n');
+      fx.git('-C', preview, 'add', '.');
+      fx.git('-C', preview, 'commit', '-qm', 'Preview update');
+      await expect(assertSafetyBackupCurrent(backup)).resolves.toBeUndefined();
+      fx.git('-C', slot, 'add', '.');
+      await expect(assertSafetyBackupCurrent(backup)).rejects.toMatchObject({ code: 'backup_stale' });
+    } finally {
+      await fs.rm(sibling, { recursive: true, force: true });
+      await fs.rm(`${fx.root}-warden`, { recursive: true, force: true });
+    }
+  });
+
+  it('backs up a shared checkout while a sibling commits and restores it after removing the shared object store', async () => {
+    await checkout('shared');
+    const common = path.resolve(slot, fx.git('-C', slot, 'rev-parse', '--git-common-dir').trim());
+    const sibling = `${fx.root}-2`;
+    fx.git('-C', common, 'worktree', 'add', '-qb', 'agent/sibling', sibling, fx.git('-C', slot, 'rev-parse', 'HEAD').trim());
+    try {
+      await fs.writeFile(path.join(slot, '.gitignore'), 'local.env\n');
+      fx.git('-C', slot, 'add', '.gitignore');
+      fx.git('-C', slot, 'commit', '-qm', 'Ignore local environment');
+      for (const message of ['older shared stash', 'newer shared stash']) {
+        await fs.writeFile(path.join(slot, 'src/a.ts'), `${message}\n`);
+        fx.git('-C', slot, 'stash', 'push', '-qm', message);
+      }
+      await fs.writeFile(path.join(slot, 'src/a.ts'), 'staged selected content\n');
+      fx.git('-C', slot, 'add', 'src/a.ts');
+      await fs.writeFile(path.join(slot, 'src/a.ts'), 'unstaged selected content\n');
+      await fs.writeFile(path.join(slot, 'local.env'), 'ignored selected configuration\n');
+      const head = fx.git('-C', slot, 'rev-parse', 'HEAD').trim();
+      const staged = fx.git('-C', slot, 'diff', '--cached');
+      const stashes = fx.git('-C', slot, 'stash', 'list');
+      fx.git('-C', common, 'pack-refs', '--all', '--prune');
+      const copy = (await vi.importActual<typeof fs>('node:fs/promises')).copyFile;
+      let committed = false;
+      vi.mocked(fs.copyFile).mockImplementation(async (source, destination, flags) => {
+        await copy(source, destination, flags);
+        if (!committed) {
+          committed = true;
+          await fs.writeFile(path.join(sibling, 'sibling.txt'), 'concurrent sibling change\n');
+          fx.git('-C', sibling, 'add', '.');
+          fx.git('-C', sibling, 'commit', '-qm', 'Commit while another checkout is backed up');
+        }
+      });
+      const backup = await createSafetyBackup(store, slot, 'remove');
+      expect(committed).toBe(true);
+      await expect(assertSafetyBackupCurrent(backup)).resolves.toBeUndefined();
+      const recovered = await recover(backup);
+      await fs.rm(slot, { recursive: true, force: true });
+      await fs.rm(common, { recursive: true, force: true });
+      expect(fx.git('-C', recovered, 'rev-parse', 'HEAD').trim()).toBe(head);
+      expect(fx.git('-C', recovered, 'diff', '--cached')).toBe(staged);
+      expect(fx.git('-C', recovered, 'stash', 'list')).toBe(stashes);
+      expect(await fs.readFile(path.join(recovered, 'src/a.ts'), 'utf8')).toBe('unstaged selected content\n');
+      expect(await fs.readFile(path.join(recovered, 'local.env'), 'utf8')).toBe('ignored selected configuration\n');
+      expect(fx.git('-C', recovered, 'fsck', '--full')).not.toContain('missing');
+    } finally {
+      await fs.rm(sibling, { recursive: true, force: true });
+      await fs.rm(`${fx.root}-warden`, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a shared snapshot when a frozen sibling ref loses its objects before inventory', async () => {
+    await checkout('shared');
+    const common = path.resolve(slot, fx.git('-C', slot, 'rev-parse', '--git-common-dir').trim());
+    const sibling = `${fx.root}-2`;
+    const head = fx.git('-C', slot, 'rev-parse', 'HEAD').trim();
+    fx.git('-C', common, 'worktree', 'add', '-qb', 'agent/sibling', sibling, head);
+    try {
+      fx.git('-C', sibling, 'commit', '--allow-empty', '-qm', 'Temporary sibling revision');
+      const discarded = fx.git('-C', sibling, 'rev-parse', 'HEAD').trim();
+      const selectedGit = path.resolve(slot, fx.git('-C', slot, 'rev-parse', '--absolute-git-dir').trim());
+      const index = await fs.readFile(path.join(selectedGit, 'index'));
+      const run = gitCommands.runGit;
+      let pruned = false;
+      const commands = vi.spyOn(gitCommands, 'runGit').mockImplementation(async (args, options) => {
+        const result = await run(args, options);
+        if (!pruned && args[0] === 'for-each-ref' && args[1] === '--format=%(refname)%00%(objectname)%00%(symref)') {
+          expect(result.stdout).toContain(discarded);
+          pruned = true;
+          fx.git('-C', sibling, 'reset', '--hard', head);
+          fx.git('-C', sibling, 'reflog', 'expire', '--expire=now', '--expire-unreachable=now', 'HEAD', 'refs/heads/agent/sibling');
+          fx.git('-C', common, 'prune', '--expire=now');
+          expect(() => fx.git('-C', common, 'cat-file', '-e', discarded)).toThrow();
+        }
+        return result;
+      });
+      await expect(createSafetyBackup(store, slot, 'remove')).rejects.toMatchObject({ code: 'backup_failed' });
+      expect(pruned).toBe(true);
+      expect(commands.mock.calls.some(([args]) => args.join(' ') === 'fsck --full --no-dangling')).toBe(true);
+      expect(await listSafetyBackups(store)).toEqual([]);
+      expect(await fs.readdir(path.join(data, 'backups'))).toEqual([]);
+      expect(fx.git('-C', slot, 'rev-parse', 'HEAD').trim()).toBe(head);
+      expect(await fs.readFile(path.join(selectedGit, 'index'))).toEqual(index);
+    } finally {
+      await fs.rm(sibling, { recursive: true, force: true });
+      await fs.rm(`${fx.root}-warden`, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects selected branch changes and Git metadata hazards in a shared backup', async () => {
+    await checkout('shared');
+    const common = path.resolve(slot, fx.git('-C', slot, 'rev-parse', '--git-common-dir').trim());
+    try {
+      const backup = await createSafetyBackup(store, slot, 'rebase');
+      fx.git('-C', slot, 'commit', '--allow-empty', '-qm', 'Selected branch moved');
+      await expect(assertSafetyBackupCurrent(backup)).rejects.toMatchObject({ code: 'backup_stale' });
+      await fs.writeFile(path.join(common, 'config.lock'), 'active configuration writer');
+      await expect(createSafetyBackup(store, slot, 'rebase')).rejects.toMatchObject({ code: 'backup_failed' });
+      await fs.unlink(path.join(common, 'config.lock'));
+      await fs.writeFile(path.join(common, 'objects/info/alternates'), path.join(fx.root, '.git/objects'));
+      await expect(createSafetyBackup(store, slot, 'rebase')).rejects.toMatchObject({ code: 'backup_failed' });
+    } finally {
+      await fs.rm(`${fx.root}-warden`, { recursive: true, force: true });
+    }
   });
 
   it.each(['/release', '/remove'])('stops %s when backup storage cannot be written and preserves HEAD, index and files', async (operation) => {

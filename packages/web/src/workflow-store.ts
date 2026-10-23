@@ -17,6 +17,7 @@ interface WorkflowStore {
 }
 
 let refreshVersion = 0;
+let appliedRefreshVersion = 0;
 export const useWorkflow = create<WorkflowStore>((set) => ({
   data: null,
   checkouts: null,
@@ -29,7 +30,12 @@ export const useWorkflow = create<WorkflowStore>((set) => ({
     const version = ++refreshVersion;
     try {
       const [data, checkouts] = await Promise.all([api.workflow(), api.worktrees()]);
-      if (version === refreshVersion) set({ data, checkouts, error: null });
+      // An awaited review refresh must publish its snapshot even if an automatic refresh
+      // has started meanwhile. Only a newer completed snapshot can supersede it.
+      if (version > appliedRefreshVersion) {
+        appliedRefreshVersion = version;
+        set({ data, checkouts, error: null });
+      }
     } catch (error) {
       if (version === refreshVersion) set({ error: error instanceof Error ? error.message : String(error) });
     }

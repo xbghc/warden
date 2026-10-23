@@ -21,6 +21,10 @@ Browser-only virtual filesystems are unsupported. Workspace Trust is required.
 ## Edit, review and run
 
 Edit and save human code in the primary directory. Agents work in numbered task workspaces.
+Creation defaults to **共享 Git 工作区**, backed by Warden's external repository at
+`<primary>-warden/repo.git`. Task worktrees and preview share its Git objects while retaining their
+own files, HEADs and indexes. Choose **独立 clone（兼容模式）** for tools that require their own `.git`
+directory. Existing task paths and repositories remain usable without migration.
 Expand a task to see its undelivered file list; opening a file uses VS Code's native diff editor.
 Both sides are read-only review documents. Users must review the entire intended delivery; Warden
 does not track read markers or review progress.
@@ -31,8 +35,9 @@ review. Background refresh alone does not advance the review. Binary changes lis
 version for review with external tools. Live uncommitted content remains readable, but must be
 committed and reopened for delivery review.
 
-Connect tasks using their context menu. The preview is an independent, persistent repository in
-Warden's external data directory. Its path is displayed by the preview item and can be copied with
+Connect tasks using their context menu. New previews are persistent worktrees in Warden's external
+data directory, sharing the external repository with default task workspaces. Existing standalone
+previews keep their location and repository. The preview path is displayed by the preview item and can be copied with
 **Warden: 复制预览路径**. It is not added as a workspace root or mixed into the primary repository's Git
 changes. Preview files are generated runtime inputs: edit the primary directory or the responsible
 agent workspace, not the preview directory. Unexpected edits there stop publication and are preserved.

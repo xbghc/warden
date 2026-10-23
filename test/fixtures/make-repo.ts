@@ -51,6 +51,9 @@ export async function makeFixtureRepo(prefix = 'warden-fixture-'): Promise<Fixtu
     root,
     git,
     write,
-    cleanup: () => rm(root, { recursive: true, force: true }),
+    cleanup: async () => {
+      await rm(`${root}-warden`, { recursive: true, force: true });
+      await rm(root, { recursive: true, force: true });
+    },
   };
 }

@@ -32,6 +32,7 @@ import { PreviewService } from './preview.js';
 import { assertSafetyBackupCurrent, createSafetyBackup, discardOperationBackup } from './backups.js';
 import { retireWorkflowRefs } from './retention.js';
 import { readWorktreeState } from './worktree-state.js';
+import { ensureSharedRepository } from './shared-repository.js';
 
 function fail(message: string, code: string): never {
   throw new HttpError(409, message, code);
@@ -279,7 +280,8 @@ export class WorkflowService {
   }
 
   private async startTask(plan: PlannedChange, request: StartChangeRequest, workflow: DevelopmentWorkflow): Promise<DevelopmentChange> {
-    if (request.kind !== undefined && request.kind !== 'clone' && request.kind !== 'worktree') throw badRequest('invalid checkout kind');
+    if (request.kind !== undefined && request.kind !== 'shared' && request.kind !== 'clone' && request.kind !== 'worktree')
+      throw badRequest('invalid checkout kind');
     if (request.agent !== undefined && (typeof request.agent !== 'string' || request.agent.trim().length > 100))
       throw badRequest('执行者名称不能超过 100 字', 'invalid_agent');
     const base = await this.taskBaseline(workflow);
@@ -300,12 +302,16 @@ export class WorkflowService {
       fork = (await runGit(['merge-base', base, 'HEAD'], { cwd: worktree })).stdout.trim();
     } else {
       branch = `warden/change-${plan.id.replace(/^todo-/, '').slice(0, 8)}`;
-      const kind = request.kind ?? 'clone';
+      const kind = request.kind ?? 'shared';
       const free = list.find(
-        (row) => row.free && !!row.clone === (kind === 'clone') && !workflow.changes.some((change) => active(change) && change.worktree === row.path),
+        (row) =>
+          row.free &&
+          !!row.clone === (kind === 'clone') &&
+          !!row.shared === (kind === 'shared') &&
+          !workflow.changes.some((change) => active(change) && change.worktree === row.path),
       );
       const slot = free?.slot ?? (await nextSlot(this.repo, list)).slot;
-      if (free?.clone) await this.importCommit(this.repo.commonRoot, free.path, base);
+      if (free?.clone || free?.shared) await this.importCommit(this.repo.commonRoot, free.path, base);
       const created = await checkoutWorktree(this.repo, { branch, base, slot, kind });
       worktree = created.worktree.path;
       hookEvent = created.reused ? 'reuse' : 'create';
@@ -475,6 +481,7 @@ export class WorkflowService {
               row.base,
               row.sourceBase,
               checkout.clone,
+              checkout.shared,
               check.sourceHead,
               target,
               boundary,
@@ -523,20 +530,32 @@ export class WorkflowService {
 
   private async rebaseContext(): Promise<string | undefined> {
     try {
-      const cwd = path.dirname(this.store.file);
+      const cwd = await ensureSharedRepository(this.repo.commonRoot);
       const variables = Object.entries(gitEnvironment());
-      // These paths would resolve differently in the parent directory and a generated
-      // sandbox. Their effective config cannot be inferred safely from the parent probe.
+      // Relative and conditional configuration may resolve differently in the bare
+      // repository and a generated worktree, so those checks are never reused.
       if (variables.some(([name, value]) => configLocationVariables.has(name.toUpperCase()) && value !== undefined && !path.isAbsolute(value)))
         return undefined;
       const environment = digest(variables.sort(([a], [b]) => a.localeCompare(b)));
-      const [repository, config] = await finishReads([
-        runGit(['rev-parse', '--absolute-git-dir'], { cwd, okCodes: [0, 128] }),
+      const [config, identity, unusualGraph, packed] = await finishReads([
         runGit(['config', '--get-regexp', '.'], { cwd, okCodes: [0, 1] }),
+        repositoryIdentity([cwd]),
+        finishReads(['shallow', 'info/grafts', 'refs/replace', 'objects/info/alternates', 'info/attributes'].map((file) => fileExists(path.join(cwd, file)))),
+        readFile(path.join(cwd, 'packed-refs'), 'utf8').catch((error: NodeJS.ErrnoException) => {
+          if (error.code === 'ENOENT') return '';
+          throw error;
+        }),
       ]);
-      // Generated sandboxes have their own local config. Outside a repository, their parent
-      // sees exactly the global/system config they inherit, unless conditional includes apply.
-      if (repository.code === 0 || !repository.stderr.includes('not a git repository') || opaqueRebaseConfig.test(config.stdout)) return undefined;
+      // All trials share this repository's configuration and graph. Agent config edits
+      // must invalidate earlier results, even for a legacy clone source. Per-worktree
+      // configuration may differ again in the generated checkout, so disable reuse.
+      if (
+        opaqueRebaseConfig.test(config.stdout) ||
+        /^extensions\.(?:refstorage reftable|worktreeconfig true)$/im.test(config.stdout) ||
+        unusualGraph.some(Boolean) ||
+        / refs\/replace\//.test(packed)
+      )
+        return undefined;
       if (this.attributePaths?.environment !== environment) {
         const paths = finishReads([runGit(['var', 'GIT_ATTR_GLOBAL'], { cwd }), runGit(['var', 'GIT_ATTR_SYSTEM'], { cwd, okCodes: [0, 1] })])
           .then(([global, system]) => {
@@ -556,7 +575,7 @@ export class WorkflowService {
       }
       if (attributes.some((file) => !path.isAbsolute(file)) || (await finishReads(attributes.map(fileExists))).some(Boolean)) return undefined;
       if (environment !== digest(Object.entries(gitEnvironment()).sort(([a], [b]) => a.localeCompare(b)))) return undefined;
-      return digest([environment, config.stdout, attributes]);
+      return digest([environment, config.stdout, attributes, identity]);
     } catch {
       // Older Git versions may not expose attribute paths. Unsupported or unreadable inputs
       // only disable reuse; the normal isolated check must still remain available.
@@ -719,7 +738,7 @@ export class WorkflowService {
 
   /** Never switch the user's checkout or silently publish a branch that cannot be tested there. */
   private async destination(branch: string, clean = false, expectedPath?: string) {
-    const checkout = (await listWorktreesAll(this.repo)).find((row) => !row.clone && row.branch === branch);
+    const checkout = (await listWorktreesAll(this.repo)).find((row) => !row.clone && !row.shared && row.branch === branch);
     if (!checkout || checkout.prunable) fail('请先在本仓库的工作区检出主开发分支，再准备验证', 'development_checkout_missing');
     if (expectedPath && checkout.path !== expectedPath) fail('主开发分支的工作目录已改变，请恢复原工作目录', 'development_checkout_moved');
     const state = await checkoutState(this.repo, checkout);
@@ -804,7 +823,7 @@ export class WorkflowService {
     try {
       await sandbox.fetch(checkout.path, source);
       try {
-        await applyPatch(sandbox.path, await patchBetween(checkout.path, boundary, source), true, true);
+        await sandbox.apply(await patchBetween(checkout.path, boundary, source), true, true);
       } catch (error) {
         fail(`合入存在冲突，请先在工作区处理：${(await sandbox.conflicts()).join('、') || errorMessage(error)}`, 'delivery_conflict');
       }

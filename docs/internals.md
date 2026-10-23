@@ -45,6 +45,9 @@ own arguments. Diff review is read-only: the legacy `POST /api/targets/:key/stag
 partial index-patch writer have been removed. The `PUT /api/targets/:key/viewed` endpoint is also
 removed and returns 404.
 Formal delivery still prepares the primary index and commits through its validated workflow.
+The sole `fsck` read shape is `git fsck --full --no-dangling`, used against independently copied
+backup metadata to verify object connectivity before publishing a shared-repository backup. Caller-
+supplied flags and the write-capable `--lost-found` form remain forbidden.
 `POST /api/worktrees`, `POST /api/worktrees/release` and `POST /api/worktrees/remove` run
 `git worktree add`, `git branch`, `git switch`, `git worktree remove` and `git branch -d` with a
 branch name git has validated, a ref that resolves, and a slot path the server composes from a
@@ -57,7 +60,7 @@ a 409. A clone slot (see [Clone slots](worktrees.md#clone-slots)) is made at suc
 `set-url` / `set-head` with the names and URLs read from the main worktree's config, and a `git fetch`
 of the main worktree's remote-tracking branches; after that it is written like any slot, in the
 clone, plus a `git fetch --all` there when the checkout asks for one. A clone made for a checkout
-that then fails is deleted again, and a clone's directory is deleted — the one write outside git —
+that then fails is deleted again, and a clone's directory is deleted
 only on a removal the reviewer confirmed after being told what only it holds, and only while it is
 still a clone of this repository. Legacy checkout refs change when a branch is made for a checkout (plus its upstream setting when it comes
 from a remote) — undone with `branch -D` should the switch into the slot then fail — or deleted on
@@ -70,6 +73,24 @@ writes must not, because Git can freshen alternate objects. `snapshots.ts` owns 
 New clone workspaces copy the primary repository's effective `user.name` and `user.email` with
 fixed `git config` writes only when they differ from the clone's inherited defaults. This preserves
 repository-local commit identity without overriding matching global defaults.
+
+Default task creation uses `kind: shared`. `shared-repository.ts` owns the separate bare repository
+at `<primary>-warden/repo.git`: fixed `git init --bare`, ownership configuration, local fetches of
+validated exact commits, and `git worktree add` / `remove` for generated paths. Numbered task paths
+stay beside primary. The repository owns task branches and objects; it is never the primary Git
+common directory. Repository resolution validates its ownership and maps its task worktrees back to
+primary for state and locking. Inventory excludes the bare repository and internal operation
+worktrees. Existing `kind: worktree` and `kind: clone` layouts remain supported without migration.
+Primary commits are fetched into the shared repository only when absent; worktrees in that repository
+can already read each other's objects. Shared initialization preserves the primary commit identity.
+Clone refs remain independent, while composition imports the clone commits it needs into the shared
+object store. This never imports agent development history into primary.
+Internal commands disable hooks/signing through command-local configuration, never by changing the
+shared repository's ordinary commit configuration.
+Deleting a shared task branch first proves its tip is included in the primary commit or its explicit
+upstream. Only then does `update-ref -d <ref> <observed-tip>` remove that exact ref in the external
+repository. A squash delivery does not establish ancestry of its source branch; such branches are
+retained unless a valid ancestry check permits deletion. Primary refs are never changed by this cleanup.
 
 The independent `warden-core` Rust crate exposes a typed worktree observation, rather than a raw
 command API. It executes exactly `git status --porcelain=v2 --branch --untracked-files=all
@@ -102,8 +123,9 @@ numbered workspace from the selected primary baseline, without dependency enforc
 `workflow.changes[].deliveries` stores stable delivery IDs, source ranges, primary commits and
 review records. `sourceBase` distinguishes a delivered source tip from its squash commit.
 
-`GET /workflow/rebase-checks` replays only in independent repositories under the state directory's
-`operations/`. Their hooks and signing are disabled. `POST /workflow/rebase` validates source and
+`GET /workflow/rebase-checks` replays only in isolated worktrees under the state directory's
+`operations/`, backed by the external shared repository. Their commands disable hooks and signing.
+`POST /workflow/rebase` validates source and
 primary HEADs and clean checkout state, then explicitly rebases selected workspaces with
 `rebase --no-autostash --onto`. Actual conflicts remain for manual handling. There is no background
 rebase or workspace recycling.
@@ -125,16 +147,19 @@ already-incorporated target and repairs bookkeeping without executing rebase hoo
 
 `PUT /preview` and the refresh timer snapshot saved primary content and selected workspaces into
 Warden's external snapshot store. Binary patches compose with `apply --index --3way` in a temporary
-independent repository. A persistent independent runtime repository then fetches only that candidate,
+worktree of the external shared repository. A persistent runtime worktree reads the complete candidate,
 checks its previous ownership tree, applies the old/new patch with `apply --index`, and advances its
-own detached HEAD. Primary files, HEAD and index are not touched. Ignored runtime dependencies and
+own detached HEAD and index. Each task has its own HEAD and index. Primary files, HEAD and index are not touched. Ignored runtime dependencies and
 caches survive; source files modified outside publication stop synchronization without being discarded.
 
 `connectionPreview.directory` identifies the persistent runtime (validated as an operation directory).
-The record journals old/new trees and the candidate repository before publication. Recovery accepts
+The record journals old/new trees and the candidate worktree before publication. Recovery accepts
 a complete old or new tree; ambiguous partial changes remain blocked for manual repair. Complete
-publication disposes its temporary candidate; the runtime retains the installed snapshot. Legacy
-primary-directory previews migrate only after proving ownership, with a separate migration journal.
+publication disposes its temporary candidate worktree; the runtime retains the installed snapshot.
+The shared bare repository is persistent and is not removed with a preview or operation worktree. Legacy
+standalone runtime repositories remain at their original paths and continue receiving complete
+candidates through local fetches. Existing standalone operation journals remain recoverable.
+Legacy primary-directory previews migrate only after proving ownership, with a separate migration journal.
 Initial conflicts preserve the previous selection; later failures expose stale status. Content hashes
 and a debounce window drive per-workspace observed/applied versions, never agent-idleness inference.
 
@@ -176,7 +201,7 @@ candidate requires the same final tree and original HEAD. Only the selected repl
 graph is fetched locally; `update-ref <branch> <new> <old>` publishes it.
 An independent filesystem backup is also required before fetching/publishing the candidate.
 The real files/index need no change. `historyDraft` journals publication and subsequent delivery-SHA
-mapping. The temporary repository and operation backup are removed after that mapping is durable.
+mapping. The temporary worktree and operation backup are removed after that mapping is durable.
 No remote push or user-facing undo/restore operation is provided.
 
 All mutation arguments are composed by the server; requests cannot supply raw Git commands or
@@ -186,9 +211,10 @@ without adding retention refs. Successful delivery, synchronization and history 
 older versions' exact generated `refs/warden/changes/<id>/{source,accepted}`,
 `refs/warden/deliveries/<id>/{source,commit}` and `refs/warden/history/<id>` refs with
 `update-ref -d <ref> <observed-old-value>`. Other refs and user reflogs are preserved; ordinary Git
-maintenance decides when previously retained, now-unreachable objects can be collected. Clone
-workspaces isolate agent objects; explicitly selected linked worktrees share the primary object
-store by Git's design. Workflow writes share
+maintenance decides when previously retained, now-unreachable objects can be collected. Default
+shared workspaces keep agent objects outside primary and share them with preview and composition.
+Clone workspaces retain separate object stores; legacy primary-linked worktrees share the primary
+object store by Git's design. Workflow writes share
 a cross-process repository-operation lock; short JSON updates have their own lock. Stale-heartbeat
 recovery also requires the recorded owner process to be gone. A live owner, incomplete owner record,
 or inconclusive liveness check remains occupied, so a delayed heartbeat cannot authorize a second

@@ -1,8 +1,9 @@
 import path from 'node:path';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { DIFF_OUTPUT_ARGS, runGit, runGitWrite, type SnapshotEnv } from './git.js';
+import { lstat, mkdir, mkdtemp, realpath, rm, rmdir, writeFile } from 'node:fs/promises';
+import { DIFF_OUTPUT_ARGS, LONG_GIT_TIMEOUT_MS, runGit, runGitWrite, type SnapshotEnv } from './git.js';
 import type { StateStore } from './state.js';
 import type { DevelopmentChange } from '@warden/shared';
+import { importSharedCommit, isSharedCheckout, sharedRepositoryPath, validatedSharedRepository } from './shared-repository.js';
 
 export const gitOid = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-f]{40,64}$/.test(value);
 export const gitMessage = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -37,25 +38,29 @@ export async function applyPatch(cwd: string, patch: string, index: boolean, thr
   }
 }
 
-/** Independent repository: trial replay cannot touch any agent's index, files or refs. */
+/** Detached worktrees share objects, but trial replay owns its files, index and HEAD. */
 export class GitSandbox {
-  private constructor(readonly path: string) {}
+  private constructor(
+    readonly path: string,
+    private readonly store: StateStore,
+    private readonly identity: string[] = [],
+  ) {}
+
   static async create(store: StateStore, source: string, head: string) {
     const root = path.join(path.dirname(store.file), 'operations');
     await mkdir(root, { recursive: true });
-    const sandbox = new GitSandbox(await mkdtemp(path.join(root, 'git-')));
+    const repository = await importSharedCommit(store.repoRoot, source, head);
+    const identity: string[] = [];
+    for (const [field, fallback] of [
+      ['user.name', 'Warden'],
+      ['user.email', 'warden@localhost'],
+    ]) {
+      const configured = await runGit(['config', '--get', field!], { cwd: source, okCodes: [0, 1] });
+      identity.push('-c', `${field}=${configured.stdout.trim() || fallback}`);
+    }
+    const sandbox = new GitSandbox(await mkdtemp(path.join(root, 'git-')), store, identity);
     try {
-      await runGitWrite(['init', '--quiet', '--template=', ...(head.length === 64 ? ['--object-format=sha256'] : []), sandbox.path], { cwd: root });
-      await sandbox.write(['config', 'core.hooksPath', path.join(sandbox.path, '.git', 'disabled-hooks')]);
-      for (const [field, fallback] of [
-        ['user.name', 'Warden'],
-        ['user.email', 'warden@localhost'],
-      ]) {
-        const configured = await runGit(['config', '--get', field!], { cwd: source, okCodes: [0, 1] });
-        await sandbox.write(['config', field!, configured.stdout.trim() || fallback!]);
-      }
-      await sandbox.fetch(source, head);
-      await sandbox.write(['checkout', '--quiet', '--detach', head]);
+      await runGitWrite([...sandbox.options(), 'worktree', 'add', '--quiet', '--detach', '--', sandbox.path, head], { cwd: repository });
       return sandbox;
     } catch (error) {
       await sandbox.dispose();
@@ -65,13 +70,84 @@ export class GitSandbox {
   static open(store: StateStore, location: string) {
     const root = path.join(path.dirname(store.file), 'operations');
     if (path.dirname(location) !== root || !path.basename(location).startsWith('git-')) throw new Error('Invalid operation directory');
-    return new GitSandbox(location);
+    return new GitSandbox(location, store);
   }
-  write(args: string[]) {
-    return runGitWrite(['-c', 'commit.gpgSign=false', '-c', 'tag.gpgSign=false', '-c', 'rebase.updateRefs=false', ...args], { cwd: this.path });
+
+  private options() {
+    // This path is beneath the worktree's .git file, so it cannot contain hooks. Never
+    // persist these overrides: task commits use the same repository configuration.
+    return [
+      '-c',
+      `core.hooksPath=${path.join(this.path, '.git', 'disabled-hooks')}`,
+      '-c',
+      'commit.gpgSign=false',
+      '-c',
+      'tag.gpgSign=false',
+      '-c',
+      'rebase.updateRefs=false',
+      ...this.identity,
+    ];
   }
-  fetch(source: string, head: string) {
-    return this.write(['fetch', '--quiet', '--no-tags', '--no-write-fetch-head', '--', source, head]);
+
+  private async registered(repository: string) {
+    const listed = await runGit(['worktree', 'list', '--porcelain', '-z'], { cwd: repository });
+    const wanted = await realpath(this.path).catch(() => path.resolve(this.path));
+    for (const field of listed.stdout.split('\0')) {
+      if (!field.startsWith('worktree ')) continue;
+      const location = field.slice('worktree '.length);
+      if ((await realpath(location).catch(() => path.resolve(location))) === wanted) return true;
+    }
+    return false;
+  }
+
+  /** Old journals can still name standalone repositories, but never arbitrary linked worktrees. */
+  private async repository() {
+    const directory = await lstat(this.path);
+    if (!directory.isDirectory() || directory.isSymbolicLink()) throw new Error('Invalid operation directory');
+    const parent = await realpath(path.dirname(this.path));
+    if ((await realpath(this.path)) !== path.join(parent, path.basename(this.path))) throw new Error('Invalid operation directory');
+    const git = await lstat(path.join(this.path, '.git'));
+    if (git.isDirectory() && !git.isSymbolicLink()) {
+      const result = await runGit(['rev-parse', '--show-toplevel', '--git-common-dir'], { cwd: this.path });
+      const [top, common] = result.stdout.trim().split('\n');
+      if (
+        top &&
+        common &&
+        (await realpath(top)) === (await realpath(this.path)) &&
+        (await realpath(path.resolve(this.path, common))) === path.join(await realpath(this.path), '.git')
+      )
+        return undefined;
+      throw new Error('Invalid operation worktree');
+    }
+    if (!git.isFile() || !(await isSharedCheckout(this.store.repoRoot, this.path))) throw new Error('Invalid operation repository');
+    return sharedRepositoryPath(await realpath(this.store.repoRoot));
+  }
+
+  async write(args: string[]) {
+    await this.repository();
+    return runGitWrite([...this.options(), ...args], { cwd: this.path });
+  }
+
+  async validate() {
+    await this.repository();
+  }
+
+  async apply(patch: string, index: boolean, threeWay = false) {
+    await this.repository();
+    await applyPatch(this.path, patch, index, threeWay);
+  }
+
+  async fetch(source: string, head: string) {
+    if (!gitOid(head)) throw new Error('Invalid operation commit');
+    await this.repository();
+    const exists = await runGit(['rev-parse', '--verify', '--quiet', `${head}^{commit}`], { cwd: this.path, okCodes: [0, 1, 128] });
+    if (exists.code === 0) return;
+    const expected = await runGit(['rev-parse', '--verify', `${head}^{commit}`], { cwd: source });
+    if (expected.stdout.trim() !== head) throw new Error('Invalid operation source commit');
+    await runGitWrite([...this.options(), 'fetch', '--quiet', '--no-tags', '--no-write-fetch-head', '--no-auto-maintenance', '--', source, head], {
+      cwd: this.path,
+      timeoutMs: LONG_GIT_TIMEOUT_MS,
+    });
   }
   async commit(message = 'Warden temporary composition') {
     await this.write(['commit', '--quiet', '--allow-empty', '-m', message]);
@@ -80,7 +156,21 @@ export class GitSandbox {
   async conflicts() {
     return (await runGit(['diff', '--name-only', '--diff-filter=U', '-z'], { cwd: this.path })).stdout.split('\0').filter(Boolean);
   }
-  dispose() {
-    return rm(this.path, { recursive: true, force: true });
+  async dispose() {
+    const directory = await lstat(this.path).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== 'ENOENT') throw error;
+      return undefined;
+    });
+    // A failed worktree add can leave its allocated empty directory. Nothing else at
+    // this path is removed until its repository ownership has been verified.
+    if (directory && !(await lstat(path.join(this.path, '.git')).catch(() => undefined))) {
+      await rmdir(this.path);
+      return;
+    }
+    const shared = directory ? await this.repository() : await validatedSharedRepository(this.store.repoRoot);
+    if (shared) {
+      if (directory || (await this.registered(shared)))
+        await runGitWrite([...this.options(), 'worktree', 'remove', '--force', '--', this.path], { cwd: shared });
+    } else if (directory) await rm(this.path, { recursive: true });
   }
 }

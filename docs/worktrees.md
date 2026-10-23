@@ -10,8 +10,10 @@ Workspace creation does not install dependencies or launch an agent.
 The left navigation’s *工作区* list holds the ordered work plan. Add a task and its notes, reorder it, and select
 *创建工作区* when needed. Planning does not create a Git branch or pin a baseline. A task can use
 a new numbered worktree, an available detached slot, or a validated existing numbered checkout.
-The default is an independent clone, keeping agent development objects outside the primary
-repository. A linked Git worktree remains an explicit option. Ordering never enforces dependencies.
+The default is a worktree of Warden's external shared repository. Agent development objects stay
+outside the primary repository while tasks and preview can read the same Git objects directly.
+Independent clones remain a compatibility option for tooling that requires its own `.git` directory.
+Existing primary-linked worktrees remain usable. Ordering never enforces dependencies.
 
 A workspace corresponds to one linear task. It can contain multiple local commits and make multiple
 deliveries without being recycled. There is no task-complete declaration or release step. Editing
@@ -20,6 +22,27 @@ historical metadata is retained; old checked items migrate as archived notes, no
 
 The primary branch can change when no integration or active connection belongs to it.
 Tasks remain associated with the branch for which they were created.
+
+## Shared repository
+
+The primary checkout retains its own Git repository. Warden creates a separate bare repository at
+`<primary>-warden/repo.git`; default task directories remain numbered siblings such as
+`<primary>-1` and `<primary>-2`. Newly created preview and temporary composition worktrees live in Warden's
+external data directory and use the same shared repository. Each worktree has independent files,
+HEAD and index. Branch references and Git objects are shared among these Warden worktrees.
+
+Primary commits are imported locally when needed. Saved uncommitted primary and task content is
+captured without changing the real indexes. Composition uses a separate worktree and publishes only
+a complete candidate to the persistent preview. Delivery applies only the reviewed final patch to
+primary and commits there with its ordinary hooks and signing. Agent and preview histories do not
+enter primary.
+
+The shared repository outlives temporary operations and preview worktrees. Existing clones,
+primary-linked worktrees and standalone runtime previews keep their paths and repositories;
+Warden does not relocate active tasks or existing previews. Old operation journals remain recoverable.
+Warden started from a shared task still resolves to the primary repository's state and lock.
+Internal composition disables hooks and signing only for its own commands, without changing the
+shared repository's configuration or ordinary agent commits.
 
 ## Workspace hooks
 
@@ -44,7 +67,7 @@ command in it operates on the assigned workspace. Normal identity and configurat
 
 Use the connection switches in the left *工作区* list to select one or more task workspaces. Warden snapshots their live committed and
 uncommitted changes relative to each workspace's undelivered baseline. It composes them with
-three-way patch application in an independent temporary repository. Only a complete, successful
+three-way patch application in a temporary worktree of the external shared repository. Only a complete, successful
 composition is published to the independent preview directory, including saved primary content
 as its baseline. Primary files, index and HEAD are unchanged by connections.
 
@@ -69,7 +92,7 @@ a **clean committed source**, pinned to the reviewed source, delivery boundary a
 continue from the previous delivery without first rebasing. `sourceBase` records that previous
 source tip so A1 is excluded when delivering A2.
 
-Preparation first composes the delivery in an isolated repository. It leaves the independent preview running and stages only that delivery in the checked-out
+Preparation first composes the delivery in an isolated worktree. It leaves the independent preview running and stages only that delivery in the checked-out
 primary branch. Existing primary user edits must be handled first.
 Only one preparation uses that directory at a time. Other connected workspaces cannot enter the
 resulting commit. Review takes place before preparation; normal delivery prepares and commits
@@ -112,7 +135,7 @@ Manual synchronization that incorporates the current primary HEAD is recognized 
 
 *提交历史* shows the most recent 100 primary commits, oldest first. Select a start, then reorder or
 edit messages from that commit through HEAD. The draft does not change Git. Preview cherry-picks
-in an independent temporary repository with hooks and signing disabled. Current delivery commits
+in an isolated temporary worktree with hooks and signing disabled for those commands. Current delivery commits
 still use their ordinary hooks; history preview is not another validation run.
 
 The first version accepts only consecutive linear commits with one parent and the same final tree
@@ -141,8 +164,9 @@ also remain; ready no longer rebases, and no readiness protocol is exposed by th
 
 ## Clone slots
 
-Independent clones are the default, providing their own `.git` directories and isolating agent
-objects from the primary repository. Delivery applies the final reviewed patch; explicit rebase
+Independent clones are a compatibility option, providing their own `.git` directories and branch refs.
+Preview and replay import the required clone commits into the external shared repository; primary
+still receives only the final reviewed patch. Explicit rebase
 imports exact primary commits into the clone from validated local repositories, without remote
 fetches or remote-tracking ref updates. Clone ownership and branch
 validation use the same rules as other task workspaces.

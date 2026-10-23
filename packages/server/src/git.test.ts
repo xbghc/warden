@@ -57,4 +57,10 @@ describe('git whitelist', () => {
       expect(() => assertAllowedGitArgs(args)).toThrow(GitError);
     }
   });
+  it('verifies backup connectivity without allowing fsck to write recovery files', () => {
+    expect(() => assertAllowedGitArgs(['fsck', '--full', '--no-dangling'])).not.toThrow();
+    for (const args of [['fsck'], ['fsck', '--lost-found'], ['fsck', '--full', '--no-dangling', '--lost-found'], ['fsck', '--full', '--no-dangling', 'HEAD']]) {
+      expect(() => assertAllowedGitArgs(args)).toThrow(GitError);
+    }
+  });
 });

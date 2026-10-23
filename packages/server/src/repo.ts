@@ -3,6 +3,7 @@ import { readdir, realpath, stat } from 'node:fs/promises';
 import type { RepoInfo, WorktreeInfo } from '@warden/shared';
 import { refExists, runGit } from './git.js';
 import { HttpError } from './errors.js';
+import { sharedRepositoryOwner, validatedSharedRepository } from './shared-repository.js';
 
 export interface RepoContext {
   /** Root of the worktree the server was started in. */
@@ -160,6 +161,8 @@ export async function resolveRepo(dir: string): Promise<RepoContext> {
   }
   if (!top) throw new HttpError(400, `${dir} is not inside a git worktree (bare repository?)`, 'not_a_repo');
   const root = await safeRealpath(top);
+  const sharedOwner = await sharedRepositoryOwner(root);
+  if (sharedOwner) return { root, commonRoot: sharedOwner };
   const common = await runGit(['rev-parse', '--git-common-dir'], { cwd: root });
   const commonDir = await safeRealpath(path.resolve(root, common.stdout.trim()));
   const commonRoot = path.basename(commonDir) === '.git' ? path.dirname(commonDir) : root;
@@ -223,9 +226,8 @@ async function listCloneSlots(ctx: RepoContext, listed: Set<string>): Promise<(W
  * Every checkout of the repository: what git lists — the main worktree and the linked ones,
  * including those whose directory is gone (`prunable`) — then the clone slots.
  */
-export async function listWorktreesAll(ctx: RepoContext): Promise<(WorktreeInfo & { prunable: boolean })[]> {
-  // From the main worktree: in a clone slot, git would list the clone's own worktrees.
-  const r = await runGit(['worktree', 'list', '--porcelain'], { cwd: ctx.commonRoot });
+async function listedWorktrees(cwd: string): Promise<(WorktreeInfo & { prunable: boolean })[]> {
+  const r = await runGit(['worktree', 'list', '--porcelain'], { cwd });
   const out: (WorktreeInfo & { prunable: boolean })[] = [];
   let cur: (Partial<WorktreeInfo> & { prunable?: boolean }) | null = null;
   const flush = () => {
@@ -261,8 +263,18 @@ export async function listWorktreesAll(ctx: RepoContext): Promise<(WorktreeInfo 
   // Normalise paths through realpath so they match ctx.root/commonRoot comparisons.
   for (const wt of out) {
     wt.path = await safeRealpath(wt.path);
-    wt.isMain = wt.path === ctx.commonRoot;
   }
+  return out;
+}
+
+export async function listWorktreesAll(ctx: RepoContext): Promise<(WorktreeInfo & { prunable: boolean })[]> {
+  // Internal preview and replay worktrees are deliberately absent from the public task inventory.
+  const [primary, repository] = await Promise.all([listedWorktrees(ctx.commonRoot), validatedSharedRepository(ctx.commonRoot)]);
+  for (const wt of primary) wt.isMain = wt.path === ctx.commonRoot;
+  const shared = repository
+    ? (await listedWorktrees(repository)).filter((wt) => !wt.bare && slotOf(ctx, wt.path) !== undefined).map((wt) => ({ ...wt, shared: true }))
+    : [];
+  const out = [...primary, ...shared.filter((wt) => !primary.some((other) => other.path === wt.path))];
   return [...out, ...(await listCloneSlots(ctx, new Set(out.map((w) => w.path))))];
 }
 

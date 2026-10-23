@@ -44,7 +44,8 @@ changes accumulate. It need not be the repository's default branch.
 1. **Plan in the left navigation.** Add and order tasks; create each workspace when needed.
    Ordering does not impose dependencies. One workspace can deliver multiple commits.
 2. **Create a workspace.** Configure optional creation/reuse hooks in settings. Warden supplies
-   the workspace and hook context; use your own tools or scripts to run agents there.
+   the workspace and hook context; use your own tools or scripts to run agents there. By default,
+   task worktrees and preview share an external Git repository, keeping development history out of primary.
 3. **Connect for preview.** Connect selected workspaces. Their committed and uncommitted
    increments are composed with saved primary edits in a separate preview directory for your dev server and tests.
    A conflicting connection fails and preserves the previous preview. HEAD and index stay unchanged.

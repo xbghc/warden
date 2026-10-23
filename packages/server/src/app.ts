@@ -535,7 +535,7 @@ export function createApp(opts: AppOptions): WardenApp {
     const [list, state] = await Promise.all([listWorktreesDetailed(repo), store.load()]);
     const [branches, newSlot] = await Promise.all([listBranches(repo, list), nextSlot(repo, list)]);
     const trunk = await remoteDefault(repo.commonRoot).catch(() => undefined);
-    const res: WorktreesResponse = { worktrees: list, branches, newSlot, slotKind: state.prefs.slotKind ?? 'clone', ...(trunk ? { trunk } : {}) };
+    const res: WorktreesResponse = { worktrees: list, branches, newSlot, slotKind: state.prefs.slotKind ?? 'shared', ...(trunk ? { trunk } : {}) };
     return c.json(res);
   });
 
@@ -566,7 +566,8 @@ export function createApp(opts: AppOptions): WardenApp {
     if (typeof body.branch !== 'string') throw badRequest('branch is required');
     if (body.base !== undefined && typeof body.base !== 'string') throw badRequest('base must be a ref');
     if (body.slot !== undefined && (!Number.isInteger(body.slot) || body.slot < 1)) throw badRequest('slot must be a positive integer', 'invalid_slot');
-    if (body.kind !== undefined && body.kind !== 'clone' && body.kind !== 'worktree') throw badRequest('kind must be clone or worktree', 'invalid_kind');
+    if (body.kind !== undefined && body.kind !== 'shared' && body.kind !== 'clone' && body.kind !== 'worktree')
+      throw badRequest('kind must be shared, clone or worktree', 'invalid_kind');
     if (body.fetch !== undefined && typeof body.fetch !== 'boolean') throw badRequest('fetch must be a boolean');
     const res = await oneAtATime(async () => {
       const held = (await store.load()).workflow?.changes.filter((row) => row.status !== 'accepted') ?? [];

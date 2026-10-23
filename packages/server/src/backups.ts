@@ -4,7 +4,8 @@ import { constants, createReadStream } from 'node:fs';
 import { chmod, copyFile, lstat, mkdir, open, readFile, readdir, readlink, realpath, rename, rm } from 'node:fs/promises';
 import type { SafetyBackup } from '@warden/shared';
 import { HttpError } from './errors.js';
-import { runGit } from './git.js';
+import { LONG_GIT_TIMEOUT_MS, runGit } from './git.js';
+import { sharedRepositoryOwner } from './shared-repository.js';
 import type { StateStore } from './state.js';
 
 type Entry = { path: string; mode: number } & ({ kind: 'directory' } | { kind: 'file'; size: number; sha256: string } | { kind: 'symlink'; target: string });
@@ -12,6 +13,8 @@ interface Source {
   path: string;
   name: 'worktree' | 'git-common' | 'git-worktree';
   entries: Entry[];
+  /** Shared repositories freeze refs separately; sibling additions do not invalidate this checkout. */
+  shared?: { entries: Entry[]; branch?: string; reflog?: string };
 }
 interface Manifest extends SafetyBackup {
   version: 1;
@@ -30,11 +33,11 @@ const digest = async (file: string) => {
 };
 
 /** Links are recorded as links, never traversed; unsupported external repositories fail closed. */
-async function inventory(root: string, working: boolean): Promise<Entry[]> {
+async function inventory(root: string, working: boolean, shared = false): Promise<Entry[]> {
   const entries: Entry[] = [];
   async function walk(relative: string) {
     for (const name of (await readdir(path.join(root, relative))).sort()) {
-      if (working && !relative && name === '.git') continue;
+      if (!relative && ((working && name === '.git') || (shared && name === 'worktrees'))) continue;
       const rel = relative ? `${relative}/${name}` : name;
       const file = path.join(root, rel);
       const info = await lstat(file);
@@ -54,6 +57,62 @@ async function inventory(root: string, working: boolean): Promise<Entry[]> {
   }
   await walk('');
   return entries;
+}
+
+const under = (name: string, prefix: string) => name === prefix || name.startsWith(`${prefix}/`);
+const objectEntry = (entry: Entry) => under(entry.path, 'objects');
+const sharedMetadata = (entries: Entry[]) =>
+  entries.filter((entry) => !['refs', 'logs'].some((name) => under(entry.path, name)) && entry.path !== 'packed-refs');
+
+/** Read only ordinary metadata paths; a ref or parent directory must never escape through a link. */
+async function logBytes(common: string, name: string): Promise<Buffer | undefined> {
+  let current = common;
+  for (const part of name.split('/')) {
+    current = path.join(current, part);
+    const info = await lstat(current).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return undefined;
+      throw error;
+    });
+    if (!info) return undefined;
+    if (info.isSymbolicLink() || (!info.isDirectory() && current !== path.join(common, name))) throw new Error('Git 元数据包含外部链接，无法建立独立备份');
+  }
+  return readFile(current);
+}
+
+/** Refs are resolved before objects are inventoried, including refs stored in packed-refs/reftable. */
+async function sharedReferences(cwd: string, common: string) {
+  const symbolic = (await runGit(['rev-parse', '--symbolic-full-name', 'HEAD'], { cwd })).stdout.trim();
+  const branch = symbolic.startsWith('refs/heads/') ? symbolic : undefined;
+  const refs = (await runGit(['for-each-ref', '--format=%(refname)%00%(objectname)%00%(symref)'], { cwd })).stdout;
+  const files: { path: string; bytes: Buffer }[] = [];
+  for (const line of refs.split('\n').filter(Boolean)) {
+    const [name = '', object = '', target = ''] = line.split('\0');
+    const safe = (ref: string) => ref.startsWith('refs/') && ref.split('/').every((part) => part && part !== '.' && part !== '..' && !part.includes('\\'));
+    if (!safe(name) || (target && !safe(target)) || !/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(object)) throw new Error('Git 引用格式无效，无法建立独立备份');
+    files.push({ path: name, bytes: Buffer.from(`${target ? `ref: ${target}` : object}\n`) });
+  }
+  let reflog: string | undefined;
+  for (const name of new Set([...(branch ? [`logs/${branch}`] : []), 'logs/refs/stash'])) {
+    const bytes = await logBytes(common, name);
+    if (bytes) {
+      files.push({ path: name, bytes });
+      if (name === `logs/${branch}`) reflog = createHash('sha256').update(bytes).digest('hex');
+    }
+  }
+  return { files, branch, reflog };
+}
+
+/** Compare selected metadata and the copied objects, while allowing new sibling objects and refs. */
+async function sharedCurrent(source: Source): Promise<boolean> {
+  const original = source.shared!;
+  const current = sharedMetadata(await inventory(source.path, false, true));
+  if (JSON.stringify(current.filter((entry) => !objectEntry(entry))) !== JSON.stringify(original.entries.filter((entry) => !objectEntry(entry)))) return false;
+  const objects = new Map(current.filter(objectEntry).map((entry) => [entry.path, entry]));
+  for (const entry of original.entries.filter(objectEntry)) {
+    if (JSON.stringify(objects.get(entry.path)) !== JSON.stringify(entry)) return false;
+  }
+  const log = original.branch ? await logBytes(source.path, `logs/${original.branch}`) : undefined;
+  return (log ? createHash('sha256').update(log).digest('hex') : undefined) === original.reflog;
 }
 
 async function syncFile(file: string) {
@@ -99,10 +158,11 @@ export async function createSafetyBackup(store: StateStore, cwd: string, reason:
     if ((await realpath(directories[2]!)) !== worktree) throw new Error('工作区路径与 Git 实际工作目录不一致');
     const common = await realpath(path.resolve(worktree, directories[0]!));
     const git = await realpath(path.resolve(worktree, directories[1]!));
+    const shared = (await sharedRepositoryOwner(worktree)) !== undefined;
     const definitions: Omit<Source, 'entries'>[] = [
       { path: worktree, name: 'worktree' },
-      { path: common, name: 'git-common' },
       ...(git === common ? [] : [{ path: git, name: 'git-worktree' as const }]),
+      { path: common, name: 'git-common' },
     ];
     // Resolve the parent first, so even a symlinked data directory cannot recurse into itself.
     await mkdir(path.dirname(store.file), { recursive: true, mode: 0o700 });
@@ -117,7 +177,15 @@ export async function createSafetyBackup(store: StateStore, cwd: string, reason:
     await mkdir(pending, { mode: 0o700 });
     const head = (await runGit(['rev-parse', '--verify', 'HEAD'], { cwd: worktree })).stdout.trim();
     const sources: Source[] = [];
-    for (const source of definitions) sources.push({ ...source, entries: await inventory(source.path, source.name === 'worktree') });
+    let references: Awaited<ReturnType<typeof sharedReferences>> | undefined;
+    for (const source of definitions) {
+      // Freeze index/private metadata before capturing the objects those entries refer to.
+      if (shared && source.name === 'git-common') {
+        references = await sharedReferences(worktree, common);
+        const entries = sharedMetadata(await inventory(source.path, false, true));
+        sources.push({ ...source, entries, shared: { entries, branch: references.branch, reflog: references.reflog } });
+      } else sources.push({ ...source, entries: await inventory(source.path, source.name === 'worktree') });
+    }
     for (const source of sources) {
       const target = path.join(pending, source.name);
       await mkdir(target, { mode: 0o700 });
@@ -133,12 +201,34 @@ export async function createSafetyBackup(store: StateStore, cwd: string, reason:
         }
         // Symlink targets live in the manifest, so opening a backup cannot follow a live link.
       }
+      if (source.shared) {
+        for (const file of references!.files) {
+          const destination = path.join(target, file.path);
+          await mkdir(path.dirname(destination), { recursive: true, mode: 0o700 });
+          const handle = await open(destination, 'wx', 0o600);
+          try {
+            await handle.writeFile(file.bytes);
+            await handle.sync();
+          } finally {
+            await handle.close();
+          }
+        }
+        // The manifest describes the independent recovery layout, including generated loose refs.
+        source.entries = await inventory(target, false);
+      }
       for (const entry of [...source.entries].reverse()) if (entry.kind === 'directory') await syncDirectory(path.join(target, entry.path));
       await syncDirectory(target);
     }
+    if (shared) {
+      // A sibling can rewrite a captured ref and prune its old objects before our inventory.
+      // Validate the independent copy, not the now-different live repository, before publishing it.
+      await runGit(['fsck', '--full', '--no-dangling'], { cwd: path.join(pending, 'git-common'), timeoutMs: LONG_GIT_TIMEOUT_MS });
+    }
     for (const source of [...sources].reverse()) {
-      if (JSON.stringify(await inventory(source.path, source.name === 'worktree')) !== JSON.stringify(source.entries))
-        throw new Error('备份期间工作区发生变化，请停止其他写入后重试');
+      const current = source.shared
+        ? await sharedCurrent(source)
+        : JSON.stringify(await inventory(source.path, source.name === 'worktree')) === JSON.stringify(source.entries);
+      if (!current) throw new Error('备份期间工作区发生变化，请停止其他写入后重试');
     }
     if ((await runGit(['rev-parse', '--verify', 'HEAD'], { cwd: worktree })).stdout.trim() !== head) throw new Error('备份期间 HEAD 发生变化');
     const backup: SafetyBackup = { id, path: destination, reason, createdAt: new Date().toISOString(), worktree, head };
@@ -177,7 +267,12 @@ export async function assertSafetyBackupCurrent(backup: SafetyBackup): Promise<v
         )
           throw new Error('Git checkout identity changed');
       }
-      if (JSON.stringify(await inventory(source.path, source.name === 'worktree')) === JSON.stringify(source.entries)) continue;
+      if (
+        source.shared
+          ? await sharedCurrent(source)
+          : JSON.stringify(await inventory(source.path, source.name === 'worktree')) === JSON.stringify(source.entries)
+      )
+        continue;
     } catch {
       // Missing files, new locks and inaccessible paths are all changes since the verified copy.
     }

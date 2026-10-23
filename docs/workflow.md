@@ -54,11 +54,12 @@ claim that the entire task or requirement has ended.
 
 The primary repository receives only the final commits the user chooses to deliver and push.
 Agent source history, trial commits and recovery copies belong to task workspaces or Warden's
-external data directory. Deliveries apply the reviewed final patch without importing the source
-commit graph. Successful operations retire their temporary repositories and recovery backups;
+external shared repository or data directory. Deliveries apply the reviewed final patch without importing the source
+commit graph. Successful operations retire their temporary worktrees and recovery backups;
 interrupted operations retain the data their recovery journals still need. User branches and
-reflogs are never expired automatically. Clone workspaces provide object-store isolation; linked
-worktrees deliberately share the primary repository's objects while development is active.
+reflogs are never expired automatically. Default tasks and preview share a Warden-owned Git object
+store outside primary, with independent working files, HEADs and indexes. Clone workspaces remain
+a compatibility option. Existing primary-linked worktrees deliberately share primary's objects.
 
 The list's order expresses the user's intended work sequence. It does **not** assert that each
 item depends on the previous one. Users decide dependencies, parallelism and when to begin a
@@ -73,8 +74,10 @@ without mandatory acceptance templates or agent-generated reports.
 
 ## Workspaces and hooks
 
-A workspace is an execution resource, normally a Git worktree on a temporary branch based on
-the requirement's development branch. Warden creates or reuses it and exposes generic hooks.
+A workspace is an execution resource, normally a Git worktree of Warden's external shared repository
+on a task branch based on the requirement's development branch. The bare repository lives at
+`<primary>-warden/repo.git`, independently of task, preview and temporary operation directories.
+Task paths remain `<primary>-<n>`. Warden creates or reuses workspaces and exposes generic hooks.
 The user chooses external tools for running agents and sending prompts. Warden has no terminal
 session model, agent launcher or process-control API.
 
@@ -91,8 +94,10 @@ ordinary `git commit` in the development checkout, preserving those hooks and si
 
 Human code is edited and saved in the primary directory; agents edit task workspaces. The baseline
 is the primary directory's saved working content, including staged and untracked non-ignored files.
-Unsaved editor buffers are not published. Warden's generated preview is a separate persistent
-repository outside primary. Run development servers, tests and debug sessions there.
+Unsaved editor buffers are not published. New generated previews are persistent worktrees outside
+primary, sharing the external Git repository with default task workspaces. Existing standalone
+previews keep their directory and repository. Run development servers, tests and debug sessions
+there. Shared Git objects do not replace snapshots of uncommitted content.
 
 Connecting workspaces composes their undelivered live changes against that saved baseline. Preview
 never modifies primary files, HEAD, index or refs. A conflicting initial connection fails without
@@ -232,7 +237,7 @@ The first implementation provides a linear history editor. Its operation must pr
 
 The user's candidate approach is a backup branch plus a temporary branch: replay commits with
 cherry-pick in the requested order, inspect the result and only then update the primary development
-branch. The implementation uses an independent temporary repository and a journaled external
+branch. The implementation uses an isolated temporary worktree and a journaled external
 backup for this sequence, removing both after successful application and bookkeeping. The backup
 does not imply a user-facing restoration workflow or a permanent retention ref in the primary repository.
 Existing tools and libraries should inform the design; see [research references](design.md#research-references).
@@ -264,7 +269,7 @@ The working copy implements the workflow above. It has not been published as a r
 |---|---|
 | Plan and workspace | Ordered task notes, explicit allocation, persistent workspaces and repeated deliveries. No completion declaration or automatic recycling. |
 | Workspace hooks | Generic creation/reuse scripts with cwd, environment, output and status. Agent execution stays in user tools. |
-| Connection | Live committed/uncommitted changes composed in an independent temporary Git repository, then published only to the persistent preview directory. Failed initial connections preserve the prior set and files. |
+| Connection | Live committed/uncommitted changes composed in an isolated worktree of the external shared Git repository, then published only to the persistent preview directory. Failed initial connections preserve the prior set and files. |
 | Later connection conflict | Preserve the last coherent preview and display stale status; user changes the connections or source work. |
 | Delivery | All current undelivered changes from a clean committed source, pinned by reviewed source, delivery boundary and primary HEAD. No file/commit subset picking in this version. |
 | Web commit | Normal primary-directory Git commit with hooks/signing. Failed hooks retain files/index. No test-passed checkbox or agent handoff. |

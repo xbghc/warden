@@ -430,15 +430,32 @@ describe('requirement development workflow', () => {
     expect(gitAt(next, 'rev-parse', 'HEAD')).toBe(accepted.deliveries!.at(-1)!.commit);
   });
 
-  it('allocates an independent clone by default to isolate development objects', async () => {
+  it('allocates default task worktrees in one external repository while preserving primary isolation', async () => {
+    const primaryHead = fx.git('rev-parse', 'HEAD');
+    const primaryRefs = fx.git('show-ref');
+    const primaryIndex = await readFile(path.join(fx.root, '.git', 'index'));
     const planned = await workflow.create({ title: 'Isolated default' });
     const change = await workflow.start(planned.id);
+    const sibling = await workflow.start((await workflow.create({ title: 'Shared sibling' })).id);
     const checkout = (await listWorktreesDetailed(await resolveRepo(fx.root))).find((row) => row.path === change.worktree);
-    expect(checkout?.clone).toBe(true);
-    expect(gitAt(change, 'rev-parse', '--git-common-dir')).toBe('.git');
+    expect(checkout?.shared).toBe(true);
+    expect(checkout?.clone).not.toBe(true);
+    const common = path.resolve(change.worktree, gitAt(change, 'rev-parse', '--git-common-dir'));
+    expect(common).toBe(path.join(`${fx.root}-warden`, 'repo.git'));
+    expect(path.resolve(sibling.worktree, gitAt(sibling, 'rev-parse', '--git-common-dir'))).toBe(common);
+    expect(await resolveRepo(change.worktree)).toEqual({ root: change.worktree, commonRoot: fx.root });
     expect(gitAt(change, 'config', '--get', 'user.name')).toBe(fx.git('config', '--get', 'user.name').trim());
     expect(gitAt(change, 'config', '--get', 'user.email')).toBe(fx.git('config', '--get', 'user.email').trim());
     expect(fx.git('for-each-ref', '--format=%(refname)', `refs/heads/${change.branch}`).trim()).toBe('');
+    const siblingHead = gitAt(sibling, 'rev-parse', 'HEAD');
+    await commit(change);
+    const source = gitAt(change, 'rev-parse', 'HEAD');
+    expect(gitAt(sibling, 'cat-file', '-t', source)).toBe('commit');
+    expect(gitAt(sibling, 'rev-parse', 'HEAD')).toBe(siblingHead);
+    expect(() => fx.git('cat-file', '-e', source)).toThrow();
+    expect(fx.git('rev-parse', 'HEAD')).toBe(primaryHead);
+    expect(fx.git('show-ref')).toBe(primaryRefs);
+    expect(await readFile(path.join(fx.root, '.git', 'index'))).toEqual(primaryIndex);
   });
 
   it('retires legacy retention refs after delivery without touching user branches or other refs', async () => {

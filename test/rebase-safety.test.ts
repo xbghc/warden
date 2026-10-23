@@ -52,7 +52,7 @@ async function advance(file = 'destination.txt', content = 'destination work\n')
 }
 
 describe('rebase safety', () => {
-  it.each(['worktree', 'clone'] as const)('completes and verifies a backup before rebasing a %s', async (kind) => {
+  it.each(['worktree', 'clone', 'shared'] as const)('completes and verifies a backup before rebasing a %s', async (kind) => {
     const change = await source(kind);
     const before = head(change.worktree);
     await writeFile(path.join(change.worktree, 'local.env'), 'private local config\n');

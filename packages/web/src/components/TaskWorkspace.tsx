@@ -25,7 +25,7 @@ export function OperationError({ message }: { message?: string | null }) {
 function WorkspaceCreation({ task }: { task: WorkflowTask }) {
   const { checkouts, data, busy, actionError } = useWorkflow();
   const [open, setOpen] = useState(false);
-  const [kind, setKind] = useState<SlotKind>('clone');
+  const [kind, setKind] = useState<SlotKind>('shared');
   const [existing, setExisting] = useState('');
   const occupied = new Set(data?.workflow?.changes.filter((change) => change.worktree).map((change) => change.worktree));
   const available = checkouts?.worktrees.filter((row) => !row.isMain && !row.foreign && !row.prunable && !occupied.has(row.path)) ?? [];
@@ -60,8 +60,8 @@ function WorkspaceCreation({ task }: { task: WorkflowTask }) {
             <label className="wb-field">
               目录类型
               <NativeSelect value={kind} onChange={(event) => setKind(event.target.value as SlotKind)} aria-label="目录类型">
-                <option value="worktree">Git worktree</option>
-                <option value="clone">独立 clone</option>
+                <option value="shared">共享 Git 工作区</option>
+                <option value="clone">独立 clone（兼容模式）</option>
               </NativeSelect>
             </label>
           )}

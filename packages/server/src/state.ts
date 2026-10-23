@@ -85,7 +85,7 @@ function normalise(raw: unknown, repoRoot: string, file: string): ReviewState {
             ? 'diff'
             : 'orchestration',
       slotKind: undefined,
-      ...(r.prefs?.slotKind === 'clone' || r.prefs?.slotKind === 'worktree' ? { slotKind: r.prefs.slotKind } : {}),
+      ...(r.prefs?.slotKind === 'shared' || r.prefs?.slotKind === 'clone' || r.prefs?.slotKind === 'worktree' ? { slotKind: r.prefs.slotKind } : {}),
       autoRefresh: typeof r.prefs?.autoRefresh === 'boolean' ? r.prefs.autoRefresh : true,
     },
   };

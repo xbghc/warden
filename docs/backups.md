@@ -32,8 +32,10 @@ Each backup contains:
 - `worktree/`: exact bytes of regular files' primary data streams, including tracked, untracked
   and ignored files. Deleted paths stay absent. No clean/smudge filters, Git LFS conversion or
   automatic staging are involved.
-- `git-common/`: an independent copy of the common Git directory's regular-file contents, including
-  objects, branches, reflogs, older stashes, packed refs and configuration.
+- `git-common/`: an independent copy of common Git objects and configuration. Legacy clone/linked
+  repositories retain the full common-directory contents, including branches, reflogs, older
+  stashes and packed refs. Shared Warden repositories freeze resolved refs as loose refs and retain
+  the selected branch's reflog and shared stash history; other worktrees' private metadata is omitted.
 - `git-worktree/`, for a linked worktree: its private HEAD, index and operation metadata. A clone's
   private metadata is already in `git-common/`. Index copies preserve partial staging, conflicts,
   intent-to-add entries and staged contents that differ from working files.
@@ -51,10 +53,21 @@ a filesystem-level backup that preserves it before performing destructive operat
 
 Objects are copied, never hard-linked or borrowed through alternates. Removing the source clone,
 pruning the source repository, or removing its reflogs cannot invalidate the backup. Every copied
-file's primary data stream is hashed and flushed, then the source inventory is checked again for
+file's primary data stream is hashed and flushed, then the relevant source inventory is checked again for
 concurrent changes. Only a complete verified backup is atomically renamed into its published directory.
 Directories are also flushed on POSIX; Node cannot perform directory fsync on Windows. A crash can
 leave an unpublished `.pending-*` directory, which is never listed as a completed backup.
+
+Shared-repository backups validate the selected checkout's HEAD, index, files, operation metadata,
+branch reflog and common configuration. New objects and ref updates from sibling tasks or preview
+publication do not invalidate that checkout's backup. Previously copied objects must remain unchanged;
+concurrent object pruning/repacking may therefore stop the operation safely. The captured refs and
+stash reflog describe their captured versions, not a later sibling update. Repositories using reftable
+retain their table files and conservative table validation. A backup is independently recoverable and
+does not depend on the shared object store remaining present. Before publication, Warden also runs
+`git fsck --full --no-dangling` against the independent copied common directory. This rejects a frozen
+ref or reflog whose objects disappeared before copying, including a sibling rewrite followed by
+aggressive pruning. An incomplete snapshot is removed and the destructive operation does not run.
 
 Copies intentionally include ignored dependencies and can consume substantial time and peak disk
 space. Successful rebase/history operations clean up their copies; failed operations, older copies
@@ -96,5 +109,6 @@ to bring back into the active project. This is an incident-recovery procedure, n
 
 The automated recovery test deletes a clone and its original object source, reconstructs a fresh
 repository, and verifies binary staged/unstaged bytes, deletions, ignored and Unicode paths, detached
-HEAD, branches and multiple stash entries. Other tests cover linked-worktree indexes, unwritable
-backup storage, writes during copying, restart discovery and rebase failures.
+HEAD, branches and multiple stash entries. Other tests cover linked-worktree indexes, shared-worktree recovery after its object store is removed,
+sibling commits during copying, preview publication after a backup, selected-checkout changes,
+unwritable backup storage, restart discovery and rebase failures.

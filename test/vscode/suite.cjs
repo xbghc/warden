@@ -16,6 +16,10 @@ exports.run = async () => {
     const state = () => fs.readFile(fixture.state, 'utf8').then(JSON.parse);
     let preview = (await state()).connectionPreview;
     assert.notEqual(preview.worktree, fixture.root);
+    const commonGit = async (cwd) =>
+      fs.realpath(path.resolve(cwd, execFileSync('git', ['-C', cwd, 'rev-parse', '--git-common-dir'], { encoding: 'utf8' }).trim()));
+    assert.equal(await commonGit(preview.worktree), await commonGit(tasks[0].task.worktree), 'task and preview share the external Git repository');
+    assert.notEqual(await commonGit(preview.worktree), await commonGit(fixture.root), 'primary Git storage stays independent');
     assert.equal(await fs.readFile(path.join(preview.worktree, 'agent.txt'), 'utf8'), 'Agent addition\n');
     await assert.rejects(fs.access(path.join(fixture.root, 'agent.txt')));
     const files = await workbench.getChildren(tasks[0]);
@@ -87,7 +91,7 @@ exports.run = async () => {
     assert.equal((await state()).connectionPreview.connectedIds.length, 0);
     assert.equal(await fs.readFile(path.join(fixture.root, 'human.txt'), 'utf8'), 'Human code\n');
     console.log(
-      'Warden extension host: native diff, pinned source/baseline, stale-delivery rejection, readonly review, preview isolation, setup and terminal passed',
+      'Warden extension host: shared task/preview Git, primary isolation, native readonly diff, pinned review, stale-delivery rejection, setup and terminal passed',
     );
   } finally {
     await workbench.close();

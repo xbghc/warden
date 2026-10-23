@@ -20,6 +20,7 @@ import { clonedBranch, discardClone, dropCloneBranch, fetchClone, makeClone, rem
 import { assertSafetyBackupCurrent, createSafetyBackup } from './backups.js';
 import type { StateStore } from './state.js';
 import { readWorktreeState } from './worktree-state.js';
+import { ensureSharedRepository, importSharedCommit, isSharedCheckout } from './shared-repository.js';
 
 export { slotOf, slotPath } from './repo.js';
 
@@ -92,6 +93,8 @@ export async function checkoutState(ctx: RepoContext, wt: WorktreeInfo): Promise
   const dir = wt.path;
   if (wt.clone) {
     if (!(await isCloneOf(ctx.commonRoot, dir))) return { foreign: true };
+  } else if (wt.shared) {
+    if (!(await isSharedCheckout(ctx.commonRoot, dir))) return { foreign: true };
   } else {
     const [ours, theirs] = await Promise.all([commonDirOf(ctx.commonRoot), commonDirOf(dir)]);
     if (!ours || ours !== theirs) return { foreign: true };
@@ -120,6 +123,8 @@ function listingOrder(a: WorktreeDetail, b: WorktreeDetail): number {
 
 export async function listWorktreesDetailed(ctx: RepoContext): Promise<WorktreeDetail[]> {
   const [all, upstreams] = await Promise.all([listWorktreesAll(ctx), listUpstreams(ctx.commonRoot)]);
+  const shared = all.find((w) => w.shared && !w.prunable);
+  const sharedUpstreams = shared ? await listUpstreams(shared.path) : new Map<string, Upstream>();
   const main = all.find((w) => w.isMain);
   const held = new Map<string, string>();
   for (const w of all) if (w.branch) held.set(w.branch, w.path);
@@ -140,11 +145,12 @@ export async function listWorktreesDetailed(ctx: RepoContext): Promise<WorktreeD
       };
       if (w.clone) return describeClone(detail, held);
       // A free slot holds no branch: there is nothing to compare.
-      if (detail.free) return detail;
+      if (detail.free)
+        return w.shared ? describeFreeBranches(detail, new Map(all.filter((row) => row.shared && row.branch).map((row) => [row.branch!, row.path]))) : detail;
       // A branch that has an upstream is counted against it, the main worktree's included: what is
       // not pushed or not pulled yet says more about it than its distance from whatever the main
       // worktree has checked out. The upstream is also the ref `git branch -d` checks before deleting.
-      const upstream = w.branch ? upstreams.get(w.branch) : undefined;
+      const upstream = w.branch ? (w.shared ? sharedUpstreams : upstreams).get(w.branch) : undefined;
       if (upstream && !upstream.gone) {
         detail.comparison = { kind: 'upstream', base: upstream.name, ahead: upstream.ahead, behind: upstream.behind };
         return detail;
@@ -154,7 +160,9 @@ export async function listWorktreesDetailed(ctx: RepoContext): Promise<WorktreeD
       if (w.isMain) return detail;
       if (!main?.head || !w.head || /^0+$/.test(main.head) || /^0+$/.test(w.head)) return { ...detail, comparisonError: '分支尚无提交' };
       try {
-        const result = await runGit(['rev-list', '--left-right', '--count', `${main.head}...${w.head}`, '--'], { cwd: ctx.commonRoot });
+        const result = await runGit(['rev-list', '--left-right', '--count', `${main.head}...${w.head}`, '--'], {
+          cwd: w.shared ? w.path : ctx.commonRoot,
+        });
         const [behind, ahead] = result.stdout.trim().split(/\s+/).map(Number);
         detail.comparison = { kind: 'base', base: main.branch ?? `HEAD ${main.head.slice(0, 7)}`, ahead: ahead!, behind: behind! };
       } catch {
@@ -178,18 +186,7 @@ async function describeClone(detail: WorktreeDetail, held: Map<string, string>):
   if (detail.foreign) return detail;
   const cwd = detail.path;
   const trunk = detail.trunk;
-  if (detail.free) {
-    const r = await runGit(['for-each-ref', '--format=%(refname:lstrip=2)%09%(objectname:short)', 'refs/heads'], { cwd });
-    detail.branches = r.stdout
-      .split('\n')
-      .filter(Boolean)
-      .map((line) => {
-        const [name = '', sha = ''] = line.split('\t');
-        const worktree = held.get(name);
-        return { name, sha, ...(worktree ? { worktree } : {}) };
-      });
-    return detail;
-  }
+  if (detail.free) return describeFreeBranches(detail, held);
   const upstream = detail.branch ? (await listUpstreams(cwd)).get(detail.branch) : undefined;
   if (upstream && !upstream.gone) {
     detail.comparison = { kind: 'upstream', base: upstream.name, ahead: upstream.ahead, behind: upstream.behind };
@@ -207,6 +204,19 @@ async function describeClone(detail: WorktreeDetail, held: Map<string, string>):
   return detail;
 }
 
+async function describeFreeBranches(detail: WorktreeDetail, held: Map<string, string>): Promise<WorktreeDetail> {
+  const r = await runGit(['for-each-ref', '--format=%(refname:lstrip=2)%09%(objectname:short)', 'refs/heads'], { cwd: detail.path });
+  detail.branches = r.stdout
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => {
+      const [name = '', sha = ''] = line.split('\t');
+      const worktree = held.get(name);
+      return { name, sha, ...(worktree ? { worktree } : {}) };
+    });
+  return detail;
+}
+
 /**
  * Local branches, each with the worktree that has it checked out (a prunable one still counts).
  * `lstrip=2` rather than `short`, which turns a branch that shares its name with a tag into
@@ -216,7 +226,7 @@ async function describeClone(detail: WorktreeDetail, held: Map<string, string>):
 export async function listBranches(ctx: RepoContext, worktrees: WorktreeInfo[]): Promise<BranchInfo[]> {
   const r = await runGit(['for-each-ref', '--format=%(refname:lstrip=2)%09%(objectname:short)', 'refs/heads'], { cwd: ctx.commonRoot });
   const at = new Map<string, string>();
-  for (const w of worktrees) if (w.branch) at.set(w.branch, w.path);
+  for (const w of worktrees) if (w.branch && !w.clone && !w.shared) at.set(w.branch, w.path);
   return r.stdout
     .split('\n')
     .filter(Boolean)
@@ -237,8 +247,8 @@ export async function lookupRemoteBranches(ctx: RepoContext, name: string, slot?
   const branch = name.trim();
   // The name becomes a `for-each-ref` pattern, where a `*` would match every remote branch there is.
   await assertBranchName(ctx, branch);
-  const clone = slot === undefined ? undefined : (await listWorktreesAll(ctx)).find((w) => w.clone && w.path === slotPath(ctx, slot));
-  return remoteBranches(clone?.path ?? ctx.commonRoot, branch);
+  const own = slot === undefined ? undefined : (await listWorktreesAll(ctx)).find((w) => (w.clone || w.shared) && w.path === slotPath(ctx, slot));
+  return remoteBranches(own?.path ?? ctx.commonRoot, branch);
 }
 
 /** A branch name git would accept, and one that is only ever a name: no `@{-1}`-style expansion. */
@@ -286,22 +296,22 @@ async function pickSlot(
   worktrees: WorktreeDetail[],
   wanted: number | undefined,
   kind: SlotKind,
-): Promise<WorktreeSlot & { reuse: boolean; clone: boolean }> {
+): Promise<WorktreeSlot & { reuse: boolean; clone: boolean; shared: boolean }> {
   const slots = worktrees.filter((w) => w.slot !== undefined);
   if (wanted === undefined) {
     const free = slots.filter((w) => w.free).sort((a, b) => a.slot! - b.slot!)[0];
-    if (free) return { slot: free.slot!, path: free.path, reuse: true, clone: !!free.clone };
-    return { ...(await nextSlot(ctx, worktrees)), reuse: false, clone: kind === 'clone' };
+    if (free) return { slot: free.slot!, path: free.path, reuse: true, clone: !!free.clone, shared: !!free.shared };
+    return { ...(await nextSlot(ctx, worktrees)), reuse: false, clone: kind === 'clone', shared: kind === 'shared' };
   }
   const have = slots.find((w) => w.slot === wanted);
   if (have?.prunable) throw new HttpError(409, `the directory of slot ${wanted} is gone; remove its entry first`, 'slot_gone');
   if (have?.foreign) throw new HttpError(409, `${have.path} is not a checkout of this repository`, 'not_our_checkout');
   if (have?.busy) throw new HttpError(409, `a ${have.busy} is in progress in slot ${wanted}`, 'operation_in_progress');
   if (have && !have.free) throw new HttpError(409, `slot ${wanted} is in use${have.branch ? ` by ${have.branch}` : ''}`, 'slot_in_use');
-  if (have) return { slot: wanted, path: have.path, reuse: true, clone: !!have.clone };
+  if (have) return { slot: wanted, path: have.path, reuse: true, clone: !!have.clone, shared: !!have.shared };
   const p = slotPath(ctx, wanted);
   if (!(await dirUsable(p))) throw badRequest(`${p} already exists`, 'path_exists');
-  return { slot: wanted, path: p, reuse: false, clone: kind === 'clone' };
+  return { slot: wanted, path: p, reuse: false, clone: kind === 'clone', shared: kind === 'shared' };
 }
 
 /** `<remote>/<branch>` for each remote that has the branch; `*` spans one path segment, the remote's name. */
@@ -373,6 +383,7 @@ export async function checkoutWorktree(ctx: RepoContext, req: CreateWorktreeRequ
   const existing = await listWorktreesDetailed(ctx);
   const target = await pickSlot(ctx, existing, req.slot, req.kind ?? 'worktree');
   if (target.clone) await checkoutClone(ctx, existing, target, branch, base, !!req.fetch);
+  else if (target.shared) await checkoutShared(ctx, existing, target, branch, base);
   else await checkoutLinked(ctx, existing, target, branch, base);
   const real = await realpath(target.path).catch(() => target.path);
   const worktree = (await listWorktrees(ctx)).find((w) => w.path === real);
@@ -386,8 +397,9 @@ async function checkoutLinked(
   target: WorktreeSlot & { reuse: boolean },
   branch: string,
   base?: string,
+  repository = ctx.commonRoot,
 ): Promise<void> {
-  const cwd = ctx.commonRoot;
+  const cwd = repository;
   const create = await resolveBranch(cwd, branch, base, async () => (await detectDefaultBase(cwd)) || 'HEAD');
   assertBranchFree(existing, branch);
   // A branch made for a slot that then refuses the switch would stay behind, taken; `-D` undoes
@@ -411,6 +423,33 @@ async function checkoutLinked(
     if (e instanceof GitError && /already (checked out|used by worktree)/.test(e.stderr)) throw new HttpError(409, e.message, 'branch_in_use');
     throw e;
   }
+}
+
+async function checkoutShared(
+  ctx: RepoContext,
+  existing: WorktreeDetail[],
+  target: WorktreeSlot & { reuse: boolean },
+  branch: string,
+  base?: string,
+): Promise<void> {
+  assertBranchFree(existing, branch);
+  const repository = await ensureSharedRepository(ctx.commonRoot);
+  if (await refExists(repository, `refs/heads/${branch}`)) {
+    // Existing task branches retain their history; they never resolve through primary refs.
+    await checkoutLinked(ctx, existing, target, branch, base, repository);
+    return;
+  }
+  const wanted = base ?? (await detectDefaultBase(ctx.commonRoot)) ?? 'HEAD';
+  // Explicit bases may name another shared task. Primary refs are the default source and are
+  // imported as immutable commits without creating a primary-named branch in the shared store.
+  let sha: string;
+  if (base && (await refExists(repository, base))) sha = (await runGit(['rev-parse', '--verify', `${base}^{commit}`], { cwd: repository })).stdout.trim();
+  else {
+    if (!(await refExists(ctx.commonRoot, wanted))) throw badRequest(`unknown ref: ${wanted}`, 'unknown_ref');
+    sha = (await runGit(['rev-parse', '--verify', `${wanted}^{commit}`], { cwd: ctx.commonRoot })).stdout.trim();
+    await importSharedCommit(ctx.commonRoot, ctx.commonRoot, sha);
+  }
+  await checkoutLinked(ctx, existing, target, branch, sha, repository);
 }
 
 async function checkoutClone(
@@ -455,13 +494,34 @@ async function dropBranch(ctx: RepoContext, wt: WorktreeInfo, asked: boolean | u
   const res: RemoveWorktreeResponse = { ok: true, branchDeleted: false };
   if (asked && wt.branch) {
     try {
-      await runGitWrite(['branch', '-d', wt.branch], { cwd: ctx.commonRoot });
+      if (wt.shared) await dropSharedBranch(ctx, wt.branch);
+      else await runGitWrite(['branch', '-d', wt.branch], { cwd: ctx.commonRoot });
       res.branchDeleted = true;
     } catch (e) {
       res.branchError = e instanceof Error ? e.message : String(e);
     }
   }
   return res;
+}
+
+/** A bare repository's HEAD is not the delivery baseline. Check that baseline explicitly before
+ * deleting only the exact observed ref; squash-delivered source histories remain conservatively kept.
+ */
+async function dropSharedBranch(ctx: RepoContext, branch: string): Promise<void> {
+  const primaryHead = (await runGit(['rev-parse', '--verify', 'HEAD'], { cwd: ctx.commonRoot })).stdout.trim();
+  const repository = await importSharedCommit(ctx.commonRoot, ctx.commonRoot, primaryHead);
+  const ref = `refs/heads/${branch}`;
+  const head = (await runGit(['rev-parse', '--verify', ref], { cwd: repository })).stdout.trim();
+  const upstream = (await listUpstreams(repository)).get(branch);
+  const target =
+    upstream && !upstream.gone ? (await runGit(['rev-parse', '--verify', `${upstream.name}^{commit}`], { cwd: repository })).stdout.trim() : primaryHead;
+  if ((await runGit(['merge-base', '--is-ancestor', head, target], { cwd: repository, okCodes: [0, 1] })).code !== 0)
+    throw new HttpError(409, `分支 ${branch} 尚未完整合入目标，已保留`, 'branch_not_merged');
+  // Public inventory excludes internal and manually placed worktrees, but all registered
+  // checkouts protect their branch, just as they do for Git's ordinary branch deletion.
+  const worktrees = await runGit(['worktree', 'list', '--porcelain', '-z'], { cwd: repository });
+  if (worktrees.stdout.split('\0').includes(`branch ${ref}`)) throw new HttpError(409, `分支 ${branch} 仍在工作区中使用，已保留`, 'branch_in_use');
+  await runGitWrite(['update-ref', '-d', ref, head], { cwd: repository });
 }
 
 /**
@@ -536,7 +596,7 @@ export async function removeWorktree(ctx: RepoContext, req: RemoveWorktreeReques
   if (req.force) args.push('--force');
   args.push(wt.path);
   try {
-    await runGitWrite(args, { cwd: ctx.commonRoot });
+    await runGitWrite(args, { cwd: wt.shared ? await ensureSharedRepository(ctx.commonRoot) : ctx.commonRoot });
   } catch (e) {
     if (e instanceof GitError && /contains modified or untracked files/.test(e.stderr)) {
       throw new HttpError(409, `${wt.path} has uncommitted changes`, 'worktree_dirty');

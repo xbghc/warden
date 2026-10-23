@@ -119,7 +119,9 @@ ask for an owner or lifecycle state, or impose a dependency or delivery-report f
 
 The creation sheet identifies the branch and worktree path. An explicit option may associate an
 existing workspace, showing its real branch and path. Directory-name similarity does not establish
-task identity. Exact allocation/path policies remain implementation work.
+task identity. New tasks default to shared Git workspaces outside primary; independent clones are
+available for compatibility. Existing primary-linked worktrees can still be associated. Numbered
+task paths remain stable across deliveries, and internal repository layout does not add UI steps.
 
 After creation, the same task detail becomes the working surface:
 
@@ -420,10 +422,11 @@ The implementation follows these bounded choices:
 3. The page creates the primary commit with ordinary Git hooks. No terminal-only commit requirement.
 4. History edits cover a selected start through HEAD within the latest 100 commits, excluding root
    and merge commits. Isolated cherry-pick preview must preserve final content. Apply is local only.
-5. Rebase checks run in independent temporary repositories; explicit execution leaves actual
+5. Rebase checks run in isolated temporary worktrees; explicit execution leaves actual
    conflicts for manual handling. Batch results are per workspace.
-6. The Git mechanism remains an internal server module. No separate repository or Git library has
-   been introduced. External backups and operation journals support interrupted operations, not undo UI.
+6. The Git mechanism remains an internal server module. Warden's external shared Git repository
+   backs task, preview and operation worktrees; primary remains separate. External backups and
+   operation journals support interrupted operations, not undo UI.
 
 Do not add task branching, dependency scheduling, completion declarations, agent-specific SDKs,
 ACP integration, default dependency installation, test gates, automatic rebase/stash/recycling,

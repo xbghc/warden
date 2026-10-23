@@ -72,11 +72,12 @@ export interface Prefs {
 }
 
 /**
- * What a slot is. `clone`: a repository of its own beside the main checkout — its own `.git`,
+ * What a slot is. `shared`: a linked worktree of Warden's external shared repository.
+ * `clone`: a repository of its own beside the main checkout — its own `.git`,
  * hooks and refs, talking to the server by itself — for repositories whose tooling does not cope
  * with linked worktrees. `worktree`: a linked worktree sharing the main checkout's `.git`.
  */
-export type SlotKind = 'clone' | 'worktree';
+export type SlotKind = 'shared' | 'clone' | 'worktree';
 
 export type TodoStatus = 'open' | 'done';
 
@@ -359,6 +360,8 @@ export interface WorktreeInfo {
    * from and pushes to the server by itself.
    */
   clone?: boolean;
+  /** A task worktree in Warden's external common repository, independent of the primary Git store. */
+  shared?: boolean;
   /** A clone's remote default branch (`origin/main`): what it is compared with, and where a new branch starts. */
   trunk?: string;
 }
@@ -406,7 +409,7 @@ export interface WorktreeDetail extends WorktreeInfo {
   /** The upstream the branch is set to track when that ref no longer exists, as in `[origin/topic: gone]`. */
   upstreamGone?: string;
   comparisonError?: string;
-  /** A free clone's own local branches, which the checkout form offers for it instead of the main worktree's. */
+  /** A free clone/shared slot's local branches, separate from primary development-branch choices. */
   branches?: BranchInfo[];
 }
 
@@ -429,7 +432,7 @@ export interface WorktreesResponse {
   branches: BranchInfo[];
   /** The slot a checkout makes when it takes no free one: the lowest number with no directory yet. */
   newSlot: WorktreeSlot;
-  /** How the form offers to make that slot: the kind made last time, a clone until then. */
+  /** How the form offers to make that slot: the kind made last time, shared until then. */
   slotKind: SlotKind;
   /** The main worktree's remote default branch, which a new clone starts a branch from unless told otherwise. */
   trunk?: string;

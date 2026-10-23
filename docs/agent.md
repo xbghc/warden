@@ -7,6 +7,13 @@ Work happens in the assigned task worktree. The user runs tests in the preview d
 changes before squash. Warden does not require an agent test command, structured delivery report or
 readiness signal.
 
+Default task workspaces are numbered directories beside primary and share Warden's external Git
+repository with the preview. Each workspace has its own files, HEAD and index; agent edits and
+commits belong only in the assigned task workspace. The user edits primary and runs the combined
+code in preview. Ordinary agent commits retain their Git hooks and signing; Warden's temporary
+composition commands do not change that configuration. Independent clones remain available for
+tools that cannot use linked worktrees.
+
 ## Task briefs
 
 Plan and order small changes in the left navigation. Allocate a workspace when needed, then copy

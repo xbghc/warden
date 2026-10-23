@@ -12,7 +12,7 @@ function conflict(message: string, code = 'preview_conflict'): never {
   throw new HttpError(409, message, code);
 }
 export async function primaryCheckout(repo: RepoContext, branch: string) {
-  const row = (await listWorktreesAll(repo)).find((w) => !w.clone && w.branch === branch && !w.prunable);
+  const row = (await listWorktreesAll(repo)).find((w) => !w.clone && !w.shared && w.branch === branch && !w.prunable);
   if (!row) return conflict('请先在主目录检出主开发分支', 'development_checkout_missing');
   const state = await checkoutState(repo, row);
   if (state.foreign || state.busy) return conflict('主目录有未完成的 Git 操作，请先处理', 'development_busy');
@@ -21,7 +21,7 @@ export async function primaryCheckout(repo: RepoContext, branch: string) {
 
 type Inputs = Awaited<ReturnType<PreviewService['inputs']>>;
 
-/** A persistent independent repository; composition never stages or writes primary-directory files. */
+/** A persistent preview worktree; composition never stages or writes primary-directory files. */
 export class PreviewService {
   private observed?: { key: string; since: number };
   constructor(
@@ -93,7 +93,9 @@ export class PreviewService {
       try {
         const inputs = await this.inputs(state, state.connectionPreview.connectedIds);
         const saved = state.connectionPreview;
-        if ((await snapshotWorktree(GitSandbox.open(this.store, saved.directory!).path, snapshotStore(this.store.file))) !== saved.tree)
+        const target = GitSandbox.open(this.store, saved.directory!);
+        await target.validate();
+        if ((await snapshotWorktree(target.path, snapshotStore(this.store.file))) !== saved.tree)
           conflict('预览目录有额外改动，已停止同步；请在主目录编辑代码', 'preview_dirty');
         const unchanged =
           saved.baselineTree === inputs.baseline &&
@@ -140,7 +142,9 @@ export class PreviewService {
     const saved = state.connectionPreview;
     const command = state.workspaceConfig?.previewSetup;
     if (!saved?.directory || !command) return;
-    const directory = GitSandbox.open(this.store, saved.directory).path;
+    const target = GitSandbox.open(this.store, saved.directory);
+    await target.validate();
+    const directory = target.path;
     await this.store.update((s) => {
       s.connectionPreview!.setup = { command, status: 'running' };
     });
@@ -206,6 +210,7 @@ export class PreviewService {
     const saved = state.connectionPreview;
     if (!saved?.pending || !saved.directory) return;
     const target = GitSandbox.open(this.store, saved.directory);
+    await target.validate();
     const actual = await snapshotWorktree(target.path, snapshotStore(this.store.file));
     const pending = saved.pending;
     if (actual === pending.tree) {
@@ -269,11 +274,7 @@ export class PreviewService {
     const sandbox = await GitSandbox.create(this.store, primary.path, head);
     let retained = false;
     try {
-      await applyPatch(
-        sandbox.path,
-        await patchBetween(primary.path, head, baseline, await snapshotObjects(primary.path, snapshotStore(this.store.file))),
-        true,
-      );
+      await sandbox.apply(await patchBetween(primary.path, head, baseline, await snapshotObjects(primary.path, snapshotStore(this.store.file))), true);
       if (previous?.directory && JSON.stringify(ids) === JSON.stringify(previous.connectedIds))
         await this.store.update((s) => {
           s.connectionPreview!.sources = this.sourceStates(inputs, previous, 'updating');
@@ -282,8 +283,7 @@ export class PreviewService {
       for (const { change, from, tree } of inputs.sources) {
         await sandbox.fetch(change.worktree, from);
         try {
-          await applyPatch(
-            sandbox.path,
+          await sandbox.apply(
             await patchBetween(change.worktree, from, tree, await snapshotObjects(change.worktree, snapshotStore(this.store.file))),
             true,
             true,
@@ -315,6 +315,7 @@ export class PreviewService {
         }
       }
       const target = GitSandbox.open(this.store, previous.directory!);
+      await target.validate();
       if ((await snapshotWorktree(target.path, snapshotStore(this.store.file))) !== previous.tree)
         conflict('预览目录有额外改动，已停止同步以保留这些文件；请在主目录编辑代码', 'preview_dirty');
       await sandbox.fetch(target.path, await oid(target.path, 'HEAD'));
@@ -340,7 +341,7 @@ export class PreviewService {
         s.connectionPreview = { ...previous!, pending: { tree, sandbox: sandbox.path, snapshot, response } };
       });
       retained = true;
-      await applyPatch(target.path, patch, true);
+      await target.apply(patch, true);
       if ((await snapshotWorktree(target.path, snapshotStore(this.store.file))) !== tree)
         conflict('同步期间预览目录发生变化，已停止继续同步，请检查文件', 'preview_interrupted');
       await target.write(['update-ref', 'HEAD', snapshot]);

@@ -18,6 +18,7 @@ const ALLOWED_SUBCOMMANDS = new Set([
   'grep',
   'config',
   'var',
+  'fsck',
 ]);
 
 /** The only forms of `git config` that read: anything else it takes (a value, `--unset`, `--edit`) writes. */
@@ -145,6 +146,11 @@ export function assertAllowedGitArgs(args: readonly string[]): void {
   // synchronization check has reusable inputs. Other `var` forms are outside this read API.
   if (sub === 'var' && (args.length !== 2 || !['GIT_ATTR_SYSTEM', 'GIT_ATTR_GLOBAL'].includes(args[1] ?? ''))) {
     throw new GitError(`git var ${args.slice(1).join(' ')} is not allowed`, null, '', 400, 'git_subcommand_forbidden');
+  }
+  // Backup verification may inspect object connectivity, but must never write lost-found
+  // files or accept caller-selected objects and alternate fsck modes.
+  if (sub === 'fsck' && (args.length !== 3 || args[1] !== '--full' || args[2] !== '--no-dangling')) {
+    throw new GitError('only read-only backup fsck is allowed', null, '', 400, 'git_subcommand_forbidden');
   }
   // `grep -O` / `--open-files-in-pager` runs a program on the matches. Git takes any unambiguous
   // prefix of a long option, so everything that could be one is refused, not just the full name.

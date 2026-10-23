@@ -38,7 +38,7 @@ afterEach(async () => {
   await rm(data, { recursive: true, force: true });
 });
 
-async function task(kind: 'clone' | 'worktree' = 'worktree') {
+async function task(kind: 'clone' | 'worktree' | 'shared' = 'worktree') {
   const change = await workflow.start((await workflow.create({ title: 'Read checks' })).id, { kind });
   checkouts.push(change.worktree);
   return change;
@@ -50,7 +50,7 @@ async function commit(cwd: string, file: string, content: string) {
   fx.git('-C', cwd, 'commit', '-qm', `Change ${file}`);
 }
 
-async function behind(kind: 'clone' | 'worktree' = 'worktree', conflict = false) {
+async function behind(kind: 'clone' | 'worktree' | 'shared' = 'worktree', conflict = false) {
   const change = await task(kind);
   await commit(change.worktree, conflict ? 'src/b.ts' : 'task.txt', 'Task change\n');
   await commit(fx.root, conflict ? 'src/b.ts' : 'primary.txt', 'Primary change\n');
@@ -195,6 +195,24 @@ describe('shared workflow reads', () => {
     expect((await check(change)).status).toBe('ready');
     expect((await check(change)).status).toBe('ready');
     expect(create).toHaveBeenCalledTimes(5);
+  });
+
+  it('invalidates replay checks when shared repository configuration or attributes change', { timeout: longGitTimeout }, async () => {
+    const change = await behind('shared', true);
+    const create = vi.spyOn(GitSandbox, 'create');
+    expect((await check(change)).status).toBe('conflict');
+    expect((await check(change)).status).toBe('conflict');
+    expect(create).toHaveBeenCalledTimes(1);
+
+    const common = path.resolve(change.worktree, fx.git('-C', change.worktree, 'rev-parse', '--git-common-dir').trim());
+    fx.git('-C', common, 'config', 'merge.conflictStyle', 'diff3');
+    expect((await check(change)).status).toBe('conflict');
+    expect(create).toHaveBeenCalledTimes(2);
+    await mkdir(path.join(common, 'info'), { recursive: true });
+    await writeFile(path.join(common, 'info', 'attributes'), '*.ts merge=union\n');
+    expect((await check(change)).status).toBe('ready');
+    expect((await check(change)).status).toBe('ready');
+    expect(create).toHaveBeenCalledTimes(4);
   });
 
   it('notices a newly created global attributes file that resolves a previously cached conflict', { timeout: longGitTimeout }, async () => {
