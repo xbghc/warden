@@ -1,6 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, open, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resolveRepo, StateStore, WorkflowService } from '@warden/server';
 import { GitSandbox, oid } from '../packages/server/src/git-sandbox.js';
@@ -14,9 +14,20 @@ let store: StateStore;
 const timeout = process.platform === 'win32' ? 90_000 : 30_000;
 const common = (directory: string) => path.resolve(directory, fx.git('-C', directory, 'rev-parse', '--git-common-dir').trim());
 
+async function replaceGitfile(location: string, contents: Buffer) {
+  // Git marks this file hidden on Windows, which refuses opening it with 'w'.
+  const file = await open(location, 'r+');
+  try {
+    await file.truncate(0);
+    await file.writeFile(contents);
+  } finally {
+    await file.close();
+  }
+}
+
 beforeEach(async () => {
   fx = await makeFixtureRepo('warden-shared-preview-');
-  data = await mkdtemp(path.join(os.tmpdir(), 'warden-shared-preview-data-'));
+  data = await realpath(await mkdtemp(path.join(os.tmpdir(), 'warden-shared-preview-data-')));
   store = new StateStore(path.join(data, 'state.json'), fx.root);
 });
 
@@ -63,7 +74,7 @@ describe('shared preview worktrees', () => {
     const otherHead = await b.commit('Preserve the other worktree');
     const indexPath = path.resolve(b.path, fx.git('-C', b.path, 'rev-parse', '--git-path', 'index').trim());
     const index = await readFile(indexPath);
-    await writeFile(path.join(a.path, '.git'), await readFile(path.join(b.path, '.git')));
+    await replaceGitfile(path.join(a.path, '.git'), await readFile(path.join(b.path, '.git')));
     try {
       await expect(a.write(['update-ref', 'HEAD', head])).rejects.toThrow('Invalid operation repository');
       await expect(a.apply('', true)).rejects.toThrow('Invalid operation repository');
@@ -71,7 +82,7 @@ describe('shared preview worktrees', () => {
       expect(await oid(b.path, 'HEAD')).toBe(otherHead);
       expect(await readFile(indexPath)).toEqual(index);
     } finally {
-      await writeFile(path.join(a.path, '.git'), original);
+      await replaceGitfile(path.join(a.path, '.git'), original);
       await a.dispose();
       await b.dispose();
     }
@@ -110,7 +121,12 @@ describe('shared preview worktrees', () => {
     expect(() => fx.git('cat-file', '-e', `${composed}^{commit}`)).toThrow();
 
     await sandbox.dispose();
-    expect(fx.git('-C', repository, 'worktree', 'list', '--porcelain')).not.toContain(sandbox.path);
+    const registered = fx
+      .git('-C', repository, 'worktree', 'list', '--porcelain', '-z')
+      .split('\0')
+      .filter((field) => field.startsWith('worktree '))
+      .map((field) => path.resolve(field.slice('worktree '.length)));
+    expect(registered).not.toContain(sandbox.path);
     expect(fx.git('-C', task, 'rev-parse', 'HEAD').trim()).toBe(source);
     expect(await readdir(path.join(data, 'operations'))).toEqual([]);
   });
@@ -146,14 +162,14 @@ describe('shared preview worktrees', () => {
     const previewGitfile = path.join(first.worktree!, '.git');
     const original = await readFile(previewGitfile);
     const sourceHead = fx.git('-C', a.worktree, 'rev-parse', 'HEAD');
-    await writeFile(previewGitfile, await readFile(path.join(a.worktree, '.git')));
+    await replaceGitfile(previewGitfile, await readFile(path.join(a.worktree, '.git')));
     try {
       await preview.tick();
       expect(await preview.get()).toMatchObject({ status: 'stale', syncStatus: 'error' });
       expect(fx.git('-C', a.worktree, 'rev-parse', 'HEAD')).toBe(sourceHead);
       expect(await readFile(path.resolve(a.worktree, fx.git('-C', a.worktree, 'rev-parse', '--git-path', 'index').trim()))).toEqual(aIndex);
     } finally {
-      await writeFile(previewGitfile, original);
+      await replaceGitfile(previewGitfile, original);
     }
     expect((await preview.refresh()).syncStatus).toBe('synced');
   });

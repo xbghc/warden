@@ -33,7 +33,7 @@ describe('external shared task repository', () => {
     const repository = sharedRepositoryPath(fx.root);
     for (const checkout of [first, second]) {
       expect(checkout.worktree.shared).toBe(true);
-      expect(fx.git('-C', checkout.worktree.path, 'rev-parse', '--git-common-dir').trim()).toBe(repository);
+      expect(path.resolve(checkout.worktree.path, fx.git('-C', checkout.worktree.path, 'rev-parse', '--git-common-dir').trim())).toBe(repository);
       expect(await resolveRepo(checkout.worktree.path)).toEqual({ root: checkout.worktree.path, commonRoot: fx.root });
       expect(await checkoutState(ctx, checkout.worktree)).toEqual({ foreign: false });
     }
