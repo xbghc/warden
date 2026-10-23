@@ -99,7 +99,7 @@ export function checkpointKey(c: Checkpoint): TargetKey {
 }
 
 /**
- * Drops a checkpoint and its viewed marks; the next checkpoint may be given its number.
+ * Drops a checkpoint and its historical target metadata; the next checkpoint may be given its number.
  * Its objects stay in the store; they are small and another checkpoint may share them.
  */
 export function forgetCheckpoint(state: ReviewState, c: Checkpoint): void {

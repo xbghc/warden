@@ -15,7 +15,7 @@ export interface FileSummary {
   additions: number;
   deletions: number;
   binary: boolean;
-  /** sha1 of the diff content of this file; used to validate `viewed` state. */
+  /** sha1 of the diff content of this file; used to detect content changes. */
   contentHash: string;
   /** True when the file is untracked in the working tree (only for working/all targets). */
   untracked?: boolean;
@@ -85,11 +85,6 @@ export interface Prefs {
  */
 export type SlotKind = 'clone' | 'worktree';
 
-export interface TargetState {
-  /** filePath -> contentHash at the time it was marked viewed */
-  viewed: Record<string, string>;
-}
-
 export type TodoStatus = 'open' | 'done';
 
 /** A branch-scoped note that survives commits. */
@@ -126,7 +121,8 @@ export interface Checkpoint {
 export interface ReviewState {
   schemaVersion: 1;
   repoRoot: string;
-  targets: Record<TargetKey, TargetState>;
+  /** Opaque historical target metadata retained for compatibility. */
+  targets: Record<TargetKey, Record<string, unknown>>;
   todos: Todo[];
   /** Oldest first. */
   checkpoints: Checkpoint[];
@@ -134,11 +130,13 @@ export interface ReviewState {
   /** A requirement branch and the small changes that are integrated into it. */
   workflow?: DevelopmentWorkflow;
   workspaceConfig?: WorkspaceConfig;
-  /** Durable ownership record for temporary primary-directory files. */
+  /** Durable ownership record for the independent preview and an interrupted publication. */
   connectionPreview?: PreviewResponse & {
+    directory?: string;
     tree?: string;
     sandbox?: string;
     snapshot?: string;
+    migrating?: boolean;
     pending?: { tree: string; sandbox: string; snapshot: string; response: PreviewResponse };
   };
   historyDraft?: HistoryPreviewResponse & {
@@ -151,6 +149,7 @@ export interface ReviewState {
 
 export interface WorkspaceConfig {
   hooks: { create?: string; reuse?: string };
+  previewSetup?: string;
 }
 
 export interface WorkspaceHookResult {
@@ -268,6 +267,10 @@ export interface PreviewResponse {
   message?: string;
   files: { path: string; changeIds: string[] }[];
   conflicts?: string[];
+  syncStatus?: 'pending' | 'updating' | 'synced' | 'conflict' | 'error';
+  baselineTree?: string;
+  sources?: { changeId: string; observedTree: string; appliedTree?: string; status: 'pending' | 'updating' | 'synced' | 'conflict' | 'error' }[];
+  setup?: { command: string; status: 'pending' | 'running' | 'succeeded' | 'failed'; exitCode?: number | null; output?: string };
 }
 
 export interface HistoryEntry {
@@ -553,11 +556,7 @@ export interface UpdateNotice {
   command: string;
 }
 
-export interface FileEntry extends FileSummary {
-  viewed: boolean;
-  /** The file changed since it was marked as viewed (viewed flag was dropped). */
-  changed: boolean;
-}
+export type FileEntry = FileSummary;
 
 export interface FilesResponse {
   targetKey: TargetKey;

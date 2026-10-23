@@ -57,7 +57,8 @@ to discuss. Do not invent a file-copy implementation or make preview a second ed
 ## Review and delivery
 
 Review the worktree before squash. Users request further work through their own tools, then choose
-integration. Review provides viewed marks and copyable file locations; inline comments are removed.
+integration. Review presents the complete delivery diff and copyable file locations. Users review the entire
+intended delivery; there are no read markers or review-completion declarations. Inline comments are removed.
 The Web page supports commit-message entry and committing with normal Git
 hooks; terminal use is not required. The user runs tests in the primary directory; no mandatory
 test or agent handoff gate is established by this brief.

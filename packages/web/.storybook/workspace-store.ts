@@ -38,7 +38,7 @@ export async function setupWorkspaceStore() {
   const cleanup = setupWorktreeStore();
   await setupWorkflowStore();
   const { worktrees } = await api.worktrees();
-  const file: FileEntry = { ...diff, viewed: false, changed: false };
+  const file: FileEntry = { ...diff };
   const setTarget = useStore.getState().setTarget;
   api.patchPrefs = fn(async (patch) => ({ ...useStore.getState().prefs, ...patch }));
   api.forkPoint = fn(async ({ base }) => ({ base, sha: 'abc1234', ahead: 2, behind: 0 }));
@@ -81,9 +81,6 @@ export async function setupWorkspaceStore() {
     loadCheckpoints: fn(async () => {}),
     createCheckpoint: fn(async () => {
       useStore.getState().showToast('预览：已记录当前工作区');
-    }),
-    toggleViewed: fn(async (path) => {
-      useStore.setState((current) => ({ files: current.files.map((entry) => (entry.path === path ? { ...entry, viewed: !entry.viewed } : entry)) }));
     }),
   }));
   return cleanup;

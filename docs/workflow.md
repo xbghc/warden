@@ -26,8 +26,8 @@ merging that branch into the company's main branch remains outside Warden's core
 | Plan | Decompose the requirement and arrange the work sequence. | Keep one ordered plan of intended commits; TODO and orchestration are the same thing. |
 | Prepare | Choose which work to start and how its workspace should be initialized. | Create or reuse a workspace from the development branch and support user-defined workspace hooks. |
 | Execute | Choose and run agents using external tools or user scripts. | Supply the workspace path and generic hook context; execution tools remain outside Warden. |
-| Preview and test | Choose connected worktrees and run the development server, lint or tests in the primary directory. | Temporarily compose their live changes there without creating a commit; this capability is planned. |
-| Review | Inspect the worktree's changes and decide whether they are ready to integrate. | Show the diff and viewed marks before squash; let the user copy code locations for their own tools. |
+| Preview and test | Choose connected worktrees and edit primary code and run the development server, lint or tests in the preview directory. | Compose their live changes in a persistent independent preview, preserving primary Git state. |
+| Review | Inspect the worktree's changes and decide whether they are ready to integrate. | Show the complete delivery diff before squash; let the user copy code locations for their own tools. |
 | Integrate | Initiate squash, decide what testing is needed, and commit after validation. | Perform the requested Git operations, preserve normal commit hooks, and report their results. |
 | Continue | Continue the task and choose when to synchronize its workspace. | Keep the workspace available, show synchronization conditions and rebase only when requested. |
 | Organize history | Group related commits and edit their messages; adjust again if needed. | Preview and apply local history edits with conflict feedback; no undo/restore-history feature. |
@@ -89,44 +89,40 @@ ordinary `git commit` in the development checkout, preserving those hooks and si
 
 ## Primary directory and temporary connections
 
-All code editing belongs in task worktrees. The recommended workflow keeps the primary directory
-for dependencies, a running development server and user-operated lint/tests. Warden does not edit
-code, launch an editor, jump into Neovim, require agents to run tests or install dependencies into
-every task workspace. Users can still customize their own scripts.
+Human code is edited and saved in the primary directory; agents edit task workspaces. The baseline
+is the primary directory's saved working content, including staged and untracked non-ignored files.
+Unsaved editor buffers are not published. Warden's generated preview is a separate persistent
+repository outside primary. Run development servers, tests and debug sessions there.
 
-The user chooses which worktrees to **connect** to the primary directory. A connection continually
-projects their live changes into the files used by that directory's existing tools. It is a
-temporary combined preview, independent of pre-squash review, integration and commit creation.
-It must include in-progress edits rather than only previously committed revisions.
+Connecting workspaces composes their undelivered live changes against that saved baseline. Preview
+never modifies primary files, HEAD, index or refs. A conflicting initial connection fails without
+changing the selected connections. A later conflict preserves the previous coherent preview and
+reports stale/conflict status. Disconnecting removes the selected contributions; with no connections,
+the preview still follows saved primary content. Warden does not require isolated delivery testing.
 
-The agreed behavior is user-selected, continuous, temporary composition in the primary directory,
-without treating connection as integration or a commit. If establishing a connection conflicts,
-notify the user and fail that connection attempt; preserve the previous valid preview and leave
-the new workspace unconnected. Do not partially apply it or silently resolve the conflict.
+Changes are observed by content hashes and debounced. Each workspace reports pending, updating,
+synced, conflict or error based on captured/applied versions. Source edits arriving during composition
+are captured by a later update; an agent's clean Git state never establishes idleness. Preview files
+are generated and must not be edited. Unexpected runtime edits stop publication without overwriting
+them. Publication is journaled and recoverable after a complete old/new write; ambiguous partial
+writes remain visible for manual repair.
 
-Proposed operation rules to refine, including updates to an established connection, are:
+The runtime directory retains ignored dependencies and caches. A user-configured idempotent setup
+script runs on initialization and successful code updates, with manual retry and output/exit status.
+It is serialized with publication and receives the primary and preview paths. Scripts decide whether
+the environment needs updating; Warden does not interpret dependency manifests.
 
-- Compose the selected worktrees against the primary development baseline; leave HEAD and the
-  real Git index unchanged. Do not use a commit or squash as the preview mechanism.
-- Disconnecting recomposes the remaining connections, or restores the baseline when none remain.
-  Restore only files owned by the preview; unexpected edits in the primary directory are not disposable.
-- Detect overlapping changes and show conflicts. Never let connection order silently choose a winner.
-  A failed update leaves the last coherent preview available and identifies the failed connection.
-- Preserve source worktrees. Preview is one-way; changes in the primary directory are not sent back
-  into a task. Test fixes are made in the responsible worktree.
-- Suspend and remove the temporary preview before formal squash, so other connected worktrees
-  cannot enter that commit. Recompose remaining connections against the new baseline afterwards.
-- Make interruption and restart recoverable; persisted ownership and baseline information are needed
-  before writing files. Do not implement disconnect with a blanket reset or clean.
-
-Connection synchronization uses isolated composition and a periodic refresh in the running server.
-Git sees temporary preview files as working-directory modifications; the UI identifies their
-contributing workspaces. Delivery preparation removes owned preview contributions before staging.
+VS Code migration comes before ACP. Native task diffs replace a separate diff renderer in the
+extension. The first extension has task navigation, review, delivery, scripts, explicit
+rebase, history arrangement and preview terminals/tasks. A preview-versus-baseline or provenance
+view is deliberately omitted. See [VS Code](vscode.md) for installation and runtime configuration.
 
 ## Review first, then squash
 
 Review and connection previews use the workspace's current content, regardless of whether changes
-are staged. Review has one file list and hash-bound viewed marks; staging is not a review status.
+are staged. Review has one complete file list. Users must review all content they intend to commit.
+Warden does not track per-file read status or require a review-completion declaration. Staging is not
+a review status.
 The legacy line/file staging API has been removed. Read-only comparison keys remain available for
 explicit comparisons. Formal delivery continues to use the primary checkout's Git index and hooks.
 
@@ -134,7 +130,7 @@ explicit comparisons. Formal delivery continues to use the primary checkout's Gi
 flowchart LR
   P[User plans and orders commits] --> W[Warden prepares a workspace]
   W --> E[User develops with their own tools]
-  E --> V[User connects worktrees and tests in the primary directory]
+  E --> V[User connects worktrees and tests in the preview directory]
   E --> R[User reviews worktree changes]
   V --> R[User reviews worktree changes]
   R -->|More work needed| E
@@ -249,7 +245,7 @@ diff review, squash/commit operations and history. In particular, do not add:
 - Mandatory agent handoff commands, delivery reports or automatic completion detection.
 - Task-complete/idle declarations, automatic workspace recycling or rebase triggered by acceptance.
 - Built-in terminal sessions, agent launch, prompt delivery or process control; user scripts own these choices.
-- Embedded editing or editor launch/jump integrations, including Neovim.
+- A custom code editor or preview-versus-baseline diff; native VS Code editing/review is used.
 - A separate requirement approval or final acceptance workflow.
 - Undo/restore-history actions; users adjust the current history themselves.
 - A generic project-management state machine for every pause, interruption or reassignment.
@@ -265,20 +261,20 @@ The working copy implements the workflow above. It has not been published as a r
 |---|---|
 | Plan and workspace | Ordered task notes, explicit allocation, persistent workspaces and repeated deliveries. No completion declaration or automatic recycling. |
 | Workspace hooks | Generic creation/reuse scripts with cwd, environment, output and status. Agent execution stays in user tools. |
-| Connection | Live committed/uncommitted changes composed in an independent temporary Git repository, then written only to primary working files. Failed initial connections preserve the prior set and files. |
+| Connection | Live committed/uncommitted changes composed in an independent temporary Git repository, then published only to the persistent preview directory. Failed initial connections preserve the prior set and files. |
 | Later connection conflict | Preserve the last coherent preview and display stale status; user changes the connections or source work. |
 | Delivery | All current undelivered changes from a clean committed source, pinned by source and primary HEAD. No file/commit subset picking in this version. |
 | Web commit | Normal primary-directory Git commit with hooks/signing. Failed hooks retain files/index. No test-passed checkbox or agent handoff. |
 | Rebase | Isolated checks and explicit single/selected/all execution, with per-workspace results and pinned heads. Actual conflicts are left for the user to handle. |
 | History | Select a start through HEAD within the latest 100 commits. Reorder/reword in an isolated cherry-pick preview; apply only linear ranges with identical final tree. No undo or remote push. |
-| Navigation | Single left navigation: primary preview, history, ordered plan, synchronization/settings sheets. Selecting a task/file directly opens review. |
+| Navigation | Single left navigation: runtime preview, history, ordered plan, synchronization/settings sheets. Selecting a task/file directly opens review. |
 
 `sourceBase` records the last delivered source tip, independently of the squash commit SHA.
 Each delivery has a stable identifier and a source range, primary parent, commit, message and
 review record. History rewriting updates delivery-to-commit associations; it does not complete
 a task or automatically rewrite a source workspace.
 
-Primary-directory preview files have a durable ownership record. An unexpected file/index change
+Independent preview files have a durable ownership record. An unexpected preview file/index change
 blocks replacement rather than being discarded. Interrupted operations recognize only their known
 old/new snapshots. This operation bookkeeping is not an undo feature. Users handle unexpected
 edits and actual rebase conflicts themselves.

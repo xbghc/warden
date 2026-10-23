@@ -1,6 +1,7 @@
 # Reviewing
 
-What warden can put under review, and the ways to mark it done.
+What Warden can put under review. Users must review all content they intend to commit; Warden
+does not track per-file read status or ask for a review-completion declaration.
 
 This guide describes the current implementation. The [workflow contract](workflow.md#review-first-then-squash)
 places user review before squash and uses commit history for requirement acceptance; it does not
@@ -13,11 +14,11 @@ formal delivery in this version requires a clean committed source.
 
 Delivery history and successful workspace-hook output are collapsed on the task page. Expand
 **交付** to inspect previous batches or **工作区脚本** to inspect hook output. Failed hooks remain visible. The file-list heading shows
-review progress once; layout controls use icons with accessible labels and tooltips.
+the total number of changed files; layout controls use icons with accessible labels and tooltips.
 The same [interface copy rules](design.md#interface-copy) apply to preview, history, synchronization
 and settings. Operational consequences and recovery instructions stay beside their actions.
 
-The task page is read-only for source files. Viewed marks support review. Preparation
+The task page is read-only for source files. Preparation
 isolates this delivery in the primary index; the page supports a message and ordinary Git commit
 with hooks. No validation checkbox or readiness declaration is required. Failed hooks preserve
 files; successful delivery preserves the workspace. See [Squash acceptance](worktrees.md#squash-acceptance).
@@ -46,16 +47,15 @@ Worktrees are discovered with `git worktree list`, and clone slots beside the ma
 [Clone slots](worktrees.md#clone-slots)); both are made in *任务编排* and share the review
 state of the main repository.
 One whose directory is gone (git lists it as *prunable*) is not offered, and a remembered target
-inside a removed worktree falls back to the working tree on the next load. Viewed flags kept under a
-worktree's key stay in the state file until a branch is checked out into that slot again, which drops
-them: they were about another branch.
+inside a removed worktree falls back to the working tree on the next load. Reusing a slot for another
+branch clears its historical target metadata and checkpoints.
 
 Navigation stays together in the left sidebar: *主目录预览*, *提交历史*, ordered tasks and the
 synchronization/settings sheets. Within a task, its file list selects the diff directly. Connection
 selection is independent and belongs to the primary preview page.
 
-Review presents one file list for the current comparison. Staging does not mark a file reviewed;
-the [已读 mark](#viewed-files) records that separately and is invalidated when the diff changes.
+Review presents the complete file list for the current comparison. Staging does not establish that
+a file has been reviewed.
 Local review opens `all`, including staged, unstaged and untracked content in the current working
 files. Saved `working` or `staged` startup targets open `all` in the same workspace. Their read-only
 APIs remain available for explicit comparisons against HEAD or the index.
@@ -72,6 +72,7 @@ what sits above is the branch's own work.
 
 ## Read-only review
 
+Read markers and `PUT /api/targets/:key/viewed` have been removed; requests return 404.
 Inline comments and their dedicated endpoints have been removed. Comment creation, editing, replies,
 reanchoring and export requests return 404. Click a line number to copy its location, or Shift-click
 to copy a range from the last copied line on the same side.
@@ -102,14 +103,6 @@ A hunk rarely shows the marker that opened the block its lines sit in, so warden
 file whole — only for the files `git grep` finds a marker in. Marker detection is textual: a marker
 inside a string literal that follows a comment leader counts too.
 
-## Viewed files
-
-A file in any comparison can be marked *已读* — the
-box beside it in the sidebar, or the one in the file header. A directory whose files are all read
-recedes with a check. The mark is bound to a hash of the file's diff: when the diff changes (a `base`
-target reads the working tree, so the agent's next edit does that) the mark is dropped and the file
-is flagged *已变化*. Viewed marks belong to the exact comparison, including local views.
-
 ## Checkpoints
 
 An agent works in rounds, and after the first one the question is no longer "what is uncommitted"
@@ -118,16 +111,14 @@ neither stages nor commits, and a `base` target shows the whole branch every tim
 the working tree noted at the moment you choose, and `checkpoint:<n>` is one diff from it to the
 working tree now — whatever was staged or committed in between does not show, only what changed.
 
-- *新建检查点*, under the progress figure in 工作区, takes one: tracked and untracked files as they are
+- *新建检查点*, in the local review controls, takes one: tracked and untracked files as they are
   on disk, ignored ones left out. *对比检查点 #n* beside it opens the newest. A checkpoint of a working
   tree that has not changed since the newest one is not taken twice; that one is handed back.
-- In a checkpoint's view the picker reads *检查点 #n*, and the row under the figure switches to another
+- In a checkpoint's view the picker reads *检查点 #n*, and the checkpoint toolbar switches to another
   checkpoint, takes a new one — the round is over, so the view moves on to it, empty — or deletes
   the one in front after asking.
-- Files there carry the [已读 mark](#viewed-files), which the agent's next edit to a file drops.
-  Deleting the checkpoint also deletes its marks.
 - Checkpoints are numbered per worktree. Each worktree retains its newest 20; older checkpoints
-  and their viewed marks are dropped. Reusing a slot for another branch clears its checkpoints.
+  are dropped. Reusing a slot for another branch clears its checkpoints.
 
 Nothing of this is written to the repository. The snapshot is `git add --all` plus
 `git write-tree` run against a copy of the index kept in warden's data directory, with

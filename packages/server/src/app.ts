@@ -37,7 +37,7 @@ import { currentBranch, getRepoInfo, listWorktrees, remoteDefault, slotPath, typ
 import { annotateDebug, getFileDiff, getFullFile, listTargetDiffs, literal, resolveTargetContext, toSummary, type TargetContext } from './targets.js';
 import { checkpointKey, checkpointStore, checkpointsOf, findCheckpoint, forgetCheckpoint, takeCheckpoint } from './checkpoints.js';
 import { checkoutWorktree, listBranches, listWorktreesDetailed, lookupRemoteBranches, nextSlot, releaseWorktree, removeWorktree } from './worktrees.js';
-import { ensureTarget, forgetWorktreeTargets, type StateStore } from './state.js';
+import { forgetWorktreeTargets, type StateStore } from './state.js';
 import { formatTodoExport } from './export.js';
 import { WorkflowService } from './workflow.js';
 import { PreviewService } from './preview.js';
@@ -99,8 +99,6 @@ export function createApp(opts: AppOptions): WardenApp {
 
   /** Last listing per target: only used to recover rename/untracked hints for single-file requests. */
   const listings = new Map<string, ListingCache>();
-  /** Files whose viewed flag was dropped because their diff changed (in-memory notice). */
-  const changedNotices = new Map<string, Set<string>>();
   /** One watcher per worktree root, started lazily and stopped when the last client disconnects. */
   const watchers = new Map<string, RepoWatcher>();
   const watcherFor = (root: string): RepoWatcher => {
@@ -274,33 +272,7 @@ export function createApp(opts: AppOptions): WardenApp {
     const diffs = await listTargetDiffs(ctx);
     await annotateDebug(ctx, diffs);
     listings.set(key, { at: Date.now(), files: diffs });
-    const notices = changedNotices.get(key) ?? new Set<string>();
-    changedNotices.set(key, notices);
-
-    const stale: string[] = [];
-    const state = await store.load();
-    const viewed = state.targets[key]?.viewed ?? {};
-    for (const [p, h] of Object.entries(viewed)) {
-      const f = diffs.find((d) => d.path === p);
-      if (!f || f.contentHash !== h) stale.push(p);
-    }
-    if (stale.length) {
-      await store.update((s) => {
-        const ts = s.targets[key];
-        if (!ts) return;
-        for (const p of stale) {
-          if (ts.viewed[p] === viewed[p]) {
-            delete ts.viewed[p];
-            if (diffs.some((d) => d.path === p)) notices.add(p);
-          }
-        }
-      });
-    }
-    const files: FileEntry[] = diffs.map((d) => ({
-      ...toSummary(d),
-      viewed: !stale.includes(d.path) && viewed[d.path] === d.contentHash,
-      changed: notices.has(d.path),
-    }));
+    const files: FileEntry[] = diffs.map(toSummary);
     const res: FilesResponse = { targetKey: key, root: ctx.cwd, files };
     return c.json(res);
   });
@@ -327,21 +299,6 @@ export function createApp(opts: AppOptions): WardenApp {
     const content = await getFullFile(ctx, filePath, side);
     const res: FullFileResponse = { path: filePath, side, content };
     return c.json(res);
-  });
-
-  api.put('/targets/:key/viewed', async (c) => {
-    const key = c.req.param('key');
-    await targetCtx(key);
-    const body = (await c.req.json()) as { path?: string; viewed?: boolean; contentHash?: string };
-    if (!body.path) throw badRequest('missing path');
-    const viewed = await store.update((s) => {
-      const t = ensureTarget(s, key);
-      if (body.viewed && body.contentHash) t.viewed[body.path!] = body.contentHash;
-      else delete t.viewed[body.path!];
-      return t.viewed;
-    });
-    changedNotices.get(key)?.delete(body.path);
-    return c.json({ viewed });
   });
 
   // ---- checkpoints -------------------------------------------------------
@@ -542,6 +499,7 @@ export function createApp(opts: AppOptions): WardenApp {
   api.get('/preview', async (c) => c.json(await preview.get()));
   api.put('/preview', async (c) => c.json(await preview.set((await c.req.json())?.connectedIds)));
   api.post('/preview/refresh', async (c) => c.json(await preview.refresh()));
+  api.post('/preview/setup', async (c) => c.json(await preview.setup()));
   api.get('/workflow/rebase-checks', async (c) => c.json(await workflow.rebaseChecks()));
   api.post('/workflow/rebase', async (c) => {
     const result = await workflow.rebaseBatch(await c.req.json());
@@ -553,9 +511,11 @@ export function createApp(opts: AppOptions): WardenApp {
   api.post('/history/apply', async (c) => c.json(await history.apply(await c.req.json())));
   api.put('/workspace/config', async (c) => {
     const config = workspaceConfig(await c.req.json());
-    await store.update((state) => {
-      state.workspaceConfig = config;
-    });
+    await store.withRepositoryLock(() =>
+      store.update((state) => {
+        state.workspaceConfig = config;
+      }),
+    );
     return c.json(config);
   });
   api.post('/workflow/changes/:id/hook', async (c) => c.json(await workflow.retryHook(c.req.param('id'))));

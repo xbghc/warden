@@ -5,7 +5,7 @@ import { useStore } from '../store';
 import { FileTree } from './FileTree';
 
 function file(path: string, status: FileEntry['status'], extra: Partial<FileEntry> = {}): FileEntry {
-  return { path, status, additions: 12, deletions: 3, binary: false, contentHash: path, viewed: false, changed: false, ...extra };
+  return { path, status, additions: 12, deletions: 3, binary: false, contentHash: path, ...extra };
 }
 
 const changes = [
@@ -15,11 +15,7 @@ const changes = [
   file('assets/logo.png', 'modified', { binary: true }),
   file('README.md', 'modified'),
 ];
-const commitFiles = [
-  file('src/App.tsx', 'modified'),
-  file('src/components/Empty.tsx', 'added', { deletions: 0, viewed: true }),
-  file('README.md', 'modified', { changed: true }),
-];
+const commitFiles = [file('src/App.tsx', 'modified'), file('src/components/Empty.tsx', 'added', { deletions: 0 }), file('README.md', 'modified')];
 
 const meta = {
   title: 'Review/FileTree',
@@ -38,10 +34,6 @@ const meta = {
       activeFile: 'src/App.tsx',
       openFile: fn(async (path: string) => {
         useStore.setState({ activeFile: path });
-      }),
-      toggleViewed: fn(async (path: string) => {
-        const files = useStore.getState().files.map((entry) => (entry.path === path ? { ...entry, viewed: !entry.viewed, changed: false } : entry));
-        useStore.setState({ files });
       }),
     });
   },
@@ -72,7 +64,7 @@ export const FileTypes: Story = {
 export const LongPaths: Story = {
   beforeEach: () => {
     const files = [
-      file('src/components/ReviewFileComparisonSelector.tsx', 'modified', { additions: 1248, deletions: 365, changed: true }),
+      file('src/components/ReviewFileComparisonSelector.tsx', 'modified', { additions: 1248, deletions: 365 }),
       file('src/components/ReviewFileComparisonSelector.test.tsx', 'added', { additions: 240, deletions: 0 }),
       file('src/components/原始文件与新文件的差异比较.tsx', 'renamed', { oldPath: 'src/compare.tsx' }),
     ];
@@ -107,29 +99,27 @@ export const CommitChanges: Story = {
     useStore.setState({ targetKey: 'commit:abc1234', files: commitFiles });
   },
 };
-export const ReviewedDirectories: Story = {
+export const NestedDirectories: Story = {
   beforeEach: () => {
     const files = [
-      file('src/features/order/OrderList.tsx', 'modified', { viewed: true }),
-      file('src/features/order/hooks/useOrder.ts', 'modified', { viewed: true }),
-      file('src/utils/a.ts', 'modified', { viewed: true }),
+      file('src/features/order/OrderList.tsx', 'modified'),
+      file('src/features/order/hooks/useOrder.ts', 'modified'),
+      file('src/utils/a.ts', 'modified'),
       file('src/utils/b.ts', 'modified'),
-      file('docs/guide.md', 'modified', { viewed: true }),
+      file('docs/guide.md', 'modified'),
     ];
     useStore.setState({ targetKey: 'commit:abc1234', files });
   },
 };
-export const MarkViewed: Story = {
+export const OpenFile: Story = {
   beforeEach: () => {
     useStore.setState({ targetKey: 'commit:abc1234', files: commitFiles, activeFile: null });
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await userEvent.click(canvas.getByRole('button', { name: '展开全部目录' }));
-    const viewed = await canvas.findByRole('checkbox', { name: '标记 src/App.tsx 为已读' });
-    await userEvent.click(viewed);
-    await expect(viewed).toBeChecked();
-    await expect(useStore.getState().toggleViewed).toHaveBeenCalledOnce();
-    await expect(useStore.getState().toggleViewed).toHaveBeenCalledWith('src/App.tsx');
+    await userEvent.click(canvas.getByRole('button', { name: '打开 src/App.tsx' }));
+    await expect(useStore.getState().openFile).toHaveBeenCalledWith('src/App.tsx');
+    await expect(canvas.queryByRole('checkbox', { name: /已读/ })).not.toBeInTheDocument();
   },
 };

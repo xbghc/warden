@@ -1,5 +1,4 @@
 import { Button } from './ui/button';
-import { Checkbox } from './ui/checkbox';
 import { useMemo, useState } from 'react';
 import type { FileEntry } from '@warden/shared';
 import { useStore } from '../store';
@@ -22,7 +21,6 @@ function PathParts({ path }: { path: string }) {
 }
 
 function FileHeader({ entry }: { entry: FileEntry }) {
-  const toggleViewed = useStore((s) => s.toggleViewed);
   const copyToClipboard = useStore((s) => s.copyToClipboard);
   return (
     <div className="file-head">
@@ -54,16 +52,6 @@ function FileHeader({ entry }: { entry: FileEntry }) {
       <span className="counts">
         <span className="add">+{entry.additions}</span> <span className="del">-{entry.deletions}</span>
       </span>
-      {entry.changed && (
-        <span className="changed" title="文件有新变更，已取消已读标记">
-          已读已重置
-        </span>
-      )}
-      <span className="spacer" />
-      <label className="check">
-        <Checkbox checked={entry.viewed} onCheckedChange={() => void toggleViewed(entry.path)} />
-        已读
-      </label>
     </div>
   );
 }

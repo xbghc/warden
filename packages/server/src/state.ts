@@ -2,7 +2,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, rename, stat, unlink, utimes } from 'node:fs/promises';
-import type { Checkpoint, Prefs, ReviewState, TargetState } from '@warden/shared';
+import type { Checkpoint, Prefs, ReviewState } from '@warden/shared';
 import { sha1 } from './hash.js';
 import { HttpError } from './errors.js';
 
@@ -26,15 +26,6 @@ export function defaultPrefs(): Prefs {
 
 export function defaultState(repoRoot: string): ReviewState {
   return { schemaVersion: 1, repoRoot, targets: {}, todos: [], checkpoints: [], prefs: defaultPrefs() };
-}
-
-export function ensureTarget(state: ReviewState, key: string): TargetState {
-  let t = state.targets[key];
-  if (!t) {
-    t = { viewed: {} };
-    state.targets[key] = t;
-  }
-  return t;
 }
 
 /** The fields the rest of the server dereferences without checking; anything else is a corrupt row. */
@@ -72,12 +63,10 @@ function normalise(raw: unknown, repoRoot: string, file: string): ReviewState {
   const extra = Object.fromEntries(Object.entries(r).filter(([k]) => !KNOWN_KEYS.has(k)));
   const targets: ReviewState['targets'] = {};
   for (const [k, v] of Object.entries(r.targets ?? {})) {
-    if (!v || typeof v !== 'object') continue;
-    targets[k] = {
-      // Retain unknown historical fields as opaque data when another state change is saved.
-      ...v,
-      viewed: typeof v.viewed === 'object' && v.viewed ? v.viewed : {},
-    };
+    if (!v || typeof v !== 'object' || Array.isArray(v)) continue;
+    // Retire read markers while preserving unrelated historical metadata.
+    const metadata = Object.fromEntries(Object.entries(v).filter(([field]) => field !== 'viewed'));
+    if (Object.keys(metadata).length) targets[k] = metadata;
   }
   // Older builds remembered a separate review area. Fold it into the content destination and
   // leave the selected target intact; there is no longer an extra mode to enter before reading.
@@ -289,7 +278,7 @@ export class StateStore {
   }
 }
 
-/** A reused slot starts with fresh viewed marks and checkpoint baselines. */
+/** A reused slot drops historical target metadata and checkpoint baselines. */
 export function forgetWorktreeTargets(state: ReviewState, worktreePath: string): void {
   const prefix = `worktree:${worktreePath}:`;
   for (const key of Object.keys(state.targets)) {

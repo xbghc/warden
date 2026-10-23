@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { defaultState, ensureTarget, forgetWorktreeTargets } from './state.js';
+import { defaultState, forgetWorktreeTargets } from './state.js';
 import { MAX_CHECKPOINTS, addCheckpoint, checkpointsOf, forgetCheckpoint } from './checkpoints.js';
 
 describe('checkpoint bookkeeping', () => {
@@ -13,10 +13,10 @@ describe('checkpoint bookkeeping', () => {
     expect(addCheckpoint(s, undefined, 't4', 'h').id).toBe(2);
   });
 
-  it('drops the oldest past the limit, with its 已读 marks', () => {
+  it('drops the oldest past the limit, with its historical target metadata', () => {
     const s = defaultState('/repo');
     for (let i = 1; i <= MAX_CHECKPOINTS; i++) addCheckpoint(s, undefined, `t${i}`, 'h');
-    ensureTarget(s, 'checkpoint:1').viewed['a.ts'] = 'x';
+    s.targets['checkpoint:1'] = { comments: [] };
     addCheckpoint(s, '/wt', 'other', 'h');
 
     addCheckpoint(s, undefined, 'newest', 'h');
@@ -32,7 +32,7 @@ describe('checkpoint bookkeeping', () => {
     const s = defaultState('/repo');
     addCheckpoint(s, '/slot-1', 't', 'h');
     addCheckpoint(s, undefined, 't', 'h');
-    ensureTarget(s, 'worktree:/slot-1:checkpoint:1');
+    s.targets['worktree:/slot-1:checkpoint:1'] = { comments: [] };
     forgetWorktreeTargets(s, '/slot-1');
     expect(s.checkpoints.map((c) => c.worktree)).toEqual([undefined]);
     expect(s.targets['worktree:/slot-1:checkpoint:1']).toBeUndefined();

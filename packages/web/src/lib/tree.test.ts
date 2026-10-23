@@ -2,15 +2,13 @@ import { describe, expect, it } from 'vitest';
 import type { FileEntry } from '@warden/shared';
 import { allDirPaths, buildTree } from './tree';
 
-const entry = (path: string, viewed = false): FileEntry => ({
+const entry = (path: string): FileEntry => ({
   path,
   status: 'modified',
   additions: 1,
   deletions: 0,
   binary: false,
   contentHash: '',
-  viewed,
-  changed: false,
 });
 
 describe('buildTree', () => {
@@ -29,29 +27,29 @@ describe('buildTree', () => {
     expect(allDirPaths(tree)).toEqual(['src', 'src/features/order', 'src/features/order/hooks', 'src/utils']);
   });
 
-  it('counts viewed files through every level, collapsed chains included', () => {
+  it('counts files through every level, collapsed chains included', () => {
     const tree = buildTree([
-      entry('src/features/order/OrderList.tsx', true),
-      entry('src/features/order/hooks/useOrder.ts', true),
-      entry('src/utils/a.ts', true),
+      entry('src/features/order/OrderList.tsx'),
+      entry('src/features/order/hooks/useOrder.ts'),
+      entry('src/utils/a.ts'),
       entry('src/utils/b.ts'),
-      entry('README.md', true),
+      entry('README.md'),
     ]);
-    const dirs = new Map<string, [number, number]>();
+    const dirs = new Map<string, number>();
     const walk = (node: typeof tree) => {
       for (const c of node.children) {
         if (c.kind !== 'dir') continue;
-        dirs.set(c.path, [c.viewedCount, c.fileCount]);
+        dirs.set(c.path, c.fileCount);
         walk(c);
       }
     };
     walk(tree);
     expect(Object.fromEntries(dirs)).toEqual({
-      src: [3, 4],
-      'src/features/order': [2, 2],
-      'src/features/order/hooks': [1, 1],
-      'src/utils': [1, 2],
+      src: 4,
+      'src/features/order': 2,
+      'src/features/order/hooks': 1,
+      'src/utils': 2,
     });
-    expect([tree.viewedCount, tree.fileCount]).toEqual([4, 5]);
+    expect(tree.fileCount).toBe(5);
   });
 });

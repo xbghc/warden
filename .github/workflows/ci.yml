@@ -43,6 +43,10 @@ jobs:
       # Keep this version aligned with publish.yml so npm output changes fail CI first.
       - name: Check package with the publishing npm version
         run: pnpm --package=npm@12.2.1 dlx npm run check:package
+      - name: Build the VS Code extension
+        run: pnpm package:vscode
+      - name: Exercise the VS Code extension host
+        run: xvfb-run -a pnpm test:vscode
 
   test:
     name: Test (${{ matrix.os }}, Node ${{ matrix.node }})

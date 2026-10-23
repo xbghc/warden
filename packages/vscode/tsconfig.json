@@ -1,0 +1,5 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "types": ["node", "vscode"], "lib": ["ES2022"], "noEmit": true },
+  "include": ["src/**/*.ts"]
+}

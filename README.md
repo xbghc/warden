@@ -4,15 +4,9 @@ A local tool for developing one requirement with several coding agents. Plan sma
 operate agent workspaces, review their diffs and build a clear history on your **primary development
 branch** (主开发分支).
 
-The project is being redesigned around the [agreed workflow](docs/workflow.md) and a fresh
-[interaction design](docs/design.md), using shadcn/ui. Warden is a passive tool: workspaces persist
-across deliveries, and users trigger Git operations without maintaining readiness or task
-completion declarations. The working copy implements the new page, temporary connected previews and commit-history
-arrangement. These changes have not been published to npm or the hosted Storybook.
-
-One process per repository, on `127.0.0.1` only, with no account and no database. It integrates reviewed changes from the
-page and keeps task workspaces available; see
-[State and security](docs/internals.md).
+The working copy includes a [VS Code extension](docs/vscode.md), persistent independent previews,
+and commit-history arrangement. These changes have not yet been published. ACP integration is deferred.
+The browser and CLI remain available and share the same state and operation locks.
 
 ## Install / run
 
@@ -43,7 +37,7 @@ for a global install. The check never delays startup and fails silently. `--no-u
 
 ## Development workflow
 
-Warden is a passive Web workbench for parallel agent development inside one requirement.
+Warden is a passive workbench for parallel agent development inside one requirement.
 The **primary development branch** (主开发分支), such as `feature/order`, is where reviewed
 changes accumulate. It need not be the repository's default branch.
 
@@ -51,8 +45,8 @@ changes accumulate. It need not be the repository's default branch.
    Ordering does not impose dependencies. One workspace can deliver multiple commits.
 2. **Create a workspace.** Configure optional creation/reuse hooks in settings. Warden supplies
    the workspace and hook context; use your own tools or scripts to run agents there.
-3. **Connect for preview.** Choose workspaces on *主目录预览*. Their committed and uncommitted
-   changes are temporarily composed into the primary directory for your dev server and tests.
+3. **Connect for preview.** Connect selected workspaces. Their committed and uncommitted
+   increments are composed with saved primary edits in a separate preview directory for your dev server and tests.
    A conflicting connection fails and preserves the previous preview. HEAD and index stay unchanged.
 4. **Review and commit.** Click a task and its files to review directly. Prepare the complete
    undelivered committed change, enter a message and commit in the page with normal Git hooks.
@@ -61,8 +55,8 @@ changes accumulate. It need not be the repository's default branch.
    selected or all eligible workspaces explicitly. In *提交历史*, edit messages and reorder a
    selected linear range, preview it, then apply. There is no undo or automatic push.
 
-Code edits belong in task worktrees; dependencies and user-run validation belong in the primary
-directory. A clean checkout does not mean an agent has stopped.
+Edit human code in primary and agent code in task workspaces. Dependencies and user-run validation
+belong in the persistent preview directory; configure an idempotent setup script for its environment. A clean checkout does not mean an agent has stopped.
 No readiness declaration, task-completion checkbox or workspace-release step is required.
 
 The first version delivers clean, committed source changes as one squash commit per operation.
@@ -87,9 +81,10 @@ The copy button beside the path in the file header copies the path, relative to 
 
 | | |
 |---|---|
+| [VS Code](docs/vscode.md) | Extension installation, native review, preview runtime, scripts and delivery |
 | [Workflow](docs/workflow.md) | User-controlled development loop, current-version scope and implementation alignment |
 | [Interaction design](docs/design.md) | Agreed behavior, connection previews, commit arrangement and open product decisions |
-| [Reviewing](docs/reviewing.md) | Read-only review, targets, debug code, 已读, checkpoints, auto-refresh |
+| [Reviewing](docs/reviewing.md) | Read-only review, targets, debug code, checkpoints, auto-refresh |
 | [Working with agents](docs/agent.md) | Workspace boundaries, task briefs and external tools |
 | [Worktrees and tasks](docs/worktrees.md) | Commit plans, workspace hooks, squash acceptance and synchronization |
 | [Platform](docs/environment.md) | WSL2 and browser access |

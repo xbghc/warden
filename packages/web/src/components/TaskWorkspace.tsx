@@ -10,7 +10,6 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Textarea } from './ui/textarea';
 import { NativeSelect } from './ui/native-select';
-import { Checkbox } from './ui/checkbox';
 import { Sheet } from './ui/sheet';
 import { DiffPanel } from './DiffPanel';
 import { Markdown } from './Markdown';
@@ -255,9 +254,7 @@ function TaskFiles({ onOpenFile }: { onOpenFile(): void }) {
     <aside className="wb-files" aria-label="本次变更文件">
       <div className="wb-files-title">
         <strong>文件</strong>
-        {!error && (!loading || files.length > 0) && (
-          <span>{files.length > 0 ? `已读 ${files.filter((file) => file.viewed).length}/${files.length}` : files.length}</span>
-        )}
+        {!error && (!loading || files.length > 0) && <span>{files.length}</span>}
       </div>
       <OperationError message={error} />
       {loading && files.length === 0 && <p className="wb-muted-note">加载中…</p>}
@@ -280,7 +277,6 @@ function TaskFiles({ onOpenFile }: { onOpenFile(): void }) {
                 {file.conflicted ? 'U' : { added: 'A', modified: 'M', deleted: 'D', renamed: 'R' }[file.status]}
               </small>
             </button>
-            <Checkbox aria-label={`${file.path} 已读`} checked={file.viewed} onCheckedChange={() => void useStore.getState().toggleViewed(file.path)} />
           </li>
         ))}
       </ul>

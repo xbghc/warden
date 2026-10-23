@@ -47,11 +47,11 @@ describe('a server started inside a linked worktree', () => {
     expect(info.defaultTarget).toBe(`worktree:${linked}:all`);
   });
 
-  it('keeps viewed marks scoped to their worktree across servers', async () => {
+  it('resolves the same comparison and shares preferences across servers', async () => {
     await fx.write('src/a.ts', 'export function a() {\n  return 2;\n}\n');
     const files = (await (await main.request('/api/targets/all/files')).json()) as FilesResponse;
     const file = files.files.find((row) => row.path === 'src/a.ts')!;
-    await send(main, 'PUT', '/api/targets/all/viewed', { path: file.path, viewed: true, contentHash: file.contentHash });
+    await send(main, 'PATCH', '/api/prefs', { viewMode: 'split' });
 
     // The linked worktree moves its own HEAD, as an agent committing there does.
     await writeFile(path.join(linked, 'side.txt'), 'x\n');
@@ -61,8 +61,8 @@ describe('a server started inside a linked worktree', () => {
     const own = (await (await inLinked.request(`/api/targets/${k(`worktree:${linked}:all`)}/files`)).json()) as FilesResponse;
     expect(own.files).toEqual([]);
     const viaBare = (await (await inLinked.request('/api/targets/all/files')).json()) as FilesResponse;
-    expect(viaBare.files.find((row) => row.path === file.path)?.viewed).toBe(true);
-    const state = (await (await main.request('/api/state')).json()) as ReviewState;
-    expect(state.targets.all!.viewed[file.path]).toBe(file.contentHash);
+    expect(viaBare.files.find((row) => row.path === file.path)).toEqual(file);
+    const state = (await (await inLinked.request('/api/state')).json()) as ReviewState;
+    expect(state.prefs.viewMode).toBe('split');
   });
 });

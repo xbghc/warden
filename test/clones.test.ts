@@ -265,7 +265,7 @@ describe('a clone slot', () => {
     expect((await checkout({ branch: 'agent/one', kind: 'clone' })).slot).toBe(2);
   });
 
-  it('shares viewed marks with a server started inside the clone', async () => {
+  it('resolves the same diff from a server started inside the clone', async () => {
     const made = await checkout({ branch: 'agent/one', kind: 'clone' });
     const dir = made.worktree.path;
     const inClone = await resolveRepo(dir);
@@ -277,9 +277,8 @@ describe('a clone slot', () => {
     const target = k(`worktree:${dir}:all`);
     const files = await json<FilesResponse>(await app.request(`/api/targets/${target}/files`));
     const file = files.files.find((row) => row.path === 'src/b.ts')!;
-    await send('PUT', `/api/targets/${target}/viewed`, { path: file.path, viewed: true, contentHash: file.contentHash });
     const fromClone = await json<FilesResponse>(await there.request(`/api/targets/${target}/files`));
-    expect(fromClone.files.find((row) => row.path === file.path)?.viewed).toBe(true);
+    expect(fromClone.files.find((row) => row.path === file.path)).toEqual(file);
     await there.close();
   });
 

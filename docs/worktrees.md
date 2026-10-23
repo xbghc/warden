@@ -68,12 +68,12 @@ a **clean committed source**, pinned to the reviewed source and primary HEAD. So
 continue from the previous delivery without first rebasing. `sourceBase` records that previous
 source tip so A1 is excluded when delivering A2.
 
-Preparation first composes the delivery in an isolated repository. It pauses connections, removes
-only their owned temporary contribution, then stages the delivery in the checked-out primary branch.
+Preparation first composes the delivery in an isolated repository. It leaves the independent preview running and stages only that delivery in the checked-out
+primary branch. Existing primary user edits must be handled first.
 Only one preparation uses that directory at a time. Other connected workspaces cannot enter the
 resulting commit. Review takes place before preparation; the page shows the resulting staged diff.
 
-Run tests in the primary directory when needed, enter a message, and choose *提交到主开发分支*.
+Run tests in the preview directory when needed, enter a message, and choose *提交到主开发分支*.
 There is no test-passed checkbox. Warden runs ordinary `git commit -m` with the checkout's identity,
 signing, `core.hooksPath`, `pre-commit`, `prepare-commit-msg`, `commit-msg` and `post-commit` behavior.
 It never uses `--no-verify` or `commit-tree` for delivery. The server checks the current HEAD and

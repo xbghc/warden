@@ -1,5 +1,10 @@
 # Warden page design
 
+The browser layouts below are retained for compatibility. The current primary/preview directory
+boundary and native extension workflow are defined in [Workflow](workflow.md) and [VS Code](vscode.md);
+they supersede references here to composing into primary or building a new preview diff view.
+
+
 Status: interaction design, updated 2026-10-20. The new page is implemented in the working copy.
 The [workflow](workflow.md) owns agreed behavior; [first-version boundaries](#first-version-boundaries-and-explicit-exclusions)
 record the implementation choices. Original wireframes describe intent rather than exact labels.
@@ -205,15 +210,15 @@ establish that tests passed. The synchronization mechanism remains undecided.
 ## Selecting a file is review
 
 Present current undelivered content in one file list, including live uncommitted edits. Do not split
-review into staged and unstaged piles or offer line, hunk or file staging controls. Viewed marks
-record review independently of the index; staging through external tools does not change them
-when the displayed content is unchanged.
+review into staged and unstaged piles or offer line, hunk or file staging controls. Users must review
+all content they intend to commit. Warden does not track per-file read status or review progress;
+staging through external tools does not establish that content has been reviewed.
 
 The workspace detail directly presents its file list and diff. Clicking a file displays it without
 “进入审查”, “切换审查区” or “标记审查完成”. Local file selection does not create a second global
 navigation system, alter the connection set or implicitly narrow the delivery scope.
 
-Review uses viewed marks and copyable file locations. Inline comments, the review rail and comment
+Review provides copyable file locations. Inline comments, the review rail and comment
 feedback commands have been removed. Users exchange feedback through their own tools.
 
 After A1, review defaults to the reliably identified undelivered changes:

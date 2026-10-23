@@ -2,7 +2,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp, readFile, readdir, rm, utimes, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { StateStore, defaultState, ensureTarget, forgetWorktreeTargets, repoHash, stateFilePath } from './state.js';
+import { StateStore, defaultState, forgetWorktreeTargets, repoHash, stateFilePath } from './state.js';
 
 let dir: string;
 beforeEach(async () => {
@@ -58,7 +58,7 @@ describe('StateStore', () => {
       }),
     );
     const s = await new StateStore(file, '/repo').load();
-    expect(s.targets).toEqual({ all: { viewed: {} } });
+    expect(s.targets).toEqual({});
     expect(s).not.toHaveProperty('issues');
     expect(s.todos.map((t) => t.id)).toEqual(['t1']);
   });
@@ -67,12 +67,10 @@ describe('StateStore', () => {
     const file = path.join(dir, 'nested', 'state.json');
     const store = new StateStore(file, '/repo');
     await store.update((s) => {
-      ensureTarget(s, 'base:main').viewed['a.ts'] = 'hash1';
       s.prefs.viewMode = 'split';
     });
     const again = new StateStore(file, '/repo');
     const s = await again.load();
-    expect(s.targets['base:main']?.viewed).toEqual({ 'a.ts': 'hash1' });
     expect(s.prefs.viewMode).toBe('split');
     // no temp files or lock files left behind
     const files = await readdir(path.dirname(file));
@@ -104,17 +102,17 @@ describe('StateStore', () => {
     const b = new StateStore(file, '/repo');
     await Promise.all([
       a.update((s) => {
-        ensureTarget(s, 'base:main').viewed['a.ts'] = '1';
+        s.prefs.viewMode = 'split';
       }),
       b.update((s) => {
-        ensureTarget(s, 'base:main').viewed['b.ts'] = '2';
+        s.prefs.autoRefresh = false;
       }),
       a.update((s) => {
         s.todos.push({ id: 't1', branch: 'main', title: 't', body: '', status: 'open', createdAt: '', updatedAt: '' });
       }),
     ]);
     const s = await a.load();
-    expect(s.targets['base:main']?.viewed).toEqual({ 'a.ts': '1', 'b.ts': '2' });
+    expect(s.prefs).toMatchObject({ viewMode: 'split', autoRefresh: false });
     expect(s.todos).toHaveLength(1);
   });
 
@@ -128,23 +126,28 @@ describe('StateStore', () => {
     expect(files.some((f) => f.startsWith('state.json.corrupt-'))).toBe(true);
   });
 
-  it('preserves historical review data without reanchoring or pooling it on unrelated writes', async () => {
+  it('retires legacy viewed marks while preserving unrelated historical review data', async () => {
     const file = path.join(dir, 'state.json');
     const historical = { id: 'old', body: 'Keep this review', targetKey: 'working', anchor: { hunkHash: 'h' } };
     const targets = {
+      all: { viewed: { 'b.ts': 'hash' } },
       working: { viewed: { 'a.ts': 'h' }, comments: [historical] },
       local: { viewed: {}, comments: [{ ...historical, id: 'local' }], head: 'abc' },
       'commit:abc': { viewed: {}, comments: [{ ...historical, id: 'delivered' }] },
     };
     await writeFile(file, JSON.stringify({ schemaVersion: 1, targets }));
     const store = new StateStore(file, '/repo');
-    expect((await store.load()).targets).toEqual(targets);
+    const retained = {
+      working: { comments: [historical] },
+      local: { comments: [{ ...historical, id: 'local' }], head: 'abc' },
+      'commit:abc': { comments: [{ ...historical, id: 'delivered' }] },
+    };
+    expect((await store.load()).targets).toEqual(retained);
     await store.update((state) => {
       state.prefs.viewMode = 'split';
-      ensureTarget(state, 'all').viewed['b.ts'] = 'new-hash';
     });
     const saved = JSON.parse(await readFile(file, 'utf8'));
-    expect(saved.targets).toEqual({ ...targets, all: { viewed: { 'b.ts': 'new-hash' } } });
+    expect(saved.targets).toEqual(retained);
     expect((await store.load()).targets).toEqual(saved.targets);
   });
 });
@@ -258,13 +261,13 @@ describe('forgetWorktreeTargets', () => {
     const slot = '/x/repo-1';
     const s = defaultState('/x/repo');
     s.targets = {
-      [`worktree:${slot}:local`]: { viewed: {} },
-      [`worktree:${slot}:working`]: { viewed: { 'a.ts': 'h1' } },
-      [`worktree:${slot}:base:main`]: { viewed: {} },
+      [`worktree:${slot}:local`]: { comments: [] },
+      [`worktree:${slot}:working`]: { comments: [] },
+      [`worktree:${slot}:base:main`]: { comments: [] },
       // `/x/repo-1` is a prefix of `/x/repo-10`; the colon after the path keeps them apart.
-      'worktree:/x/repo-10:local': { viewed: {} },
-      local: { viewed: {} },
-      'base:main': { viewed: { 'a.ts': 'h2' } },
+      'worktree:/x/repo-10:local': { comments: [] },
+      local: { comments: [] },
+      'base:main': { comments: [] },
     };
     forgetWorktreeTargets(s, slot);
     expect(Object.keys(s.targets).sort()).toEqual(['base:main', 'local', 'worktree:/x/repo-10:local']);

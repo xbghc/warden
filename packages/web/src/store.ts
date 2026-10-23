@@ -92,7 +92,6 @@ export interface AppStore {
   openFile(path: string, force?: boolean): Promise<void>;
   setActiveFile(path: string | null): void;
   setViewMode(mode: ViewMode): void;
-  toggleViewed(path: string): Promise<void>;
   setPanel(panel: Panel): void;
   setSidebarWidth(px: number): void;
   setSideSlot(el: HTMLElement | null): void;
@@ -378,22 +377,6 @@ export const useStore = create<AppStore>((set, get) => {
     setViewMode(mode) {
       set((s) => ({ prefs: { ...s.prefs, viewMode: mode } }));
       api.patchPrefs({ viewMode: mode }).catch(fail);
-    },
-
-    async toggleViewed(path) {
-      // Apply the response only if the user is still reviewing the same comparison.
-      const key = get().targetKey;
-      const entry = get().files.find((f) => f.path === path);
-      if (!entry) return;
-      const patch = (p: Partial<FileEntry>) => set((s) => (s.targetKey === key ? { files: s.files.map((f) => (f.path === path ? { ...f, ...p } : f)) } : {}));
-      const next = !entry.viewed;
-      patch({ viewed: next, changed: false });
-      try {
-        await api.setViewed(key, path, next, entry.contentHash);
-      } catch (e) {
-        fail(e);
-        patch({ viewed: !next });
-      }
     },
 
     setPanel(panel) {

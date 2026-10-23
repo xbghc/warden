@@ -26,7 +26,7 @@ function FileStatusLabel({ status, conflicted }: { status: FileEntry['status']; 
   );
 }
 
-function TreeIcon({ kind }: { kind: 'folder' | 'expand' | 'collapse' | 'check' }) {
+function TreeIcon({ kind }: { kind: 'folder' | 'expand' | 'collapse' }) {
   return (
     <svg
       className={`tree-icon tree-icon-${kind}`}
@@ -43,7 +43,6 @@ function TreeIcon({ kind }: { kind: 'folder' | 'expand' | 'collapse' | 'check' }
       {kind === 'folder' && <path d="M3 7V5a1 1 0 0 1 1-1h5l2 3h9a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7Z" />}
       {kind === 'expand' && <path d="m8 8 4-4 4 4M12 4v6m-4 6 4 4 4-4m-4-2v6" />}
       {kind === 'collapse' && <path d="m8 4 4 4 4-4M12 2v6m-4 12 4-4 4 4m-4-4v6" />}
-      {kind === 'check' && <path d="m5 12 4 4L19 6" />}
     </svg>
   );
 }
@@ -56,23 +55,10 @@ interface RowProps {
 function FileRow({ node, depth, view }: RowProps & { node: Extract<TreeNode, { kind: 'file' }> }) {
   const active = useStore((s) => s.panel === 'diff' && s.activeFile === node.path && s.targetKey === view);
   const openFile = useStore((s) => s.openFile);
-  const toggleViewed = useStore((s) => s.toggleViewed);
   const e = node.entry;
 
   return (
-    <div
-      className={`tree-row file ${active ? 'active' : ''} ${e.viewed ? 'viewed' : ''}`}
-      style={{ paddingLeft: 10 + depth * 14 }}
-      title={e.oldPath ? `${e.oldPath} → ${e.path}` : e.path}
-    >
-      <Checkbox
-        className="viewed-box"
-        checked={e.viewed}
-        onClick={(ev) => ev.stopPropagation()}
-        onCheckedChange={() => void toggleViewed(node.path)}
-        title="标记为已读"
-        aria-label={`标记 ${node.path} 为已读`}
-      />
+    <div className={`tree-row file ${active ? 'active' : ''}`} style={{ paddingLeft: 10 + depth * 14 }} title={e.oldPath ? `${e.oldPath} → ${e.path}` : e.path}>
       <Button
         variant="ghost"
         size="sm"
@@ -86,7 +72,6 @@ function FileRow({ node, depth, view }: RowProps & { node: Extract<TreeNode, { k
           <FileIcon fileName={node.name} autoAssign />
         </span>
         <span className="name">{node.name}</span>
-        {e.changed && <span className="tree-changed" title="文件自上次标记已读后发生变化" aria-label="文件有新变化" />}
         <FileStatusLabel status={e.status} conflicted={e.conflicted} />
         <span className="counts">
           {e.binary ? (
@@ -105,29 +90,23 @@ function FileRow({ node, depth, view }: RowProps & { node: Extract<TreeNode, { k
 
 function DirRow({ node, depth, view, open, toggle }: RowProps & { node: DirNode; open: Set<string>; toggle: (p: string) => void }) {
   const isOpen = open.has(node.path);
-  // Nothing below is left to review. The row has to say so itself: collapsed, it is the only sign,
-  // and a directory that still hides an unread file looks exactly the same otherwise.
-  const done = node.viewedCount === node.fileCount;
   return (
     <>
       <Button
         variant="ghost"
         size="sm"
-        className={`tree-row dir ${done ? 'viewed' : ''}`}
+        className="tree-row dir"
         style={{ paddingLeft: 10 + depth * 14 }}
         onClick={() => toggle(node.path)}
         aria-expanded={isOpen}
-        title={done ? `${node.path}（${node.fileCount} 个文件均已读）` : node.path}
+        title={node.path}
       >
         <span className={`chev ${isOpen ? 'open' : ''}`} aria-hidden="true">
           ›
         </span>
         <TreeIcon kind="folder" />
         <span className="name">{node.name}</span>
-        <span className="muted count">
-          {done && <TreeIcon kind="check" />}
-          {node.fileCount}
-        </span>
+        <span className="muted count">{node.fileCount}</span>
       </Button>
       {isOpen &&
         node.children.map((c) =>
@@ -228,22 +207,6 @@ function TreeBlock({ title, view, files, empty }: { title: string; view: TargetK
   );
 }
 
-function ReviewProgress({ done, total, label, hint }: { done: number; total: number; label: string; hint: string }) {
-  const pct = total === 0 ? 0 : (done / total) * 100;
-  return (
-    <div className="progress" role="progressbar" aria-label={`文件${label}进度`} aria-valuemin={0} aria-valuemax={total} aria-valuenow={done} title={hint}>
-      <div className="progress-figure">
-        <span className={`progress-done ${done === total && total > 0 ? 'complete' : ''}`}>{done}</span>
-        <span className="progress-of">/ {total}</span>
-        <span className="progress-label">{label}</span>
-      </div>
-      <div className="progress-track">
-        <span style={{ width: `${pct}%` }} />
-      </div>
-    </div>
-  );
-}
-
 function DebugToggle() {
   const on = useStore((s) => s.prefs.ignoreDebug);
   const setIgnoreDebug = useStore((s) => s.setIgnoreDebug);
@@ -288,7 +251,7 @@ function CheckpointBar({ target }: { target: Target }) {
 
   if (target.kind === 'checkpoint') {
     const remove = () => {
-      if (window.confirm(`删除检查点 #${target.id}？它上面的已读标记会一起删除。`)) void deleteCheckpoint(target.id);
+      if (window.confirm(`删除检查点 #${target.id}？`)) void deleteCheckpoint(target.id);
     };
     return (
       <div className="checkpoint-bar">
@@ -366,7 +329,6 @@ export function FileTree() {
 
   return (
     <>
-      <ReviewProgress done={files.filter((f) => f.viewed).length} total={files.length} label="已读" hint="勾选文件旁的框，或用文件头的“已读”标记" />
       <DebugToggle />
       {target?.kind === 'checkpoint' && <CheckpointBar target={target} />}
       <div className="tree-blocks">

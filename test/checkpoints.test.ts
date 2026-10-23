@@ -114,12 +114,9 @@ describe('checkpoints', () => {
     expect(b.content).toBe('export const b = 31;\n');
   });
 
-  it('keeps 已读 marks of its own and drops them with the checkpoint', async () => {
+  it('removes a checkpoint comparison without affecting newer checkpoints', async () => {
     const key = 'checkpoint:1';
-    const files = await listing(key);
-    const notes = files.files.find((f) => f.path === 'notes.txt')!;
-    expect((await send('PUT', `/api/targets/${k(key)}/viewed`, { path: 'notes.txt', viewed: true, contentHash: notes.contentHash })).status).toBe(200);
-    expect((await listing(key)).files.find((file) => file.path === 'notes.txt')?.viewed).toBe(true);
+    expect((await listing(key)).files.some((file) => file.path === 'notes.txt')).toBe(true);
 
     expect((await send('DELETE', `/api/targets/${k('working')}/checkpoints/1`)).status).toBe(200);
     const gone = await get(`/api/targets/${k(key)}/files`);

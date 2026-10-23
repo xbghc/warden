@@ -6,8 +6,6 @@ export interface DirNode {
   path: string;
   children: TreeNode[];
   fileCount: number;
-  /** Files below that are marked viewed; equal to `fileCount` once nothing in here is left to review. */
-  viewedCount: number;
 }
 export interface FileNode {
   kind: 'file';
@@ -25,7 +23,6 @@ interface Builder {
 function build(b: Builder, name: string, prefix: string): DirNode {
   const children: TreeNode[] = [];
   let fileCount = 0;
-  let viewedCount = 0;
   const dirNames = [...b.dirs.keys()].sort((x, y) => x.localeCompare(y));
   for (const d of dirNames) {
     let node = build(b.dirs.get(d)!, d, prefix ? `${prefix}/${d}` : d);
@@ -35,15 +32,13 @@ function build(b: Builder, name: string, prefix: string): DirNode {
       node = { ...only, name: `${node.name}/${only.name}` };
     }
     fileCount += node.fileCount;
-    viewedCount += node.viewedCount;
     children.push(node);
   }
   for (const f of [...b.files].sort((x, y) => x.path.localeCompare(y.path))) {
     children.push({ kind: 'file', name: f.path.split('/').pop() ?? f.path, path: f.path, entry: f });
     fileCount++;
-    if (f.viewed) viewedCount++;
   }
-  return { kind: 'dir', name, path: prefix, children, fileCount, viewedCount };
+  return { kind: 'dir', name, path: prefix, children, fileCount };
 }
 
 export function buildTree(files: FileEntry[]): DirNode {

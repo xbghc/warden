@@ -127,9 +127,20 @@ function SettingsForm() {
             onChange={(event) => setConfig({ ...config, hooks: { ...config.hooks, reuse: event.target.value } })}
           />
         </label>
+        <label className="wb-field">
+          预览 setup（幂等，在预览目录初始化及代码更新后运行）
+          <Textarea
+            aria-label="预览 setup 脚本"
+            rows={3}
+            value={config.previewSetup ?? ''}
+            onChange={(event) => setConfig({ ...config, previewSetup: event.target.value })}
+          />
+        </label>
         <details className="wb-description">
           <summary>脚本环境变量</summary>
-          <p className="mono">WARDEN_WORKTREE · WARDEN_REPO · WARDEN_BRANCH · WARDEN_DEVELOPMENT_BRANCH · WARDEN_TASK_ID · WARDEN_HOOK_EVENT</p>
+          <p className="mono">
+            WARDEN_PREVIEW（预览 setup） · WARDEN_WORKTREE · WARDEN_REPO · WARDEN_BRANCH · WARDEN_DEVELOPMENT_BRANCH · WARDEN_TASK_ID · WARDEN_HOOK_EVENT
+          </p>
         </details>
         <Button size="icon" disabled={pending} aria-label="保存工作区脚本" title={pending ? '保存中…' : '保存工作区脚本'}>
           {pending ? <LoaderCircle size={16} className="animate-spin" aria-hidden="true" /> : <Save size={16} aria-hidden="true" />}

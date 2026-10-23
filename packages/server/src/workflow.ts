@@ -19,7 +19,7 @@ import type {
   RebaseBatchRequest,
   RebaseBatchResponse,
 } from '@warden/shared';
-import { moveBefore, isValidRef, tryParseTargetKey } from '@warden/shared';
+import { moveBefore, isValidRef } from '@warden/shared';
 import { runWorkspaceHook } from './workspace.js';
 import { badRequest, HttpError, notFound } from './errors.js';
 import { GitError, LONG_GIT_TIMEOUT_MS, gitEnvironment, refExists, runGit, runGitWrite } from './git.js';
@@ -101,7 +101,7 @@ export class WorkflowService {
     const state = await this.store.load();
     const workflow = state.workflow ?? null;
     const legacyTodos = state.todos;
-    const workspaceConfig = { hooks: state.workspaceConfig?.hooks ?? {} };
+    const workspaceConfig = { hooks: state.workspaceConfig?.hooks ?? {}, previewSetup: state.workspaceConfig?.previewSetup };
     if (!workflow) return { workflow, workspaceConfig, legacyTodos };
     try {
       const developmentHead = await this.developmentHead(workflow.developmentBranch);
@@ -159,7 +159,9 @@ export class WorkflowService {
         if (state.workflow?.changes.some((c) => c.status === 'integrating') || state.connectionPreview?.connectedIds.length)
           fail('请先完成主目录提交并断开预览连接，再切换主开发分支', 'development_in_use');
         state.workflow = { developmentBranch: branch, changes: state.workflow?.changes ?? [] };
-        delete state.connectionPreview;
+        // Keep the persistent runtime directory (and its dependencies) across branch switches.
+        if (state.connectionPreview?.directory) state.connectionPreview.status = 'stale';
+        else delete state.connectionPreview;
       });
       return this.get();
     });
@@ -903,9 +905,6 @@ export class WorkflowService {
   private async recordAccepted(change: DevelopmentChange) {
     const integration = change.integration!;
     await this.store.update((state) => {
-      for (const [key, target] of Object.entries(state.targets)) {
-        if (tryParseTargetKey(key)?.worktree === change.worktree) target.viewed = {};
-      }
       change.deliveries ??= [];
       if (!change.deliveries.some((d) => d.commit === integration.commit))
         change.deliveries.push({

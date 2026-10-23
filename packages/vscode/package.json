@@ -1,0 +1,315 @@
+{
+  "name": "warden",
+  "displayName": "Warden",
+  "description": "Plan parallel workspaces, review with native diffs, and run an isolated live preview.",
+  "version": "0.17.2",
+  "publisher": "xbghc",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xbghc/warden.git"
+  },
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./dist/extension.cjs",
+  "extensionKind": [
+    "workspace"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "Warden runs Git, commit hooks and explicitly configured setup scripts."
+    },
+    "virtualWorkspaces": {
+      "supported": false,
+      "description": "Warden needs a local or remote filesystem and Git."
+    }
+  },
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "warden",
+          "title": "Warden",
+          "icon": "media/warden.svg"
+        }
+      ]
+    },
+    "views": {
+      "warden": [
+        {
+          "id": "warden.workbench",
+          "name": "工作区"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "warden.selectRepository",
+        "title": "选择仓库",
+        "category": "Warden"
+      },
+      {
+        "command": "warden.refresh",
+        "title": "刷新",
+        "category": "Warden",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "warden.configure",
+        "title": "选择主开发分支",
+        "category": "Warden"
+      },
+      {
+        "command": "warden.createTask",
+        "title": "新增任务",
+        "category": "Warden",
+        "icon": "$(add)"
+      },
+      {
+        "command": "warden.taskActions",
+        "title": "任务操作",
+        "category": "Warden"
+      },
+      {
+        "command": "warden.startTask",
+        "title": "分配工作区",
+        "category": "Warden"
+      },
+      {
+        "command": "warden.editTask",
+        "title": "编辑任务",
+        "category": "Warden"
+      },
+      {
+        "command": "warden.moveTask",
+        "title": "调整计划顺序",
+        "category": "Warden"
+      },
+      {
+        "command": "warden.connect",
+        "title": "连接／断开预览",
+        "category": "Warden"
+      },
+      {
+        "command": "warden.openDiff",
+        "title": "打开原生差异",
+        "category": "Warden"
+      },
+      {
+        "command": "warden.deliver",
+        "title": "交付提交",
+        "category": "Warden"
+      },
+      {
+        "command": "warden.retryHook",
+        "title": "重试工作区脚本",
+        "category": "Warden"
+      },
+      {
+        "command": "warden.resumeTask",
+        "title": "结束已恢复的提交准备",
+        "category": "Warden"
+      },
+      {
+        "command": "warden.previewTerminal",
+        "title": "打开预览终端",
+        "category": "Warden"
+      },
+      {
+        "command": "warden.runPreview",
+        "title": "运行预览",
+        "category": "Warden"
+      },
+      {
+        "command": "warden.previewPath",
+        "title": "复制预览路径",
+        "category": "Warden"
+      },
+      {
+        "command": "warden.refreshPreview",
+        "title": "立即同步预览",
+        "category": "Warden"
+      },
+      {
+        "command": "warden.setup",
+        "title": "重跑预览 setup",
+        "category": "Warden"
+      },
+      {
+        "command": "warden.configureScripts",
+        "title": "编辑脚本配置",
+        "category": "Warden"
+      },
+      {
+        "command": "warden.applyScripts",
+        "title": "保存脚本配置",
+        "category": "Warden"
+      },
+      {
+        "command": "warden.rebase",
+        "title": "检查并 rebase 工作区",
+        "category": "Warden"
+      },
+      {
+        "command": "warden.editHistory",
+        "title": "编辑提交历史",
+        "category": "Warden"
+      },
+      {
+        "command": "warden.applyHistory",
+        "title": "预览并应用历史编排",
+        "category": "Warden"
+      },
+      {
+        "command": "warden.taskDetails",
+        "title": "查看任务说明",
+        "category": "Warden"
+      },
+      {
+        "command": "warden.copyWorkspace",
+        "title": "复制工作区路径",
+        "category": "Warden"
+      },
+      {
+        "command": "warden.importNotes",
+        "title": "导入旧笔记",
+        "category": "Warden"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "warden.refresh",
+          "when": "view == warden.workbench",
+          "group": "navigation@1"
+        },
+        {
+          "command": "warden.createTask",
+          "when": "view == warden.workbench",
+          "group": "navigation@2"
+        },
+        {
+          "command": "warden.configure",
+          "when": "view == warden.workbench"
+        },
+        {
+          "command": "warden.selectRepository",
+          "when": "view == warden.workbench"
+        },
+        {
+          "command": "warden.configureScripts",
+          "when": "view == warden.workbench"
+        },
+        {
+          "command": "warden.rebase",
+          "when": "view == warden.workbench"
+        },
+        {
+          "command": "warden.editHistory",
+          "when": "view == warden.workbench"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "warden.connect",
+          "when": "view == warden.workbench && viewItem == task"
+        },
+        {
+          "command": "warden.deliver",
+          "when": "view == warden.workbench && viewItem == task"
+        },
+        {
+          "command": "warden.taskDetails",
+          "when": "view == warden.workbench && viewItem == task"
+        },
+        {
+          "command": "warden.copyWorkspace",
+          "when": "view == warden.workbench && viewItem == task"
+        },
+        {
+          "command": "warden.retryHook",
+          "when": "view == warden.workbench && viewItem == task"
+        },
+        {
+          "command": "warden.resumeTask",
+          "when": "view == warden.workbench && viewItem == task"
+        },
+        {
+          "command": "warden.editTask",
+          "when": "view == warden.workbench && viewItem == task"
+        },
+        {
+          "command": "warden.moveTask",
+          "when": "view == warden.workbench && viewItem == task"
+        },
+        {
+          "command": "warden.startTask",
+          "when": "view == warden.workbench && viewItem == plan"
+        },
+        {
+          "command": "warden.editTask",
+          "when": "view == warden.workbench && viewItem == plan"
+        },
+        {
+          "command": "warden.moveTask",
+          "when": "view == warden.workbench && viewItem == plan"
+        },
+        {
+          "command": "warden.previewTerminal",
+          "when": "view == warden.workbench && viewItem == preview"
+        },
+        {
+          "command": "warden.runPreview",
+          "when": "view == warden.workbench && viewItem == preview"
+        },
+        {
+          "command": "warden.refreshPreview",
+          "when": "view == warden.workbench && viewItem == preview"
+        },
+        {
+          "command": "warden.setup",
+          "when": "view == warden.workbench && viewItem == preview"
+        },
+        {
+          "command": "warden.previewPath",
+          "when": "view == warden.workbench && viewItem == preview"
+        },
+        {
+          "command": "warden.editHistory",
+          "when": "view == warden.workbench && viewItem == history"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "warden.openDiff",
+          "when": "false"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Warden",
+      "properties": {
+        "warden.previewCommand": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "在预览目录运行的命令。也可直接使用 Warden 预览终端。"
+        }
+      }
+    },
+    "viewsWelcome": [
+      {
+        "view": "warden.workbench",
+        "contents": "打开主目录开始编程。\n[选择仓库](command:warden.selectRepository)\n[选择主开发分支](command:warden.configure)"
+      }
+    ]
+  }
+}

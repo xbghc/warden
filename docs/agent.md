@@ -3,7 +3,7 @@
 Warden creates task workspaces and exposes generic [workspace hooks](worktrees.md#workspace-hooks).
 Users run agents and interact with them through their own tools or scripts.
 
-Work happens in the assigned task worktree. The user runs tests in the primary directory and reviews
+Work happens in the assigned task worktree. The user runs tests in the preview directory and reviews
 changes before squash. Warden does not require an agent test command, structured delivery report or
 readiness signal.
 

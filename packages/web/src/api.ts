@@ -88,6 +88,7 @@ const q = (params: Record<string, string | number | boolean | undefined>): strin
 export const api = {
   preview: () => req<PreviewResponse>('GET', '/api/preview'),
   connectPreview: (connectedIds: string[]) => req<PreviewResponse>('PUT', '/api/preview', { connectedIds }),
+  setupPreview: () => req<PreviewResponse>('POST', '/api/preview/setup', {}),
   refreshPreview: () => req<PreviewResponse>('POST', '/api/preview/refresh', {}),
   rebaseChecks: () => req<RebaseResponse>('GET', '/api/workflow/rebase-checks'),
   rebaseWorkspaces: (body: RebaseBatchRequest) => req<RebaseBatchResponse>('POST', '/api/workflow/rebase', body),
@@ -115,8 +116,6 @@ export const api = {
   file: (key: TargetKey, path: string, hints: { oldPath?: string; untracked?: boolean } = {}) =>
     req<FileDiff>('GET', `/api/targets/${enc(key)}/file${q({ path, old: hints.oldPath, untracked: hints.untracked })}`),
   fullFile: (key: TargetKey, path: string, side: DiffSide) => req<FullFileResponse>('GET', `/api/targets/${enc(key)}/file/full${q({ path, side })}`),
-  setViewed: (key: TargetKey, path: string, viewed: boolean, contentHash: string) =>
-    req<{ viewed: Record<string, string> }>('PUT', `/api/targets/${enc(key)}/viewed`, { path, viewed, contentHash }),
 
   checkpoints: (key: TargetKey) => req<CheckpointsResponse>('GET', `/api/targets/${enc(key)}/checkpoints`),
   createCheckpoint: (key: TargetKey) => req<CreateCheckpointResponse>('POST', `/api/targets/${enc(key)}/checkpoints`),

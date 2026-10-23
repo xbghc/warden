@@ -545,51 +545,6 @@ kbd {
   padding: 6px 12px;
 }
 
-/* The one figure in the app, and the question a review actually asks: how much is left. */
-.progress {
-  flex: none;
-  padding: 10px 12px 12px;
-}
-.progress-figure {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-}
-.progress-done {
-  font-family: var(--mono);
-  font-size: var(--t-figure);
-  font-weight: 500;
-  line-height: 1.1;
-  letter-spacing: -0.03em;
-  color: var(--ink);
-  font-variant-numeric: tabular-nums;
-}
-.progress-done.complete {
-  color: var(--add-fg);
-}
-.progress-of {
-  font-family: var(--mono);
-  font-size: var(--t-lead);
-  color: var(--muted-foreground);
-  font-variant-numeric: tabular-nums;
-}
-.progress-label {
-  font-size: var(--t-meta);
-  color: var(--muted-foreground);
-}
-.progress-track {
-  margin-top: 7px;
-  height: 3px;
-  background: var(--surface-3);
-  border-radius: 2px;
-  overflow: hidden;
-}
-.progress-track > span {
-  display: block;
-  height: 100%;
-  background: var(--ink);
-  transition: width 0.25s;
-}
 /* Only above a worktree target that failed to list; the view picker names every other target. */
 .sidebar-target {
   flex: none;
@@ -679,9 +634,6 @@ kbd {
 .tree-row.active .name {
   color: var(--ink);
 }
-.tree-row.viewed .name {
-  color: var(--muted-foreground);
-}
 .tree-row .name {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -711,9 +663,6 @@ kbd {
   font-family: var(--mono);
   font-size: 11px;
 }
-.viewed-box {
-  margin: 0;
-}
 .status {
   font-family: var(--mono);
   font-size: 11px;
@@ -737,14 +686,6 @@ kbd {
   color: var(--del-fg);
   font-weight: 600;
 }
-.changed {
-  font-size: 11px;
-  background: var(--warn-bg);
-  color: var(--warn-fg);
-  border-radius: var(--r-ctl);
-  padding: 0 5px;
-}
-
 /* ---- diff panel ---------------------------------------------------------------- */
 .diff-panel {
   flex: 1;
@@ -1613,8 +1554,7 @@ kbd {
   [data-slot="button"],
   [data-slot="tabs-trigger"],
   .chev,
-  .task-row.completing,
-  .progress-track > span {
+  .task-row.completing {
     transition: none;
   }
 }
@@ -1749,30 +1689,6 @@ button.link.danger:has(> .action-icon):hover:not(:disabled) {
 
 .tree-row.dir:hover {
   background: var(--surface-2);
-}
-
-/* Every file below is marked viewed: the directory recedes the way a viewed file does, and the check
-   says so without leaning on the colour alone. */
-.tree-row.dir.viewed .name {
-  font-weight: 400;
-  color: var(--muted-foreground);
-}
-
-.tree-row.dir.viewed .tree-icon-folder {
-  opacity: 0.55;
-}
-
-.tree-row.dir.viewed .count {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-}
-
-.tree-row.dir.viewed .count .tree-icon {
-  color: var(--add-fg);
-  width: 12px;
-  height: 12px;
-  flex-basis: 12px;
 }
 
 .tree-row .counts {
@@ -1996,14 +1912,6 @@ button.link.danger:has(> .action-icon):hover:not(:disabled) {
   font-size: 11px;
   margin-left: auto;
   padding: 0 4px;
-}
-
-.tree-changed {
-  width: 6px;
-  height: 6px;
-  flex: 0 0 6px;
-  border-radius: 50%;
-  background: #bf8700;
 }
 
 .tree-binary {

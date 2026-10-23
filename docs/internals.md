@@ -17,15 +17,17 @@ top-level fields this version does not know are kept when it writes. `schemaVers
 warden up to 0.16 replaces a file with any other version by an empty state. Delete the directory to reset. Checkpoint objects live beside it in `checkpoints/objects`;
 deleting a checkpoint leaves them there, since another may share them.
 
-`targets` is keyed by the exact comparison. Its `viewed` map binds each file's mark to the diff
-hash. Staging does not imply review and does not clear a mark when displayed content is unchanged.
+`targets` retains opaque historical metadata keyed by the exact comparison. Legacy `viewed` maps
+are discarded on load and removed on the next state write; empty target records are omitted.
+Listing a diff does not update persistent review state.
+
 `workflow.changes` holds requirement plans and their delivery records. Legacy `todos` matching the
 requirement or its task branches migrate on load with stable `todo-<id>` IDs; checked notes become
 archived plans, never accepted commits. Unrelated notes require explicit import.
 
 Inline comment handling has been removed. Older target fields, linked-note metadata and delivery
 review records are retained as opaque historical data on unrelated writes. They are not moved,
-reanchored or copied into new deliveries. New targets contain only viewed marks. Checkpoints are
+reanchored or copied into new deliveries. New comparisons create no target state. Checkpoints are
 created explicitly and retain the newest 20 per worktree, without comment-based retention.
 
 ## Security model
@@ -39,7 +41,8 @@ reads go through an argument whitelist (`rev-parse`, `diff`, `show`, `log`,
 that refuses option-looking refs and any write-capable
 flag; requests that would need anything else get HTTP 400. The writes are few and each composes its
 own arguments. Diff review is read-only: the legacy `POST /api/targets/:key/stage` endpoint and its
-partial index-patch writer have been removed. Viewed marks write Warden state only.
+partial index-patch writer have been removed. The `PUT /api/targets/:key/viewed` endpoint is also
+removed and returns 404.
 Formal delivery still prepares the primary index and commits through its validated workflow.
 `POST /api/worktrees`, `POST /api/worktrees/release` and `POST /api/worktrees/remove` run
 `git worktree add`, `git branch`, `git switch`, `git worktree remove` and `git branch -d` with a
@@ -118,18 +121,34 @@ or intermediate replay commits, creates an independent backup, then rechecks the
 and checkout state. A retry after successful rebase but failed state persistence recognizes an
 already-incorporated target and repairs bookkeeping without executing rebase hooks again.
 
-`PUT /preview` and the server refresh timer snapshot selected workspaces into Warden's checkpoint
-object store. Server-generated binary patches are composed with `apply --index --3way` in an
-independent repository, then `apply --check` / `apply` update only the primary working files.
-Primary HEAD, index and complete nonignored file snapshot must match the recorded ownership state.
-The durable `connectionPreview` record journals old/new snapshots before writes. Initial conflict
-fails without changing the existing preview; later failure marks the preserved preview stale.
+`PUT /preview` and the refresh timer snapshot saved primary content and selected workspaces into
+Warden's external checkpoint store. Binary patches compose with `apply --index --3way` in a temporary
+independent repository. A persistent independent runtime repository then fetches only that candidate,
+checks its previous ownership tree, applies the old/new patch with `apply --index`, and advances its
+own detached HEAD. Primary files, HEAD and index are not touched. Ignored runtime dependencies and
+caches survive; source files modified outside publication stop synchronization without being discarded.
+
+`connectionPreview.directory` identifies the persistent runtime (validated as an operation directory).
+The record journals old/new trees and the candidate repository before publication. Recovery accepts
+a complete old or new tree; ambiguous partial changes remain blocked for manual repair. Complete
+publication disposes its temporary candidate; the runtime retains the installed snapshot. Legacy
+primary-directory previews migrate only after proving ownership, with a separate migration journal.
+Initial conflicts preserve the previous selection; later failures expose stale status. Content hashes
+and a debounce window drive per-workspace observed/applied versions, never agent-idleness inference.
+
+`POST /preview/setup` reruns the user's explicit `workspaceConfig.previewSetup`. The same command
+runs after initialization or code/config changes, serialized by the repository lock. It receives
+preview/primary paths and exposes bounded output and exit status. It may manage ignored environment
+files; source mutations make the preview stale. The VS Code workspace extension calls the existing
+Hono API in process, registers read-only native review documents, and opens terminals/tasks with the
+preview cwd. Workspace Trust is required. It does not add preview to the editor's workspace roots.
 
 `POST /workflow/changes/:id/prepare` pins a clean source and primary HEAD, composes the undelivered
-range in isolation, suspends owned preview files and stages only that delivery. `update-index
---refresh` refreshes stat metadata before explicit `apply --index`; preview itself never refreshes
-the real index. Preparation is journaled first. Interrupted preparation accepts only its known
-reviewed tree, preserving other edits.
+range in isolation, and stages only that delivery. Existing primary user edits are rejected without
+being changed. The independent runtime remains available throughout delivery. `update-index --refresh`
+refreshes stat metadata before explicit `apply --index`; preview never refreshes the primary index.
+Preparation is journaled first. Interrupted preparation accepts only its known reviewed tree,
+preserving other edits.
 
 Only the final binary patch enters the primary index. Neither the agent's source commits nor
 temporary composition commits are fetched into the primary repository. Interrupted preparation

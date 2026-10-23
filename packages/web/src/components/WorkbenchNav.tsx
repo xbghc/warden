@@ -63,7 +63,7 @@ export function WorkbenchNav({ connected = 0, behind = 0 }: { connected?: number
             onClick={() => openView('preview')}
           >
             <Layers2 size={17} />
-            主目录预览{connected > 0 && <span className="wb-count">{connected}</span>}
+            运行预览{connected > 0 && <span className="wb-count">{connected}</span>}
           </button>
           <button
             type="button"
@@ -114,7 +114,7 @@ export function WorkbenchNav({ connected = 0, behind = 0 }: { connected?: number
                 <Switch
                   className="wb-plan-connection"
                   aria-label={`连接 ${task.title}`}
-                  title={preview?.connectedIds.includes(task.id) ? '断开主目录预览' : '连接到主目录预览，不创建提交'}
+                  title={preview?.connectedIds.includes(task.id) ? '断开运行预览' : '连接到运行预览，不创建提交'}
                   checked={preview?.connectedIds.includes(task.id) ?? false}
                   disabled={busy || !preview || preview.status === 'paused' || !!errors.preview}
                   onCheckedChange={(connected) => connect(task.id, connected)}

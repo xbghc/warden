@@ -20,7 +20,7 @@ describe('target keys', () => {
     expect(() => parseTargetKey('base:-x')).toThrow(TargetKeyError);
     expect(() => parseTargetKey('base:a..b')).toThrow(TargetKeyError);
   });
-  it('parses checkpoints, which keep 已读 marks of their own', () => {
+  it('parses checkpoint comparisons', () => {
     expect(parseTargetKey('checkpoint:3')).toEqual({ kind: 'checkpoint', id: 3 });
     expect(parseTargetKey('worktree:/p/a:b:checkpoint:12')).toEqual({ kind: 'checkpoint', id: 12, worktree: '/p/a:b' });
     for (const bad of ['checkpoint:', 'checkpoint:0', 'checkpoint:01', 'checkpoint:-1', 'checkpoint:1.5', 'checkpoint:x', 'worktree:/p:checkpoint:x'])

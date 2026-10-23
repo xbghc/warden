@@ -303,28 +303,22 @@ describe('repo & targets', () => {
 });
 
 describe('read-only review and preferences', () => {
-  // `base:main` on main is HEAD against the working tree: a target that tracks the mark and whose
-  // diff an edit can still change.
-  it('viewed state is bound to the content hash', async () => {
+  it('lists current changes without review flags or state writes', async () => {
     await prepareLocalChanges();
-    const files = await json<FilesResponse>(await get(`/api/targets/${k('base:main')}/files`));
-    const b = files.files.find((f) => f.path === 'src/b.ts')!;
-    expect(b.viewed).toBe(false);
-    await send('PUT', `/api/targets/${k('base:main')}/viewed`, { path: 'src/b.ts', viewed: true, contentHash: b.contentHash });
-    let again = await json<FilesResponse>(await get(`/api/targets/${k('base:main')}/files`));
-    expect(again.files.find((f) => f.path === 'src/b.ts')!.viewed).toBe(true);
-    // change the file -> viewed dropped, changed notice shown
-    await fx.write('src/b.ts', 'export const b = 22;\n');
-    again = await json<FilesResponse>(await get(`/api/targets/${k('base:main')}/files`));
-    const b2 = again.files.find((f) => f.path === 'src/b.ts')!;
-    expect(b2.viewed).toBe(false);
-    expect(b2.changed).toBe(true);
     const state = await json<ReviewState>(await get('/api/state'));
-    expect(state.targets['base:main']?.viewed['src/b.ts']).toBeUndefined();
-    // re-view clears the notice
-    await send('PUT', `/api/targets/${k('base:main')}/viewed`, { path: 'src/b.ts', viewed: true, contentHash: b2.contentHash });
-    again = await json<FilesResponse>(await get(`/api/targets/${k('base:main')}/files`));
-    expect(again.files.find((f) => f.path === 'src/b.ts')).toMatchObject({ viewed: true, changed: false });
+    state.targets['base:main'] = { viewed: { 'src/b.ts': 'obsolete-hash' } };
+    await writeFile(stateFile, JSON.stringify(state));
+    const stored = await readFile(stateFile, 'utf8');
+    const list = async () => json<FilesResponse>(await get(`/api/targets/${k('base:main')}/files`));
+    const before = (await list()).files.find((f) => f.path === 'src/b.ts')!;
+    expect(before).not.toHaveProperty('viewed');
+    expect(before).not.toHaveProperty('changed');
+    await fx.write('src/b.ts', 'export const b = 22;\n');
+    const after = (await list()).files.find((f) => f.path === before.path)!;
+    expect(after.contentHash).not.toBe(before.contentHash);
+    expect(after).not.toHaveProperty('viewed');
+    expect(after).not.toHaveProperty('changed');
+    expect(await readFile(stateFile, 'utf8')).toBe(stored);
   });
 
   it('reviews current content regardless of staging and preserves the real index', async () => {
@@ -338,29 +332,28 @@ describe('read-only review and preferences', () => {
     const full = await json<{ content: string }>(await get('/api/targets/all/file/full?path=src%2Fb.ts&side=new'));
     expect(full.content).toBe('export const b = 21;\n');
     expect(fx.git('show', ':src/b.ts')).toBe('export const b = 20;\n');
-    expect((await send('PUT', '/api/targets/all/viewed', { path: before.path, viewed: true, contentHash: before.contentHash })).status).toBe(200);
-    expect((await list()).files.find((f) => f.path === before.path)).toMatchObject({ viewed: true, changed: false });
     expect(await readFile(indexPath)).toEqual(index);
     expect(await readFile(path.join(fx.root, 'src/b.ts'))).toEqual(working);
     expect(fx.git('rev-parse', 'HEAD')).toBe(head);
 
     // External staging changes neither the current content nor its review hash.
     fx.git('add', 'src/b.ts');
-    expect((await list()).files.find((f) => f.path === before.path)).toMatchObject({ contentHash: before.contentHash, viewed: true, changed: false });
+    expect((await list()).files.find((f) => f.path === before.path)).toMatchObject({ contentHash: before.contentHash });
     fx.git('restore', '--staged', '--', 'src/b.ts');
-    expect((await list()).files.find((f) => f.path === before.path)).toMatchObject({ contentHash: before.contentHash, viewed: true, changed: false });
+    expect((await list()).files.find((f) => f.path === before.path)).toMatchObject({ contentHash: before.contentHash });
 
     await fx.write('src/b.ts', 'export const b = 22;\n');
-    expect((await list()).files.find((f) => f.path === before.path)).toMatchObject({ viewed: false, changed: true });
+    expect((await list()).files.find((f) => f.path === before.path)?.contentHash).not.toBe(before.contentHash);
   });
 
-  it('returns 404 for removed comment routes without changing repository or state', async () => {
+  it('returns 404 for removed review-state routes without changing repository or state', async () => {
     await prepareLocalChanges();
     const state = await json<ReviewState>(await get('/api/state'));
     const head = fx.git('rev-parse', 'HEAD');
     const index = await readFile(path.join(fx.root, '.git', 'index'));
     const work = await readFile(path.join(fx.root, 'src/b.ts'));
     for (const [method, route] of [
+      ['PUT', '/api/targets/all/viewed'],
       ['GET', '/api/targets/all/comments'],
       ['POST', '/api/targets/all/comments'],
       ['PATCH', '/api/targets/all/comments/old'],
@@ -680,9 +673,9 @@ describe('worktree management', () => {
     freeSlot(1);
     const slotPath = (await slot(1))!.path;
     const state = await json<ReviewState>(await get('/api/state'));
-    state.targets[`worktree:${slotPath}:base:main`] = { viewed: { 'src/a.ts': 'h' } };
-    state.targets[`worktree:${slotPath}:local`] = { viewed: {} };
-    state.targets['base:main'] = { viewed: { 'src/a.ts': 'h' } };
+    state.targets[`worktree:${slotPath}:base:main`] = { comments: [] };
+    state.targets[`worktree:${slotPath}:local`] = { comments: [] };
+    state.targets['base:main'] = { comments: [] };
     await writeFile(stateFile, JSON.stringify(state));
     const made = await json<CreateWorktreeResponse>(await create({ branch: 'agent/state', base: 'main', slot: 1 }));
     expect(made.reused).toBe(true);

@@ -4,6 +4,7 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import type { DevelopmentChange } from '@warden/shared';
 import { createApp, resolveRepo, StateStore, WorkflowService } from '@warden/server';
+import { GitSandbox, applyPatch, oid, patchBetween } from '../packages/server/src/git-sandbox.js';
 import { PreviewService } from '../packages/server/src/preview.js';
 import { HistoryService } from '../packages/server/src/history.js';
 import { listSafetyBackups } from '../packages/server/src/backups.js';
@@ -102,9 +103,9 @@ describe('continuous workspace delivery and passive synchronization', () => {
       await writeFile(path.join(a.worktree, 'src/image.bin'), bytes);
 
       expect(await preview.set([a.id])).toMatchObject({ status: 'current', connectedIds: [a.id] });
-      expect(await file(fx.root, 'src/added.txt')).toBe('Nested content\n');
-      expect(await file(fx.root, 'src/a.ts')).toBe(await file(a.worktree, 'src/a.ts'));
-      expect(await readFile(path.join(fx.root, 'src/image.bin'))).toEqual(bytes);
+      expect(await file((await preview.get()).worktree!, 'src/added.txt')).toBe('Nested content\n');
+      expect(await file((await preview.get()).worktree!, 'src/a.ts')).toBe(await file(a.worktree, 'src/a.ts'));
+      expect(await readFile(path.join((await preview.get()).worktree!, 'src/image.bin'))).toEqual(bytes);
       expect(head()).toBe(originalHead);
       expect(fx.git('diff', '--cached', '--name-only').trim()).toBe('');
 
@@ -165,7 +166,7 @@ describe('continuous workspace delivery and passive synchronization', () => {
   });
 });
 
-describe('temporary primary-directory connections', () => {
+describe('persistent independent preview connections', () => {
   it('recovers a completed file write after an interrupted ownership-state write', async () => {
     const a = await task('A');
     await edit(a, 'src/b.ts', 'export const b = 10;\n');
@@ -183,12 +184,12 @@ describe('temporary primary-directory connections', () => {
     const restarted = new PreviewService(await resolveRepo(fx.root), store);
     await restarted.tick();
     expect(await restarted.get()).toMatchObject({ status: 'current', connectedIds: [a.id] });
-    expect(await file(fx.root, 'src/b.ts')).toBe('export const b = 10;\n');
+    expect(await file((await preview.get()).worktree!, 'src/b.ts')).toBe('export const b = 10;\n');
     await restarted.set([]);
     expect(fx.git('status', '--porcelain').trim()).toBe('');
     expect(fx.git('for-each-ref', '--format=%(refname)', 'refs/warden/').trim()).toBe('');
     expect(await listSafetyBackups(store)).toEqual([]);
-    expect(await readdir(path.join(data, 'operations'))).toEqual([]);
+    expect(await readdir(path.join(data, 'operations'))).toEqual([path.basename((await preview.get()).worktree!)]);
   });
 
   it('preserves binary changes, renames and deletions across connection and disconnection', async () => {
@@ -200,13 +201,13 @@ describe('temporary primary-directory connections', () => {
     fx.git('-C', a.worktree, 'mv', 'src/b.ts', 'src/renamed.ts');
     await rm(path.join(a.worktree, 'src/a.ts'));
     await preview.set([a.id]);
-    expect(await readFile(path.join(fx.root, 'image.bin'))).toEqual(bytes);
-    expect(await file(fx.root, 'src/renamed.ts')).toBe(before);
-    await expect(file(fx.root, 'src/a.ts')).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await readFile(path.join((await preview.get()).worktree!, 'image.bin'))).toEqual(bytes);
+    expect(await file((await preview.get()).worktree!, 'src/renamed.ts')).toBe(before);
+    await expect(file((await preview.get()).worktree!, 'src/a.ts')).rejects.toMatchObject({ code: 'ENOENT' });
     await preview.set([]);
-    expect(await file(fx.root, 'src/a.ts')).toBe(originalA);
-    expect(await file(fx.root, 'src/b.ts')).toBe(before);
-    await expect(file(fx.root, 'image.bin')).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await file((await preview.get()).worktree!, 'src/a.ts')).toBe(originalA);
+    expect(await file((await preview.get()).worktree!, 'src/b.ts')).toBe(before);
+    await expect(file((await preview.get()).worktree!, 'image.bin')).rejects.toMatchObject({ code: 'ENOENT' });
     expect(fx.git('status', '--porcelain').trim()).toBe('');
   });
   it('composes live edits, updates them, and disconnects contributions without touching HEAD or index', { timeout: longGitTimeout }, async () => {
@@ -217,14 +218,14 @@ describe('temporary primary-directory connections', () => {
     const old = head();
     const index = await readFile(path.join(fx.root, '.git/index'));
     expect((await preview.set([a.id, b.id])).status).toBe('current');
-    expect(await file(fx.root, 'a.txt')).toBe('A\n');
-    expect(await file(fx.root, 'b.txt')).toBe('B\n');
+    expect(await file((await preview.get()).worktree!, 'a.txt')).toBe('A\n');
+    expect(await file((await preview.get()).worktree!, 'b.txt')).toBe('B\n');
     await edit(a, 'a.txt', 'A live\n');
     expect((await preview.refresh()).status).toBe('current');
-    expect(await file(fx.root, 'a.txt')).toBe('A live\n');
+    expect(await file((await preview.get()).worktree!, 'a.txt')).toBe('A live\n');
     await preview.set([b.id]);
-    await expect(file(fx.root, 'a.txt')).rejects.toMatchObject({ code: 'ENOENT' });
-    expect(await file(fx.root, 'b.txt')).toBe('B\n');
+    await expect(file((await preview.get()).worktree!, 'a.txt')).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await file((await preview.get()).worktree!, 'b.txt')).toBe('B\n');
     await preview.set([]);
     expect(fx.git('status', '--porcelain').trim()).toBe('');
     expect(head()).toBe(old);
@@ -239,24 +240,24 @@ describe('temporary primary-directory connections', () => {
     await preview.set([a.id]);
     await expect(preview.set([a.id, b.id])).rejects.toMatchObject({ status: 409, code: 'preview_conflict' });
     expect((await preview.get()).connectedIds).toEqual([a.id]);
-    expect(await file(fx.root, 'src/b.ts')).toBe('export const b = 10;\n');
+    expect(await file((await preview.get()).worktree!, 'src/b.ts')).toBe('export const b = 10;\n');
     fx.git('-C', b.worktree, 'restore', 'src/b.ts');
     await edit(b, 'b.txt', 'other\n');
     await preview.set([a.id, b.id]);
     await edit(b, 'src/b.ts', 'export const b = 30;\n');
     expect((await preview.refresh()).status).toBe('stale');
-    expect(await file(fx.root, 'src/b.ts')).toBe('export const b = 10;\n');
-    expect(await file(fx.root, 'b.txt')).toBe('other\n');
+    expect(await file((await preview.get()).worktree!, 'src/b.ts')).toBe('export const b = 10;\n');
+    expect(await file((await preview.get()).worktree!, 'b.txt')).toBe('other\n');
     await preview.set([a.id]);
   });
 
-  it('refuses to overwrite unexpected edits in the primary directory', async () => {
+  it('refuses to overwrite unexpected edits in the preview directory', async () => {
     const a = await task('A');
     await edit(a, 'a.txt', 'A\n');
     await preview.set([a.id]);
-    await fx.write('a.txt', 'user fix\n');
-    await expect(preview.set([])).rejects.toMatchObject({ code: 'development_dirty' });
-    expect(await file(fx.root, 'a.txt')).toBe('user fix\n');
+    await writeFile(path.join((await preview.get()).worktree!, 'a.txt'), 'user fix\n');
+    await expect(preview.set([])).rejects.toMatchObject({ code: 'preview_dirty' });
+    expect(await file((await preview.get()).worktree!, 'a.txt')).toBe('user fix\n');
     expect((await preview.get()).connectedIds).toEqual([a.id]);
   });
 
@@ -268,13 +269,178 @@ describe('temporary primary-directory connections', () => {
     await preview.set([a.id, b.id]);
     const delivered = await deliver(a, 'A1');
     expect(fx.git('show', '--format=', '--name-only', head()).trim()).toBe('src/b.ts');
-    expect(await file(fx.root, 'b.txt')).toBe('B live\n');
+    expect(await file((await preview.get()).worktree!, 'b.txt')).toBe('B live\n');
     expect((await preview.get()).status).toBe('current');
     expect(delivered.sourceBase).toBe(sourceHead(a));
     expect(fx.git('diff', '--cached', '--name-only').trim()).toBe('');
     await preview.set([]);
-    expect(await file(fx.root, 'src/b.ts')).toBe('export const b = 10;\n');
+    expect(await file((await preview.get()).worktree!, 'src/b.ts')).toBe('export const b = 10;\n');
+    await expect(file((await preview.get()).worktree!, 'b.txt')).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+});
+
+describe('primary-preview migration', () => {
+  async function oldPreview() {
+    const a = await task('Old connected task');
+    await edit(a, 'agent.txt', 'Old preview\n', true);
+    const sandbox = await GitSandbox.create(store, a.worktree, sourceHead(a));
+    const tree = await oid(sandbox.path, 'HEAD^{tree}');
+    await applyPatch(fx.root, await patchBetween(sandbox.path, head(), tree), false);
+    await store.update((s) => {
+      s.connectionPreview = {
+        worktree: fx.root,
+        developmentBranch: 'feature/order',
+        developmentHead: head(),
+        connectedIds: [a.id],
+        status: 'current',
+        files: [],
+        tree,
+        sandbox: sandbox.path,
+        snapshot: sourceHead(a),
+      };
+    });
+    return a;
+  }
+  it('moves a proven legacy composition out of primary and retries after interrupted baseline bookkeeping', async () => {
+    const a = await oldPreview();
+    const update = store.update.bind(store);
+    const spy = vi.spyOn(store, 'update').mockImplementation(async (mutate) =>
+      update((s) => {
+        const result = mutate(s);
+        if (s.connectionPreview?.status === 'disconnected' && !s.connectionPreview.directory) throw new Error('migration interrupted');
+        return result;
+      }),
+    );
+    expect((await preview.refresh()).status).toBe('stale');
+    spy.mockRestore();
+    expect(fx.git('status', '--porcelain')).toBe('');
+    const result = await preview.refresh();
+    expect(result).toMatchObject({ connectedIds: [a.id], status: 'current' });
+    expect(result.worktree).not.toBe(fx.root);
+    expect(await file(result.worktree!, 'agent.txt')).toBe('Old preview\n');
+    expect(fx.git('status', '--porcelain')).toBe('');
+  });
+  it('preserves unexpected human edits and blocks legacy migration', async () => {
+    const a = await oldPreview();
+    await fx.write('human.txt', 'Keep me\n');
+    await expect(preview.set([a.id])).rejects.toMatchObject({ code: 'preview_migration_required' });
+    expect(await file(fx.root, 'human.txt')).toBe('Keep me\n');
+    expect(await file(fx.root, 'agent.txt')).toBe('Old preview\n');
+    expect((await store.load()).connectionPreview?.directory).toBeUndefined();
+  });
+});
+
+describe('saved baseline and preview runtime', () => {
+  it('includes staged, unstaged and untracked primary edits without changing the primary index or admitting them to a delivery', async () => {
+    const a = await task('A');
+    await edit(a, 'agent.txt', 'agent\n', true);
+    await fx.write('src/b.ts', 'export const b = 200;\n');
+    fx.git('add', 'src/b.ts');
+    await fx.write('README.md', 'Human edits\n');
+    await fx.write('human.txt', 'Untracked human file\n');
+    const before = fx.git('status', '--porcelain');
+    const index = await readFile(path.join(fx.root, '.git/index'));
+    const result = await preview.set([a.id]);
+    expect(result.worktree).not.toBe(fx.root);
+    expect(await file(result.worktree!, 'src/b.ts')).toBe('export const b = 200;\n');
+    expect(await file(result.worktree!, 'README.md')).toBe('Human edits\n');
+    expect(await file(result.worktree!, 'human.txt')).toBe('Untracked human file\n');
+    expect(await file(result.worktree!, 'agent.txt')).toBe('agent\n');
+    expect(fx.git('status', '--porcelain')).toBe(before);
+    expect(await readFile(path.join(fx.root, '.git/index'))).toEqual(index);
+    await expect(workflow.prepare(a.id, { sourceHead: sourceHead(a), developmentHead: head() })).rejects.toMatchObject({ code: 'development_dirty' });
+    expect(fx.git('status', '--porcelain')).toBe(before);
+    await fx.write('human.txt', 'Saved again\n');
+    await preview.refresh();
+    expect(await file(result.worktree!, 'human.txt')).toBe('Saved again\n');
+    await preview.set([]);
+    await expect(file(result.worktree!, 'agent.txt')).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await file(result.worktree!, 'human.txt')).toBe('Saved again\n');
+  });
+
+  it('keeps other connections running while a delivery is prepared in primary', async () => {
+    const a = await task('A');
+    const b = await task('B');
+    await edit(a, 'src/b.ts', 'export const b = 10;\n', true);
+    await edit(b, 'b.txt', 'B\n');
+    const first = await preview.set([a.id, b.id]);
+    await workflow.prepare(a.id, { sourceHead: sourceHead(a), developmentHead: head() });
+    const result = await preview.refresh();
+    expect(result.status).toBe('current');
+    expect(await file(first.worktree!, 'src/b.ts')).toBe('export const b = 10;\n');
+    expect(await file(first.worktree!, 'b.txt')).toBe('B\n');
+    expect(fx.git('diff', '--cached', '--name-only').trim()).toBe('src/b.ts');
     await expect(file(fx.root, 'b.txt')).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('keeps the last preview when a human baseline change conflicts with an agent change', async () => {
+    const a = await task('A');
+    await edit(a, 'src/b.ts', 'export const b = 10;\n');
+    const first = await preview.set([a.id]);
+    await fx.write('src/b.ts', 'export const b = 20;\n');
+    const result = await preview.refresh();
+    expect(result.status).toBe('stale');
+    expect(result.sources?.[0]?.status).toBe('conflict');
+    expect(await file(first.worktree!, 'src/b.ts')).toBe('export const b = 10;\n');
+    expect(await file(fx.root, 'src/b.ts')).toBe('export const b = 20;\n');
+    await preview.set([]);
+    expect(await file(first.worktree!, 'src/b.ts')).toBe('export const b = 20;\n');
+  });
+
+  it('debounces actual content changes and reports whether each captured source has reached preview', async () => {
+    const a = await task('A');
+    await edit(a, 'a.txt', 'one\n');
+    const first = await preview.set([a.id]);
+    await edit(a, 'a.txt', 'two\n');
+    await preview.tick();
+    const pending = (await preview.get()).sources![0]!;
+    expect(pending.status).toBe('pending');
+    expect(pending.appliedTree).toBe(first.sources![0]!.appliedTree);
+    expect(pending.observedTree).not.toBe(pending.appliedTree);
+    await edit(a, 'a.txt', 'three\n');
+    await preview.tick();
+    expect((await preview.get()).sources![0]!.observedTree).not.toBe(pending.observedTree);
+    const now = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 2000);
+    try {
+      await preview.tick();
+    } finally {
+      now.mockRestore();
+    }
+    expect((await preview.get()).sources![0]!.status).toBe('synced');
+    expect(await file(first.worktree!, 'a.txt')).toBe('three\n');
+  });
+
+  it('keeps dependencies across updates and restarts, runs setup on changes, and exposes setup failures and retry output', async () => {
+    await fx.write('.gitignore', 'node_modules/\n');
+    fx.git('add', '.gitignore');
+    fx.git('commit', '-qm', 'Ignore runtime dependencies');
+    const a = await task('A');
+    const command = 'mkdir -p node_modules; echo setup >> node_modules/runs; echo configured';
+    await store.update((s) => {
+      s.workspaceConfig = { hooks: {}, previewSetup: command };
+    });
+    const first = await preview.set([]);
+    expect(first.setup).toMatchObject({ status: 'succeeded', exitCode: 0 });
+    expect(first.setup!.output).toContain('configured');
+    await writeFile(path.join(first.worktree!, 'node_modules/cache'), 'keep');
+    await preview.refresh();
+    expect((await file(first.worktree!, 'node_modules/runs')).trim().split('\n')).toHaveLength(1);
+    await edit(a, 'a.txt', 'A\n');
+    await preview.set([a.id]);
+    const restarted = new PreviewService(await resolveRepo(fx.root), store);
+    await restarted.refresh();
+    expect((await restarted.get()).worktree).toBe(first.worktree);
+    expect(await file(first.worktree!, 'node_modules/cache')).toBe('keep');
+    expect((await file(first.worktree!, 'node_modules/runs')).trim().split('\n')).toHaveLength(2);
+    await store.update((s) => {
+      s.workspaceConfig!.previewSetup = 'echo failed-setup; exit 7';
+    });
+    expect((await restarted.setup()).setup).toMatchObject({ status: 'failed', exitCode: 7 });
+    await store.update((s) => {
+      s.workspaceConfig!.previewSetup = command;
+    });
+    expect((await restarted.setup()).setup).toMatchObject({ status: 'succeeded', exitCode: 0 });
+    expect(fx.git('status', '--porcelain')).toBe('');
   });
 });
 

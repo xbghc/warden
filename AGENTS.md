@@ -20,11 +20,14 @@ or separate requirement approval belongs in the product.
 One workspace corresponds to one linear task and can deliver several commits. Keep it available
 across deliveries; do not automatically recycle it or ask whether a delivery finishes the task.
 The primary development branch (主开发分支) belongs to the requirement, not the repository default
-branch. All code edits happen in worktrees. Dependencies and user-operated tests/dev servers belong
-in the primary directory. Neovim/editor integration is out of scope.
+branch. Human code edits happen in the primary directory; agents edit task workspaces. Saved primary
+content is the baseline. Dependencies and user-operated tests/dev servers belong in the persistent,
+independent preview directory. VS Code is the primary integration; ACP is deferred.
 
-Connections are reversible live composition into the primary directory, separate from review and
-squash. An initial connection conflict must notify the user and fail that connection attempt,
+Connections are reversible live composition into the independent preview directory, separate from
+review and squash. Never write connections into primary or add preview as a VS Code workspace root.
+Use native read-only VS Code diffs for task review; no preview-versus-baseline diff is required.
+Expose debounced content-based sync state and an explicitly configured idempotent preview setup script. An initial connection conflict must notify the user and fail that connection attempt,
 preserving the existing preview. The Web page must support commit-message entry and ordinary Git
 commit hooks without requiring terminal use. A development commit must not include other connected
 workspaces by accident. After the
@@ -43,7 +46,7 @@ remain for compatibility; they must not revive readiness gates or automatic recy
 
 ## Commands
 
-- `pnpm typecheck` runs two separate tsc projects: the root one (bin, packages/shared, packages/server, test; Node lib) and `pnpm --filter @warden/web typecheck` (DOM, JSX). Both must pass.
+- `pnpm typecheck` runs three separate tsc projects: the root one (bin, packages/shared, packages/server, test; Node lib) and `pnpm --filter @warden/web typecheck` (DOM, JSX), plus the VS Code extension project. All must pass.
 - `pnpm test` is one vitest config. Unit tests sit beside sources (`packages/*/src/**/*.test.ts`), integration tests in `test/`. Web tests cover only `packages/web/src/lib/**`; there is no jsdom and no component test. One file: `pnpm exec vitest run test/api.test.ts` (add `--reporter=verbose` for names).
 - `pnpm build` builds the Rust module, then web, then server. Vite empties `dist/web`, tsup writes `dist/cli.js` with `clean: false`, so web must build before server or the CLI is wiped. `pnpm build:web` alone refreshes what a running server serves from `dist/web`. Rust development uses the pinned `rust-toolchain.toml`; `pnpm build:native` rebuilds the module. CI sets `WARDEN_NATIVE=required` so a missing native build cannot silently pass through the compatibility backend.
 - `pnpm dev`: server on 4100 (`tsx watch bin/cli.ts --port 4100 --no-open`) plus Vite on 5173 proxying `/api`.
@@ -68,9 +71,9 @@ remain for compatibility; they must not revive readiness gates or automatic recy
 - Language: code, comments, commit messages and docs in English; user-visible UI strings in Chinese.
 - Docs: `README.md` is the front page — install, the review loop in five steps, keyboard, an index — and stays short. `docs/workflow.md` owns the product contract; feature and implementation details live in the other topic files under `docs/` (`reviewing`, `agent`, `worktrees`, `environment`, `internals`, `development`). A behaviour change updates the topic file, and the README only when the loop itself changes. Links between them use the heading anchors, so renaming a heading means fixing its links.
 - UI: use the shadcn/ui primitives in `packages/web/src/components/ui` and the neutral theme in `styles.css`. Tailwind v4 is shared by Vite and Storybook. shadcn's `--accent` and `--muted` are neutral surfaces, with `--muted-foreground` for secondary text. Light theme only for now.
-- UI navigation lives in `WorkbenchNav`: preview, history, ordered plan, bottom synchronization/settings. `useWorkbench` owns the content destination; task selection opens review directly. `useWorkbenchData` reads actual Git operation state. Do not reintroduce old global review/orchestration tabs. Task diffs are read-only, with viewed marks and copyable locations. Inline comments, the review rail and feedback/reply commands have been removed.
+- UI navigation lives in `WorkbenchNav`: preview, history, ordered plan, bottom synchronization/settings. `useWorkbench` owns the content destination; task selection opens review directly. `useWorkbenchData` reads actual Git operation state. Do not reintroduce old global review/orchestration tabs. Task diffs are read-only, with copyable locations. Users must review their entire intended delivery; do not add read markers, progress tracking or review-completion declarations. Inline comments, the review rail and feedback/reply commands have been removed.
 - Commit planning: `workflow.changes` is the task source of truth. A planned task has no checkout, branch or baseline; workspace allocation uses the development baseline. One linear task can produce several deliveries; delivery records associate each reviewed range with its primary commit without a completion gate. Ordering expresses the user's sequence, not a dependency graph; legacy dependency metadata must not become an execution gate. Assignment names label the executor, never imply an agent was launched. Completed legacy checkboxes migrate as archived records, never accepted commits. Keep old titles, bodies and opaque historical metadata; other branches' notes require explicit import. Follow-up planning is a user action, not agent-driven task decomposition. Never reintroduce a second TODO checklist on task cards.
-- Review uses one file list for the current comparison and the hash-bound 已读 mark, independent of Git staging. Do not restore staging/unstaging controls, selection state, or the removed `POST /api/targets/:key/stage` endpoint. Legacy `working`/`staged` read targets remain for explicit comparisons; local review opens `all`. Formal delivery still uses the primary index and normal commit hooks.
+- Review uses one complete file list for the current comparison, independent of Git staging. Read-marker controls and the `PUT /api/targets/:key/viewed` endpoint have been removed. Do not restore staging/unstaging controls, selection state, or the removed `POST /api/targets/:key/stage` endpoint. Legacy `working`/`staged` read targets remain for explicit comparisons; local review opens `all`. Formal delivery still uses the primary index and normal commit hooks.
 - Tests: `makeFixtureRepo()` from `test/fixtures/make-repo.ts` builds an isolated temp repo (`{ root, git, write, cleanup }`); API tests call the Hono app directly with `app.request`.
 
 ## Git workflow

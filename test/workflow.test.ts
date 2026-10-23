@@ -472,21 +472,16 @@ describe('requirement development workflow', () => {
     expect(fx.git('rev-list', '--count', 'main..feature/order').trim()).toBe('1');
   });
 
-  it('clears delivered viewed marks without completing unrelated plan notes', async () => {
+  it('records delivery without completing unrelated plan notes', async () => {
     const change = await task('Archive');
     await commit(change);
-    const targetKey = `worktree:${change.worktree}:working`;
     await store.update((state) => {
-      state.targets[targetKey] = {
-        viewed: { 'task.txt': 'hash' },
-      };
       state.todos.push({ id: 'todo', branch: change.branch, title: 'Check', body: '', status: 'open', createdAt: 'now', updatedAt: 'now' });
     });
     const ready = await workflow.ready(change.id);
     const accepted = await accept(ready);
     await task('Next');
     const state = await store.load();
-    expect(state.targets[targetKey]?.viewed).toEqual({});
     expect(accepted.deliveries![0]).not.toHaveProperty('review');
     expect(state.todos).toEqual([]);
     expect(state.workflow!.changes.find((row) => row.id === 'todo-todo')).toMatchObject({ status: 'planned', title: 'Check' });

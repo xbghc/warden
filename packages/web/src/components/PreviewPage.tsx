@@ -15,12 +15,12 @@ export function PreviewPage({ active }: { active: boolean }) {
     setError(null);
   }, [data?.workflow?.developmentBranch]);
   const names = (ids: string[]) => ids.map((id) => data?.workflow?.changes.find((task) => task.id === id)?.title ?? id).join(' + ');
-  const run = () =>
+  const run = (setup = false) =>
     workflowAction(async () => {
       setPending(true);
       setError(null);
       try {
-        useWorkbenchData.setState({ preview: await api.refreshPreview() });
+        useWorkbenchData.setState({ preview: await (setup ? api.setupPreview() : api.refreshPreview()) });
       } catch (error) {
         setError(errorMessage(error));
         await useWorkbenchData.getState().refresh();
@@ -30,11 +30,11 @@ export function PreviewPage({ active }: { active: boolean }) {
     });
   const status = errors.preview ? 'stale' : preview?.status;
   return (
-    <section className="wb-page wb-preview-page" hidden={!active} aria-label="主目录预览">
+    <section className="wb-page wb-preview-page" hidden={!active} aria-label="运行预览">
       <header className="wb-page-header">
         <div>
           <span className="wb-eyebrow">主开发分支 · {data?.workflow?.developmentBranch ?? '尚未选择'}</span>
-          <h1>主目录预览</h1>
+          <h1>运行预览</h1>
         </div>
         <Button
           variant="outline"
@@ -66,13 +66,28 @@ export function PreviewPage({ active }: { active: boolean }) {
                         ? names(preview.connectedIds)
                         : '未连接工作区'}
             </strong>
-            <p>{preview?.worktree ?? '主目录尚未配置'}</p>
+            <p>{preview?.worktree ?? '预览目录尚未初始化'}</p>
             {preview?.updatedAt && <small>上次更新 {new Date(preview.updatedAt).toLocaleString('zh-CN')}</small>}
             {preview?.message && <p>{preview.message}</p>}
             {errors.preview && preview && <p>显示上次读取的预览。</p>}
           </div>
           {status === 'current' && <span className="wb-status">已更新</span>}
         </div>
+        <p className="muted small">在主目录编辑并保存代码，在此目录运行。预览保留依赖和缓存，工作区变更防抖后自动同步。</p>
+        {preview?.sources?.map((source) => (
+          <p key={source.changeId}>
+            {names([source.changeId])} · {{ pending: '待同步', updating: '同步中', synced: '已同步', conflict: '冲突', error: '同步失败' }[source.status]}
+          </p>
+        ))}
+        <Button variant="outline" disabled={busy || pending || !preview?.worktree} onClick={() => void run(true)}>
+          重跑 setup
+        </Button>
+        {preview?.setup && (
+          <details className="wb-description">
+            <summary>setup · {{ pending: '待执行', running: '运行中', succeeded: '成功', failed: '失败' }[preview.setup.status]}</summary>
+            <pre>{preview.setup.output || preview.setup.command}</pre>
+          </details>
+        )}
         <OperationError message={error ?? errors.preview} />
         {!!preview?.conflicts?.length && (
           <div className="wb-error">

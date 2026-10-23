@@ -16,6 +16,8 @@ pnpm dev          # API server on :4100 (tsx watch) + Vite dev server on :5173 w
 pnpm test         # vitest: diff parser, read-only review, watcher, todos, worktrees, export, state, HTTP API
 pnpm typecheck
 pnpm build        # dist/native (Rust) + dist/web (Vite) + dist/cli.js (tsup)
+pnpm package:vscode # build an installable native VS Code extension
+pnpm test:vscode    # real VS Code extension host integration (display required on Linux)
 pnpm check:package # pack, unpack and exercise the real CLI with required native execution
 node dist/cli.js path/to/repo
 ```
@@ -26,6 +28,7 @@ Layout:
 bin/cli.ts           argument parsing, start server, open browser
 packages/shared      types + target key helpers (bundled into both sides)
 packages/server      Hono API, git wrapper, diff parser, read-only review, targets, worktrees, watcher, state, export
+packages/vscode      workspace extension, native read-only diffs, preview terminals/tasks
 packages/web         React + Vite + Tailwind v4 UI (shadcn/ui, shiki highlighting, @tanstack/react-virtual, react-markdown)
 crates/warden-core   independent Rust repository operations, typed data and errors
 crates/warden-node   thin asynchronous napi-rs binding; no workflow or HTTP logic
@@ -128,7 +131,7 @@ Report the flows exercised and any flow that could not be reached.
 
 Run `pnpm storybook` for isolated review and layout components at http://127.0.0.1:6006. Stories use in-memory fixtures and include interaction checks. Run `pnpm build:storybook` to build the static preview.
 
-The new application uses one left navigation: *主目录预览*, *提交历史*, the ordered *工作区* list with connection switches,
+The new application uses one left navigation: *运行预览*, *提交历史*, the ordered *工作区* list with connection switches,
 and bottom *同步工作区* / *设置* actions. A selected task contains its workspace path, hook results,
 notes, files and diff. There is no second review-mode switch or task-completion declaration.
 
@@ -150,3 +153,14 @@ run it from `packages/web` when adding a component and retain React 18 ref suppo
 common controls; keep custom styles for the diff, file tree and task editor. `--accent` and
 `--muted` are shadcn surface colors. Interface text uses the
 system sans-serif font, while code retains IBM Plex Mono. Vite and Storybook share the same theme.
+
+## VS Code extension verification
+
+`pnpm test:vscode` builds the extension and launches a disposable VS Code 1.95.3 extension host.
+The suite verifies native readonly diff tabs, primary/preview isolation, setup and
+preview terminal cwd. On Linux use an existing display or `xvfb-run -a pnpm test:vscode`.
+`VSCODE_EXECUTABLE_PATH` can select an already downloaded VS Code executable. The fixture owns
+its repository, numbered workspace, data directory and user/extension profiles, and removes them
+after host shutdown. `pnpm package:vscode` creates the VSIX under `packages/vscode`; no publishing
+or marketplace credentials are involved. The extension's bundled backend uses the same native
+module when packaged, with the existing portable Git fallback on other supported hosts.

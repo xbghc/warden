@@ -17,7 +17,10 @@ export function workspaceConfig(value: unknown): WorkspaceConfig {
       throw badRequest('hook 应是 shell 命令字符串');
     if (command?.trim()) hooks[event] = command;
   }
-  return { hooks };
+  const previewSetup = row.previewSetup;
+  if (previewSetup !== undefined && (typeof previewSetup !== 'string' || previewSetup.length > 20000 || previewSetup.includes('\0')))
+    throw badRequest('setup 应是 shell 命令字符串');
+  return { hooks, ...(previewSetup?.trim() ? { previewSetup } : {}) };
 }
 
 /** Git's own installation supplies the POSIX shell on Windows, including portable installations. */
@@ -58,35 +61,56 @@ export async function workspaceShell(root: string, platform = process.platform):
 
 /** A thin shell-command hook: cwd and environment in, output and exit status out. */
 export async function runWorkspaceHook(root: string, change: DevelopmentChange, event: 'create' | 'reuse', command: string): Promise<WorkspaceHookResult> {
+  return {
+    event,
+    command,
+    ...(await runSetupCommand(
+      root,
+      change.worktree,
+      command,
+      {
+        WARDEN_BRANCH: change.branch,
+        WARDEN_DEVELOPMENT_BRANCH: change.developmentBranch,
+        WARDEN_TASK_ID: change.id,
+        WARDEN_HOOK_EVENT: event,
+      },
+      60000,
+    )),
+  };
+}
+
+/** Explicit user-configured commands only; preview scripts never come from task metadata. */
+export async function runSetupCommand(
+  root: string,
+  cwd: string,
+  command: string,
+  environment: Record<string, string> = {},
+  timeout = 600000,
+): Promise<Pick<WorkspaceHookResult, 'status' | 'exitCode' | 'output'>> {
   let shell: string;
   try {
     shell = await workspaceShell(root);
   } catch (error) {
-    return { event, command, status: 'failed', exitCode: null, output: error instanceof Error ? error.message : String(error) };
+    return { status: 'failed', exitCode: null, output: error instanceof Error ? error.message : String(error) };
   }
   return new Promise((resolve) => {
     execFile(
       shell,
       ['-c', command],
       {
-        cwd: change.worktree,
-        timeout: 60000,
+        cwd,
+        timeout,
         maxBuffer: 128 * 1024,
         windowsHide: true,
         env: {
           ...gitEnvironment(),
           WARDEN_REPO: root,
-          WARDEN_WORKTREE: change.worktree,
-          WARDEN_BRANCH: change.branch,
-          WARDEN_DEVELOPMENT_BRANCH: change.developmentBranch,
-          WARDEN_TASK_ID: change.id,
-          WARDEN_HOOK_EVENT: event,
+          WARDEN_WORKTREE: cwd,
+          ...environment,
         },
       },
       (error, stdout, stderr) =>
         resolve({
-          event,
-          command,
           status: error ? 'failed' : 'succeeded',
           exitCode: error ? (typeof error.code === 'number' ? error.code : null) : 0,
           output: [stdout, stderr, error?.code === 'ENOENT' ? `无法运行工作区 hook：找不到 shell（${shell}）。${error.message}` : error?.message]

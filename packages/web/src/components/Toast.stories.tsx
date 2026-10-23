@@ -18,5 +18,5 @@ function showToast(kind: ToastState['kind'], message: string) {
 
 export const Info: Story = { beforeEach: showToast('info', '已复制文件位置') };
 export const ErrorState: Story = { beforeEach: showToast('error', '加载 diff 失败，请刷新重试。') };
-export const LongMessage: Story = { beforeEach: showToast('info', '任务说明已复制。请将内容粘贴给编码助手，修改后刷新以检查代码变化和已读状态。') };
+export const LongMessage: Story = { beforeEach: showToast('info', '任务说明已复制。请将内容粘贴给编码助手，修改后刷新以检查代码变化。') };
 export const Hidden: Story = {};
