@@ -118,8 +118,11 @@ One-time configuration:
 | Setting | Value |
 | --- | --- |
 | Issuer | `https://token.actions.githubusercontent.com` |
-| Subject | `repo:xbghc/warden:environment:vscode-marketplace` |
+| Subject | `repo:xbghc@58060018/warden@1360402477:environment:vscode-marketplace` |
 | Audience | `api://AzureADTokenExchange` |
+
+This repository's GitHub OIDC subject includes immutable owner and repository IDs. Use the exact
+subject shown by the Azure Login step; the shorter name-only form does not match its tokens.
 
 3. Create GitHub Environment `vscode-marketplace` in `xbghc/warden`. Allow `v*` tags for publication
    and the `main` branch for authentication-only checks. Store the application's client ID as
