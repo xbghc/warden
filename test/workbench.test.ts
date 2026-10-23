@@ -528,7 +528,7 @@ describe('commit history arrangement', () => {
     expect((await restarted.get()).commits.at(-1)?.deliveryId).toBe(last.deliveryId);
   });
 
-  it('retries cleanup after temporary files were removed but their journal update failed', async () => {
+  it('retries cleanup after temporary files were removed but their journal update failed', { timeout: longGitTimeout }, async () => {
     const a = await task('A');
     await edit(a, 'a.txt', 'A1\n', true);
     await deliver(a, 'A1');

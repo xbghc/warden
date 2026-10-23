@@ -11,9 +11,9 @@ export default defineConfig({
   test: {
     environment: 'node',
     setupFiles: ['test/setup.ts'],
-    // Dozens of simultaneous Git processes make Windows process startup dominate
-    // integration tests and can leave operations running past a test's timeout.
-    maxWorkers: process.platform === 'win32' ? 2 : undefined,
+    // Each integration file already runs parallel Git reads. Serialize Windows files
+    // so independent fixtures do not compete for process startup and disk access.
+    maxWorkers: process.platform === 'win32' ? 1 : undefined,
     projects: [
       {
         extends: true,
