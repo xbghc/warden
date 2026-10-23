@@ -9,7 +9,7 @@ No server port or browser is needed by the extension.
 ```sh
 pnpm install
 pnpm package:vscode
-code --install-extension packages/vscode/warden-0.17.2.vsix
+code --install-extension packages/vscode/warden-0.18.0.vsix
 ```
 
 Open the primary directory in VS Code, open the Warden activity view and run **Warden: 选择主开发分支**.
