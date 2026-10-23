@@ -97,3 +97,31 @@ Older primary-directory previews are migrated only when their saved ownership re
 primary. Unexpected primary edits block migration with an actionable error; no reset/clean is used.
 The state schema remains version 1 so older metadata is retained, but do not run an old Warden
 version alongside a new independent preview.
+
+## Automated publishing
+
+Push a stable `vX.Y.Z` tag after setting `X.Y.Z` in both the root and extension `package.json`.
+`.github/workflows/publish.yml` publishes `@xbghc/warden` to npm and `xbghc.warden` to Visual Studio
+Marketplace after the exact tag passes the full CI matrix and the packaged extension-host test.
+Ordinary commits do not publish. CI retains the tested universal VSIX as `vscode-extension`.
+
+The Marketplace publisher `xbghc` needs a one-time GitHub Trusted Publishing policy in the
+[publisher management page](https://marketplace.visualstudio.com/manage/publishers/):
+
+| Setting | Value |
+| --- | --- |
+| GitHub owner | `xbghc` |
+| Repository | `warden` |
+| Workflow file | `publish.yml` |
+| GitHub Environment | None (leave optional environment restrictions empty) |
+
+Use the existing publisher that owns the extension. The policy must authorize this repository and
+workflow, matching the manifest's publisher. [vsce trusted publishing](https://github.com/microsoft/vscode-vsce#trusted-publishing)
+uses the job's short-lived GitHub OIDC identity; no PAT or Azure client secret is stored in GitHub.
+Only the Marketplace publishing job receives `id-token: write` for this exchange. Saving a policy
+does not test it; the next requested release verifies authentication and actual publication.
+
+`pnpm check:release` checks version consistency; `pnpm check:vscode` inspects the built VSIX. CI sets
+`WARDEN_NATIVE_EXPECT_ALL=1` to require every supported native module. Its extension-host test uses
+the unpacked artifact, and publication uploads those same bytes. A failed registry job can be retried
+with **Re-run failed jobs** after correcting configuration; published versions and tags stay unchanged.

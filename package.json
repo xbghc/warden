@@ -46,9 +46,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "check:package": "node scripts/native-package-smoke.mjs",
+    "check:release": "node scripts/check-release.mjs",
+    "check:vscode": "node scripts/check-vscode-package.mjs",
     "bench:git": "node --import tsx scripts/bench-git.mjs",
-    "prepublishOnly": "pnpm lint && pnpm typecheck && pnpm build && pnpm test && pnpm check:package",
-    "build:vscode": "node scripts/build-vscode.mjs",
+    "prepublishOnly": "pnpm check:release && pnpm lint && pnpm typecheck && pnpm build && pnpm test && pnpm check:package",
+    "build:vscode": "node scripts/check-release.mjs && node scripts/build-vscode.mjs",
     "package:vscode": "pnpm build:vscode && cd packages/vscode && vsce package --no-dependencies",
     "test:vscode": "pnpm build:vscode && node --import tsx scripts/test-vscode.mjs"
   },
@@ -56,17 +58,18 @@
     "@biomejs/biome": "^2.5.12",
     "@hono/node-server": "^1.19.17",
     "@types/node": "^22.20.1",
+    "@types/vscode": "1.95.0",
+    "@vscode/test-electron": "2.5.2",
+    "@vscode/vsce": "4.0.0",
     "@warden/server": "workspace:*",
     "@warden/shared": "workspace:*",
     "concurrently": "^9.2.4",
+    "fflate": "0.8.2",
     "hono": "^4.13.7",
     "rimraf": "^6.1.3",
     "tsup": "^8.5.1",
     "tsx": "^4.23.13",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.11",
-    "@types/vscode": "1.95.0",
-    "@vscode/vsce": "3.3.2",
-    "@vscode/test-electron": "2.5.2"
+    "vitest": "^4.1.11"
   }
 }

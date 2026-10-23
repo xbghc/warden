@@ -1,6 +1,6 @@
-name: Publish to npm
+name: Publish npm and VS Code
 
-# Push a tag like v0.1.0 (matching package.json "version") to publish @xbghc/warden.
+# Push a vX.Y.Z tag matching both package versions to publish npm and VS Code.
 #
 # Auth is npm trusted publishing (OIDC) — no NPM_TOKEN secret, no token to rotate.
 # The registry hands out a short-lived credential only to this repo's publish.yml.
@@ -22,11 +22,16 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   verify:
     uses: ./.github/workflows/ci.yml
 
   publish:
+    name: Publish npm
     needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -57,14 +62,8 @@ jobs:
           pattern: native-*
           merge-multiple: true
           path: native
-      - name: Check tag matches package.json version
-        run: |
-          PKG_VERSION="$(node -p "require('./package.json').version")"
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
-          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
-            echo "tag v$TAG_VERSION does not match package.json version $PKG_VERSION" >&2
-            exit 1
-          fi
+      - name: Check tag and package versions
+        run: pnpm check:release
       # The reusable CI workflow verifies this exact tag across the supported matrix
       # before this job can request an npm credential. prepublishOnly also verifies
       # lint, types, build, tests and the packed CLI in the publishing checkout. It copies all
@@ -74,3 +73,34 @@ jobs:
       # trusted publish, but that did not happen through `pnpm publish` (0.2.0 shipped without
       # one). pnpm's own release workflow passes the flag for the same reason.
       - run: pnpm publish --access public --no-git-checks --provenance
+
+  publish-vscode:
+    name: Publish VS Code Marketplace
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      WARDEN_NATIVE_EXPECT_ALL: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check:release
+      - uses: actions/download-artifact@v8
+        with:
+          name: vscode-extension
+          path: packages/vscode
+      - run: pnpm check:vscode
+      # Marketplace must trust xbghc/warden and this publish.yml workflow for publisher xbghc.
+      # Publish the tested VSIX unchanged; OIDC does not fall back to a stored PAT.
+      - name: Publish the tested VSIX with OIDC
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          pnpm exec vsce publish --packagePath "packages/vscode/warden-$VERSION.vsix" --oidc

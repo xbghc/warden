@@ -59,19 +59,32 @@ formatting, clippy and tests, and exercises the unpacked npm tarball. The
 release workflow collects the five artifacts tested for that exact tag; it does not rebuild only
 the publishing machine's binary. All five must be present before publishing proceeds.
 
-Releasing: bump `version` in the root `package.json`, commit it as `Release X.Y.Z`, tag `vX.Y.Z`, and
-push `main` and the tag. Releases require an explicit user request. Never `npm publish` from a
-machine. The `Publish to npm` workflow first runs the reusable CI workflow against the exact tag,
-then checks the tag against the version, runs lint, typecheck, build and tests through
+Releasing: set the same `version` in the root and `packages/vscode/package.json`, run
+`pnpm check:release`, commit as `Release X.Y.Z`, tag `vX.Y.Z`, and push `main` and the tag.
+Releases require an explicit user request. Never publish npm or Marketplace packages from a local
+machine. The `Publish npm and VS Code` workflow runs reusable CI against the exact tag. CI rejects
+mismatched package versions or tags before publication. The npm job runs lint, typecheck, build and tests through
 `prepublishOnly`, and publishes over OIDC trusted publishing — no `NPM_TOKEN` secret to store or
 rotate. It relies on a trusted publisher configured on the package's npmjs.com settings page (user
 `xbghc`, repo `warden`, workflow `publish.yml`), and passes `--provenance` explicitly, because npm's
 automatic attestation does not fire through `pnpm publish` (0.2.0 shipped without one). CI runs lint,
 typecheck, tests, build, Storybook build and a package dry run on every push to `main` and every pull
-request. Publishing waits for every CI job to succeed; only the publishing job receives OIDC permission.
+request. Publishing waits for every CI job to succeed; only the two publishing jobs receive OIDC permission.
 CI also runs the package smoke test with the pinned publishing npm version (12.2.1), in addition
 to the version bundled with Node. The smoke test accepts both older array output and npm 12's
 package-name map from `npm pack --json`, then checks and exercises the same unpacked tarball.
+
+The VS Code CI job waits for the full test matrix, combines all five tested native modules into a
+universal VSIX, checks its manifest and contents, and runs the extension-host tests against the
+unpacked VSIX. It uploads `vscode-extension`; the Marketplace job downloads and publishes that exact
+artifact with `vsce publish --oidc`. Source builds and packaging require Node 22 or newer for vsce 4;
+the npm CLI still supports Node 20. See [VS Code publishing](vscode.md#automated-publishing) for the
+one-time Marketplace trust configuration. No `VSCE_PAT` or `NPM_TOKEN` is needed.
+
+The npm and Marketplace jobs run independently after the shared checks. If one registry rejects
+a release, correct its configuration and use GitHub Actions **Re-run failed jobs** for the same tag.
+Do not republish the successful registry, move an existing tag, or disable checks. A code fix needs
+a new commit and version. Pushing ordinary `main` commits builds and tests artifacts without publishing.
 
 The full test suite runs on Linux x64 with Node 20, 22 and 24, and Linux arm64, Windows x64 and
 macOS x64/arm64 with Node 22. All platforms run the real Git workflow, workspace hooks, backups and failure recovery;

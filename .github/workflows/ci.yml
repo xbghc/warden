@@ -27,6 +27,8 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Check release versions
+        run: pnpm check:release
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
@@ -43,10 +45,6 @@ jobs:
       # Keep this version aligned with publish.yml so npm output changes fail CI first.
       - name: Check package with the publishing npm version
         run: pnpm --package=npm@12.2.1 dlx npm run check:package
-      - name: Build the VS Code extension
-        run: pnpm package:vscode
-      - name: Exercise the VS Code extension host
-        run: xvfb-run -a pnpm test:vscode
 
   test:
     name: Test (${{ matrix.os }}, Node ${{ matrix.node }})
@@ -111,3 +109,39 @@ jobs:
           name: tests-${{ matrix.os }}-node-${{ matrix.node }}
           path: test-results/vitest.xml
           if-no-files-found: ignore
+
+  vscode:
+    name: Package and test VS Code extension
+    needs: [quality, test]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    env:
+      WARDEN_NATIVE: required
+      WARDEN_NATIVE_EXPECT_ALL: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # A universal VSIX contains only native modules tested by this same workflow run.
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: native-*
+          merge-multiple: true
+          path: native
+      - run: pnpm package:vscode
+      - run: pnpm check:vscode
+      - name: Unpack the VSIX for extension-host tests
+        run: unzip -q packages/vscode/warden-*.vsix -d "$RUNNER_TEMP/warden-vsix"
+      - name: Exercise the packaged VS Code extension
+        run: xvfb-run -a pnpm test:vscode
+        env:
+          WARDEN_EXTENSION_PATH: ${{ runner.temp }}/warden-vsix/extension
+      - uses: actions/upload-artifact@v7
+        with:
+          name: vscode-extension
+          path: packages/vscode/warden-*.vsix
+          if-no-files-found: error
