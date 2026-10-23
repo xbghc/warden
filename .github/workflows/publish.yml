@@ -18,6 +18,8 @@ name: Publish npm and VS Code
 on:
   push:
     tags: ['v*']
+  # Manual runs only verify Marketplace authentication; they never publish either package.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -28,10 +30,12 @@ concurrency:
 
 jobs:
   verify:
+    if: github.event_name == 'push'
     uses: ./.github/workflows/ci.yml
 
   publish:
     name: Publish npm
+    if: github.event_name == 'push'
     needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -76,9 +80,11 @@ jobs:
 
   publish-vscode:
     name: Publish VS Code Marketplace
+    if: github.event_name == 'push'
     needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    environment: vscode-marketplace
     permissions:
       contents: read
       id-token: write
@@ -98,9 +104,44 @@ jobs:
           name: vscode-extension
           path: packages/vscode
       - run: pnpm check:vscode
-      # Marketplace must trust xbghc/warden and this publish.yml workflow for publisher xbghc.
-      # Publish the tested VSIX unchanged; OIDC does not fall back to a stored PAT.
-      - name: Publish the tested VSIX with OIDC
+      - name: Sign in to the Marketplace publishing identity
+        uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+      # Entra trusts this GitHub environment; Marketplace grants the identity Contributor access.
+      # Publish the tested VSIX unchanged without a PAT or Azure client secret.
+      - name: Publish the tested VSIX with the Azure identity
         run: |
           VERSION="$(node -p "require('./package.json').version")"
-          pnpm exec vsce publish --packagePath "packages/vscode/warden-$VERSION.vsix" --oidc
+          pnpm exec vsce publish --packagePath "packages/vscode/warden-$VERSION.vsix" --azure-credential
+
+  verify-marketplace-auth:
+    name: Verify Marketplace authentication
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: vscode-marketplace
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+      - name: Show the identity to add to the Marketplace publisher
+        run: |
+          PROFILE_ID="$(az rest --url 'https://app.vssps.visualstudio.com/_apis/profile/profiles/me?api-version=7.1' --resource 499b84ac-1321-427f-aa17-267ca6975798 --query id -o tsv)"
+          printf 'Marketplace identity: `%s`\n' "$PROFILE_ID" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Verify access to publisher xbghc
+        run: pnpm exec vsce verify-pat xbghc --azure-credential

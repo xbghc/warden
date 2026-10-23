@@ -69,7 +69,8 @@ rotate. It relies on a trusted publisher configured on the package's npmjs.com s
 `xbghc`, repo `warden`, workflow `publish.yml`), and passes `--provenance` explicitly, because npm's
 automatic attestation does not fire through `pnpm publish` (0.2.0 shipped without one). CI runs lint,
 typecheck, tests, build, Storybook build and a package dry run on every push to `main` and every pull
-request. Publishing waits for every CI job to succeed; only the two publishing jobs receive OIDC permission.
+request. Publishing waits for every CI job to succeed; only registry publication and the explicit
+Marketplace authentication check receive OIDC permission.
 CI also runs the package smoke test with the pinned publishing npm version (12.2.1), in addition
 to the version bundled with Node. The smoke test accepts both older array output and npm 12's
 package-name map from `npm pack --json`, then checks and exercises the same unpacked tarball.
@@ -77,9 +78,13 @@ package-name map from `npm pack --json`, then checks and exercises the same unpa
 The VS Code CI job waits for the full test matrix, combines all five tested native modules into a
 universal VSIX, checks its manifest and contents, and runs the extension-host tests against the
 unpacked VSIX. It uploads `vscode-extension`; the Marketplace job downloads and publishes that exact
-artifact with `vsce publish --oidc`. Source builds and packaging require Node 22 or newer for vsce 4;
+artifact with `vsce publish --azure-credential` after GitHub OIDC signs into a dedicated Entra
+service principal through `azure/login`. The identity needs Marketplace Contributor access, not
+Azure subscription roles. Source builds and packaging require Node 22 or newer for vsce 4;
 the npm CLI still supports Node 20. See [VS Code publishing](vscode.md#automated-publishing) for the
-one-time Marketplace trust configuration. No `VSCE_PAT` or `NPM_TOKEN` is needed.
+one-time identity and Marketplace membership configuration. No `VSCE_PAT`, `NPM_TOKEN` or Azure
+client secret is needed. Manually running `publish.yml` only verifies Marketplace authentication;
+it never publishes either package or bypasses release CI.
 
 The npm and Marketplace jobs run independently after the shared checks. If one registry rejects
 a release, correct its configuration and use GitHub Actions **Re-run failed jobs** for the same tag.

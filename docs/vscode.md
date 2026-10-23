@@ -105,21 +105,37 @@ Push a stable `vX.Y.Z` tag after setting `X.Y.Z` in both the root and extension 
 Marketplace after the exact tag passes the full CI matrix and the packaged extension-host test.
 Ordinary commits do not publish. CI retains the tested universal VSIX as `vscode-extension`.
 
-The Marketplace publisher `xbghc` needs a one-time GitHub Trusted Publishing policy in the
-[publisher management page](https://marketplace.visualstudio.com/manage/publishers/):
+Marketplace publishing uses [Microsoft Entra authentication](https://code.visualstudio.com/api/working-with-extensions/publishing-extension#secure-automated-publishing-to-visual-studio-marketplace).
+The publisher's direct Trusted Publishing API currently reports `Trusted Publishing is not supported`,
+so the workflow uses `azure/login` followed by `vsce publish --azure-credential`.
+
+One-time configuration:
+
+1. Create the single-tenant Entra application and service principal `warden-marketplace`, without
+   a client secret or Azure subscription role assignments.
+2. Add an application federated identity credential with these exact values:
 
 | Setting | Value |
 | --- | --- |
-| GitHub owner | `xbghc` |
-| Repository | `warden` |
-| Workflow file | `publish.yml` |
-| GitHub Environment | None (leave optional environment restrictions empty) |
+| Issuer | `https://token.actions.githubusercontent.com` |
+| Subject | `repo:xbghc/warden:environment:vscode-marketplace` |
+| Audience | `api://AzureADTokenExchange` |
 
-Use the existing publisher that owns the extension. The policy must authorize this repository and
-workflow, matching the manifest's publisher. [vsce trusted publishing](https://github.com/microsoft/vscode-vsce#trusted-publishing)
-uses the job's short-lived GitHub OIDC identity; no PAT or Azure client secret is stored in GitHub.
-Only the Marketplace publishing job receives `id-token: write` for this exchange. Saving a policy
-does not test it; the next requested release verifies authentication and actual publication.
+3. Create GitHub Environment `vscode-marketplace` in `xbghc/warden`. Allow `v*` tags for publication
+   and the `main` branch for authentication-only checks. Store the application's client ID as
+   environment variable `AZURE_CLIENT_ID`, and its tenant ID as `AZURE_TENANT_ID`.
+4. Manually run **Publish npm and VS Code** on `main`. This only signs in and checks permissions;
+   the release CI and both publishing jobs are excluded. The job summary shows a Marketplace
+   identity ID. The publisher owner must add that identity as **Contributor** under `xbghc` in the
+   [publisher management page](https://marketplace.visualstudio.com/manage/publishers/).
+5. Re-run the authentication check until `vsce verify-pat xbghc --azure-credential` succeeds.
+   Despite the command's historical name, it uses Entra authentication, not a PAT. Merely having
+   an Azure subscription or logging into Azure CLI does not grant publisher access; a personal
+   Microsoft account and its Entra representation can be separate Marketplace identities.
+
+Only Marketplace publishing and its explicit authentication check receive `id-token: write` for
+the exchange. `allow-no-subscriptions: true` avoids granting unnecessary Azure resource access.
+No PAT, client secret or local Azure login is copied into GitHub. Actual releases remain tag-only.
 
 `pnpm check:release` checks version consistency; `pnpm check:vscode` inspects the built VSIX. CI sets
 `WARDEN_NATIVE_EXPECT_ALL=1` to require every supported native module. Its extension-host test uses
