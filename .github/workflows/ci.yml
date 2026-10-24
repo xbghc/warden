@@ -40,11 +40,6 @@ jobs:
         env:
           WARDEN_NATIVE: disabled
       - run: pnpm build:storybook
-      - name: Check package contents
-        run: pnpm check:package
-      # Keep this version aligned with publish.yml so npm output changes fail CI first.
-      - name: Check package with the publishing npm version
-        run: pnpm --package=npm@12.2.1 dlx npm run check:package
 
   test:
     name: Test (${{ matrix.os }}, Node ${{ matrix.node }})
@@ -93,9 +88,6 @@ jobs:
       - run: pnpm build:native
       - run: cargo test --workspace --locked
       - run: pnpm test --reporter=default --reporter=junit --outputFile.junit=test-results/vitest.xml
-      - name: Build and exercise the packaged CLI
-        if: matrix.node == 22
-        run: pnpm build && pnpm check:package
       - name: Upload tested native module
         if: matrix.node == 22
         uses: actions/upload-artifact@v7
@@ -135,14 +127,78 @@ jobs:
           path: native
       - run: pnpm package:vscode
       - run: pnpm check:vscode
-      - name: Unpack the VSIX for extension-host tests
-        run: unzip -q packages/vscode/warden-*.vsix -d "$RUNNER_TEMP/warden-vsix"
-      - name: Exercise the packaged VS Code extension
-        run: xvfb-run -a pnpm test:vscode
-        env:
-          WARDEN_EXTENSION_PATH: ${{ runner.temp }}/warden-vsix/extension
       - uses: actions/upload-artifact@v7
         with:
           name: vscode-extension
           path: packages/vscode/warden-*.vsix
           if-no-files-found: error
+
+  webview-ui:
+    name: Packaged webview browser flows
+    needs: vscode
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v8
+        with:
+          name: vscode-extension
+          path: packages/vscode
+      - run: python -m pip install -r test/ui/requirements.txt
+      - run: python -m playwright install --with-deps chromium
+      - run: python test/ui/smoke.py
+        env:
+          WARDEN_UI_ARTIFACTS: test-results/webview
+          WARDEN_NATIVE: disabled
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: webview-screenshots
+          path: test-results/webview
+          if-no-files-found: ignore
+
+  extension-host:
+    name: VS Code (${{ matrix.os }}, ${{ matrix.vscode }})
+    needs: vscode
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-latest]
+        vscode: ['1.95.3', stable]
+    env:
+      WARDEN_NATIVE: required
+      WARDEN_VSCODE_VERSION: ${{ matrix.vscode }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v8
+        with:
+          name: vscode-extension
+          path: packages/vscode
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: native-*
+          merge-multiple: true
+          path: native
+      - name: Test the packaged extension on Linux
+        if: runner.os == 'Linux'
+        run: xvfb-run -a pnpm test:vscode
+      - name: Test the packaged extension on Windows and macOS
+        if: runner.os != 'Linux'
+        run: pnpm test:vscode

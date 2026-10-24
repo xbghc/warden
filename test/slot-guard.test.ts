@@ -6,7 +6,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Hono } from 'hono';
 import type { WorktreesResponse } from '@warden/shared';
-import { createApp, resolveRepo, StateStore } from '@warden/server';
+import { createApp, resolveRepo, StateStore } from './compat/index.js';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
 // A slot is written — reset, clean, switch, removed — only while it is this repository's own

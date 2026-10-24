@@ -9,7 +9,8 @@ Workspace creation does not install dependencies or launch an agent.
 
 The left navigation’s *工作区* list holds the ordered work plan. Add a task and its notes, reorder it, and select
 *创建工作区* when needed. Planning does not create a Git branch or pin a baseline. A task can use
-a new numbered worktree, an available detached slot, or a validated existing numbered checkout.
+a freshly allocated logical workspace and branch. Warden may internally reuse a clean, unassigned
+physical directory; the user does not choose a previous workspace.
 The default is a worktree of Warden's external shared repository. Agent development objects stay
 outside the primary repository while tasks and preview can read the same Git objects directly.
 Independent clones remain a compatibility option for tooling that requires its own `.git` directory.
@@ -50,10 +51,12 @@ Settings contain local repository configuration, outside task branches. The conf
 a `hooks` object and an optional idempotent `previewSetup` command. Warden creates workspaces and runs these user-provided scripts; users choose
 external tools for agent execution and interaction.
 
-`hooks.create` and `hooks.reuse` are optional POSIX shell commands executed after the assignment is
+The settings form presents one workspace initialization script and writes it to both `hooks.create`
+and `hooks.reuse`. Existing differing scripts remain unchanged until the user saves settings.
+These legacy fields are optional POSIX shell commands executed after the assignment is
 saved, with the workspace as cwd. Linux and macOS use `/bin/sh -c`; native Windows uses Git for
 Windows' bundled `sh.exe -c`. They expose stdout/stderr, exit code and failure. A failed hook
-leaves the workspace intact; retry it explicitly. Hooks have a 60-second timeout and bounded output.
+leaves the workspace intact; retry it explicitly. Hooks have a ten-minute timeout and bounded output.
 Warden does not provide a dependency installer or a process supervisor.
 
 Environment: `WARDEN_REPO`, `WARDEN_WORKTREE`, `WARDEN_BRANCH`, `WARDEN_DEVELOPMENT_BRANCH`,
@@ -75,7 +78,8 @@ as its baseline. Primary files, index and HEAD are unchanged by connections.
 Workspace selection stays in the sidebar, and file review stays in each workspace’s detail; the
 preview page does not repeat either list.
 
-The running server refreshes connections approximately every two seconds. Initial conflicts fail
+One extension session owns background preview synchronization; it checks content each second and
+debounces saved edits. Other windows observe shared state and can take over when the owner closes. Initial conflicts fail
 the connection attempt and preserve the previous set and files. A later conflict preserves the last
 coherent preview and marks it stale. Adjust the source edits or selection, then refresh. Disconnecting
 recomposes the remaining contributions; it does not discard unexpected user or tool edits.
@@ -99,10 +103,10 @@ resulting commit. Review takes place before preparation; normal delivery prepare
 in one operation. The staged diff is shown for recovery after an interrupted operation.
 
 Run tests in the preview directory when needed, review the complete delivery, enter a message,
-and choose *提交到主开发分支*. Canceling message entry does not stage anything.
+and choose *提交到主开发分支*. Editing a message does not stage anything.
 There is no test-passed checkbox. Warden runs ordinary `git commit -m` with the checkout's identity,
 signing, `core.hooksPath`, `pre-commit`, `prepare-commit-msg`, `commit-msg` and `post-commit` behavior.
-It never uses `--no-verify` or `commit-tree` for delivery. The server checks the current HEAD and
+It never uses `--no-verify` or `commit-tree` for delivery. The engine checks the current HEAD and
 staged-diff fingerprint again before committing.
 
 Hook failure preserves files/index and displays the output. Handle any hook edits, refresh the
@@ -125,7 +129,7 @@ Dirty/busy workspaces are blocked; a changed revision invalidates a check. Git s
 that an agent has stopped.
 
 Open *同步工作区* and select one, several or all workspaces. The page skips unknown/blocked/conflicting
-checks; the server rechecks both observed heads and actual checkout conditions. Explicit execution
+checks; the engine rechecks both observed heads and actual checkout conditions. Explicit execution
 uses `rebase --no-autostash --onto <primary> <last-delivered-source-or-base>`, avoiding duplicate
 squashed work. Each workspace has its own result. An actual conflict remains in that workspace for
 the user to resolve manually. There is no automatic stash, background rebase or forced continuation.
@@ -158,9 +162,9 @@ Numbered directories (`<repo>-1`, `<repo>-2`, ...) remain available to their tas
 A reusable slot is detached, clean, valid, unassigned and not inside a Git operation; this is a Git
 fact, not an agent-idle status. Normal delivery never releases or deletes a branch.
 
-Legacy checkout/release/remove HTTP APIs remain for older clients. They refuse to release or reuse
-an assigned task's slot and are not part of the new page navigation. Legacy ready/resume HTTP APIs
-also remain; ready no longer rebases, and no readiness protocol is exposed by the agent CLI.
+Legacy checkout/release/remove and ready/resume HTTP adapters exist only in regression tests.
+They still refuse to release or reuse an assigned task's slot. The extension offers fresh workspace
+allocation and recovery actions; it exposes no readiness protocol.
 
 ## Clone slots
 

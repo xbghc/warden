@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Hono } from 'hono';
 import type { CommitsResponse, FileDiff, FilesResponse } from '@warden/shared';
-import { createApp, resolveRepo, StateStore } from '@warden/server';
+import { createApp, resolveRepo, StateStore } from './compat/index.js';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
 // The repository's own git config reaches every command warden parses. Each setting here once

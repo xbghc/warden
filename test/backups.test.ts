@@ -5,11 +5,11 @@ import * as fs from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Hono } from 'hono';
 import type { RemoveWorktreeResponse, SafetyBackup } from '@warden/shared';
-import { createApp, resolveRepo, StateStore, WorkflowService } from '@warden/server';
-import { HistoryService } from '../packages/server/src/history.js';
-import { assertSafetyBackupCurrent, createSafetyBackup, discardOperationBackup, listSafetyBackups } from '../packages/server/src/backups.js';
-import * as backups from '../packages/server/src/backups.js';
-import * as gitCommands from '../packages/server/src/git.js';
+import { createApp, resolveRepo, StateStore, WorkflowService } from './compat/index.js';
+import { HistoryService } from '../packages/engine/src/history.js';
+import { assertSafetyBackupCurrent, createSafetyBackup, discardOperationBackup, listSafetyBackups } from '../packages/engine/src/backups.js';
+import * as backups from '../packages/engine/src/backups.js';
+import * as gitCommands from '../packages/engine/src/git.js';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
 vi.mock('node:fs/promises', async (original) => {

@@ -3,10 +3,10 @@ import path from 'node:path';
 import { copyFile, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DevelopmentChange } from '@warden/shared';
-import { resolveRepo, StateStore, WorkflowService } from '@warden/server';
-import { GitSandbox } from '../packages/server/src/git-sandbox.js';
-import * as git from '../packages/server/src/git.js';
-import * as worktrees from '../packages/server/src/worktrees.js';
+import { resolveRepo, StateStore, WorkflowService } from './compat/index.js';
+import { GitSandbox } from '../packages/engine/src/git-sandbox.js';
+import * as git from '../packages/engine/src/git.js';
+import * as worktrees from '../packages/engine/src/worktrees.js';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
 let fx: FixtureRepo;

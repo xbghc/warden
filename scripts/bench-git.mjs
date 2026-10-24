@@ -37,10 +37,10 @@ process.env.GIT_CONFIG_SYSTEM = '/dev/null';
 const moduleAt = (file) => import(pathToFileURL(path.join(root, file)).href);
 const [{ makeFixtureRepo }, { WorkflowService }, { StateStore }, { resolveRepo }, { RepoWatcher }] = await Promise.all([
   moduleAt('test/fixtures/make-repo.ts'),
-  moduleAt('packages/server/src/workflow.ts'),
-  moduleAt('packages/server/src/state.ts'),
-  moduleAt('packages/server/src/repo.ts'),
-  moduleAt('packages/server/src/watcher.ts'),
+  moduleAt('packages/engine/src/workflow.ts'),
+  moduleAt('packages/engine/src/state.ts'),
+  moduleAt('packages/engine/src/repo.ts'),
+  moduleAt('packages/engine/src/watcher.ts'),
 ]);
 const fx = await makeFixtureRepo('warden-read-bench-');
 const data = await mkdtemp(path.join(os.tmpdir(), 'warden-read-bench-data-'));

@@ -1,6 +1,6 @@
 import { build } from 'tsup';
 import { cp, mkdir, readdir, readFile } from 'node:fs/promises';
-const pkg = JSON.parse(await readFile('package.json', 'utf8'));
+const pkg = JSON.parse(await readFile('packages/vscode/package.json', 'utf8'));
 await build({
   config: false,
   entry: { extension: 'packages/vscode/src/extension.ts' },
@@ -12,7 +12,7 @@ await build({
   bundle: true,
   splitting: false,
   external: ['vscode'],
-  noExternal: [/^@warden\//, /^hono(?:\/|$)/],
+  noExternal: [/^@warden\//],
   banner: { js: "var __wardenModuleUrl = require('node:url').pathToFileURL(__filename).href;" },
   define: { 'import.meta.url': '__wardenModuleUrl', __WARDEN_BUNDLED__: 'true', __WARDEN_VERSION__: JSON.stringify(pkg.version) },
 });

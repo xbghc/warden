@@ -1,6 +1,6 @@
 use std::ffi::{OsStr, OsString};
 
-// Keep this list aligned with packages/server/src/git.ts. A server started by a Git hook must
+// Keep this list aligned with packages/engine/src/git.ts. A host started by a Git hook must
 // inspect its validated worktree, while retaining normal user/system Git configuration.
 const REPOSITORY_ENV: &[&str] = &[
     "GIT_DIR",

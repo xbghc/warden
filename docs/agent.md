@@ -21,8 +21,8 @@ its task brief to the assigned agent. The brief includes the task title, goal, a
 assignment, workspace path, development branch and development instructions.
 
 Copying a brief only writes text to the clipboard. It does not launch an agent or update review state.
-Review feedback is exchanged through the user's own tools. Click a diff line
-number to copy its location; Shift-click extends the copied range on the same side.
+Review feedback is exchanged through the user's own tools. In a native Warden diff, select a line
+or range and run **Warden: 复制审阅位置** (`Ctrl+Alt+C`, macOS `Cmd+Alt+C`).
 
 Inline comments, comment exports and the `warden feedback` / `warden reply` commands have been
 removed. Historical review fields in existing state files are retained as opaque data on unrelated

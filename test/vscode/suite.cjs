@@ -90,8 +90,89 @@ exports.run = async () => {
     await vscode.commands.executeCommand('warden.connect', tasks[0]);
     assert.equal((await state()).connectionPreview.connectedIds.length, 0);
     assert.equal(await fs.readFile(path.join(fixture.root, 'human.txt'), 'utf8'), 'Human code\n');
+    // The packaged host must preserve normal hooks and recover its exact staged version.
+    const primaryGit = (...args) => execFileSync('git', ['-C', fixture.root, ...args], { encoding: 'utf8' }).trim();
+    primaryGit('add', 'human.txt');
+    primaryGit('commit', '-qm', 'Human development');
+    await workbench.refresh();
+    currentFiles = await workbench.getChildren(tasks[0]);
+    await workbench.openDiff(currentFiles[0]);
+    const hook = path.join(fixture.root, '.git', 'hooks', 'commit-msg');
+    await fs.writeFile(hook, '#!/bin/sh\necho blocked-by-hook >&2\nexit 1\n');
+    await fs.chmod(hook, 0o755);
+    await assert.rejects(workbench.deliver(tasks[0], 'Reviewed delivery'), /blocked-by-hook/);
+    assert.equal((await state()).workflow.changes[0].integration.prepared, true);
+    await fs.unlink(hook);
+    await workbench.refresh();
+    currentFiles = await workbench.getChildren(tasks[0]);
+    await workbench.openDiff(currentFiles[0]);
+    await workbench.deliver(tasks[0], 'Reviewed delivery\n\nKeep normal commit hooks');
+    assert.equal(primaryGit('log', '-1', '--format=%B'), 'Reviewed delivery\n\nKeep normal commit hooks');
+    const accepted = (await state()).workflow.changes[0].deliveries[0];
+    assert(accepted.id && accepted.commit, 'delivery is durable');
+    assert.equal((await state()).workflow.changes[0].worktree, workspace);
+
+    await workbench.refresh();
+    const session = workbench.session;
+    const count = (await state()).workflow.changes.length;
+    await assert.rejects(workbench.handleAction({ type: 'task.create', title: 'Wrong repository', body: '' }, 'old-session'), /仓库已切换/);
+    assert.equal((await state()).workflow.changes.length, count);
+    // Hold a real pre-mutation read until creation commits; it must not hide the newly saved task.
+    await workbench.reading;
+    const engine = workbench.backend;
+    const execute = engine.execute;
+    let releaseRead;
+    let capturedRead;
+    const heldRead = new Promise((resolve) => {
+      releaseRead = resolve;
+    });
+    const captured = new Promise((resolve) => {
+      capturedRead = resolve;
+    });
+    let hold = true;
+    engine.execute = async (command, request) => {
+      const result = await execute.call(engine, command, request);
+      if (command === 'workflow.get' && hold) {
+        hold = false;
+        capturedRead();
+        await heldRead;
+      }
+      if (command === 'task.create') releaseRead();
+      return result;
+    };
+    try {
+      const reading = workbench.refresh();
+      await captured;
+      await workbench.handleAction({ type: 'task.create', title: 'Fresh workspace', body: 'Line one\nLine two' }, session);
+      await reading;
+    } finally {
+      releaseRead();
+      engine.execute = execute;
+    }
+    const newTask = (await state()).workflow.changes.at(-1);
+    assert.equal(newTask.body, 'Line one\nLine two');
+    await workbench.handleAction({ type: 'task.start', taskId: newTask.id, kind: 'shared', agent: 'worker-b' }, session);
+    await workbench.handleAction({ type: 'task.brief', taskId: newTask.id }, session);
+    assert.match(await vscode.env.clipboard.readText(), /执行者：worker-b/);
+    assert.notEqual((await state()).workflow.changes.at(-1).worktree, workspace);
+
+    const beforeHistory = primaryGit('rev-parse', 'HEAD');
+    const draft = { head: beforeHistory, start: beforeHistory, commits: [{ sha: beforeHistory, message: 'Arrange accepted delivery' }] };
+    await workbench.handleAction({ type: 'history.preview', draft }, session);
+    assert.equal(workbench.historyPreview.canApply, true);
+    await workbench.handleAction({ type: 'history.apply', id: workbench.historyPreview.id, head: beforeHistory }, session);
+    assert.equal(primaryGit('log', '-1', '--format=%B'), 'Arrange accepted delivery');
+    assert.equal((await state()).workflow.changes[0].deliveries[0].id, accepted.id);
+    assert.notEqual((await state()).workflow.changes[0].deliveries[0].commit, accepted.commit);
+    assert.equal(workbench.historyDraft, undefined);
+    workbench.documents.contents.clear();
+    assert.equal(await workbench.documents.provideTextDocumentContent(pinnedDoc.uri), 'Agent addition\n', 'saved native snapshots survive memory eviction');
+    await workbench.open(fixture.root);
+    assert.notEqual(workbench.session, session, 'reopening the repository creates a new session');
+    await assert.rejects(workbench.handleAction({ type: 'task.create', title: 'Stale view', body: '' }, session), /仓库已切换/);
+    assert.equal((await state()).workflow.changes.length, count + 1);
     console.log(
-      'Warden extension host: shared task/preview Git, primary isolation, native readonly diff, pinned review, stale-delivery rejection, setup and terminal passed',
+      'Packaged extension passed: native readonly review, version guards, preview/setup, normal hooks, recovery, multiline delivery, fresh workspaces, stale-session rejection and history mapping',
     );
   } finally {
     await workbench.close();

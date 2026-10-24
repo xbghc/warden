@@ -13,7 +13,7 @@ primary baseline already incorporated by the workspace. Live uncommitted edits r
 formal delivery in this version requires a clean committed source.
 
 Delivery history and successful workspace-hook output are collapsed on the task page. Expand
-**交付** to inspect previous batches or **工作区脚本** to inspect hook output. Failed hooks remain visible. The file-list heading shows
+**交付记录** to inspect previous batches or **初始化脚本** to inspect hook output. Failed hooks remain visible. The file-list heading shows
 the total number of changed files; layout controls use icons with accessible labels and tooltips.
 The same [interface copy rules](design.md#interface-copy) apply to preview, history, synchronization
 and settings. Operational consequences and recovery instructions stay beside their actions.
@@ -53,8 +53,8 @@ inside a removed worktree falls back to the working tree on the next load. Reusi
 branch clears its historical target metadata.
 
 Navigation stays together in the left sidebar: *预览*, *提交历史*, ordered tasks and the
-synchronization/settings sheets. Within a task, its file list selects the diff directly. Connection
-selection is independent and belongs to the independent preview page.
+synchronization/settings panels. Within a task, its file list selects the diff directly. Connection
+selection is independent and remains available in each task row of the native tree.
 
 Review presents the complete file list for the current comparison. Staging does not establish that
 a file has been reviewed.
@@ -62,28 +62,20 @@ Local review opens `all`, including staged, unstaged and untracked content in th
 files. Saved `working` or `staged` startup targets open `all` in the same workspace. Their read-only
 APIs remain available for explicit comparisons against HEAD or the index.
 
-`base:<ref>` is for a branch a coding agent has been working on, committing as it goes: one tree with
-everything since the branch forked off `<ref>` — the commits plus whatever is still uncommitted or
-untracked. The diff runs against the merge base, so commits that landed on `<ref>` after the fork are
-not listed as reverted (which is what a plain `git diff <ref>` would do). The *相对于* field under
-*审阅整条分支* suggests the base for you — the main worktree's branch when a sibling worktree is under
-review, otherwise `main` or `master` — and takes any ref. Under it the form names the fork point (the
-merge base with that ref, `GET /api/fork-point`) with how many commits the branch is ahead of it and how
-many landed on the base since, and the list marks that commit with a *分叉自* chip and a rule above it:
-what sits above is the branch's own work.
+The internal target model also supports branch and arbitrary-range reads for compatibility tests.
+The product opens task comparisons and commits through native VS Code diff editors. It does not
+provide the old browser branch-comparison form or a public HTTP target API.
 
 ## Read-only review
 
-Read markers and `PUT /api/targets/:key/viewed` have been removed; requests return 404.
-Inline comments and their dedicated endpoints have been removed. Comment creation, editing, replies,
-reanchoring and export requests return 404. Click a line number to copy its location, or Shift-click
-to copy a range from the last copied line on the same side.
+Diffs use immutable `warden-review:` documents and cannot modify source files or the real index.
+Select a line or range and run **Warden: 复制审阅位置** (`Ctrl+Alt+C`, macOS `Cmd+Alt+C`) to copy
+`path:start-end`. Native diff navigation, folding and search remain available.
 
-Review does not modify source files or the real index. File, hunk and line staging controls and the
-legacy `POST /api/targets/:key/stage` endpoint have been removed; requests to that endpoint return
-404. Staging and unstaging through external Git tools do not change the review scope or establish
-that content has been read. Formal delivery still prepares and commits the selected delivery in
-the primary checkout using the normal Git index and commit hooks.
+There are no read markers, inline comments or staging controls. Staging and unstaging through
+external Git tools do not change the review scope or establish that content has been read. Formal
+delivery still prepares the selected delivery in primary and commits with normal Git hooks.
+The retired viewed/comment/stage endpoints return 404 in the test-only compatibility adapter.
 
 ## Complete delivery content
 
@@ -101,14 +93,11 @@ folding remain available.
 
 ## Auto-refresh
 
-warden polls the worktree every 1.5 s while the page is open (`git status --porcelain
---untracked-files=all`, HEAD, the branch name, plus mtime and size of the paths status reports — enough to notice a second edit to an
-already-modified file) and pushes a change event over `GET /api/events` (SSE). The page then re-runs
-the normal refresh for the selected comparison: reload its file list and open diff. A committed
-task comparison stays pinned until its explicit refresh action. The current view and current file
-are left alone, and the diff is scrolled back to where you were reading.
-Turn it off with the *自动* toggle next to the refresh button; `r` still
-refreshes by hand.
+The extension observes repository and state changes, with periodic reconciliation when events are
+missed. Live inventory and connection status refresh independently of committed review snapshots.
+A committed task comparison stays pinned until the user opens its current differences again; a
+changed source, delivery boundary or primary HEAD invalidates delivery from the old review.
 
-The same stream carries a `state` event when the state file's mtime moves, so changes made by
-another Warden instance refresh the page.
+Each native document has a persisted immutable snapshot, so reopening an editor after an extension
+reload cannot silently display a newer file under the old review identity. A missing snapshot asks
+the user to reopen the comparison. No local server, SSE stream or browser polling is involved.

@@ -1,6 +1,6 @@
 # Warden page design
 
-The browser and native VS Code extension share the [workflow](workflow.md). Human editing uses
+The VS Code extension implements the [workflow](workflow.md). See [VS Code](vscode.md) for the native tree, review editors and packaged webview forms. Human editing uses
 primary; runtime composition uses the independent preview directory. The new page is implemented.
 Wireframes describe intent rather than exact labels. Updated 2026-10-23.
 
@@ -424,7 +424,7 @@ The implementation follows these bounded choices:
    and merge commits. Isolated cherry-pick preview must preserve final content. Apply is local only.
 5. Rebase checks run in isolated temporary worktrees; explicit execution leaves actual
    conflicts for manual handling. Batch results are per workspace.
-6. The Git mechanism remains an internal server module. Warden's external shared Git repository
+6. The Git mechanism remains an internal engine package. Warden's external shared Git repository
    backs task, preview and operation worktrees; primary remains separate. External backups and
    operation journals support interrupted operations, not undo UI.
 
@@ -449,7 +449,7 @@ The proposal keeps these operations independent:
 
 Remaining complexity explains real operations: stale preview content, source ranges, replay conflicts
 and previewed history edits. It must not become extra lifecycle bookkeeping. Implementation and
-browser verification follow these boundaries.
+extension-host and webview browser verification follow these boundaries.
 
 ## Research references
 

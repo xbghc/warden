@@ -33,14 +33,15 @@ the same workspace. Unrelated historical metadata and internal snapshot objects 
 
 ## Security model
 
-Single user, local only. The server binds to `127.0.0.1` and executes Git with argument arrays,
+Single user, in the VS Code workspace extension host (local, SSH, WSL or container). There is no
+production HTTP listener. The internal engine executes Git with argument arrays,
 through Node's `execFile` or the Rust core's fixed status operation, without a shell. General
 reads go through an argument whitelist (`rev-parse`, `diff`, `show`, `log`,
 `worktree list`, `ls-files`, `status`, `merge-base`, `rev-list`, `for-each-ref`, `check-ref-format`,
 `grep` without `-O` / `--open-files-in-pager`, and `config` only as `--get`, `--get-all` or
 `--get-regexp` of one name or pattern; `var` only for `GIT_ATTR_GLOBAL` and `GIT_ATTR_SYSTEM`)
 that refuses option-looking refs and any write-capable
-flag; requests that would need anything else get HTTP 400. The writes are few and each composes its
+flag; requests that would need anything else receive a structured engine error. The writes are few and each composes its
 own arguments. Diff review is read-only: the legacy `POST /api/targets/:key/stage` endpoint and its
 partial index-patch writer have been removed. The `PUT /api/targets/:key/viewed` endpoint is also
 removed and returns 404.
@@ -50,7 +51,7 @@ backup metadata to verify object connectivity before publishing a shared-reposit
 supplied flags and the write-capable `--lost-found` form remain forbidden.
 `POST /api/worktrees`, `POST /api/worktrees/release` and `POST /api/worktrees/remove` run
 `git worktree add`, `git branch`, `git switch`, `git worktree remove` and `git branch -d` with a
-branch name git has validated, a ref that resolves, and a slot path the server composes from a
+branch name git has validated, a ref that resolves, and a slot path the engine composes from a
 number — `<repo>-<n>` beside the main worktree; no request names a directory. The working tree and
 HEAD of an existing checkout are normally written inside such a slot: `git switch <branch>` into a free
 one (detached, clean) when a branch is checked out there, `git switch --detach` when it is released,
@@ -101,7 +102,7 @@ reap the direct Git child before returning. Reads set `GIT_OPTIONAL_LOCKS=0`; th
 refreshed. The N-API binding passes the calling Node worker's environment explicitly, and the core
 independently removes repository redirection variables. Platforms without a prebuilt module use
 the same fixed operation through the guarded Node runner. Both paths hash original bytes; paths
-retain the server's existing UTF-8 representation. Watching repeated edits to a non-UTF-8 filename
+retain the engine's existing UTF-8 representation. Watching repeated edits to a non-UTF-8 filename
 still has the existing lossy-path limitation.
 
 Status results are not retained across completed requests: external agents and ordinary Git
@@ -118,7 +119,7 @@ blocks the mutation. Backup creation copies files without running repository fil
 Switching branches in a reused slot passes `--no-overwrite-ignore`, so Git refuses to overwrite
 ignored local configuration even when status reports the slot clean.
 
-Task notes and ordering write only Warden state. Explicit allocation creates/adopts a validated
+Task notes and ordering write only Warden state. Explicit allocation creates a fresh logical workspace in a validated
 numbered workspace from the selected primary baseline, without dependency enforcement.
 `workflow.changes[].deliveries` stores stable delivery IDs, source ranges, primary commits and
 review records. `sourceBase` distinguishes a delivered source tip from its squash commit.
@@ -204,7 +205,7 @@ The real files/index need no change. `historyDraft` journals publication and sub
 mapping. The temporary worktree and operation backup are removed after that mapping is durable.
 No remote push or user-facing undo/restore operation is provided.
 
-All mutation arguments are composed by the server; requests cannot supply raw Git commands or
+All mutation arguments are composed by the engine; requests cannot supply raw Git commands or
 candidate directories. Local fetches use validated repositories and exact object IDs. Source
 history stays in the task workspace; delivery records associate it with the final primary commit
 without adding retention refs. Successful delivery, synchronization and history publication retire
@@ -224,23 +225,28 @@ from writing concurrently.
 
 User-configured workspace hooks are the deliberate shell interface (`/bin/sh -c`, or Git for
 Windows' bundled `sh.exe -c`, with cwd/env and bounded output/timeout). They use the same Git
-environment isolation as server Git calls. Warden records hook output and exit status without
+environment isolation as engine Git calls. Warden records hook output and exit status without
 interpreting the script as an agent lifecycle. Planning a task does not execute hooks.
 Windows shell discovery uses a fixed `git --exec-path` invocation with a five-second timeout and
 removes inherited `GIT_EXEC_PATH`; this installation lookup does not read or change the repository.
 
-Binding to `127.0.0.1` keeps other machines out but not other web pages, which reach the server
-through the browser. Every request whose `Host` is not `127.0.0.1` or `localhost` is refused with
-403, reads included: that is what a DNS-rebinding page — its own domain re-pointed at `127.0.0.1`,
-and so same-origin with warden — cannot hide. Open warden under one of those two names; a tunnel or
-proxy that rewrites the host name will be refused. A mutating request the browser labels as coming
-from another origin (`Sec-Fetch-Site: cross-site`, or an `Origin` that is not the server's own) is
-refused with 403 as well, so a page from elsewhere cannot drive the server through the browser it
-is open in.
+The webview receives only presentation models. A finite, runtime-validated action union crosses
+its message boundary; session tokens reject messages from a previous repository, and each surface
+can invoke only its own actions. Scripts and styles are packaged locally with a restrictive content
+security policy. The extension requires workspace trust before opening an engine or running actions.
+It does not expose arbitrary Git, filesystem or shell execution to a webview. User-configured hooks
+and the preview command remain explicit shell entry points.
 
-warden itself makes one request off the machine, the update check: a `GET` of
-`https://registry.npmjs.org/@xbghc%2fwarden/latest`, no more than once a day, carrying nothing about
-the repository or the review. The other way out is git's own: a checkout into a clone slot with
-*先 fetch 远端* ticked runs `git fetch --all` in that clone, which reaches its remotes with your git
-configuration and credentials, as running it yourself would. `--no-update-check` (or the environment switches under [Install / run](../README.md#install--run))
-removes it.
+A separate token-owned preview lease elects one background synchronizer per repository. The existing
+repository mutation lock still serializes writes from all windows. Watch notifications are hints;
+content fingerprints and periodic reads cover missed events. Closing a session drains in-flight
+operations and releases watchers and leases before another repository is opened.
+
+Native read-only review documents are immutable snapshots stored under VS Code extension storage.
+Their random URI identities survive editor reloads without re-reading mutable source content. Message
+and history drafts use repository-keyed workspace state; Git operation journals stay in the existing
+Warden state location. Old HTTP host/origin checks remain only in `test/compat`, which is not bundled.
+
+Updates are managed by VS Code and the Marketplace. There is no npm update request or CLI launcher.
+Workspace allocation and preview composition use local Git operations. Legacy clone-fetch code is
+retained for regression coverage and is not exposed in the extension's new-workspace form.

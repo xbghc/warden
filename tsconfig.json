@@ -5,5 +5,5 @@
     "types": ["node"],
     "noEmit": true
   },
-  "include": ["bin", "packages/shared/src", "packages/server/src", "test"]
+  "include": ["packages/shared/src", "packages/engine/src", "test"]
 }

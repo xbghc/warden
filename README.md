@@ -1,96 +1,62 @@
-# warden
+# Warden
 
-A local tool for developing one requirement with several coding agents. Plan small changes,
-operate agent workspaces, review their diffs and build a clear history on your **primary development
-branch** (主开发分支).
+A VS Code workbench for developing one requirement with independent task workspaces, native
+read-only review, an isolated live preview, and clear commits on your **primary development branch**.
+Warden supplies the workspaces and Git operations; you choose and run your own coding tools.
 
-The working copy includes a [VS Code extension](docs/vscode.md), persistent independent previews,
-and commit-history arrangement. These changes have not yet been published. ACP integration is deferred.
-The browser and CLI remain available and share the same state and operation locks.
+## Install
 
-## Install / run
+Install **Warden Workspace Review** (`xbghc.warden`) in VS Code, open the primary directory, and
+choose **Warden: 选择主开发分支**. Git must be available in the workspace environment. The extension
+runs in desktop VS Code, Remote SSH, WSL and Dev Containers. It requires Workspace Trust.
+There is no Warden server, browser application or CLI to start, and no separate Node/Rust installation
+is needed to use the extension. This working copy has not been published as a new release.
 
-Node.js 20+ is required.
-
-```sh
-npx @xbghc/warden            # review the repo in the current directory
-npx @xbghc/warden ~/proj     # or give a path
-```
-
-or install globally:
+To build a local VSIX:
 
 ```sh
-npm i -g @xbghc/warden
-warden [repoPath] [--port <n>] [--no-open] [--no-update-check]
+pnpm install
+pnpm build:native
+pnpm package:vscode
+code --install-extension packages/vscode/warden-0.18.2.vsix
 ```
-
-The server picks the first free port from 4100 (or `--port`), prints the URL and tries to open a
-browser via `wslview`, `explorer.exe`, then `xdg-open`. If none of those exist it only prints the URL.
-Several instances on the same repository can run at the same time.
-
-On start warden asks the npm registry whether a newer release exists, at most once a day (the answer
-is cached in `~/.local/share/warden/update-check.json`). When there is one, a line in the terminal
-and a chip beside the wordmark say so; clicking the chip copies the command — `npx @xbghc/warden@latest`
-for an npx run, whose cache otherwise keeps serving the old copy, `npm i -g @xbghc/warden@latest`
-for a global install. The check never delays startup and fails silently. `--no-update-check`,
-`WARDEN_NO_UPDATE_CHECK=1`, `NO_UPDATE_NOTIFIER=1` or `CI` turn it off.
 
 ## Development workflow
 
-Warden is a passive workbench for parallel agent development inside one requirement.
-The **primary development branch** (主开发分支), such as `feature/order`, is where reviewed
-changes accumulate. It need not be the repository's default branch.
+1. **Plan.** Add task titles and multiline notes in Warden. Dragging tasks changes plan order only.
+2. **Create a workspace.** Every creation is a fresh logical workspace and branch. Warden manages
+   physical directory allocation internally. Configure an optional initialization script; run
+   agents with your own tools.
+3. **Connect for preview.** Use each task's connection action. Saved primary content and connected
+   task changes appear in a persistent independent preview directory for tests and dev servers.
+4. **Review and commit.** Open task files in native read-only diffs. Enter a multiline message in
+   the current-task view and submit the reviewed increment with ordinary Git hooks and signing.
+5. **Synchronize or arrange history.** Explicitly rebase selected workspaces, or edit a history
+   draft, preview it in isolation, then apply. Warden does not push rewritten history.
 
-1. **Plan in the left navigation.** Add and order tasks; create each workspace when needed.
-   Ordering does not impose dependencies. One workspace can deliver multiple commits.
-2. **Create a workspace.** Configure optional creation/reuse hooks in settings. Warden supplies
-   the workspace and hook context; use your own tools or scripts to run agents there. By default,
-   task worktrees and preview share an external Git repository, keeping development history out of primary.
-3. **Connect for preview.** Connect selected workspaces. Their committed and uncommitted
-   increments are composed with saved primary edits in a separate preview directory for your dev server and tests.
-   A conflicting connection fails and preserves the previous preview. HEAD and index stay unchanged.
-4. **Review and commit.** Review the complete small delivery, enter a message and commit with normal Git hooks.
-   The action uses the reviewed source version; changes require fresh review. Other connections
-   remain in the independent preview. The workspace remains available afterwards.
-5. **Synchronize or arrange history when needed.** Checks do not change agent files. Rebase one,
-   selected or all eligible workspaces explicitly. In *提交历史*, edit messages and reorder a
-   selected linear range, preview it, then apply. There is no undo or automatic push.
-
-Edit human code in primary and agent code in task workspaces. Dependencies and user-run validation
-belong in the persistent preview directory; configure an idempotent setup script for its environment. A clean checkout does not mean an agent has stopped.
-No readiness declaration, task-completion checkbox or workspace-release step is required.
-
-The first version delivers clean, committed source changes as one squash commit per operation.
-History arrangement covers the selected start through HEAD, up to the latest 100 commits;
-merge/root commits and arrangements that change the final file content are rejected.
-See [Workflow](docs/workflow.md), [Worktrees and tasks](docs/worktrees.md) and
-[Development](docs/development.md#storybook) for local UI previews.
+Edit human code in primary and agent code in task workspaces. Preview is generated runtime input.
+A failed connection preserves the previous preview; a failed commit preserves recoverable content.
+No readiness declarations, task-completion checkboxes or agent-process inference are required.
 
 ## Keyboard
 
-| Key | Action |
-|---|---|
-| `r` | Refresh the current target (file list + open diff) |
-| `j` / `k` | Next / previous file in the selected task |
-| `n` / `p` | Next / previous hunk |
-| Click a line number | Copy the review location (`path:line`) |
-| `Shift`+click a line number | Copy the range from the line last copied, `src/a.ts:12-18` |
-
-The copy button beside the path in the file header copies the path, relative to the repository.
+Use the Command Palette for `Warden` actions. In a native review document, **Ctrl+Alt+C**
+(**Cmd+Alt+C** on macOS) copies the original relative file location or selected line range.
+All normal VS Code diff navigation and accessibility features remain available.
 
 ## Documentation
 
-| | |
-|---|---|
-| [VS Code](docs/vscode.md) | Extension installation, native review, preview runtime, scripts and delivery |
-| [Workflow](docs/workflow.md) | User-controlled development loop, current-version scope and implementation alignment |
-| [Interaction design](docs/design.md) | Agreed behavior, connection previews, commit arrangement and open product decisions |
-| [Reviewing](docs/reviewing.md) | Read-only review, pinned delivery versions, targets, auto-refresh |
-| [Working with agents](docs/agent.md) | Workspace boundaries, task briefs and external tools |
-| [Worktrees and tasks](docs/worktrees.md) | Commit plans, workspace hooks, squash acceptance and synchronization |
-| [Platform](docs/environment.md) | WSL2 and browser access |
-| [State and security](docs/internals.md) | The state file, what git commands run and why |
-| [Development](docs/development.md) | Building, testing, releasing, Storybook |
+| Guide | Contents |
+| --- | --- |
+| [VS Code](docs/vscode.md) | Native navigation, forms, preview runtime, scripts and migration |
+| [Workflow](docs/workflow.md) | Product responsibilities and Git operation semantics |
+| [Interaction design](docs/design.md) | Interaction contract and desktop adaptation |
+| [Reviewing](docs/reviewing.md) | Immutable comparisons and delivery versions |
+| [Working with agents](docs/agent.md) | External tools and script context |
+| [Worktrees and tasks](docs/worktrees.md) | Storage isolation, delivery and synchronization |
+| [Platform](docs/environment.md) | Local and remote workspace environments |
+| [State and security](docs/internals.md) | Persistence, locks and validated Git operations |
+| [Development](docs/development.md) | Build, test and release the extension |
 
 ## License
 

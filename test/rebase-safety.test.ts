@@ -3,10 +3,10 @@ import path from 'node:path';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DevelopmentChange, SlotKind } from '@warden/shared';
-import { resolveRepo, StateStore, WorkflowService } from '@warden/server';
-import * as backups from '../packages/server/src/backups.js';
-import * as git from '../packages/server/src/git.js';
-import { listWorktreesDetailed } from '../packages/server/src/worktrees.js';
+import { resolveRepo, StateStore, WorkflowService } from './compat/index.js';
+import * as backups from '../packages/engine/src/backups.js';
+import * as git from '../packages/engine/src/git.js';
+import { listWorktreesDetailed } from '../packages/engine/src/worktrees.js';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
 let fx: FixtureRepo;

@@ -19,7 +19,7 @@ import type {
   UpdateNotice,
   WorktreesResponse,
 } from '@warden/shared';
-import { createApp, resolveRepo, StateStore } from '@warden/server';
+import { createApp, resolveRepo, StateStore } from './compat/index.js';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
 let fx: FixtureRepo;

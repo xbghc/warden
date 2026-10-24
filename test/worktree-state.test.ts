@@ -3,9 +3,9 @@ import os from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { gitEnvironment, runGit } from '../packages/server/src/git.js';
-import { loadNativeBinding } from '../packages/server/src/native.js';
-import { readWorktreeState, readWorktreeStateWithGit } from '../packages/server/src/worktree-state.js';
+import { gitEnvironment, runGit } from '../packages/engine/src/git.js';
+import { loadNativeBinding } from '../packages/engine/src/native.js';
+import { readWorktreeState, readWorktreeStateWithGit } from '../packages/engine/src/worktree-state.js';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
 const fixtures: FixtureRepo[] = [];

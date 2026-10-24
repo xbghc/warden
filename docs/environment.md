@@ -2,24 +2,22 @@
 
 ## Windows, Linux and macOS
 
-Install Node.js 20 or newer and Git, with both available on `PATH`. Native Windows uses Git for
-Windows. Repository paths may contain spaces or Unicode; target keys accept Windows drive paths,
-UNC paths and POSIX absolute paths.
+Warden runs in the VS Code workspace extension host. Git must be installed in that environment.
+The packaged extension includes Node code and tested Rust bindings for Linux x64/arm64 with glibc,
+macOS x64/arm64, and Windows x64. Unsupported native targets use the existing Git compatibility
+backend; an installed but unloadable artifact is reported as a packaging error.
 
-Workspace `create` and `reuse` hooks use POSIX shell syntax on every platform. Linux and macOS run
-`/bin/sh`; Windows locates the `sh.exe` bundled with Git for Windows, including portable installs.
-Missing shell support is reported as a failed hook and leaves the workspace available for retry.
-Use the provided `WARDEN_*` variables to identify the repository and task; quote path arguments.
-
-The complete automated suite is a release gate on all three operating systems. See
-[Development](development.md#building-and-testing) for the Node matrix and test isolation rules.
+Workspace scripts use a POSIX shell. Git for Windows supplies it on Windows. Script-specific tools
+must be installed by the user. Preview terminals and tasks inherit the workspace runtime environment.
+Pure browser virtual workspaces are unsupported because Warden needs Git processes and real worktrees.
 
 ## WSL2 notes
 
-- Access the UI from the Windows browser at the printed `http://127.0.0.1:<port>/` URL; WSL2 forwards
-  localhost automatically.
-- Install [wslu](https://github.com/wslutilities/wslu) for `wslview` if `explorer.exe` doesn't open the
-  URL for you, or run with `--no-open`.
-- Keep the repository on the Linux filesystem for reasonable git performance.
-- Clipboard access uses `navigator.clipboard`, which works on `localhost`; if you expose the port via
-  another hostname the copy button falls back to `document.execCommand('copy')`.
+Install Warden into the WSL workspace extension host and open the Linux primary directory through
+VS Code Remote WSL. Git, task workspaces, preview files and scripts run inside WSL. There is no browser
+server, localhost probing or Windows port handoff. Remote SSH and Dev Containers follow the same
+placement rule: execution and repository state stay beside the workspace.
+
+Do not add the generated preview directory as an editor workspace root. Use its path for user-owned
+terminal, task and debug configurations. Closing the last Warden window pauses preview synchronization;
+reopening checks state and resumes it. Warden does not manage external agent or development-server processes.

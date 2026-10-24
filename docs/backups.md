@@ -11,7 +11,7 @@ paths against its target and intermediate replay commits before execution.
 Backups live at `backups/<timestamp>-<uuid>/` beside this repository's `state.json`; see
 [State](internals.md#state) for the data directory. `GET /api/backups` lists completed backups with
 their reason, original checkout path, HEAD and backup path. Release/remove responses also include
-the created `backup`. The listing survives a server restart and does not rely on a successful
+the created `backup`. The listing survives a extension restart and does not rely on a successful
 post-operation state write. Warden never pushes backups anywhere.
 
 Rebase and history backups are temporary recovery data. Their operation journals retain their

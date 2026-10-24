@@ -3,7 +3,7 @@ import path from 'node:path';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { FileDiff, FilesResponse } from '@warden/shared';
-import { createApp, resolveRepo, StateStore } from '@warden/server';
+import { createApp, resolveRepo, StateStore } from './compat/index.js';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
 // A merge stopped on a conflict: the file that needs looking at most must not vanish from the

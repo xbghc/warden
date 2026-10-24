@@ -3,12 +3,12 @@ import path from 'node:path';
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import type { DevelopmentChange } from '@warden/shared';
-import { createApp, resolveRepo, StateStore, WorkflowService } from '@warden/server';
-import { GitSandbox, applyPatch, oid, patchBetween } from '../packages/server/src/git-sandbox.js';
-import { PreviewService } from '../packages/server/src/preview.js';
-import { HistoryService } from '../packages/server/src/history.js';
-import { listSafetyBackups } from '../packages/server/src/backups.js';
-import { listWorktreesDetailed } from '../packages/server/src/worktrees.js';
+import { createApp, resolveRepo, StateStore, WorkflowService } from './compat/index.js';
+import { GitSandbox, applyPatch, oid, patchBetween } from '../packages/engine/src/git-sandbox.js';
+import { PreviewService } from '../packages/engine/src/preview.js';
+import { HistoryService } from '../packages/engine/src/history.js';
+import { listSafetyBackups } from '../packages/engine/src/backups.js';
+import { listWorktreesDetailed } from '../packages/engine/src/worktrees.js';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
 let fx: FixtureRepo;

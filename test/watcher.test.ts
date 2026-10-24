@@ -2,8 +2,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { createApp, resolveRepo, RepoWatcher, statusPaths, StateStore } from '@warden/server';
-import * as worktreeState from '../packages/server/src/worktree-state.js';
+import { createApp, resolveRepo, RepoWatcher, statusPaths, StateStore } from './compat/index.js';
+import * as worktreeState from '../packages/engine/src/worktree-state.js';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
 let fx: FixtureRepo;

@@ -2,8 +2,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { expect, it } from 'vitest';
-import { snapshotObjects, snapshotStore, snapshotWorktree } from '../packages/server/src/snapshots.js';
-import { runGit } from '../packages/server/src/git.js';
+import { snapshotObjects, snapshotStore, snapshotWorktree } from '../packages/engine/src/snapshots.js';
+import { runGit } from '../packages/engine/src/git.js';
 import { makeFixtureRepo } from './fixtures/make-repo.js';
 
 it('captures saved tracked and untracked content externally without changing the real index or refs', async () => {

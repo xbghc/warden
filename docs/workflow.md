@@ -24,7 +24,7 @@ merging that branch into the company's main branch remains outside Warden's core
 | Activity | User responsibility | Warden responsibility |
 |---|---|---|
 | Plan | Decompose the requirement and arrange the work sequence. | Keep one ordered plan of intended commits; TODO and orchestration are the same thing. |
-| Prepare | Choose which work to start and how its workspace should be initialized. | Create or reuse a workspace from the development branch and support user-defined workspace hooks. |
+| Prepare | Choose which work to start and how its workspace should be initialized. | Allocate a fresh logical workspace from the development branch and support user-defined workspace hooks. |
 | Execute | Choose and run agents using external tools or user scripts. | Supply the workspace path and generic hook context; execution tools remain outside Warden. |
 | Preview and test | Choose connected worktrees and edit primary code and run the development server, lint or tests in the preview directory. | Compose their live changes in a persistent independent preview, preserving primary Git state. |
 | Review | Inspect the worktree's changes and decide whether they are ready to integrate. | Show the complete delivery diff before squash; let the user copy code locations for their own tools. |
@@ -77,7 +77,7 @@ without mandatory acceptance templates or agent-generated reports.
 A workspace is an execution resource, normally a Git worktree of Warden's external shared repository
 on a task branch based on the requirement's development branch. The bare repository lives at
 `<primary>-warden/repo.git`, independently of task, preview and temporary operation directories.
-Task paths remain `<primary>-<n>`. Warden creates or reuses workspaces and exposes generic hooks.
+Task paths remain `<primary>-<n>`. Warden allocates fresh logical workspaces and exposes initialization hooks. Reusing a free physical directory is an internal implementation detail; users never select or adopt an old workspace.
 The user chooses external tools for running agents and sending prompts. Warden has no terminal
 session model, agent launcher or process-control API.
 
@@ -241,7 +241,7 @@ branch. The implementation uses an isolated temporary worktree and a journaled e
 backup for this sequence, removing both after successful application and bookkeeping. The backup
 does not imply a user-facing restoration workflow or a permanent retention ref in the primary repository.
 Existing tools and libraries should inform the design; see [research references](design.md#research-references).
-The implementation is an internal server module; a separate repository is not needed for this version.
+The implementation is the internal `@warden/engine` package; a separate repository is not needed for this version.
 
 ## Current-version boundaries
 
@@ -272,10 +272,10 @@ The working copy implements the workflow above. It has not been published as a r
 | Connection | Live committed/uncommitted changes composed in an isolated worktree of the external shared Git repository, then published only to the persistent preview directory. Failed initial connections preserve the prior set and files. |
 | Later connection conflict | Preserve the last coherent preview and display stale status; user changes the connections or source work. |
 | Delivery | All current undelivered changes from a clean committed source, pinned by reviewed source, delivery boundary and primary HEAD. No file/commit subset picking in this version. |
-| Web commit | Normal primary-directory Git commit with hooks/signing. Failed hooks retain files/index. No test-passed checkbox or agent handoff. |
+| Extension commit | Normal primary-directory Git commit with hooks/signing. Failed hooks retain files/index. No test-passed checkbox or agent handoff. |
 | Rebase | Isolated checks and explicit single/selected/all execution, with per-workspace results and pinned heads. Actual conflicts are left for the user to handle. |
 | History | Select a start through HEAD within the latest 100 commits. Reorder/reword in an isolated cherry-pick preview; apply only linear ranges with identical final tree. No undo or remote push. |
-| Navigation | Single left navigation: runtime preview, history, ordered plan, synchronization/settings sheets. Selecting a task/file directly opens review. |
+| Navigation | Single left navigation: runtime preview, history, ordered plan, synchronization/settings panels. Selecting a task/file directly opens review. |
 
 `sourceBase` records the last delivered source tip, independently of the squash commit SHA.
 Each delivery has a stable identifier and a source range, primary parent, commit, message and
@@ -287,6 +287,6 @@ blocks replacement rather than being discarded. Interrupted operations recognize
 old/new snapshots. This operation bookkeeping is not an undo feature. Users handle unexpected
 edits and actual rebase conflicts themselves.
 
-Existing low-level checkout and ready/resume HTTP endpoints remain for compatibility, but are
-absent from the new UI. Legacy ready does not rebase. The CLI starts the review server; there are no
-comment feedback or reply commands.
+The VS Code extension is the only product entry point. Legacy HTTP adapters exist only in the
+regression test harness; no review server, browser application or CLI is shipped. Existing on-disk
+state, delivery associations and interrupted-operation journals remain compatible.

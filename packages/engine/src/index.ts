@@ -1,0 +1,12 @@
+export { Engine } from './engine.js';
+export type { EngineCommands, EngineCommand, EngineInput, EngineOutput } from './engine.js';
+export { resolveRepo } from './repo.js';
+export { StateStore, stateFilePath } from './state.js';
+export { RepoWatcher, statusPaths, DEFAULT_POLL_INTERVAL_MS } from './watcher.js';
+export { WardenError } from './errors.js';
+export { runGit, GitError, assertAllowedGitArgs } from './git.js';
+export { parseUnifiedDiff } from './diffparse.js';
+export { formatTodoExport } from './export.js';
+export { WorkflowService } from './workflow.js';
+export { PreviewService } from './preview.js';
+export { HistoryService } from './history.js';

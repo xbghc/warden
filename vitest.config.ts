@@ -2,9 +2,9 @@ import { configDefaults, defineConfig } from 'vitest/config';
 
 const integrationFiles = [
   'test/**/*.test.ts',
-  'packages/server/src/git-env.test.ts',
-  'packages/server/src/worktrees.test.ts',
-  'packages/server/src/shared-repository.test.ts',
+  'packages/engine/src/git-env.test.ts',
+  'packages/engine/src/worktrees.test.ts',
+  'packages/engine/src/shared-repository.test.ts',
 ];
 
 export default defineConfig({
@@ -19,7 +19,7 @@ export default defineConfig({
         extends: true,
         test: {
           name: 'unit',
-          include: ['packages/server/src/**/*.test.ts', 'packages/shared/src/**/*.test.ts', 'packages/web/src/lib/**/*.test.ts'],
+          include: ['packages/engine/src/**/*.test.ts', 'packages/shared/src/**/*.test.ts', 'packages/webview/src/**/*.test.ts'],
           exclude: [...configDefaults.exclude, ...integrationFiles],
           testTimeout: 5000,
         },

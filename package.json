@@ -1,7 +1,6 @@
 {
-  "name": "@xbghc/warden",
-  "version": "0.18.2",
-  "description": "Local web workbench to plan tasks, review git diffs, manage workspaces and integrate changes.",
+  "name": "warden-workspace",
+  "description": "VS Code workspace development and review workbench",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -16,60 +15,42 @@
     "agent",
     "wsl"
   ],
-  "bin": {
-    "warden": "./dist/cli.js"
-  },
-  "files": [
-    "dist",
-    "README.md",
-    "LICENSE"
-  ],
   "engines": {
     "node": ">=20"
   },
   "packageManager": "pnpm@10.33.0",
-  "publishConfig": {
-    "access": "public"
-  },
   "scripts": {
-    "dev": "concurrently -n server,web -c blue,green \"pnpm dev:server\" \"pnpm dev:web\"",
-    "dev:server": "tsx watch bin/cli.ts --port 4100 --no-open",
-    "dev:web": "pnpm --filter @warden/web dev",
-    "storybook": "pnpm --filter @warden/web storybook",
-    "build:storybook": "pnpm --filter @warden/web build:storybook",
-    "build": "rimraf dist && pnpm build:native && pnpm build:web && pnpm build:server",
+    "storybook": "pnpm --filter @warden/webview storybook",
+    "build:storybook": "pnpm --filter @warden/webview build:storybook",
+    "build": "pnpm build:native && pnpm build:vscode",
     "build:native": "node scripts/native-build.mjs",
-    "build:web": "pnpm --filter @warden/web build",
-    "build:server": "tsup && node scripts/native-build.mjs --copy-only",
     "lint": "biome check .",
-    "typecheck": "tsc --noEmit -p tsconfig.json && pnpm --filter @warden/web typecheck && tsc --noEmit -p packages/vscode/tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && pnpm --filter @warden/webview typecheck && tsc --noEmit -p packages/vscode/tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check:package": "node scripts/native-package-smoke.mjs",
     "check:release": "node scripts/check-release.mjs",
     "check:vscode": "node scripts/check-vscode-package.mjs",
     "bench:git": "node --import tsx scripts/bench-git.mjs",
-    "prepublishOnly": "pnpm check:release && pnpm lint && pnpm typecheck && pnpm build && pnpm test && pnpm check:package",
-    "build:vscode": "node scripts/check-release.mjs && node scripts/build-vscode.mjs",
+    "build:vscode": "node scripts/check-release.mjs && node scripts/build-vscode.mjs && pnpm build:webview",
     "package:vscode": "pnpm build:vscode && cd packages/vscode && vsce package --no-dependencies",
-    "test:vscode": "pnpm build:vscode && node --import tsx scripts/test-vscode.mjs"
+    "test:vscode": "node --import tsx scripts/test-vscode.mjs",
+    "build:webview": "pnpm --filter @warden/webview build"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.12",
-    "@hono/node-server": "^1.19.17",
     "@types/node": "^22.20.1",
     "@types/vscode": "1.95.0",
     "@vscode/test-electron": "2.5.2",
     "@vscode/vsce": "4.0.0",
-    "@warden/server": "workspace:*",
     "@warden/shared": "workspace:*",
-    "concurrently": "^9.2.4",
     "fflate": "0.8.2",
     "hono": "^4.13.7",
     "rimraf": "^6.1.3",
     "tsup": "^8.5.1",
     "tsx": "^4.23.13",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.11"
-  }
+    "vitest": "^4.1.11",
+    "@warden/engine": "workspace:*"
+  },
+  "private": true
 }

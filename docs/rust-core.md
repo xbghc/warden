@@ -11,9 +11,9 @@ core, with Git implementation choices made per operation and supported by measur
 | --- | --- |
 | `crates/warden-core` | Typed repository operations and errors, fixed Git status invocation, environment isolation, process/output limits, byte-level parsing |
 | `crates/warden-node` | Asynchronous N-API conversion between owned Rust values and JavaScript values |
-| `packages/server/src/worktree-state.ts` | Server adapter, HTTP error mapping and equivalent portable backend |
-| `packages/server/src/native.ts` | Loading the correct prebuilt binary, with explicit required/disabled modes |
-| `packages/server/src/workflow.ts` | Request-scoped checkout inventories and bounded isolated-replay reuse, alongside existing workflow coordination |
+| `packages/engine/src/worktree-state.ts` | Server adapter, HTTP error mapping and equivalent portable backend |
+| `packages/engine/src/native.ts` | Loading the correct prebuilt binary, with explicit required/disabled modes |
+| `packages/engine/src/workflow.ts` | Request-scoped checkout inventories and bounded isolated-replay reuse, alongside existing workflow coordination |
 
 The core has no dependency on Node, Hono, HTTP status codes, Warden's JSON state store, or the web
 application. Another Rust program can depend on `warden-core` directly and call
@@ -21,7 +21,7 @@ application. Another Rust program can depend on `warden-core` directly and call
 contains optional HEAD and branch, changed-entry count, changed paths, and a SHA-256 fingerprint
 of the exact porcelain bytes. An unborn branch has no HEAD; a detached checkout has no branch.
 
-The Node module remains loaded for the life of the server. Its async functions use Tokio for child
+The Node module remains loaded for the life of the extension host. Its async functions use Tokio for child
 processes and pipes; they do not block the JavaScript event loop or occupy libuv workers while
 waiting for Git. The core limits concurrent status processes to eight. Status results themselves
 are not retained across completed calls, because external editors and Git commands can change
@@ -44,7 +44,7 @@ and dirty state. Untracked files are enumerated individually so further edits in
 directory remain observable.
 
 The Rust parser consumes NUL records, including the additional source path carried by renames
-and copies. A rename contributes one dirty entry. Fingerprints use raw bytes; the server still
+and copies. A rename contributes one dirty entry. Fingerprints use raw bytes; the engine still
 represents filenames as UTF-8 strings, so its existing repeated-edit limitation for non-UTF-8 paths
 remains. The watcher also folds in mtime and size, because another edit to an already modified file
 can leave Git's porcelain output unchanged.
@@ -185,7 +185,7 @@ a reduction in total CPU or total memory.
 
 ## Remaining migration
 
-This boundary covers worktree observations and their first server consumers. Diff generation,
+This boundary covers worktree observations and their first engine consumers. Diff generation,
 preview composition, snapshots, delivery, explicit rebase and history replay still use their
 existing coordination modules and Git commands. They are separate migration candidates; none is
 silently routed through a partially compatible native Git implementation.

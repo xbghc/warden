@@ -2,12 +2,13 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const root = new URL('../', import.meta.url);
-const npm = JSON.parse(await readFile(new URL('package.json', root), 'utf8'));
+const workspace = JSON.parse(await readFile(new URL('package.json', root), 'utf8'));
 const extension = JSON.parse(await readFile(new URL('packages/vscode/package.json', root), 'utf8'));
 
-assert.match(npm.version, /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/, 'Releases require a stable X.Y.Z version.');
-assert.equal(extension.version, npm.version, 'The npm package and VS Code extension must have the same version.');
+assert.match(extension.version, /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/, 'Releases require a stable X.Y.Z version.');
+assert.equal(workspace.private, true, 'The workspace must not publish an npm product.');
+assert.equal(workspace.bin, undefined, 'The desktop product must not ship a CLI.');
 if (process.env.GITHUB_REF_TYPE === 'tag') {
-  assert.equal(process.env.GITHUB_REF_NAME, `v${npm.version}`, 'The release tag must match both package versions.');
+  assert.equal(process.env.GITHUB_REF_NAME, `v${extension.version}`, 'The release tag must match the extension version.');
 }
-console.log(`Release metadata checked: ${npm.name} and ${extension.publisher}.${extension.name} ${npm.version}.`);
+console.log(`Release metadata checked: ${extension.publisher}.${extension.name} ${extension.version}.`);

@@ -2,10 +2,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { chmod, mkdir, mkdtemp, open, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { resolveRepo, StateStore, WorkflowService } from '@warden/server';
-import { GitSandbox, oid } from '../packages/server/src/git-sandbox.js';
-import { PreviewService } from '../packages/server/src/preview.js';
-import { sharedRepositoryPath } from '../packages/server/src/shared-repository.js';
+import { resolveRepo, StateStore, WorkflowService } from './compat/index.js';
+import { GitSandbox, oid } from '../packages/engine/src/git-sandbox.js';
+import { PreviewService } from '../packages/engine/src/preview.js';
+import { sharedRepositoryPath } from '../packages/engine/src/shared-repository.js';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
 let fx: FixtureRepo;

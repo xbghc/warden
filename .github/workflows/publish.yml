@@ -1,24 +1,10 @@
-name: Publish npm and VS Code
+name: Publish VS Code
 
-# Push a vX.Y.Z tag matching both package versions to publish npm and VS Code.
-#
-# Auth is npm trusted publishing (OIDC) — no NPM_TOKEN secret, no token to rotate.
-# The registry hands out a short-lived credential only to this repo's publish.yml.
-#
-# This requires a Trusted Publisher configured on the package's npmjs.com settings
-# page (user `xbghc`, repo `warden`, workflow `publish.yml`). That page only exists
-# once the package does, so 0.1.0 was published from a laptop with `npm login`;
-# npm cannot bootstrap a brand-new package over OIDC (npm/cli#8544).
-#
-# There is deliberately no `registry-url:` on setup-node. Older versions wrote
-# `_authToken=${NODE_AUTH_TOKEN}` into .npmrc, which expands to empty with no token set and
-# could convince npm auth was already configured so it never started the OIDC exchange
-# (actions/setup-node#1551; fixed in v7 by dropping that dummy export). It is not needed
-# either way — registry.npmjs.org is the default registry.
+# Only a requested version tag publishes the exact VSIX tested by CI.
 on:
   push:
     tags: ['v*']
-  # Manual runs only verify Marketplace authentication; they never publish either package.
+  # Manual runs only verify Marketplace authentication; they never publish the extension.
   workflow_dispatch:
 
 permissions:
@@ -32,51 +18,6 @@ jobs:
   verify:
     if: github.event_name == 'push'
     uses: ./.github/workflows/ci.yml
-
-  publish:
-    name: Publish npm
-    if: github.event_name == 'push'
-    needs: verify
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    env:
-      WARDEN_NATIVE: required
-      WARDEN_NATIVE_PREBUILT: '1'
-      WARDEN_NATIVE_EXPECT_ALL: '1'
-    permissions:
-      contents: read
-      # Only the publishing job needs to request a registry credential.
-      id-token: write
-    steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: pnpm
-      # Node 22 bundles npm 10.x, but trusted publishing needs npm >= 11.5.1, and
-      # `pnpm publish` shells out to the npm CLI — so this is what OIDC keys off.
-      # An older npm silently falls back to token auth and then fails to authenticate.
-      # The same version also exercises package smoke in ci.yml before a tag is published.
-      - run: npm install -g npm@12.2.1 && npm --version
-      - run: pnpm install --frozen-lockfile
-      - name: Download native modules tested by this tag's CI
-        uses: actions/download-artifact@v8
-        with:
-          pattern: native-*
-          merge-multiple: true
-          path: native
-      - name: Check tag and package versions
-        run: pnpm check:release
-      # The reusable CI workflow verifies this exact tag across the supported matrix
-      # before this job can request an npm credential. prepublishOnly also verifies
-      # lint, types, build, tests and the packed CLI in the publishing checkout. It copies all
-      # five tested native modules without compiling a host-only replacement, and package smoke
-      # refuses to publish when any platform artifact is missing.
-      # `--provenance` is explicit on purpose: npm generates an attestation on its own for a
-      # trusted publish, but that did not happen through `pnpm publish` (0.2.0 shipped without
-      # one). pnpm's own release workflow passes the flag for the same reason.
-      - run: pnpm publish --access public --no-git-checks --provenance
 
   publish-vscode:
     name: Publish VS Code Marketplace
@@ -114,7 +55,7 @@ jobs:
       # Publish the tested VSIX unchanged without a PAT or Azure client secret.
       - name: Publish the tested VSIX with the Azure identity
         run: |
-          VERSION="$(node -p "require('./package.json').version")"
+          VERSION="$(node -p "require('./packages/vscode/package.json').version")"
           pnpm exec vsce publish --packagePath "packages/vscode/warden-$VERSION.vsix" --azure-credential
 
   verify-marketplace-auth:
