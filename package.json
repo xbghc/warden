@@ -40,8 +40,9 @@
     "@biomejs/biome": "^2.5.12",
     "@types/node": "^22.20.1",
     "@types/vscode": "1.95.0",
-    "@vscode/test-electron": "2.5.2",
+    "@vscode/test-electron": "3.1.0",
     "@vscode/vsce": "4.0.0",
+    "@warden/engine": "workspace:*",
     "@warden/shared": "workspace:*",
     "fflate": "0.8.2",
     "hono": "^4.13.7",
@@ -49,8 +50,7 @@
     "tsup": "^8.5.1",
     "tsx": "^4.23.13",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.11",
-    "@warden/engine": "workspace:*"
+    "vitest": "^4.1.11"
   },
   "private": true
 }

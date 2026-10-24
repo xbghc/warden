@@ -1,7 +1,8 @@
 # Development
 
 Warden is a pnpm workspace containing a VS Code extension, a reusable engine, shared contracts and
-webview components. Use Node 20+ for development and the pinned Rust toolchain for native builds.
+webview components. Use Node 22+ for development and the pinned Rust toolchain for native builds.
+The engine still supports Node 20; the VS Code test launcher requires Node 22 or newer.
 Using the packaged extension requires Git, not a separately installed Node or Rust runtime.
 
 ## Building and testing
