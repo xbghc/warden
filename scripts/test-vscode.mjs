@@ -1,13 +1,14 @@
 import path from 'node:path';
 import os from 'node:os';
-import { mkdtemp, mkdir, rm, writeFile, readFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile, readFile, realpath } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { unzipSync } from 'fflate';
 import { runTests } from '@vscode/test-electron';
 import { Engine } from '../packages/engine/src/engine.ts';
 import { stateFilePath } from '../packages/engine/src/state.ts';
 
-const directory = await mkdtemp(path.join(os.tmpdir(), 'warden-vscode-test-'));
+// Git resolves macOS temporary-directory symlinks before deriving the repository's state path.
+const directory = await realpath(await mkdtemp(path.join(os.tmpdir(), 'warden-vscode-test-')));
 const root = path.join(directory, 'repo');
 await mkdir(root);
 const git = (...args) =>
