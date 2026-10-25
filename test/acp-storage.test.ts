@@ -70,7 +70,7 @@ describe('external ACP session storage', () => {
     expect(await new AcpSessionStorage(directory, binding).load()).toEqual(record);
     expect(await readdir(binding.repository)).toEqual([]);
     expect(await readdir(binding.workspace)).toEqual([]);
-    expect(await readdir(directory)).toEqual([path.basename(storage.file)]);
+    expect((await readdir(directory)).filter((name) => !name.endsWith('.metadata.repository.lock'))).toEqual([path.basename(storage.file)]);
   });
 
   it('serializes captured snapshots and exposes only complete JSON during atomic replacement', async () => {
@@ -166,7 +166,7 @@ describe('external ACP session storage', () => {
   it('allows only one task claim when two windows finish reclaiming the same dead metadata owner out of order', async () => {
     const first = new AcpSessionStorage(directory, binding);
     const second = new AcpSessionStorage(directory, binding);
-    const lock = first.ownerFile.replace('.owner.json', '.metadata.repository.lock');
+    const lock = path.join(first.ownerFile.replace('.owner.json', '.metadata.repository.lock'), 'v2', 'active');
     const id = randomUUID();
     const deadOwner = path.join(lock, `owner-2147483647-${id}`);
     await mkdir(lock, { recursive: true });
@@ -227,7 +227,7 @@ describe('external ACP session storage', () => {
       lateCleanup.resolve();
       for (const result of claims) if (result.status === 'fulfilled') await result.value();
     }
-    expect(await readdir(directory)).toEqual([]);
+    expect(await readdir(path.dirname(lock))).toEqual([]);
   });
 
   it('respects a task owner held by another extension process', async () => {

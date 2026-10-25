@@ -1,6 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Engine } from '@warden/engine';
 import { resolveAcpBinding, validateAcpBinding } from '../packages/vscode/src/acp/binding.js';
@@ -144,11 +144,22 @@ describe('ACP task binding', () => {
     const binding = await resolveAcpBinding(engine, a.id);
     const gitfile = path.join(a.worktree, '.git');
     const original = await readFile(gitfile);
-    await writeFile(gitfile, await readFile(path.join(b.worktree, '.git')));
+    const replacePointer = async (contents: Buffer) => {
+      // Git hides this file on Windows, where opening an existing hidden file with 'w'
+      // fails. Write through its existing inode so restoring it also restores the binding.
+      const pointer = await open(gitfile, 'r+');
+      try {
+        await pointer.truncate(0);
+        await pointer.writeFile(contents);
+      } finally {
+        await pointer.close();
+      }
+    };
     try {
+      await replacePointer(await readFile(path.join(b.worktree, '.git')));
       await expect(validateAcpBinding(engine, binding)).rejects.toThrow('任务工作区已变化');
     } finally {
-      await writeFile(gitfile, original);
+      await replacePointer(original);
     }
     await validateAcpBinding(engine, binding);
   });

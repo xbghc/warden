@@ -130,7 +130,7 @@ describe('external shared task repository', () => {
     const results = await Promise.all(Array.from({ length: 3 }, () => run(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', source])));
     expect(results.map((result) => result.stdout.trim())).toEqual(Array(3).fill(sharedRepositoryPath(fx.root)));
     expect(await validatedSharedRepository(fx.root)).toBe(sharedRepositoryPath(fx.root));
-    expect(await lstat(path.join(`${fx.root}-warden`, 'initialization.repository.lock')).catch(() => undefined)).toBeUndefined();
+    expect(await lstat(path.join(`${fx.root}-warden`, 'initialization.repository.lock', 'v2', 'active')).catch(() => undefined)).toBeUndefined();
   });
 
   it('refuses foreign repositories and symlinked storage without modifying them', async () => {

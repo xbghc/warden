@@ -41,11 +41,12 @@ an explanation in [State and security](internals.md). Never replace normal deliv
 The extension invokes named typed engine commands; UI and transport code never bypass the engine's
 operation validation. Engine errors retain stable codes. `Engine.close()` rejects new requests and drains
 pending operations and observers. The preview-owner lease is independent of the mutation lock.
-State, repository and preview locks use atomically published directories containing one unique
-owner file. Ownership tests must preserve the actual filesystem operations when controlling
+State, repository and preview locks retain permanent `.lock/v2/` containers and atomically publish
+their `active` directory containing one unique owner file. Ownership tests must preserve the actual filesystem operations when controlling
 reclaimer interleavings. Dead locks from the older plain-file format intentionally fail with
 `legacy_lock_requires_cleanup`; follow the named-file recovery instructions in
-[State and security](internals.md#state) after closing older Warden windows.
+[State and security](internals.md#state). Close all older Warden windows and processes before first
+using this lock protocol; an already-running old reclaimer can otherwise move its container.
 
 ## ACP verification
 

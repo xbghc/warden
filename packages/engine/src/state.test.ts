@@ -35,9 +35,10 @@ function signal() {
 }
 
 async function directoryOwner(lock: string, pid = 2_147_483_647) {
+  lock = path.join(lock, 'v2', 'active');
   const id = randomUUID();
   const owner = path.join(lock, `owner-${pid}-${id}`);
-  await mkdir(lock);
+  await mkdir(lock, { recursive: true });
   await writeFile(owner, `${pid}:${id}`);
   await utimes(owner, new Date(0), new Date(0));
   return owner;
@@ -91,9 +92,10 @@ describe('StateStore', () => {
     const again = new StateStore(file, '/repo');
     const s = await again.load();
     expect(s.prefs.viewMode).toBe('split');
-    // no temp files or lock files left behind
+    // Only the state and permanent protocol container remain after releasing ownership.
     const files = await readdir(path.dirname(file));
-    expect(files).toEqual(['state.json']);
+    expect(files).toEqual(['state.json', 'state.json.lock']);
+    expect(await readdir(path.join(`${file}.lock`, 'v2'))).toEqual([]);
     expect(JSON.parse(await readFile(file, 'utf8')).schemaVersion).toBe(1);
   });
 
@@ -241,25 +243,103 @@ describe('what the state file will not lose', () => {
     expect(await readdir(dir)).toEqual(['state.json.lock']);
   });
 
-  it('reclaims a dead directory owner without leaving recovery locks', async () => {
+  it.each(['live', 'dead'] as const)('does not publish over a %s legacy file when Windows rename would replace it', async (kind) => {
+    const file = path.join(dir, 'state.json');
+    const lock = `${file}.lock`;
+    const token = `${kind === 'live' ? process.pid : 2_147_483_647}:legacy-owner`;
+    await writeFile(lock, token);
+    await utimes(lock, new Date(0), new Date(0));
+    const originalRename = fs.rename;
+    const publish = vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+      // Windows permits replacing a file with a directory. Emulate that dangerous
+      // behavior on every host instead of relying on POSIX rejecting the rename.
+      if (to === lock && (await fs.lstat(from)).isDirectory()) await fs.unlink(lock);
+      return originalRename(from, to);
+    });
+    syncBuiltinESMExports();
+    expireLockWait();
+    const mutate = vi.fn(() => undefined);
+    await expect(new StateStore(file, '/repo').update(mutate)).rejects.toMatchObject({
+      code: kind === 'live' ? 'operation_locked' : 'legacy_lock_requires_cleanup',
+    });
+    expect(mutate).not.toHaveBeenCalled();
+    expect(publish).not.toHaveBeenCalled();
+    expect(await readFile(lock, 'utf8')).toBe(token);
+    expect(await readdir(dir)).toEqual(['state.json.lock']);
+  });
+
+  it('refuses an unreleased direct-owner lock format without changing its owner', async () => {
+    const file = path.join(dir, 'state.json');
+    const lock = `${file}.repository.lock`;
+    const name = `owner-${process.pid}-${randomUUID()}`;
+    await mkdir(lock);
+    await writeFile(path.join(lock, name), 'old directory owner');
+    const mutate = vi.fn(async () => undefined);
+    await expect(new StateStore(file, '/repo').withRepositoryLock(mutate)).rejects.toMatchObject({ code: 'legacy_lock_requires_cleanup' });
+    expect(mutate).not.toHaveBeenCalled();
+    expect(await readdir(lock)).toEqual([name]);
+    expect(await readFile(path.join(lock, name), 'utf8')).toBe('old directory owner');
+  });
+
+  it('refuses an old directory owner that publishes during protocol-container initialization', async () => {
+    const file = path.join(dir, 'state.json');
+    const lock = `${file}.repository.lock`;
+    const protocol = path.join(lock, 'v2');
+    const competing = path.join(dir, 'old-candidate');
+    const name = `owner-${process.pid}-${randomUUID()}`;
+    await mkdir(competing);
+    await writeFile(path.join(competing, name), 'concurrent old owner');
+    const originalMkdir = fs.mkdir;
+    vi.spyOn(fs, 'mkdir').mockImplementation(async (file, options) => {
+      if (file === protocol) {
+        await fs.rmdir(lock);
+        await fs.rename(competing, lock);
+      }
+      return originalMkdir(file, options);
+    });
+    syncBuiltinESMExports();
+    const mutate = vi.fn(async () => undefined);
+    await expect(new StateStore(file, '/repo').withRepositoryLock(mutate)).rejects.toMatchObject({ code: 'legacy_lock_requires_cleanup' });
+    expect(mutate).not.toHaveBeenCalled();
+    expect(await readFile(path.join(lock, name), 'utf8')).toBe('concurrent old owner');
+    expect(await readdir(protocol)).toEqual([]);
+  });
+
+  it('refuses an unexpected file in the internal publication namespace', async () => {
+    const file = path.join(dir, 'state.json');
+    const protocol = path.join(`${file}.repository.lock`, 'v2');
+    const active = path.join(protocol, 'active');
+    await mkdir(protocol, { recursive: true });
+    await writeFile(active, 'unknown owner');
+    const mutate = vi.fn(async () => undefined);
+    await expect(new StateStore(file, '/repo').withRepositoryLock(mutate)).rejects.toMatchObject({ code: 'legacy_lock_requires_cleanup' });
+    expect(mutate).not.toHaveBeenCalled();
+    expect(await readFile(active, 'utf8')).toBe('unknown owner');
+  });
+
+  it('reclaims a dead directory owner and retains only the permanent protocol container', async () => {
     const file = path.join(dir, 'state.json');
     await directoryOwner(`${file}.lock`);
     await new StateStore(file, '/repo').update((s) => s.todos.push(todo('t')));
     expect(JSON.parse(await readFile(file, 'utf8')).todos).toHaveLength(1);
-    expect((await readdir(dir)).filter((f) => f.includes('.lock'))).toEqual([]);
+    expect(await readdir(`${file}.lock`)).toEqual(['v2']);
+    expect(await readdir(path.join(`${file}.lock`, 'v2'))).toEqual([]);
+    await expect(fs.open(`${file}.lock`, 'wx')).rejects.toMatchObject({ code: 'EEXIST' });
   });
 
   it('recovers an empty directory left by a reclaimer that exited after deleting the dead owner', async () => {
     const file = path.join(dir, 'state.json');
-    await mkdir(`${file}.repository.lock`);
+    const protocol = path.join(`${file}.repository.lock`, 'v2');
+    await mkdir(path.join(protocol, 'active'), { recursive: true });
     await expect(new StateStore(file, '/repo').withRepositoryLock(async () => 'recovered')).resolves.toBe('recovered');
-    expect(await readdir(dir)).toEqual([]);
+    expect(await readdir(protocol)).toEqual([]);
   });
 
   it.each(['EPERM', 'EACCES'])('recovers an empty preview lease after a Windows-style %s directory rename failure', async (code) => {
     const file = path.join(dir, 'state.json');
-    const lock = `${file}.preview-owner.lock`;
-    await mkdir(lock);
+    const protocol = path.join(`${file}.preview-owner.lock`, 'v2');
+    const lock = path.join(protocol, 'active');
+    await mkdir(lock, { recursive: true });
     const originalRename = fs.rename;
     let failed = false;
     vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
@@ -273,12 +353,13 @@ describe('what the state file will not lose', () => {
     const lease = await new StateStore(file, '/repo').acquirePreviewLease();
     expect(lease).not.toBeNull();
     await lease!.release();
-    expect(await readdir(dir)).toEqual([]);
+    expect(await readdir(protocol)).toEqual([]);
   });
 
   it('bounds repeated publication races even when the competing lock always vanishes before inspection', async () => {
     const file = path.join(dir, 'state.json');
-    const lock = `${file}.repository.lock`;
+    const protocol = path.join(`${file}.repository.lock`, 'v2');
+    const lock = path.join(protocol, 'active');
     const originalRename = fs.rename;
     const publish = vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
       if (to === lock) throw Object.assign(new Error('Competing directory appeared'), { code: 'ENOTEMPTY' });
@@ -288,13 +369,14 @@ describe('what the state file will not lose', () => {
     expireLockWait();
     await expect(new StateStore(file, '/repo').withRepositoryLock(async () => undefined)).rejects.toMatchObject({ code: 'operation_locked' });
     expect(publish).toHaveBeenCalledTimes(1);
-    expect(await readdir(dir)).toEqual([]);
+    expect(await readdir(protocol)).toEqual([]);
   });
 
   it('keeps a new repository owner while a second dead-owner reclaimer finishes late', async () => {
     const file = path.join(dir, 'state.json');
-    const lock = `${file}.repository.lock`;
-    const deadOwner = await directoryOwner(lock);
+    const protocol = path.join(`${file}.repository.lock`, 'v2');
+    const lock = path.join(protocol, 'active');
+    const deadOwner = await directoryOwner(`${file}.repository.lock`);
     const bothReclaiming = signal();
     const firstEntered = signal();
     const lateCleanup = signal();
@@ -337,7 +419,7 @@ describe('what the state file will not lose', () => {
       await Promise.all([new StateStore(file, '/repo').withRepositoryLock(critical), new StateStore(file, '/repo').withRepositoryLock(critical)]);
       expect(reclaimers).toBe(2);
       expect(entered).toBe(2);
-      expect(await readdir(dir)).toEqual([]);
+      expect(await readdir(protocol)).toEqual([]);
     } finally {
       bothReclaiming.resolve();
       firstEntered.resolve();

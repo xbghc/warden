@@ -143,6 +143,51 @@ function errorCode(error: unknown): string | undefined {
   return (error as NodeJS.ErrnoException).code;
 }
 
+function unknownLockFormat(lock: string): WardenError {
+  return new WardenError(
+    409,
+    `Warden 锁目录格式需要检查：${lock}。请关闭使用该仓库的旧版 Warden，检查旧锁后再重试；不要删除正在使用的锁目录。`,
+    'legacy_lock_requires_cleanup',
+  );
+}
+
+async function prepareLockContainer(container: string): Promise<boolean> {
+  try {
+    await mkdir(container, { mode: 0o700 }).catch((error) => {
+      if (errorCode(error) !== 'EEXIST') throw error;
+    });
+    const metadata = await lstat(container);
+    if (!metadata.isDirectory()) {
+      // mkdir never replaces an older binary's flat lock. On Windows, rename of a
+      // directory over that file can succeed, so it cannot publish the outer lock.
+      if (!metadata.isFile()) throw unknownLockFormat(container);
+      await reclaimLock(container);
+      return false;
+    }
+    const recognized = async () => (await readdir(container)).every((name) => name === 'v2');
+    if (!(await recognized())) throw unknownLockFormat(container);
+    const protocol = path.join(container, 'v2');
+    await mkdir(protocol, { mode: 0o700 }).catch((error) => {
+      if (errorCode(error) !== 'EEXIST') throw error;
+    });
+    if (!(await lstat(protocol)).isDirectory() || !(await recognized())) throw unknownLockFormat(container);
+    // The permanent v2 directory makes the outer container nonempty. Recheck after
+    // creating it in case an unreleased directory-lock build won the initial gap.
+    // Neither directory is ever removed, including when no operation owns active.
+    const entries = await readdir(protocol);
+    if (entries.some((name) => name !== 'active' && !/^active\.candidate-[a-f0-9-]{36}$/.test(name))) throw unknownLockFormat(container);
+    const active = await lstat(path.join(protocol, 'active')).catch((error) => {
+      if (errorCode(error) !== 'ENOENT') throw error;
+      return undefined;
+    });
+    if (active && !active.isDirectory()) throw unknownLockFormat(container);
+    return true;
+  } catch (error) {
+    if (['ENOENT', 'ENOTDIR'].includes(errorCode(error) ?? '')) return false;
+    throw error;
+  }
+}
+
 async function removeEmptyLock(lock: string): Promise<boolean> {
   try {
     await rmdir(lock);
@@ -278,13 +323,15 @@ export class StateStore {
   }
 
   /**
-   * Publish a complete, nonempty directory atomically. Reclaimers remove only the dead owner's
+   * Publish a complete, nonempty active directory inside a permanent versioned container.
+   * Reclaimers remove only the dead owner's
    * unique file, then rmdir the empty directory: neither operation can remove a newer owner's
    * nonempty directory. An interrupted cleanup leaves an empty directory which anyone can remove.
    * A stale heartbeat alone never permits takeover; the owner must be confirmed dead as well.
    */
   private async acquireLock(file = this.file, waitMs = LOCK_WAIT_MS): Promise<{ held(): Promise<boolean>; release(): Promise<void> }> {
-    const lock = `${file}.lock`;
+    const container = `${file}.lock`;
+    const lock = path.join(container, 'v2', 'active');
     const id = randomUUID();
     const token = `${process.pid}:${id}`;
     const name = `owner-${process.pid}-${id}`;
@@ -292,6 +339,10 @@ export class StateStore {
     const owner = path.join(lock, name);
     const started = Date.now();
     let immediateRecovery = false;
+    while (!(await prepareLockContainer(container))) {
+      if (Date.now() - started >= waitMs) throw new WardenError(409, '另一个 Warden 操作正在进行，请稍后重试', 'operation_locked');
+      await sleep(20);
+    }
     await mkdir(candidate, { mode: 0o700 });
     try {
       await writeFile(path.join(candidate, name), token, { flag: 'wx', mode: 0o600 });

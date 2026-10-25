@@ -67,7 +67,7 @@ describe('desktop engine', () => {
     );
     await vi.waitFor(() => expect(owners.size).toBe(1), { timeout: 3000 });
     // Close both in turn: only a live session may retain the observer lease.
-    const ownerFile = `${engine.store.file}.preview-owner.lock`;
+    const ownerFile = path.join(`${engine.store.file}.preview-owner.lock`, 'v2', 'active');
     const ownerEntries = await readdir(ownerFile);
     expect(ownerEntries).toHaveLength(1);
     expect(await readFile(path.join(ownerFile, ownerEntries[0]!), 'utf8')).toContain(`${process.pid}:`);

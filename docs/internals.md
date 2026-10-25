@@ -9,7 +9,8 @@ history or discarding a checkout. These are separate from preview snapshots and 
 
 `~/.local/share/warden/<sha1(repoRoot)[:12]>/state.json` (respects `XDG_DATA_HOME`). Plain JSON with a
 `schemaVersion`, written atomically (temp file, fsync, rename) under a small lock directory so multiple
-instances can share it. The directory is published atomically with a uniquely named owner file,
+instances can share it. A permanent `.lock/v2/` container is created with exclusive directory creation;
+the `active` directory inside it is published atomically with a uniquely named owner file,
 whose token and heartbeat identify its holder. One left by a process that died is taken over after
 5 s, a slow holder's is not, and a holder
 whose lock was taken over meanwhile writes nothing. A file written by a newer warden is refused
@@ -18,13 +19,24 @@ top-level fields this version does not know are kept when it writes. `schemaVers
 warden up to 0.16 replaces a file with any other version by an empty state. Delete the directory to reset. Internal snapshot objects live beside it in `checkpoints/objects`. This historical directory name
 is retained because preview and recovery journals can still reference its trees.
 
-Recovery removes only the dead owner's unique file and then the empty directory. A delayed
+Recovery removes only the dead owner's unique file and then the empty `active` directory. A delayed
 reclaimer cannot remove a newer owner's nonempty directory, and a crash between these steps leaves
 an empty directory that the next contender can remove. Older Warden versions used a plain `.lock`
 file. Live legacy owners remain occupied; a confirmed dead legacy owner produces an error naming
 the file instead of automatic deletion, since another older writer could replace its contents
 between inspection and deletion. Close older Warden windows using that repository, inspect and
 remove the named legacy lock file, then retry. Do not remove a live owner's lock.
+
+The outer `.lock` and `v2` directories persist after release. New versions use exclusive directory
+creation for the outer path, so Windows directory rename cannot replace a legacy flat lock there.
+Before first using this version, close all older Warden windows and processes; upgrade them before
+opening them again. An already-running older reclaimer can resume a delayed rename of the old lock
+path, and new code cannot prevent it from moving the new container. Once that upgrade is complete,
+the permanent container blocks older binaries' ordinary lock acquisition even while the new version
+is idle. These containers are protocol metadata,
+not stale locks to delete. Unreleased builds that placed owner files directly in `.lock` are
+rejected with `legacy_lock_requires_cleanup`; close those builds and inspect that old directory
+before removing it. The new version never removes or migrates such an owner automatically.
 
 `targets` retains opaque historical metadata keyed by the exact comparison. Legacy `viewed` maps
 are discarded on load and removed on the next state write; empty target records are omitted.
