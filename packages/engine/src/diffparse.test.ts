@@ -151,9 +151,10 @@ new file mode 100644
     expect(a).not.toBe(c);
   });
 
-  it('combines real Git file-type replacements into one review entry with both sides', async () => {
+  it.each(['true', 'false'])('combines real Git file-type replacements with core.symlinks=%s into one review entry with both sides', async (symlinks) => {
     const fixture = await makeFixtureRepo('warden-diff-types-');
     try {
+      fixture.git('config', 'core.symlinks', symlinks);
       // Populate the index directly so this also runs where Windows disallows symlinks.
       await fixture.write('link-target', 'b.ts');
       const linkBlob = fixture.git('hash-object', '-w', 'link-target').trim();
@@ -188,7 +189,9 @@ new file mode 100644
       expect(reverse[0]).toMatchObject({ path: 'src/a.ts', status: 'modified', oldMode: '120000', newMode: '100644', additions: 5, deletions: 1 });
 
       await fixture.write('src/a.ts', Buffer.from([0, 1, 2]));
-      fixture.git('add', 'src/a.ts');
+      // With core.symlinks=false, git add preserves an existing link's index mode.
+      const binaryBlob = fixture.git('hash-object', '-w', 'src/a.ts').trim();
+      fixture.git('update-index', '--cacheinfo', `100644,${binaryBlob},src/a.ts`);
       fixture.git('commit', '-qm', 'Binary baseline');
       fixture.git('update-index', '--cacheinfo', `120000,${linkBlob},src/a.ts`);
       const binary = parseUnifiedDiff(fixture.git('diff', '--cached', '--', 'src/a.ts'));
