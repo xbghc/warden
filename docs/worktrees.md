@@ -48,8 +48,9 @@ shared repository's configuration or ordinary agent commits.
 ## Workspace hooks
 
 Settings contain local repository configuration, outside task branches. The configuration contains
-a `hooks` object and an optional idempotent `previewSetup` command. Warden creates workspaces and runs these user-provided scripts; users choose
-external tools for agent execution and interaction.
+a `hooks` object and an optional idempotent `previewSetup` command. Warden creates workspaces and runs
+these user-provided scripts. Users can explicitly start an ACP task conversation or use external
+tools; initialization does not start an ACP session. See [Working with agents](agent.md).
 
 The settings form presents one workspace initialization script and writes it to both `hooks.create`
 and `hooks.reuse`. Existing differing scripts remain unchanged until the user saves settings.
@@ -57,7 +58,8 @@ These legacy fields are optional POSIX shell commands executed after the assignm
 saved, with the workspace as cwd. Linux and macOS use `/bin/sh -c`; native Windows uses Git for
 Windows' bundled `sh.exe -c`. They expose stdout/stderr, exit code and failure. A failed hook
 leaves the workspace intact; retry it explicitly. Hooks have a ten-minute timeout and bounded output.
-Warden does not provide a dependency installer or a process supervisor.
+Warden does not provide a dependency installer or supervise agent-started commands. Its ACP client
+owns only the process carrying its stdio connection; agents execute their own tools.
 
 Environment: `WARDEN_REPO`, `WARDEN_WORKTREE`, `WARDEN_BRANCH`, `WARDEN_DEVELOPMENT_BRANCH`,
 `WARDEN_TASK_ID`, `WARDEN_HOOK_EVENT` (`create` or `reuse`). These scripts are distinct from Git's

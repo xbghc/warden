@@ -33,7 +33,10 @@ try {
   await backend.close();
   backend = undefined;
   const fixture = path.join(directory, 'fixture.json');
-  await writeFile(fixture, JSON.stringify({ root, state }));
+  await writeFile(
+    fixture,
+    JSON.stringify({ root, state, node: process.execPath, agent: path.resolve('test/fixtures/acp-agent.mjs'), journal: path.join(directory, 'acp.jsonl') }),
+  );
   const manifest = JSON.parse(await readFile('packages/vscode/package.json', 'utf8'));
   const archive = unzipSync(await readFile(`packages/vscode/warden-${manifest.version}.vsix`));
   const unpacked = path.join(directory, 'vsix');

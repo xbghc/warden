@@ -1,7 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { mkdir, open, readFile, rename, stat, unlink, utimes } from 'node:fs/promises';
+import { lstat, mkdir, open, readFile, readdir, rename, rm, rmdir, unlink, utimes, writeFile } from 'node:fs/promises';
 import type { Prefs, ReviewState } from '@warden/shared';
 import { sha1 } from './hash.js';
 import { WardenError } from './errors.js';
@@ -139,9 +139,56 @@ async function sleep(ms: number): Promise<void> {
   await new Promise((r) => setTimeout(r, ms));
 }
 
+function errorCode(error: unknown): string | undefined {
+  return (error as NodeJS.ErrnoException).code;
+}
+
+async function removeEmptyLock(lock: string): Promise<boolean> {
+  try {
+    await rmdir(lock);
+    return true;
+  } catch (error) {
+    if (errorCode(error) === 'ENOENT') return true;
+    // Another contender may have atomically published its nonempty directory meanwhile.
+    if (['ENOTEMPTY', 'EEXIST', 'ENOTDIR'].includes(errorCode(error) ?? '')) return false;
+    throw error;
+  }
+}
+
+async function reclaimLock(lock: string): Promise<boolean> {
+  try {
+    const info = await lstat(lock);
+    if (info.isDirectory()) {
+      const entries = await readdir(lock);
+      if (!entries.length) return removeEmptyLock(lock);
+      if (entries.length !== 1) return false;
+      const name = entries[0]!;
+      const match = /^owner-([1-9]\d*)-([a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})$/.exec(name);
+      if (!match) return false;
+      const owner = path.join(lock, name);
+      const metadata = await lstat(owner);
+      if (!metadata.isFile() || Date.now() - metadata.mtimeMs <= LOCK_STALE_MS) return false;
+      const token = await readFile(owner, 'utf8');
+      if (token !== `${match[1]}:${match[2]}` || !lockOwnerHasExited(token)) return false;
+      // The unique filename, unlike the shared directory path, can never name a newer owner.
+      await unlink(owner).catch((error) => {
+        if (errorCode(error) !== 'ENOENT') throw error;
+      });
+      return removeEmptyLock(lock);
+    }
+    // Earlier versions published a flat file. There is no atomic conditional unlink for its
+    // token: a delayed reclaimer could delete a new flat lock acquired by an older binary.
+    if (!info.isFile() || Date.now() - info.mtimeMs <= LOCK_STALE_MS || !lockOwnerHasExited(await readFile(lock, 'utf8'))) return false;
+    throw new WardenError(409, `旧版 Warden 锁需要检查：${lock}。请关闭使用该仓库的旧版 Warden 后，检查并移除此文件，再重试。`, 'legacy_lock_requires_cleanup');
+  } catch (error) {
+    if (['ENOENT', 'ENOTDIR', 'EISDIR'].includes(errorCode(error) ?? '')) return true;
+    throw error;
+  }
+}
+
 /**
  * JSON state persisted outside the repository. Every mutation re-reads the file, applies the
- * change and writes atomically (tmp + rename) under a simple cross-process lock file, so several
+ * change and writes atomically (tmp + rename) under a cross-process lock directory, so several
  * warden instances on the same repo can coexist.
  */
 export class StateStore {
@@ -231,55 +278,65 @@ export class StateStore {
   }
 
   /**
-   * An exclusive lock file beside the state file, shared by every warden process.
-   * It carries a token of its own, so a holder releases only the lock it took, and its mtime
-   * is refreshed while held. Reclamation requires both an old heartbeat and a confirmed dead
-   * owner: a suspended process or delayed timer must not permit concurrent repository mutations.
+   * Publish a complete, nonempty directory atomically. Reclaimers remove only the dead owner's
+   * unique file, then rmdir the empty directory: neither operation can remove a newer owner's
+   * nonempty directory. An interrupted cleanup leaves an empty directory which anyone can remove.
+   * A stale heartbeat alone never permits takeover; the owner must be confirmed dead as well.
    */
   private async acquireLock(file = this.file, waitMs = LOCK_WAIT_MS): Promise<{ held(): Promise<boolean>; release(): Promise<void> }> {
     const lock = `${file}.lock`;
-    const token = `${process.pid}:${randomUUID()}`;
+    const id = randomUUID();
+    const token = `${process.pid}:${id}`;
+    const name = `owner-${process.pid}-${id}`;
+    const candidate = `${lock}.candidate-${id}`;
+    const owner = path.join(lock, name);
     const started = Date.now();
-    for (;;) {
-      try {
-        const fh = await open(lock, 'wx');
-        await fh.writeFile(token);
-        await fh.close();
-        break;
-      } catch (e) {
-        const err = e as NodeJS.ErrnoException;
-        if (err.code !== 'EEXIST') throw e;
+    let immediateRecovery = false;
+    await mkdir(candidate, { mode: 0o700 });
+    try {
+      await writeFile(path.join(candidate, name), token, { flag: 'wx', mode: 0o600 });
+      for (;;) {
         try {
-          const st = await stat(lock);
-          if (Date.now() - st.mtimeMs > LOCK_STALE_MS && lockOwnerHasExited(await readFile(lock, 'utf8').catch(() => undefined))) {
-            // Taken over by renaming it aside, which only one waiter can do to a given file; a
-            // plain unlink could remove a fresh lock another waiter created in between.
-            const aside = `${lock}.stale-${token.replace(':', '-')}`;
-            await rename(lock, aside).then(
-              () => unlink(aside).catch(() => undefined),
-              () => undefined,
-            );
+          await rename(candidate, lock);
+          break;
+        } catch (error) {
+          const code = errorCode(error);
+          // Windows reports EPERM/EACCES for some existing-directory rename failures.
+          // Require an occupied target before treating those errors as contention.
+          if (code === 'EPERM' || code === 'EACCES') {
+            if (!(await lstat(lock).catch(() => undefined))) throw error;
+          } else if (!['EEXIST', 'ENOTEMPTY', 'EISDIR', 'ENOTDIR'].includes(code ?? '')) throw error;
+          const recovered = await reclaimLock(lock);
+          const expired = Date.now() - started >= waitMs;
+          // A zero-wait preview lease may recover once and immediately attempt publication.
+          // Repeated disappearance or recovery races must still respect every wait budget.
+          if (expired && !(waitMs === 0 && recovered && !immediateRecovery)) {
+            throw new WardenError(409, '另一个 Warden 操作正在进行，请稍后重试', 'operation_locked');
+          }
+          if (recovered) {
+            if (immediateRecovery) await sleep(20);
+            immediateRecovery = true;
             continue;
           }
-        } catch {
-          continue; // lock vanished between calls
+          await sleep(20);
         }
-        if (Date.now() - started >= waitMs) {
-          throw new WardenError(409, '另一个 Warden 操作正在进行，请稍后重试', 'operation_locked');
-        }
-        await sleep(20);
       }
+    } finally {
+      await rm(candidate, { recursive: true, force: true });
     }
-    const ours = async () => (await readFile(lock, 'utf8').catch(() => '')) === token;
+    const ours = async () => (await readFile(owner, 'utf8').catch(() => '')) === token;
     const beat = setInterval(() => {
-      void ours().then((mine) => (mine ? utimes(lock, new Date(), new Date()).catch(() => undefined) : undefined));
+      void ours().then((mine) => (mine ? utimes(owner, new Date(), new Date()).catch(() => undefined) : undefined));
     }, LOCK_STALE_MS / 4);
     beat.unref();
     return {
       held: ours,
       release: async () => {
         clearInterval(beat);
-        if (await ours()) await unlink(lock).catch(() => undefined);
+        if (await ours()) {
+          await unlink(owner).catch(() => undefined);
+          await removeEmptyLock(lock);
+        }
       },
     };
   }

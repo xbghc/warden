@@ -159,6 +159,10 @@ jobs:
         env:
           WARDEN_UI_ARTIFACTS: test-results/webview
           WARDEN_NATIVE: disabled
+      - run: python test/ui/acp-smoke.py
+        env:
+          WARDEN_UI_ARTIFACTS: test-results/webview
+          WARDEN_NATIVE: disabled
       - uses: actions/upload-artifact@v7
         if: always()
         with:

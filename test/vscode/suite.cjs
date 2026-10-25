@@ -5,6 +5,13 @@ const vscode = require('vscode');
 const { execFileSync } = require('node:child_process');
 // Git may materialize preview text with CRLF under the user's Windows configuration.
 const textLines = (text) => text.replace(/\r\n/g, '\n');
+const eventually = async (condition) => {
+  const deadline = Date.now() + 10_000;
+  while (!(await condition())) {
+    if (Date.now() > deadline) throw new Error('Timed out waiting for ACP state');
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+};
 
 exports.run = async () => {
   const fixture = JSON.parse(await fs.readFile(process.env.WARDEN_VSCODE_FIXTURE, 'utf8'));
@@ -178,8 +185,86 @@ exports.run = async () => {
     assert.notEqual(workbench.session, session, 'reopening the repository creates a new session');
     await assert.rejects(workbench.handleAction({ type: 'task.create', title: 'Stale view', body: '' }, session), /仓库已切换/);
     assert.equal((await state()).workflow.changes.length, count + 1);
+
+    // Exercise the bundled ACP host through its command, configured profile and panel action boundary.
+    const configuration = vscode.workspace.getConfiguration('warden');
+    await configuration.update(
+      'acpAgents',
+      [{ id: 'fixture', label: 'Test agent', command: fixture.node, args: [fixture.agent, fixture.journal] }],
+      vscode.ConfigurationTarget.Global,
+    );
+    const chatTask = (await workbench.getChildren({ kind: 'tasks' })).find((row) => row.task.id === newTask.id);
+    await vscode.commands.executeCommand('warden.chat', chatTask);
+    const conversations = workbench.conversations;
+    const chat = [...conversations.entries.values()].find((entry) => entry.binding.taskId === newTask.id);
+    assert(chat?.panel, 'task command opens a dedicated conversation panel');
+    const edit = (text) => {
+      const current = chat.draft.snapshot();
+      return { text, version: current.draftVersion, revision: current.draftRevision + 1 };
+    };
+    assert.equal(chat.session.snapshot().status, 'disconnected');
+    await assert.rejects(fs.access(fixture.journal), 'opening a panel does not launch the agent');
+    await fs.writeFile(path.join(chat.binding.workspace, 'context.txt'), 'Task context\n');
+    await conversations.handle(chat, { type: 'send', profileId: 'fixture', ...edit('own-edit') });
+    assert.match(await fs.readFile(path.join(chat.binding.workspace, 'agent-output.txt'), 'utf8'), /^Task context edited by /);
+    await assert.rejects(fs.access(path.join(fixture.root, 'agent-output.txt')));
+    await assert.rejects(fs.access(path.join(preview.worktree, 'agent-output.txt')));
+    const journal = () => fs.readFile(fixture.journal, 'utf8').then((text) => text.trim().split('\n').map(JSON.parse));
+    const initialized = (await journal()).find((row) => row.method === 'initialize');
+    assert.deepEqual(initialized.params.clientCapabilities, { fs: { readTextFile: false, writeTextFile: false }, terminal: false });
+    assert.equal(initialized.cwd, chat.binding.workspace);
+    assert.equal(chat.draft.text, '', 'completed prompt clears the submitted draft');
+    const asking = conversations.handle(chat, { type: 'send', profileId: 'fixture', ...edit('permission') });
+    await eventually(() => chat.session.snapshot().permissions.length === 1);
+    const permission = chat.session.snapshot().permissions[0];
+    const previousPanel = chat.panelId;
+    chat.panel.dispose();
+    await conversations.show(fixture.root, newTask.id);
+    assert.notEqual(chat.panelId, previousPanel, 'reopening retains the running session in a fresh panel');
+    await conversations.handle(chat, { type: 'permission', requestId: permission.id, optionId: 'reject-once' });
+    await asking;
+    assert.equal(chat.draft.text, '', 'completion clears a submitted draft after reopening the panel');
+    assert.match(
+      await fs.readFile(path.join(chat.binding.workspace, 'agent-output.txt'), 'utf8'),
+      /^Task context edited by /,
+      'rejection does not authorize the requested edit',
+    );
+    const typedDraft = edit('Edited task');
+    await conversations.handle(chat, { type: 'draft', ...typedDraft });
+    await conversations.append(fixture.root, newTask.id, 'Selected source');
+    assert.equal(chat.draft.text, 'Edited task\n\nSelected source');
+    await assert.rejects(conversations.handle(chat, { type: 'send', profileId: 'fixture', ...typedDraft }), /草稿已更新/);
+    assert.equal(chat.draft.text, 'Edited task\n\nSelected source', 'a stale send cannot erase appended context');
+    const held = conversations.handle(chat, { type: 'send', profileId: 'fixture', ...edit('hold') });
+    await eventually(async () => (await journal()).some((row) => row.method === 'session/prompt' && row.params.prompt[0].text === 'hold'));
+    await conversations.handle(chat, { type: 'draft', ...edit('hold') });
+    await conversations.handle(chat, { type: 'cancel' });
+    await held;
+    assert.equal(chat.draft.text, 'hold', 'cancelling preserves a new draft even when its text is identical to the submitted prompt');
+    const savedSession = chat.session.snapshot().record.sessionId;
+    await conversations.handle(chat, { type: 'disconnect' });
+    await conversations.handle(chat, { type: 'connect', profileId: 'fixture', resume: true });
+    assert.equal(chat.session.snapshot().record.sessionId, savedSession);
+    assert.equal((await journal()).filter((row) => row.method === 'session/prompt').length, 3, 'resume never resends a prompt');
+    await workbench.open(fixture.root);
+    assert.equal(chat.binding.taskId, newTask.id, 'workbench navigation does not retarget the conversation');
+    assert.equal(chat.session.snapshot().status, 'connected');
+    chat.panel.dispose();
+    const gitFile = path.join(chat.binding.workspace, '.git');
+    await fs.copyFile(gitFile, `${gitFile}.replacement`);
+    await fs.rename(`${gitFile}.replacement`, gitFile);
+    await conversations.show(fixture.root, newTask.id);
+    assert(chat.panel, 'a replaced checkout still allows reopening the original connection to stop it');
+    assert.equal(chat.session.snapshot().status, 'connected');
+    await assert.rejects(conversations.handle(chat, { type: 'send', profileId: 'fixture', ...edit('wrong allocation') }), /工作区已被替换/);
+    await conversations.handle(chat, { type: 'disconnect' });
+    await conversations.show(fixture.root, newTask.id);
+    const replacement = [...conversations.entries.values()].find((entry) => entry.binding.taskId === newTask.id);
+    assert.notEqual(replacement, chat, 'reopening a disconnected replaced allocation creates a fresh binding');
+    assert.equal(replacement.session.snapshot().record.sessionId, undefined);
+    assert.equal((await state()).workflow.changes.find((task) => task.id === newTask.id).deliveries?.length ?? 0, 0, 'ACP responses never deliver code');
     console.log(
-      'Packaged extension passed: native readonly review, version guards, preview/setup, normal hooks, recovery, multiline delivery, fresh workspaces, stale-session rejection and history mapping',
+      'Packaged extension passed: native readonly review, version guards, preview/setup, normal hooks, recovery, multiline delivery, fresh workspaces, history mapping and task-bound ACP commands, permissions, cancellation and explicit resume',
     );
   } finally {
     await workbench.close();

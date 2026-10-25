@@ -28,17 +28,71 @@ changes plan order only; the context menu also offers a keyboard-accessible move
 The current-task form provides multiline notes, workspace creation, script results, multiline commit
 messages and delivery recovery. Every workspace creation produces a fresh logical workspace with a
 new task branch. The optional executor name is a label. Copying a task brief writes context to the
-clipboard; agent execution remains in external tools. Physical slot reuse is internal: users do not select or adopt an old workspace.
+clipboard; the user can paste it into an ACP task conversation or an external tool. Physical slot reuse
+is internal: users do not select or adopt an old workspace.
 The compatibility clone option is available under workspace options. Existing task associations and
 delivery records are preserved on upgrade; delivery never recycles another active task's workspace.
 
 Preview, history, batch rebase and script settings open as editor-area webviews. Their resources are
 packaged locally, use VS Code theme colors, and send a finite validated action vocabulary to the host.
-No operation requires editing a JSON draft. Command Palette entry points remain available.
+Git operations do not require editing a JSON draft. Command Palette entry points remain available.
+ACP conversations open in separate task-bound panels and keep their original repository when the
+workbench selection changes.
+
+## ACP agent configuration
+
+Configure `warden.acpAgents` in VS Code User settings, or Remote User settings for SSH, WSL and
+containers. Executable profiles cannot come from workspace or folder settings. The executable must
+exist on the workspace extension host and speak ACP over stdio, either natively or through an adapter.
+It must execute its own file and command tools: Warden does not advertise ACP filesystem or terminal
+capabilities or provide a shell runner, agent sandbox or execution guard.
+
+```json
+{
+  "warden.acpAgents": [
+    {
+      "id": "local-agent",
+      "label": "My ACP agent",
+      "command": "/path/to/agent",
+      "args": ["--acp"]
+    }
+  ]
+}
+```
+
+This is a profile shape, not a vendor command recipe. Replace the executable and arguments with those
+required by your agent or adapter; `--acp` is only an illustrative flag. An optional `env` object supplies
+string environment overrides. Use the agent's existing login and inherited environment as appropriate;
+Warden does not add a credential store. A normal CLI without ACP support cannot use this connection.
+
+Open a task's **Agent 对话**, select its profile, and connect or send text. Merely opening the panel
+does not launch the agent. The panel shows replies, tool activity and permission choices supplied by
+the agent. Select an advertised authentication method if needed; terminal-based login must be completed
+separately on the same host. There are no client-side file or terminal tool callbacks.
+
+**Warden: 发送选区到任务对话** appends selected editor text to a chosen task's draft; it does not send
+the message. The excerpt includes its file or immutable review snapshot, line range and an unsaved
+content label when applicable. The original editor and native review remain unchanged.
+
+The panel retains its original task, workspace identity and repository. One extension window owns each
+task's executable connection; other tasks can run independently. Conversation records persist outside
+the source repository. After interruption, **继续会话** explicitly loads the original session when the
+agent supports it. Otherwise **新建会话** starts again while retaining previous history. Warden never
+silently resends a prompt whose outcome is uncertain.
+
+**停止本轮** requests cancellation. **断开连接** closes Warden's connection and its agent process; an
+active connection can expose this as **结束 Agent 进程**. These actions do not promise that every command
+started by the agent has stopped. The agent owns its child commands and execution policies; coordinate
+ongoing work before Git mutations. A turn ending never connects preview, commits, delivers or rebases.
+Native review and its source/baseline pins remain unchanged.
+
+The implementation is tested with an SDK-compatible child-agent fixture and packaged extension flows.
+That does not establish support for an untested authenticated third-party agent. See
+[Working with agents](https://github.com/xbghc/warden/blob/main/docs/agent.md) and the [ACP design](https://github.com/xbghc/warden/blob/main/docs/acp-design.md) for the supported boundary.
 
 ## Edit, review and run
 
-Edit and save human code in primary. External tools edit task workspaces. Both sides of native
+Edit and save human code in primary. Agents edit task workspaces through their own tools. Both sides of native
 `warden-review` diffs are read-only snapshots. **Warden: 复制审阅位置**, also available from the editor
 context menu and Ctrl+Alt+C / Cmd+Alt+C, copies the original relative path and selected line range.
 Snapshots can be read after a window reload, but a restored tab does not authorize a delivery.
@@ -63,7 +117,7 @@ The engine combines repository-change hints, state-file notifications and period
 publication still compares content hashes and debounces updates. A separate background-owner lease
 prevents duplicate preview writers in multiple windows; writes retain the existing repository lock.
 Closing the final Warden window stops synchronization. On reopening, journals and actual content are
-checked before synchronization resumes. Existing programs are not restarted or killed by Warden.
+checked before synchronization resumes. Existing preview programs are not restarted or killed by Warden.
 
 ## Environment setup
 

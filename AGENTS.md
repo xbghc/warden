@@ -11,11 +11,14 @@ by an independent agent given only the agreed workflow, without reading existing
 preserve old navigation or state machines merely because the current code contains them.
 
 Warden is a passive tool: users act through it; they do not maintain extra status reports for it.
-The user decomposes and orders work, runs agents with their own tools and reviews changes before
-squash. Every user-requested workspace is a fresh logical allocation and branch. Physical directory reuse is internal; never expose an adoption or reuse picker. Warden creates workspaces and exposes initialization hooks; terminal tools, agent
-launch, prompt delivery and process control stay outside its product boundary. No dependency
-enforcement, scheduling, agent-owned decomposition, ready/idle declarations, task-complete checkbox
-or separate requirement approval belongs in the product.
+The user decomposes and orders work, operates agents through task-bound ACP conversations or external
+tools, and reviews changes before squash. Every user-requested workspace is a fresh logical allocation
+and branch. Physical directory reuse is internal; never expose an adoption or reuse picker. Warden
+creates workspaces and exposes initialization hooks. Its ACP client owns stdio connections and the
+agent process carrying each connection; agents own their tools, child commands and execution policies.
+Do not add ACP client filesystem/terminal capabilities, an agent shell runner, sandbox or execution
+guard. No dependency enforcement, scheduling, agent-owned decomposition, ready/idle declarations,
+task-complete checkbox or separate requirement approval belongs in the product.
 
 One workspace corresponds to one linear task and can deliver several commits. Keep it available
 across deliveries; do not automatically recycle it or ask whether a delivery finishes the task.
@@ -25,7 +28,12 @@ content is the baseline. Dependencies and user-operated tests/dev servers belong
 independent preview directory. Default tasks, preview and temporary composition worktrees share
 Warden's external bare repository at `<primary>-warden/repo.git`; each has its own files, HEAD and
 index. Numbered task paths remain `<primary>-<n>`. The primary Git repository stays separate.
-VS Code is the only product entry point; ACP is deferred.
+VS Code is the only product entry point. ACP uses generic configured agents or adapters that execute
+their own tools; see `docs/acp-design.md`. Executable profiles come only from user or remote-user
+machine settings. Chat panels retain their original task and repository; navigation never retargets
+them. One cross-window owner claim protects each task connection, not task mutations. Cancellation
+or prompt completion does not prove that agent background commands have stopped. Never automatically
+connect preview, commit, deliver, rebase or resend a prompt because an agent turn ended.
 
 Connections are reversible live composition into the independent preview directory, separate from
 review and squash. Never write connections into primary or add preview as a VS Code workspace root.

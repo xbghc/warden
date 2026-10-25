@@ -1,6 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Engine, PreviewService } from '@warden/engine';
 import { checkoutWorktree } from '../packages/engine/src/worktrees.js';
@@ -68,7 +68,9 @@ describe('desktop engine', () => {
     await vi.waitFor(() => expect(owners.size).toBe(1), { timeout: 3000 });
     // Close both in turn: only a live session may retain the observer lease.
     const ownerFile = `${engine.store.file}.preview-owner.lock`;
-    expect(await readFile(ownerFile, 'utf8')).toContain(`${process.pid}:`);
+    const ownerEntries = await readdir(ownerFile);
+    expect(ownerEntries).toHaveLength(1);
+    expect(await readFile(path.join(ownerFile, ownerEntries[0]!), 'utf8')).toContain(`${process.pid}:`);
     await second.start(
       async () => {},
       (error) => errors.push(error),
@@ -76,7 +78,7 @@ describe('desktop engine', () => {
     await engine.close();
     await vi.waitFor(() => expect(owners.size).toBe(2), { timeout: 3000 });
     await second.close();
-    await expect(readFile(ownerFile)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(readdir(ownerFile)).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(engine.execute('workflow.get', undefined)).rejects.toMatchObject({ code: 'session_closed' });
     expect(errors).toEqual([]);
   });

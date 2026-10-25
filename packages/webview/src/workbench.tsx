@@ -68,7 +68,7 @@ function Task({ model, send }: Props) {
   const [message, setMessage] = useState(model.message);
   if (!task && !model.creating) return <p className="muted">请选择任务，或在工作区列表添加任务。</p>;
   const taskId = task?.id ?? '';
-  const action = (type: 'task.review' | 'task.hook' | 'task.resume' | 'task.copy' | 'task.brief' | 'task.restore') => send({ type, taskId });
+  const action = (type: 'task.review' | 'task.chat' | 'task.hook' | 'task.resume' | 'task.copy' | 'task.brief' | 'task.restore') => send({ type, taskId });
   return (
     <>
       <h1>{model.creating ? '新增任务' : task?.title}</h1>
@@ -162,6 +162,9 @@ function Task({ model, send }: Props) {
             <div className="actions">
               <Button size="sm" onClick={() => action('task.review')}>
                 打开变更
+              </Button>
+              <Button size="sm" variant="secondary" onClick={() => action('task.chat')}>
+                与 Agent 对话
               </Button>
               <Button size="sm" variant="secondary" onClick={() => action('task.copy')}>
                 复制路径

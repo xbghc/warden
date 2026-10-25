@@ -41,6 +41,25 @@ an explanation in [State and security](internals.md). Never replace normal deliv
 The extension invokes named typed engine commands; UI and transport code never bypass the engine's
 operation validation. Engine errors retain stable codes. `Engine.close()` rejects new requests and drains
 pending operations and observers. The preview-owner lease is independent of the mutation lock.
+State, repository and preview locks use atomically published directories containing one unique
+owner file. Ownership tests must preserve the actual filesystem operations when controlling
+reclaimer interleavings. Dead locks from the older plain-file format intentionally fail with
+`legacy_lock_requires_cleanup`; follow the named-file recovery instructions in
+[State and security](internals.md#state) after closing older Warden windows.
+
+## ACP verification
+
+ACP tests use `test/fixtures/acp-agent.mjs`, an SDK-compatible child agent that performs its own file
+operations. Cover stable protocol initialization with no client filesystem/terminal capabilities,
+streamed updates, permission answers, cancellation, explicit authentication/restoration, stale task
+bindings and cross-window connection ownership. The fixture must exercise real stdio and its own tools;
+client file callbacks or Warden-run agent commands would test an unsupported architecture.
+
+Packaged extension-host and conversation webview tests verify the shipped UI/host bridge alongside
+existing native review and Git flows. Interrupted prompts must not be resent automatically, and cancel
+must not claim that all agent-owned background commands have stopped. These checks do not validate a
+third-party authenticated agent; record the exact agent/adapter version and supported features before
+making a vendor-specific compatibility claim. See [ACP design](acp-design.md).
 
 ## UI verification
 
@@ -52,6 +71,7 @@ pnpm package:vscode
 python3 -m pip install -r test/ui/requirements.txt
 python3 -m playwright install chromium
 python3 test/ui/smoke.py
+python3 test/ui/acp-smoke.py
 pnpm test:vscode
 ```
 
@@ -59,6 +79,8 @@ pnpm test:vscode
 preview setup, history preview/application and rebase selection, and saves screenshots under
 `WARDEN_UI_ARTIFACTS` (default `/tmp/warden-ui-artifacts`). The harness is test-only and is not shipped.
 Inspect screenshots and console errors. Preserve intentional error cases in native-host tests as well.
+`test/ui/acp-smoke.py` uses the same packaged assets with real ACP subprocesses to exercise concurrent
+task conversations, permission choices, cancellation, explicit recovery and draft preservation.
 Set `CHROMIUM_PATH` to use an existing browser. CI runs this test against assets read directly from
 the same VSIX used by the extension-host matrix.
 

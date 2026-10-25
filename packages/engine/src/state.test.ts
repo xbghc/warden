@@ -1,6 +1,8 @@
 import os from 'node:os';
 import path from 'node:path';
-import { mkdtemp, readFile, readdir, rm, utimes, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { syncBuiltinESMExports } from 'node:module';
+import fs, { mkdir, mkdtemp, readFile, readdir, rm, utimes, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { StateStore, defaultState, forgetWorktreeTargets, repoHash, stateFilePath } from './state.js';
 
@@ -10,6 +12,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   vi.restoreAllMocks();
+  syncBuiltinESMExports();
   await rm(dir, { recursive: true, force: true });
 });
 
@@ -21,6 +24,23 @@ function expireLockWait() {
     now += 6_000;
     return now;
   });
+}
+
+function signal() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+async function directoryOwner(lock: string, pid = 2_147_483_647) {
+  const id = randomUUID();
+  const owner = path.join(lock, `owner-${pid}-${id}`);
+  await mkdir(lock);
+  await writeFile(owner, `${pid}:${id}`);
+  await utimes(owner, new Date(0), new Date(0));
+  return owner;
 }
 
 describe('StateStore', () => {
@@ -208,14 +228,130 @@ describe('what the state file will not lose', () => {
     expect(written.todos.map((t: { id: string }) => t.id)).toEqual(['t']);
   });
 
-  it('takes over the lock of a process that died holding it', async () => {
+  it('preserves a dead legacy flat lock and explains how to recover without racing older writers', async () => {
     const file = path.join(dir, 'state.json');
     await writeFile(`${file}.lock`, '999999:gone');
     const old = new Date(Date.now() - 60_000);
     await utimes(`${file}.lock`, old, old);
+    await expect(new StateStore(file, '/repo').update((s) => s.todos.push(todo('t')))).rejects.toMatchObject({
+      code: 'legacy_lock_requires_cleanup',
+      message: expect.stringContaining(`${file}.lock`),
+    });
+    expect(await readFile(`${file}.lock`, 'utf8')).toBe('999999:gone');
+    expect(await readdir(dir)).toEqual(['state.json.lock']);
+  });
+
+  it('reclaims a dead directory owner without leaving recovery locks', async () => {
+    const file = path.join(dir, 'state.json');
+    await directoryOwner(`${file}.lock`);
     await new StateStore(file, '/repo').update((s) => s.todos.push(todo('t')));
     expect(JSON.parse(await readFile(file, 'utf8')).todos).toHaveLength(1);
     expect((await readdir(dir)).filter((f) => f.includes('.lock'))).toEqual([]);
+  });
+
+  it('recovers an empty directory left by a reclaimer that exited after deleting the dead owner', async () => {
+    const file = path.join(dir, 'state.json');
+    await mkdir(`${file}.repository.lock`);
+    await expect(new StateStore(file, '/repo').withRepositoryLock(async () => 'recovered')).resolves.toBe('recovered');
+    expect(await readdir(dir)).toEqual([]);
+  });
+
+  it.each(['EPERM', 'EACCES'])('recovers an empty preview lease after a Windows-style %s directory rename failure', async (code) => {
+    const file = path.join(dir, 'state.json');
+    const lock = `${file}.preview-owner.lock`;
+    await mkdir(lock);
+    const originalRename = fs.rename;
+    let failed = false;
+    vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+      if (to === lock && !failed) {
+        failed = true;
+        throw Object.assign(new Error('Destination directory exists'), { code });
+      }
+      return originalRename(from, to);
+    });
+    syncBuiltinESMExports();
+    const lease = await new StateStore(file, '/repo').acquirePreviewLease();
+    expect(lease).not.toBeNull();
+    await lease!.release();
+    expect(await readdir(dir)).toEqual([]);
+  });
+
+  it('bounds repeated publication races even when the competing lock always vanishes before inspection', async () => {
+    const file = path.join(dir, 'state.json');
+    const lock = `${file}.repository.lock`;
+    const originalRename = fs.rename;
+    const publish = vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+      if (to === lock) throw Object.assign(new Error('Competing directory appeared'), { code: 'ENOTEMPTY' });
+      return originalRename(from, to);
+    });
+    syncBuiltinESMExports();
+    expireLockWait();
+    await expect(new StateStore(file, '/repo').withRepositoryLock(async () => undefined)).rejects.toMatchObject({ code: 'operation_locked' });
+    expect(publish).toHaveBeenCalledTimes(1);
+    expect(await readdir(dir)).toEqual([]);
+  });
+
+  it('keeps a new repository owner while a second dead-owner reclaimer finishes late', async () => {
+    const file = path.join(dir, 'state.json');
+    const lock = `${file}.repository.lock`;
+    const deadOwner = await directoryOwner(lock);
+    const bothReclaiming = signal();
+    const firstEntered = signal();
+    const lateCleanup = signal();
+    const originalUnlink = fs.unlink;
+    const originalRmdir = fs.rmdir;
+    let reclaimers = 0;
+    let firstInside = false;
+    let active = 0;
+    let entered = 0;
+    vi.spyOn(fs, 'unlink').mockImplementation(async (file) => {
+      if (file === deadOwner) {
+        if (++reclaimers === 1) await bothReclaiming.promise;
+        else {
+          bothReclaiming.resolve();
+          await firstEntered.promise;
+        }
+      }
+      return originalUnlink(file);
+    });
+    vi.spyOn(fs, 'rmdir').mockImplementation(async (file, options) => {
+      try {
+        return await originalRmdir(file, options);
+      } finally {
+        if (file === lock && firstInside) lateCleanup.resolve();
+      }
+    });
+    syncBuiltinESMExports();
+    const critical = async () => {
+      expect(active++).toBe(0);
+      if (++entered === 1) {
+        firstInside = true;
+        firstEntered.resolve();
+        await lateCleanup.promise;
+        expect(await readdir(lock)).toHaveLength(1);
+        firstInside = false;
+      }
+      --active;
+    };
+    try {
+      await Promise.all([new StateStore(file, '/repo').withRepositoryLock(critical), new StateStore(file, '/repo').withRepositoryLock(critical)]);
+      expect(reclaimers).toBe(2);
+      expect(entered).toBe(2);
+      expect(await readdir(dir)).toEqual([]);
+    } finally {
+      bothReclaiming.resolve();
+      firstEntered.resolve();
+      lateCleanup.resolve();
+    }
+  });
+
+  it('keeps a live directory owner even when its heartbeat is stale', async () => {
+    const file = path.join(dir, 'state.json');
+    const owner = await directoryOwner(`${file}.repository.lock`, process.pid);
+    const token = await readFile(owner, 'utf8');
+    expireLockWait();
+    await expect(new StateStore(file, '/repo').withRepositoryLock(async () => undefined)).rejects.toMatchObject({ code: 'operation_locked' });
+    expect(await readFile(owner, 'utf8')).toBe(token);
   });
 
   it.each(['state', 'repository'] as const)("does not steal a live owner's %s lock when its heartbeat is stale", async (kind) => {
@@ -275,6 +411,7 @@ describe('what the state file will not lose', () => {
       store.update(async (s) => {
         s.todos.push(todo('stale'));
         // An older writer or an external replacement can still take over the token.
+        await rm(`${file}.lock`, { recursive: true });
         await writeFile(`${file}.lock`, 'other:holder');
       }),
     ).rejects.toMatchObject({ code: 'state_lock_lost' });

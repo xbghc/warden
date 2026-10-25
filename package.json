@@ -37,6 +37,7 @@
     "build:webview": "pnpm --filter @warden/webview build"
   },
   "devDependencies": {
+    "@agentclientprotocol/sdk": "2.0.2",
     "@biomejs/biome": "^2.5.12",
     "@types/node": "^22.20.1",
     "@types/vscode": "1.95.0",

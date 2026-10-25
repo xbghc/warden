@@ -142,9 +142,12 @@ src/api/filter.ts      A  │   + 新内容
 相对于已记录交付的未交付变化                             [提交到主开发分支…]
 ```
 
-Warden creates the workspace and runs any configured creation/reuse hook. Agent launch, prompt
-submission and process control belong to the user's external tools or scripts. The page has no
-terminal controls or agent-session state.
+Warden creates the workspace and runs its configured initialization hook. The user can then open
+a separate task-bound ACP conversation or use external tools. ACP supplies text prompts, updates,
+permission choices and explicit session controls; agents execute their own file and command tools.
+The conversation stays attached to its original task and repository as navigation changes.
+See the adopted [ACP boundary](acp-design.md); it adds no client filesystem/terminal tools, agent
+sandbox or execution guard and does not change the native review flow.
 
 Show a hook's output and exit code. Distinguish “工作区已创建；hook 退出码 1” from workspace
 creation failing. Retrying a hook is explicit; do not roll back arbitrary user-script modifications.
@@ -428,8 +431,8 @@ The implementation follows these bounded choices:
    backs task, preview and operation worktrees; primary remains separate. External backups and
    operation journals support interrupted operations, not undo UI.
 
-Do not add task branching, dependency scheduling, completion declarations, agent-specific SDKs,
-ACP integration, default dependency installation, test gates, automatic rebase/stash/recycling,
+Do not add task branching, dependency scheduling, completion declarations, vendor-specific agent SDKs,
+ACP client file/terminal tools, default dependency installation, test gates, automatic rebase/stash/recycling,
 history undo/restore, automatic force-push or general project management.
 
 ## Design review

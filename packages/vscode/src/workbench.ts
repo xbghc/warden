@@ -17,8 +17,10 @@ import type {
 import { Engine, WardenError } from '@warden/engine';
 import type { EngineCommand, EngineInput, EngineOutput } from '@warden/engine';
 import type { WorkbenchAction, WorkbenchModel, Surface, WorkbenchError, RebaseBatchResponse } from '@warden/shared';
+import type { AcpBinding } from '@warden/shared';
 import { Documents } from './documents.js';
 import { Views } from './views.js';
+import { AcpConversations } from './acp/conversations.js';
 
 const statusLabels: Record<string, string> = {
   pending: '待同步',
@@ -72,6 +74,7 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
   readonly dropMimeTypes = ['application/vnd.code.tree.warden.workbench'];
   private readonly views: Views;
   private readonly tree: vscode.TreeView<Node>;
+  private readonly conversations: AcpConversations;
   private selected?: string;
   private creating = false;
   private session = randomUUID();
@@ -85,6 +88,12 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
 
   constructor(private readonly context: vscode.ExtensionContext) {
     this.documents = new Documents(context);
+    this.conversations = new AcpConversations(
+      context,
+      (binding) => this.reviewConversation(binding),
+      () => this.emitter.fire(undefined),
+      (error) => this.output.appendLine(String(error)),
+    );
     this.views = new Views(
       context,
       (surface) => this.model(surface),
@@ -131,6 +140,9 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
       importNotes: () => this.importNotes(),
       showPreview: () => this.views.show('preview'),
       copyLocation: () => this.documents.copyLocation(),
+      chat: (node) => this.openConversation(node),
+      configureAgents: () => vscode.commands.executeCommand('workbench.action.openSettings', 'warden.acpAgents'),
+      sendSelectionToAgent: () => this.sendSelectionToAgent(),
     };
     const navigation = new Set([
       'refresh',
@@ -145,6 +157,9 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
       'copyWorkspace',
       'showPreview',
       'copyLocation',
+      'chat',
+      'configureAgents',
+      'sendSelectionToAgent',
     ]);
     for (const [name, action] of Object.entries(commands))
       context.subscriptions.push(
@@ -358,6 +373,7 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
           ? '审查版本已变化'
           : '',
         sync && sync.status !== 'current' ? '可检查 rebase' : '',
+        this.backend && this.conversations.activity(this.backend.root, task.id),
       ]
         .filter(Boolean)
         .join(' · ');
@@ -631,6 +647,40 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
     const task = await this.pickTask(node);
     if (task?.worktree) await vscode.env.clipboard.writeText(task.worktree);
   }
+  private async openConversation(node?: Node) {
+    const task = await this.pickTask(node);
+    if (!task?.worktree || !this.backend) throw new Error('请先为任务创建工作区');
+    await this.conversations.show(this.backend.root, task.id);
+  }
+  private async reviewConversation(binding: AcpBinding) {
+    await this.perform(
+      async () => {
+        if (this.backend?.root !== binding.repository) await this.open(binding.repository);
+        await this.refresh();
+        const task = this.tasks().find((row) => row.id === binding.taskId && row.worktree === binding.workspace);
+        if (!task) throw new Error('任务已不属于当前主开发分支，请先切回对应主开发分支');
+        await this.selectTask({ kind: 'task', task });
+      },
+      '正在打开任务审阅…',
+      `task:${binding.taskId}`,
+    );
+  }
+  private async sendSelectionToAgent() {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || editor.selection.isEmpty) throw new Error('请先选择要引用的文本');
+    const text = editor.document.getText(editor.selection);
+    if (text.length > 80_000) throw new Error('选区过长，请缩小后重试');
+    const uri = editor.document.uri;
+    const source = uri.scheme === 'warden-review' ? await this.documents.snapshot(uri) : undefined;
+    const origin = source
+      ? `审阅快照（只读）：${source.repository} / ${source.path}\n快照：${uri.toString()}`
+      : `文件：${uri.toString()}${editor.document.isDirty ? '（包含未保存内容，只作为引用）' : ''}`;
+    const start = editor.selection.start.line + 1;
+    const end = editor.selection.end.line + (editor.selection.end.character === 0 && editor.selection.end.line > editor.selection.start.line ? 0 : 1);
+    const task = await this.pickTask();
+    if (!task?.worktree || !this.backend) throw new Error('请选择已创建工作区的任务');
+    await this.conversations.append(this.backend.root, task.id, `${origin}\n行：${start}–${end}\n以下内容仅作为上下文引用：\n\n${text}`);
+  }
   private async importNotes() {
     const selected = await vscode.window.showQuickPick(
       (this.data?.legacyTodos ?? []).map((todo) => ({ label: todo.title, description: todo.branch, todo })),
@@ -685,7 +735,7 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
       this.views.render();
       return;
     }
-    const navigation = ['task.review', 'task.copy', 'task.brief', 'preview.copy', 'preview.terminal'];
+    const navigation = ['task.review', 'task.copy', 'task.brief', 'task.chat', 'preview.copy', 'preview.terminal'];
     await this.perform(
       async () => {
         // A queued message must never be interpreted in the next repository session.
@@ -709,6 +759,9 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
             break;
           case 'task.review':
             await this.selectTask(node);
+            break;
+          case 'task.chat':
+            await this.openConversation(node);
             break;
           case 'task.copy':
             await this.copyWorkspace(node);
@@ -807,6 +860,7 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
   }
   async close() {
     this.closing = true;
+    await this.conversations.close();
     await Promise.allSettled([this.active, ...this.navigation, this.reading]);
     await this.backend?.close();
   }

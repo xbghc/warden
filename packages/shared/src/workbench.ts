@@ -41,7 +41,7 @@ export type WorkbenchAction =
   | { type: 'task.create'; title: string; body: string }
   | { type: 'task.update'; taskId: string; title: string; body: string }
   | { type: 'task.start'; taskId: string; kind: 'shared' | 'clone'; agent?: string }
-  | { type: 'task.review' | 'task.hook' | 'task.resume' | 'task.copy' | 'task.brief' | 'task.restore'; taskId: string }
+  | { type: 'task.review' | 'task.hook' | 'task.resume' | 'task.copy' | 'task.brief' | 'task.restore' | 'task.chat'; taskId: string }
   | { type: 'task.deliver'; taskId: string; message: string }
   | { type: 'task.message'; taskId: string; message: string }
   | { type: 'preview.refresh' | 'preview.setup' | 'preview.terminal' | 'preview.run' | 'preview.copy' | 'rebase.check' | 'history.discard' }
@@ -100,6 +100,7 @@ export function parseWorkbenchAction(value: unknown): WorkbenchAction {
     case 'task.copy':
     case 'task.brief':
     case 'task.restore':
+    case 'task.chat':
       return { type: action.type, taskId: identity(action.taskId) };
     case 'task.message':
       return { type: action.type, taskId: identity(action.taskId), message: string(action.message) };

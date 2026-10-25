@@ -145,6 +145,110 @@ summary {
 :focus-visible {
   outline: 2px solid var(--color-ring);
 }
+.acp-app {
+  max-width: 900px;
+}
+.acp-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+.acp-heading h1 {
+  flex: 1;
+  min-width: 180px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.acp-status {
+  display: inline-block;
+  padding: 3px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  font-size: 12px;
+}
+.acp-context summary {
+  padding: 2px 0;
+  color: var(--color-muted-foreground);
+}
+.acp-profile {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+.acp-profile label.field {
+  flex: 1;
+  min-width: 180px;
+  max-width: 360px;
+  margin: 0;
+}
+.acp-profile [data-slot="native-select-wrapper"] {
+  width: 100%;
+}
+.acp-profile button {
+  margin-bottom: 2px;
+}
+.acp-transcript {
+  border-block: 1px solid var(--color-border);
+  min-height: 220px;
+  max-height: 52vh;
+  overflow: auto;
+  overflow-anchor: none;
+  margin-top: 20px;
+  padding-block: 4px;
+}
+.acp-empty {
+  padding: 24px 10px;
+}
+.acp-message {
+  padding: 14px 10px;
+  border-bottom: 1px solid var(--color-border);
+}
+.acp-message:last-child {
+  border-bottom: none;
+}
+.acp-message-user,
+.acp-message-tool {
+  background: var(--color-muted);
+}
+.acp-message-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.acp-message-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+.acp-message-tool .acp-message-text {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
+}
+.acp-message-notice {
+  color: var(--color-muted-foreground);
+}
+.acp-permission h2 {
+  overflow-wrap: anywhere;
+}
+.acp-permission .acp-message-text {
+  max-height: 220px;
+  overflow: auto;
+}
+.acp-auth > div + div {
+  margin-top: 12px;
+}
+.acp-composer {
+  margin-top: 16px;
+}
+.acp-composer textarea {
+  resize: vertical;
+  max-height: 45vh;
+}
 @media (max-width: 620px) {
   .history-columns {
     grid-template-columns: 1fr;
