@@ -95,6 +95,84 @@ describe('external ACP session storage', () => {
     expect((await readdir(directory)).filter((file) => file.endsWith('.tmp'))).toEqual([]);
   });
 
+  it.each(['EPERM', 'EACCES', 'EBUSY'])('retries transient %s replacement failures without changing the previous record', async (code) => {
+    const storage = new AcpSessionStorage(directory, binding);
+    await storage.save(conversation());
+    const original = await readFile(storage.file);
+    const replacement = conversation();
+    const originalRename = fs.rename;
+    const temporaryFiles = new Set();
+    let attempts = 0;
+    vi.spyOn(fs, 'rename').mockImplementation(async (source, target) => {
+      if (target !== storage.file) return originalRename(source, target);
+      temporaryFiles.add(source);
+      expect(await readFile(storage.file)).toEqual(original);
+      expect(JSON.parse(await readFile(source, 'utf8'))).toEqual(replacement);
+      if (++attempts <= 2) throw Object.assign(new Error('Temporary sharing violation'), { code });
+      return originalRename(source, target);
+    });
+    syncBuiltinESMExports();
+
+    await storage.save(replacement);
+    expect(attempts).toBe(3);
+    expect(temporaryFiles.size).toBe(1);
+    expect(await storage.load()).toEqual(replacement);
+    expect((await readdir(directory)).filter((file) => file.endsWith('.tmp'))).toEqual([]);
+  });
+
+  it('bounds persistent replacement retries, preserves the previous record, and permits a later save', async () => {
+    const storage = new AcpSessionStorage(directory, binding);
+    const previous = conversation();
+    await storage.save(previous);
+    const original = await readFile(storage.file);
+    const replacement = conversation();
+    const originalRename = fs.rename;
+    const temporaryFiles = new Set();
+    let attempts = 0;
+    const rename = vi.spyOn(fs, 'rename').mockImplementation(async (source, target) => {
+      if (target !== storage.file) return originalRename(source, target);
+      ++attempts;
+      temporaryFiles.add(source);
+      expect(await readFile(storage.file)).toEqual(original);
+      expect(JSON.parse(await readFile(source, 'utf8'))).toEqual(replacement);
+      throw Object.assign(new Error('Persistent sharing violation'), { code: 'EPERM' });
+    });
+    syncBuiltinESMExports();
+
+    await expect(storage.save(replacement)).rejects.toMatchObject({ code: 'EPERM' });
+    expect(attempts).toBe(6);
+    expect(temporaryFiles.size).toBe(1);
+    expect(await readFile(storage.file)).toEqual(original);
+    expect(await storage.load()).toEqual(previous);
+    expect((await readdir(directory)).filter((file) => file.endsWith('.tmp'))).toEqual([]);
+    rename.mockRestore();
+    syncBuiltinESMExports();
+    await storage.save(replacement);
+    expect(await storage.load()).toEqual(replacement);
+  });
+
+  it.each(['EIO', 'ENOENT', 'EXDEV'])('does not retry a nontransient %s replacement error', async (code) => {
+    const storage = new AcpSessionStorage(directory, binding);
+    await storage.save(conversation());
+    const original = await readFile(storage.file);
+    const replacement = conversation();
+    const originalRename = fs.rename;
+    let attempts = 0;
+    vi.spyOn(fs, 'rename').mockImplementation(async (source, target) => {
+      if (target !== storage.file) return originalRename(source, target);
+      ++attempts;
+      expect(await readFile(storage.file)).toEqual(original);
+      expect(JSON.parse(await readFile(source, 'utf8'))).toEqual(replacement);
+      throw Object.assign(new Error('Unrecoverable rename failure'), { code });
+    });
+    syncBuiltinESMExports();
+
+    await expect(storage.save(replacement)).rejects.toMatchObject({ code });
+    expect(attempts).toBe(1);
+    expect(await readFile(storage.file)).toEqual(original);
+    expect((await readdir(directory)).filter((file) => file.endsWith('.tmp'))).toEqual([]);
+  });
+
   it('archives immutable copies while leaving the current record unchanged', async () => {
     const storage = new AcpSessionStorage(directory, binding);
     const first = conversation();

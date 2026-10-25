@@ -10,6 +10,7 @@ import type { AcpStorage } from './contracts.js';
 const MAX_RECORD_BYTES = 8 * 1024 * 1024;
 const MAX_CLAIM_BYTES = 16 * 1024;
 const MAX_MESSAGES = 10_000;
+const RENAME_ATTEMPTS = 6;
 const HASH = /^[a-f0-9]{64}$/;
 const TOKEN = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
 
@@ -321,7 +322,18 @@ export class AcpSessionStorage implements AcpStorage {
       } finally {
         await handle.close();
       }
-      await rename(temporary, file);
+      for (let attempt = 0; ; attempt++) {
+        try {
+          await rename(temporary, file);
+          break;
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException).code;
+          if (attempt + 1 >= RENAME_ATTEMPTS || !['EPERM', 'EACCES', 'EBUSY'].includes(code ?? '')) throw error;
+          // Windows readers or scanners can briefly block replacement. Retry the same
+          // durable temporary file so the previous record stays visible until rename succeeds.
+          await new Promise((resolve) => setTimeout(resolve, 25 * 2 ** attempt));
+        }
+      }
     } finally {
       await rm(temporary, { force: true });
     }

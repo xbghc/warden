@@ -95,6 +95,8 @@ Session metadata and conversation records are stored outside the source reposito
 the original task/workspace/profile. A reload or connection loss preserves the last known record
 and marks uncertain work accordingly. It does not automatically relaunch, reconnect or resend a
 possibly delivered prompt.
+Record replacement remains atomic while bounded retries tolerate brief filesystem contention.
+If replacement keeps failing, the previous record is retained and the save error remains visible.
 
 On explicit **继续会话**, revalidate the binding and profile. If the same agent supports
 `session/load`, load its saved session and treat replayed updates as display history, not tool
