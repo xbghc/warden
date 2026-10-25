@@ -234,7 +234,10 @@ describe('external ACP session storage', () => {
     const storage = new AcpSessionStorage(directory, binding);
     const release = await storage.claim();
     const source = `
-      const { AcpSessionStorage } = await import(process.argv[1]);
+      // tsx exposes this CommonJS-package source as named exports or a default namespace,
+      // depending on the Node version. Exercise the same storage class in either form.
+      const namespace = await import(process.argv[1]);
+      const AcpSessionStorage = namespace.AcpSessionStorage ?? namespace.default?.AcpSessionStorage;
       const storage = new AcpSessionStorage(process.argv[2], JSON.parse(process.argv[3]));
       try {
         const release = await storage.claim();
