@@ -96,7 +96,9 @@ are observed by content and debounced into preview; they are not unexpected edit
 Select a task and file to review directly. *提交到主开发分支…* accepts all current undelivered changes from
 a **clean committed source**, pinned to the reviewed source, delivery boundary and primary HEAD. Source commits may
 continue from the previous delivery without first rebasing. `sourceBase` records that previous
-source tip so A1 is excluded when delivering A2.
+source tip so A1 is excluded when delivering A2. After a manual rebase incorporates the current
+primary HEAD, both refreshed review and delivery use that HEAD as the effective boundary; a request
+with the previous boundary requires a new review.
 
 Preparation first composes the delivery in an isolated worktree. It leaves the independent preview running and stages only that delivery in the checked-out
 primary branch. Existing primary user edits must be handled first.
@@ -130,8 +132,10 @@ Warden checks workspaces in isolated repositories and shows **已是最新**, **
 Dirty/busy workspaces are blocked; a changed revision invalidates a check. Git state is not proof
 that an agent has stopped.
 
-Open *同步工作区* and select one, several or all workspaces. The page skips unknown/blocked/conflicting
-checks; the engine rechecks both observed heads and actual checkout conditions. Explicit execution
+Open *同步工作区* and select one, several or all workspaces. The engine rechecks both observed heads
+and actual checkout conditions for every selected workspace. An unavailable workspace reports a
+failed result without preventing other selected workspaces from running. If it becomes available
+again, a new check must observe its source HEAD before it can run. Explicit execution
 uses `rebase --no-autostash --onto <primary> <last-delivered-source-or-base>`, avoiding duplicate
 squashed work. Each workspace has its own result. An actual conflict remains in that workspace for
 the user to resolve manually. There is no automatic stash, background rebase or forced continuation.

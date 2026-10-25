@@ -7,7 +7,7 @@ import os from 'node:os';
 import { unzipSync } from 'fflate';
 import { Engine } from '@warden/engine';
 import { parseAcpAction } from '@warden/shared';
-import type { AcpAction, AcpBinding, AcpModel } from '@warden/shared';
+import type { AcpAction, AcpBinding, AcpModel, AcpRecord } from '@warden/shared';
 import type { AcpProfile } from '../../packages/vscode/src/acp/contracts.js';
 import { AcpDraft } from '../../packages/vscode/src/acp/draft.js';
 import { AcpSession } from '../../packages/vscode/src/acp/session.js';
@@ -26,10 +26,41 @@ const preview = await engine.execute('preview.refresh', undefined);
 const manifest = JSON.parse(await readFile('packages/vscode/package.json', 'utf8'));
 const assets = unzipSync(await readFile(`packages/vscode/warden-${manifest.version}.vsix`));
 
+class CompletionStorage extends AcpSessionStorage {
+  blocked = false;
+  private completion?: { known: Set<string>; gate: Promise<void>; release(): void };
+
+  holdCompletion(record: AcpRecord) {
+    if (this.completion) throw new Error('A completion save is already held');
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.completion = { known: new Set(record.messages.map((item) => item.id)), gate, release };
+  }
+
+  releaseCompletion() {
+    this.completion?.release();
+    this.completion = undefined;
+  }
+
+  override async save(record: AcpRecord) {
+    const completion = this.completion;
+    const user = record.messages.filter((item) => item.role === 'user').at(-1);
+    if (completion && user && !completion.known.has(user.id) && user.uncertain === false) {
+      this.blocked = true;
+      await completion.gate;
+      this.blocked = false;
+    }
+    await super.save(record);
+  }
+}
+
 interface Entry {
   binding: AcpBinding;
   panelId: string;
   session: AcpSession;
+  storage: CompletionStorage;
   profiles: AcpProfile[];
   draft: AcpDraft;
   sending: boolean;
@@ -47,21 +78,23 @@ for (const [index, title] of ['订单筛选参数', '分页默认值'].entries()
     command: process.execPath,
     args: [path.resolve('test/fixtures/acp-agent.mjs'), path.join(data, `${index}-${mode}.jsonl`), mode],
   }));
+  const storage = new CompletionStorage(path.join(data, 'acp'), binding);
   const session = new AcpSession({
     binding,
-    storage: new AcpSessionStorage(path.join(data, 'acp'), binding),
+    storage,
     validate: () => validateAcpBinding(engine, binding),
     changed: () => {},
     timeoutMs: 3000,
   });
   await session.initialize();
-  entries.push({ binding, panelId: `panel-${index}`, session, profiles, draft: new AcpDraft(`请完成${title}。`), sending: false });
+  entries.push({ binding, panelId: `panel-${index}`, session, storage, profiles, draft: new AcpDraft(`请完成${title}。`), sending: false });
 }
 
 const model = (entry: Entry): AcpModel => ({
   ...entry.session.snapshot(),
   error: entry.error ?? entry.session.snapshot().error,
   panelId: entry.panelId,
+  sending: entry.sending,
   profiles: entry.profiles.map(({ id, label }) => ({ id, label })),
   ...entry.draft.snapshot(),
 });
@@ -126,6 +159,13 @@ const server = createServer(async (request, response) => {
     if (url.pathname === '/model') {
       response.setHeader('Content-Type', 'application/json');
       response.end(JSON.stringify(model(entry)));
+      return;
+    }
+    if (url.pathname === '/completion') {
+      if (request.method === 'POST') entry.storage.holdCompletion(entry.session.snapshot().record);
+      if (request.method === 'DELETE') entry.storage.releaseCompletion();
+      response.setHeader('Content-Type', 'application/json');
+      response.end(JSON.stringify({ blocked: entry.storage.blocked }));
       return;
     }
     if (url.pathname === '/reopen' && request.method === 'POST') {
@@ -250,6 +290,7 @@ server.listen(0, '127.0.0.1', () => {
 async function close() {
   server.close();
   server.closeAllConnections();
+  for (const entry of entries) entry.storage.releaseCompletion();
   await Promise.all(entries.map((entry) => entry.session.close()));
   await engine.close();
   await Promise.all(entries.map((entry) => rm(entry.binding.workspace, { recursive: true, force: true })));

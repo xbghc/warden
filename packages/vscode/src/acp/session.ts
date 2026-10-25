@@ -407,10 +407,11 @@ export class AcpSession {
       runtime.sessionId = session.sessionId;
       this.record.sessionId = session.sessionId;
     }
+    await this.persist();
+    if (!this.current(runtime)) throw new Error('连接已结束');
     runtime.established = true;
     this.status = 'connected';
     this.error = undefined;
-    await this.persist();
     this.notify();
   }
 
@@ -427,6 +428,7 @@ export class AcpSession {
 
   private async runPrompt(turn: Turn, value: string) {
     const runtime = turn.runtime;
+    let completed = false;
     try {
       await this.options.validate();
       if (!this.current(runtime) || turn.cancelling) throw new Error('发送已取消');
@@ -442,7 +444,7 @@ export class AcpSession {
         turn.user.uncertain = false;
         turn.user.status = '发送前已取消';
         this.record.interrupted = false;
-        if (this.current(runtime)) this.status = 'connected';
+        completed = true;
         return;
       }
       turn.sent = true;
@@ -453,10 +455,7 @@ export class AcpSession {
       turn.user.uncertain = false;
       turn.user.status = result.stopReason === 'cancelled' ? '本轮已取消' : `已响应 · ${result.stopReason}`;
       this.record.interrupted = false;
-      if (this.current(runtime)) {
-        this.status = 'connected';
-        this.error = undefined;
-      }
+      completed = true;
     } catch (error) {
       if (this.record === turn.record && turn.sent) this.record.interrupted = true;
       if (this.current(runtime)) {
@@ -468,7 +467,20 @@ export class AcpSession {
       this.cancelPermissions(runtime);
       this.history.lastChunk = undefined;
       try {
-        if (this.record === turn.record) await this.persist();
+        if (this.record === turn.record)
+          await this.persist().catch((error) => {
+            if (this.current(runtime)) {
+              this.status = 'error';
+              this.error = `保存会话失败：${message(error)}。请检查会话记录后重新连接。`;
+            }
+            throw error;
+          });
+        // A completed response can become visible while its final save is pending.
+        // Keep the turn busy until both persistence and teardown have finished.
+        if (completed && this.current(runtime)) {
+          this.status = 'connected';
+          this.error = undefined;
+        }
       } finally {
         if (this.turn === turn) this.turn = undefined;
         this.notify();

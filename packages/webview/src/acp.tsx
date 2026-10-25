@@ -46,10 +46,10 @@ export function AcpApp({ model, send }: Props) {
   const followOutput = useRef(true);
   sendRef.current = send;
 
-  const busy = status === 'connecting' || status === 'running' || status === 'waiting_permission' || status === 'cancelling';
+  const busy = model.sending || status === 'connecting' || status === 'running' || status === 'waiting_permission' || status === 'cancelling';
   // An error may leave an agent waiting for login or cancellation. Keep disconnect reachable.
   const hasConnection = status !== 'disconnected';
-  const canChooseProfile = !record.profileId && !record.sessionId && !hasConnection && !sending;
+  const canChooseProfile = !record.profileId && !record.sessionId && !hasConnection && !busy && !sending;
   const availableProfile = model.profiles.some((profile) => profile.id === profileId);
   const needsRestore = !!record.sessionId && !hasConnection;
   const canSend = !!draft.trim() && availableProfile && !busy && !sending && !pending && !needsRestore && status !== 'error';
@@ -107,7 +107,7 @@ export function AcpApp({ model, send }: Props) {
       if (model.error || (!busy && record.interrupted)) {
         setPending(undefined);
         setSending(false);
-      } else if (sent && !sent.uncertain && status === 'connected') {
+      } else if (sent && !sent.uncertain && status === 'connected' && !model.sending) {
         setPending(undefined);
         setSending(false);
       } else if (status !== pending.status || record.updatedAt !== pending.updatedAt) setSending(false);
@@ -188,7 +188,7 @@ export function AcpApp({ model, send }: Props) {
             <Button
               variant="secondary"
               size="sm"
-              disabled={!availableProfile || sending || (needsRestore && !record.canLoad)}
+              disabled={!availableProfile || busy || sending || (needsRestore && !record.canLoad)}
               onClick={() => send({ type: 'connect', profileId, resume: needsRestore })}
             >
               {needsRestore ? '继续会话' : '连接 Agent'}

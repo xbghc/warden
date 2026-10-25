@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+from time import monotonic
 from playwright.sync_api import sync_playwright, expect
 
 artifacts = Path(os.environ.get('WARDEN_UI_ARTIFACTS', '/tmp/warden-ui-artifacts'))
@@ -28,13 +29,22 @@ try:
             page.get_by_role('button', name='发送', exact=True).click()
 
         def connected(page):
-            page.wait_for_function("window.__model.status === 'connected'")
+            page.wait_for_function("window.__model.status === 'connected' && !window.__model.sending")
+
+        def wait_host(page, route, predicate):
+            # Poll resolved host state: wait_for_function treats an async predicate's
+            # Promise as truthy before its eventual boolean result is available.
+            task = page.evaluate("new URL(location.href).searchParams.get('task') || '0'")
+            deadline = monotonic() + 30
+            while monotonic() < deadline:
+                state = page.request.get(origin + route + '?task=' + task).json()
+                if predicate(state):
+                    return state
+                page.wait_for_timeout(25)
+            raise AssertionError({'route': route, 'lastState': state})
 
         def saved_draft(page, text):
-            page.wait_for_function("""async text => {
-                const task = new URL(location.href).searchParams.get('task') || '0';
-                return (await (await fetch('/model?task=' + task)).json()).draft === text;
-            }""", arg=text)
+            wait_host(page, '/model', lambda model: model['draft'] == text)
 
         def conversation(messages):
             # Agents may replay adjacent same-role messages with different chunk boundaries.
@@ -65,6 +75,58 @@ try:
         assert state['primaryContext'] == state['previewContext'] == 'primary baseline\n'
 
         composer = first.get_by_role('textbox', name='消息', exact=True)
+        # Completion is not available for another send until its final storage
+        # save and host draft bookkeeping finish, including after panel reload.
+        assert first.request.post(origin + '/completion?task=0').ok
+        send(first, 'held completion')
+        wait_host(first, '/completion', lambda state: state['blocked'])
+        first.wait_for_function("window.__model.sending && window.__model.status === 'running'")
+        expect(first.locator('.acp-composer button[type="submit"]')).to_be_disabled()
+        first.reload()
+        first.wait_for_function("window.__model.sending && window.__model.status === 'running'")
+        expect(composer).to_have_value('held completion')
+        expect(first.locator('.acp-composer button[type="submit"]')).to_be_disabled()
+        composer.fill('follow-up during completion')
+        saved_draft(first, 'follow-up during completion')
+        expect(first.locator('.acp-composer button[type="submit"]')).to_be_disabled()
+        assert first.request.get(origin + '/completion?task=0').json()['blocked']
+        assert first.request.delete(origin + '/completion?task=0').ok
+        connected(first)
+        expect(composer).to_have_value('follow-up during completion')
+        expect(first.get_by_role('button', name='发送', exact=True)).to_be_enabled()
+        first.get_by_role('button', name='发送', exact=True).click()
+        expect(first.locator('.acp-message-agent').last.locator('.acp-message-text')).to_have_text('Echo: follow-up during completion')
+        connected(first)
+        expect(composer).to_have_value('')
+        completion_state = inspect()['entries'][0]
+        assert not completion_state['model'].get('error'), completion_state['model']
+        completion_prompts = [json.loads(line) for line in completion_state['journals'][0].splitlines() if json.loads(line).get('method') == 'session/prompt']
+        assert sum(any(part.get('text') == 'follow-up during completion' for part in item['params']['prompt']) for item in completion_prompts) == 1
+
+        # Deliver two explicit sends from the same panel version while suppressing
+        # model acknowledgements. Only completion clears separate their revisions.
+        first.evaluate('window.__fixture.pauseModels()')
+        before_clear = first.request.get(origin + '/model?task=0').json()
+        for offset, text in enumerate(['unacknowledged completion', 'rapid next draft'], start=1):
+            response = first.request.post(origin + '/action?task=0', data={
+                'panelId': before_clear['panelId'],
+                'action': {'type': 'send', 'text': text, 'profileId': 'normal',
+                           'version': before_clear['draftVersion'], 'revision': before_clear['draftRevision'] + offset},
+            })
+            assert response.ok
+            def completed_prompt(model):
+                assert not model.get('error'), model
+                return not model['sending'] and model['status'] == 'connected' and any(
+                    item['role'] == 'user' and item['text'] == text and item.get('uncertain') is False
+                    for item in model['record']['messages']
+                )
+            wait_host(first, '/model', completed_prompt)
+        stale_clear_state = first.request.get(origin + '/model?task=0').json()
+        assert stale_clear_state['draftVersion'] == before_clear['draftVersion'] + 2
+        assert len([item for item in stale_clear_state['record']['messages'] if item['role'] == 'user' and item['text'] == 'rapid next draft']) == 1
+        first.evaluate('window.__fixture.resumeModels()')
+        expect(composer).to_have_value('')
+
         # Saving a draft need not echo it before the host appends an editor selection.
         # Batch the reveal and append models, as VS Code can do before React renders.
         first.evaluate('window.__fixture.pauseModels()')
@@ -107,9 +169,7 @@ try:
         users_before = len([item for item in inspect()['entries'][0]['model']['record']['messages'] if item['role'] == 'user'])
         first.evaluate("window.__fixture.append('选区内容：const offset = 0;', false)")
         first.get_by_role('button', name='发送', exact=True).click()
-        first.wait_for_function("""async () => {
-            return !!(await (await fetch('/model?task=0')).json()).error;
-        }""")
+        wait_host(first, '/model', lambda model: model.get('error'))
         first.evaluate('window.__fixture.resumeModels()')
         stale_combined = '发送前的说明\n\n选区内容：const offset = 0;'
         expect(composer).to_have_value(stale_combined)
@@ -125,9 +185,7 @@ try:
         first.evaluate('window.__fixture.pauseModels()')
         first.evaluate('window.__fixture.holdDrafts()')
         first.get_by_role('button', name='新建会话', exact=True).click()
-        first.wait_for_function("""async previous => {
-            return (await (await fetch('/model?task=0')).json()).record.id !== previous;
-        }""", arg=previous_record)
+        wait_host(first, '/model', lambda model: model['record']['id'] != previous_record)
         composer.fill('新会话建立时输入的说明')
         newer_record = first.request.get(origin + '/model?task=0').json()
         first.evaluate('model => window.__fixture.deliver(model)', newer_record)
@@ -265,7 +323,7 @@ try:
         assert first.evaluate('window.__hostError') is None
         assert second.evaluate('window.__hostError') is None
         browser.close()
-    print('ACP browser flows passed: task isolation, parallel conversations, permissions, cancellation, batched selection appends, in-flight drafts, stale models/sends, new-conversation edits, reopened-turn acknowledgement, restore, crash, authentication, failed-profile recovery and safe text.')
+    print('ACP browser flows passed: task isolation, parallel conversations, permissions, cancellation, delayed completion with reload and follow-up, unacknowledged completion clears, batched selection appends, in-flight drafts, stale models/sends, new-conversation edits, reopened-turn acknowledgement, restore, crash, authentication, failed-profile recovery and safe text.')
 finally:
     host.terminate()
     host.wait(timeout=30)

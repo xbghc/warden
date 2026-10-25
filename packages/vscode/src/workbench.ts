@@ -38,6 +38,10 @@ const statusLabels: Record<string, string> = {
   stale: '待更新',
   paused: '待迁移',
 };
+const fileModeChange = (file: FileEntry): string | undefined => {
+  if (file.oldMode === file.newMode) return undefined;
+  return `文件模式 ${file.oldMode ?? '无'} → ${file.newMode ?? '无'}`;
+};
 type Node =
   | { kind: 'preview' }
   | { kind: 'tasks' }
@@ -392,7 +396,8 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
     const item = new vscode.TreeItem(node.file.path);
     item.id = `file:${node.target}:${node.file.path}`;
     item.contextValue = 'reviewFile';
-    item.description = `+${node.file.additions} −${node.file.deletions}`;
+    item.description = [`+${node.file.additions} −${node.file.deletions}`, fileModeChange(node.file)].filter(Boolean).join(' · ');
+    item.tooltip = [node.file.path, fileModeChange(node.file)].filter(Boolean).join('\n');
     item.iconPath = new vscode.ThemeIcon('diff');
     item.command = { command: 'warden.openDiff', title: '查看差异', arguments: [node] };
     return item;
@@ -554,7 +559,7 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
       'vscode.diff',
       left,
       right,
-      `${node.task?.title ?? '提交'} · ${latest.path}${version ? ` · ${version.slice(0, 8)}` : ''}`,
+      [node.task?.title ?? '提交', latest.path, fileModeChange(latest), version?.slice(0, 8)].filter(Boolean).join(' · '),
       { preview: true },
     );
     this.views.render();

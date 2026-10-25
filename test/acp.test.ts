@@ -92,6 +92,35 @@ afterEach(async () => {
 });
 
 describe('ACP subprocess conversations', () => {
+  it('keeps a new connection busy until its session record has been persisted', async () => {
+    const f = await fixture();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let savingSession = false;
+    vi.spyOn(f.storage, 'save').mockImplementation(async (record) => {
+      if (!savingSession && record.sessionId) {
+        savingSession = true;
+        await gate;
+      }
+      f.storage.record = structuredClone(record);
+    });
+    const connected = f.session.connect(f.profile, { resume: false });
+    try {
+      await expect.poll(() => savingSession, { timeout: 5_000 }).toBe(true);
+      expect(f.session.snapshot().status).toBe('connecting');
+      await expect(f.session.send('premature prompt')).rejects.toThrow();
+    } finally {
+      release();
+      await connected;
+    }
+    expect(f.session.snapshot().status).toBe('connected');
+    await f.session.send('ready prompt');
+    expect(transcript(f.session).at(-1)).toEqual({ role: 'agent', text: 'Echo: ready prompt' });
+    expect((await journal(f.file)).filter((message) => message.method === 'session/prompt')).toHaveLength(1);
+  });
+
   it('launches only on explicit connect and leaves the agent responsible for its own task file operations', async () => {
     const f = await fixture();
     expect(await journal(f.file)).toEqual([]);
@@ -468,6 +497,62 @@ describe('ACP subprocess conversations', () => {
     await sent;
     expect((await journal(f.file)).filter((message) => message.method === 'session/prompt')).toHaveLength(1);
     expect(transcript(f.session).some((message) => message.text === 'must not be queued')).toBe(false);
+  });
+
+  it.each(['response', 'cancellation'] as const)('keeps a completed %s busy until its final save settles', async (completion) => {
+    const f = await fixture();
+    await f.session.connect(f.profile, { resume: false });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let savingCompletion = false;
+    vi.spyOn(f.storage, 'save').mockImplementation(async (record) => {
+      if (!savingCompletion && record.messages.some((message) => message.role === 'user' && message.uncertain === false)) {
+        savingCompletion = true;
+        await gate;
+      }
+      f.storage.record = structuredClone(record);
+    });
+    const sent = f.session.send(completion === 'cancellation' ? 'hold' : 'first prompt');
+    let cancelled: Promise<void> | undefined;
+    try {
+      if (completion === 'cancellation') {
+        await expect.poll(async () => (await journal(f.file)).some((message) => message.method === 'session/prompt'), { timeout: 5_000 }).toBe(true);
+        cancelled = f.session.cancel();
+      }
+      await expect.poll(() => savingCompletion, { timeout: 5_000 }).toBe(true);
+      expect(f.session.snapshot().status).toBe(completion === 'cancellation' ? 'cancelling' : 'running');
+      expect(f.session.snapshot().record.messages.find((message) => message.role === 'user')?.uncertain).toBe(false);
+      await expect(f.session.send('premature follow-up')).rejects.toThrow();
+    } finally {
+      release();
+      await Promise.all([sent, cancelled]);
+    }
+    expect(f.session.snapshot().status).toBe('connected');
+    await f.session.send('next prompt');
+    expect(transcript(f.session).at(-1)).toEqual({ role: 'agent', text: 'Echo: next prompt' });
+    expect((await journal(f.file)).filter((message) => message.method === 'session/prompt')).toHaveLength(2);
+  });
+
+  it('reports a failed completion save without leaving the turn permanently busy', async () => {
+    const f = await fixture();
+    await f.session.connect(f.profile, { resume: false });
+    let failCompletion = true;
+    vi.spyOn(f.storage, 'save').mockImplementation(async (record) => {
+      if (failCompletion && record.messages.some((message) => message.role === 'user' && message.uncertain === false)) {
+        failCompletion = false;
+        throw new Error('disk full');
+      }
+      f.storage.record = structuredClone(record);
+    });
+    await expect(f.session.send('completed response')).rejects.toThrow('disk full');
+    expect(f.session.snapshot()).toMatchObject({ status: 'error', error: expect.stringContaining('保存会话失败') });
+    await f.session.disconnect();
+    await f.session.connect(f.profile, { resume: true });
+    await f.session.send('next prompt');
+    expect(transcript(f.session).at(-1)).toEqual({ role: 'agent', text: 'Echo: next prompt' });
+    expect((await journal(f.file)).filter((message) => message.method === 'session/prompt')).toHaveLength(2);
   });
 
   it.each(['cancel', 'disconnect'] as const)('settles a pre-send %s exposed by a pending render while saving the prompt', async (action) => {

@@ -49,6 +49,82 @@ describe('ACP draft synchronization', () => {
     expect(draft.text).toBe('Next task');
   });
 
+  it.each(['Next task', 'Task'])('accepts a newer follow-up %j before its completion clear is acknowledged', (text) => {
+    const draft = new AcpDraft('Task');
+    const submitted = { text: 'Task', revision: 1, version: 0 };
+    const first = draft.begin(submitted);
+    expect(draft.complete(first.mutation)).toBe(true);
+    expect(() => draft.begin(submitted)).toThrow('草稿已更新');
+    expect(draft.text).toBe('');
+
+    // A flushed draft and its following send can both arrive before the panel receives the clear.
+    const followup = { text, revision: 2, version: 0 };
+    draft.update(followup);
+    const next = draft.begin(followup);
+    expect(next.text).toBe(text);
+    expect(draft.complete(next.mutation)).toBe(true);
+    expect(draft.text).toBe('');
+    expect(() => draft.begin(followup)).toThrow('草稿已更新');
+    expect(draft.begin({ text: 'Third task', revision: 3, version: 0 }).text).toBe('Third task');
+  });
+
+  it('requires acknowledging a selection appended after a completed draft', () => {
+    const draft = new AcpDraft('Task');
+    const first = draft.begin({ text: 'Task', revision: 1, version: 0 });
+    draft.complete(first.mutation);
+    draft.append('Review this source');
+    const followup = { text: 'Next task', revision: 2, version: 0 };
+    draft.update(followup);
+    const before = draft.snapshot();
+    expect(() => draft.begin(followup)).toThrow('草稿已更新');
+    expect(draft.snapshot()).toEqual(before);
+    expect(draft.begin({ text: draft.text, revision: 2, version: 2 }).text).toBe('Next task\n\nReview this source');
+  });
+
+  it('accepts a newer send before its separate draft save arrives', () => {
+    const draft = new AcpDraft('Task');
+    const first = draft.begin({ text: 'Task', revision: 1, version: 0 });
+    draft.complete(first.mutation);
+    const next = draft.begin({ text: 'Next task', revision: 2, version: 0 });
+    expect(next.text).toBe('Next task');
+    draft.update({ text: 'Task', revision: 1, version: 0 });
+    expect(draft.text).toBe('Next task');
+    expect(draft.complete(next.mutation)).toBe(true);
+  });
+
+  it('rejects invalid versions and revisions while a completion clear is unacknowledged', () => {
+    const draft = new AcpDraft('Task');
+    const first = draft.begin({ text: 'Task', revision: 1, version: 0 });
+    draft.complete(first.mutation);
+    const before = draft.snapshot();
+    for (const edit of [
+      { version: -1, revision: 2 },
+      { version: 2, revision: 2 },
+      { version: 0.5, revision: 2 },
+      { version: 0, revision: -1 },
+      { version: 0, revision: 2.5 },
+      { version: Number.NaN, revision: 2 },
+      { version: 0, revision: Number.NaN },
+    ]) {
+      expect(() => draft.begin({ text: 'Next task', ...edit })).toThrow();
+      expect(draft.snapshot()).toEqual(before);
+    }
+  });
+
+  it.each(['acknowledge', 'reopen'])('rejects a stale send after completion history is removed by %s', (operation) => {
+    const draft = new AcpDraft('Task');
+    const first = draft.begin({ text: 'Task', revision: 1, version: 0 });
+    draft.complete(first.mutation);
+    if (operation === 'acknowledge') draft.update({ text: '', revision: 1, version: 1 });
+    else draft.resetPanel();
+    const second = draft.begin({ text: 'Second task', revision: 2, version: 1 });
+    draft.complete(second.mutation);
+    const before = draft.snapshot();
+    expect(() => draft.begin({ text: 'Unobserved history', revision: 3, version: 0 })).toThrow('草稿已更新');
+    expect(draft.snapshot()).toEqual(before);
+    expect(draft.begin({ text: 'Next task', revision: 3, version: 1 }).text).toBe('Next task');
+  });
+
   it('preserves a newer edit even when its text equals the submitted prompt', () => {
     const draft = new AcpDraft('Task');
     const sent = draft.begin({ text: 'Same text', revision: 1, version: 0 });

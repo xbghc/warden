@@ -65,6 +65,8 @@ export interface AcpModel extends AcpSnapshot {
   /** Panel identity, independent of the currently selected workbench repository. */
   panelId: string;
   profiles: AcpProfileSummary[];
+  /** A send remains active until the completed transcript and draft acknowledgement are settled. */
+  sending: boolean;
   draft: string;
   draftVersion: number;
   draftRevision: number;

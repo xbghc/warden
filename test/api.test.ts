@@ -1,8 +1,9 @@
 import os from 'node:os';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { Engine } from '@warden/engine';
 import type {
   CommitsResponse,
   CreateWorktreeResponse,
@@ -116,6 +117,47 @@ describe('repo & targets', () => {
     expect(missing.content).toBeNull();
     const notFound = await get(`/api/targets/${k('working')}/file?path=${k('README.md')}`);
     expect(notFound.status).toBe(404);
+  });
+
+  it('keeps committed, staged and live symlink payloads consistent in desktop review', async ({ skip }) => {
+    const link = path.join(fx.root, 'link');
+    try {
+      await symlink('README.md', link, 'file');
+    } catch (error) {
+      // Windows requires Developer Mode or an elevated token for symbolic links.
+      if (process.platform === 'win32' && ['EPERM', 'EACCES'].includes((error as NodeJS.ErrnoException).code ?? '')) {
+        skip('Symbolic link creation is not permitted.');
+      }
+      throw error;
+    }
+    fx.git('config', 'core.symlinks', 'true');
+    fx.git('add', 'link');
+    fx.git('commit', '-qm', 'Add symbolic link');
+    await rm(link);
+    await symlink('staged-missing.md', link, 'file');
+    fx.git('add', 'link');
+    await rm(link);
+    await symlink('live-missing.md', link, 'file');
+    const engine = await Engine.open(fx.root, stateFile);
+    try {
+      for (const [key, oldContent, newContent] of [
+        ['working', 'staged-missing.md', 'live-missing.md'],
+        ['staged', 'README.md', 'staged-missing.md'],
+        ['all', 'README.md', 'live-missing.md'],
+        ['base:HEAD', 'README.md', 'live-missing.md'],
+      ] as const) {
+        expect((await engine.execute('review.files', { key })).files).toEqual([
+          expect.objectContaining({ path: 'link', status: 'modified', additions: 1, deletions: 1 }),
+        ]);
+        expect((await engine.execute('review.file', { key, file: 'link', side: 'old' })).content).toBe(oldContent);
+        expect((await engine.execute('review.file', { key, file: 'link', side: 'new' })).content).toBe(newContent);
+      }
+      await rm(link);
+      expect((await engine.execute('review.file', { key: 'all', file: 'link', side: 'new' })).content).toBeNull();
+      expect((await engine.execute('review.file', { key: 'all', file: 'README.md', side: 'new' })).content).toBe('# fixture\n');
+    } finally {
+      await engine.close();
+    }
   });
 
   it('commit and range targets', async () => {

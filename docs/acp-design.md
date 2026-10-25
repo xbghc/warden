@@ -64,6 +64,9 @@ Drafts belong to the task panel independently of the agent transcript. Host appe
 and acknowledged local edit revisions preserve selections across delayed messages and edits across
 new conversations. Reopened panels receive the current draft and subsequent completion acknowledgements.
 Sending from a panel that has not yet received appended context requires reviewing the updated draft first.
+A newer local edit can be sent across a delayed acknowledgement that only clears the previous draft;
+it cannot bypass unseen appended context. Sending stays unavailable until the completed transcript
+is persisted and its draft acknowledgement is settled, including when a panel is reopened mid-turn.
 
 Permission requests show the agent's supplied description and choices. Warden returns only the
 selected option identifier or the protocol's cancelled outcome. It does not invent approval options

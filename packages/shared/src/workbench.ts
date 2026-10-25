@@ -130,7 +130,9 @@ export function parseWorkbenchAction(value: unknown): WorkbenchAction {
         type: action.type,
         items: action.items.map((entry) => {
           const item = object(entry);
-          return { changeId: identity(item.changeId), sourceHead: identity(item.sourceHead), developmentHead: identity(item.developmentHead) };
+          // An unavailable workspace has no observed source head. Preserve its empty value
+          // so the engine can report that selected item without aborting the other items.
+          return { changeId: identity(item.changeId), sourceHead: string(item.sourceHead, 300), developmentHead: identity(item.developmentHead) };
         }),
       };
     default:

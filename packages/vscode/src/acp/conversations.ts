@@ -228,7 +228,7 @@ export class AcpConversations {
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     }
-    const model: AcpModel = { ...snapshot, error, panelId: entry.panelId, profiles, ...entry.draft.snapshot() };
+    const model: AcpModel = { ...snapshot, error, panelId: entry.panelId, profiles, sending: entry.sending, ...entry.draft.snapshot() };
     void entry.panel.webview.postMessage({ type: 'acp-model', model });
   }
   private saveDraft(entry: Conversation) {
@@ -258,6 +258,7 @@ export class AcpConversations {
         const submission = entry.draft.begin(action);
         entry.sending = true;
         this.saveDraft(entry);
+        this.render(entry);
         try {
           const current = session.snapshot();
           if (current.status !== 'connected') {

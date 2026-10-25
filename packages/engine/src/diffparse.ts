@@ -129,7 +129,23 @@ export function parseUnifiedDiff(text: string): FileDiff[] {
   let lastLine: DiffLine | null = null;
 
   const flush = () => {
-    if (cur) files.push(finalize(cur));
+    if (cur) {
+      const next = finalize(cur);
+      const previous = files.at(-1);
+      // Git emits a file-type replacement as adjacent deletion and addition patches.
+      // Keep one review identity for that path, including both sides of the change.
+      if (previous?.path === next.path && previous.status === 'deleted' && next.status === 'added') {
+        files[files.length - 1] = {
+          ...previous,
+          status: 'modified',
+          additions: next.additions,
+          binary: previous.binary || next.binary,
+          newMode: next.newMode,
+          contentHash: sha1(`${previous.contentHash}\n${next.contentHash}`),
+          hunks: [...previous.hunks, ...next.hunks],
+        };
+      } else files.push(next);
+    }
     cur = null;
     hunk = null;
     lastLine = null;

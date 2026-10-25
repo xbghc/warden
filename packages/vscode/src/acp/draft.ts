@@ -51,7 +51,14 @@ export class AcpDraft {
   }
 
   begin(edit: AcpDraftEdit) {
-    if (edit.version !== this.version || edit.revision < this.revision) throw new Error('草稿已更新，请确认最新内容后重新发送');
+    const unseen = this.changes.filter((change) => change.version > edit.version);
+    // A newer local edit survives completion, even if its clear acknowledgement is still in flight.
+    // Require the full history so an unacknowledged selection can never be silently submitted.
+    const onlyCompletedDrafts =
+      edit.version < this.version &&
+      unseen.length === this.version - edit.version &&
+      unseen.every((change) => change.type === 'clear' && edit.revision > change.revision);
+    if ((edit.version !== this.version && !onlyCompletedDrafts) || edit.revision < this.revision) throw new Error('草稿已更新，请确认最新内容后重新发送');
     this.update(edit);
     if (edit.text !== this.value) throw new Error('草稿已更新，请确认最新内容后重新发送');
     return { text: this.value, mutation: this.mutation };

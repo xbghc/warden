@@ -659,13 +659,15 @@ export class WorkflowService {
     if (
       !Array.isArray(request?.items) ||
       request.items.length > 100 ||
-      request.items.some((i) => !i || typeof i.changeId !== 'string' || !gitOid(i.sourceHead) || !gitOid(i.developmentHead))
+      request.items.some((i) => !i || typeof i.changeId !== 'string' || (i.sourceHead !== '' && !gitOid(i.sourceHead)) || !gitOid(i.developmentHead))
     )
       throw badRequest('同步请求格式错误');
     return this.store.withRepositoryLock(async () => {
       const results: RebaseBatchResponse['results'] = [];
       for (const item of request.items) {
         try {
+          // Unavailable checks have no source head. Report their checkout failure per item;
+          // if the checkout has returned, syncLocked still rejects the unreviewed head.
           await this.syncLocked(item.changeId, item.sourceHead, item.developmentHead);
           results.push({ changeId: item.changeId, status: 'updated' });
         } catch (error) {
@@ -815,8 +817,10 @@ export class WorkflowService {
     await this.assertClean(checkout.path);
     const source = await revParse(checkout.path, 'HEAD');
     if (source !== request?.sourceHead || target !== request?.developmentHead) fail('代码或主开发分支已变化，请刷新后重新审查', 'review_changed');
-    if (request.sourceBase !== undefined && request.sourceBase !== (change.sourceBase ?? change.base)) fail('交付基点已变化，请重新审查', 'review_changed');
     const boundary = await deliveryBase(change, source, target);
+    // Refresh recognizes manual rebases without writing state. Validate the same effective
+    // boundary shown in that review, including when the persisted sourceBase is older.
+    if (request.sourceBase !== undefined && request.sourceBase !== boundary) fail('交付基点已变化，请重新审查', 'review_changed');
     if (!(await this.ancestor(checkout.path, boundary, source))) fail('工作区历史已变化，请先手动处理同步基点', 'base_changed');
     const preview = new PreviewService(this.repo, this.store);
     const sandbox = await GitSandbox.create(this.store, this.repo.commonRoot, target);

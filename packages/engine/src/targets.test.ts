@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -57,6 +57,44 @@ describe('repository file paths', () => {
         expect(await getFullFile(context, String.raw`..\private.txt`, 'new')).toBe('literal local file\n');
       }
       expect(await readFile(path.join(root, 'private.txt'), 'utf8')).toBe('outside secret\n');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe.each(['working', 'all', 'base'] as const)('%s live full file contents', (kind) => {
+  it('reads symlink targets as Git content', async ({ skip }) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'warden-file-symlinks-'));
+    const checkout = path.join(root, 'checkout');
+    const target = kind === 'base' ? { kind, ref: 'HEAD' } : { kind };
+    const context: TargetContext = { cwd: checkout, key: kind === 'base' ? 'base:HEAD' : kind, target };
+    try {
+      await mkdir(path.join(checkout, 'src'), { recursive: true });
+      await writeFile(path.join(checkout, 'src', 'file.ts'), 'export const value = 1;\n');
+      await writeFile(path.join(root, 'private.txt'), 'outside secret\n');
+      const links = [
+        { file: 'file-link', target: path.join('src', 'file.ts'), type: 'file' },
+        { file: 'dangling-link', target: path.join('src', 'missing.ts'), type: 'file' },
+        { file: 'directory-link', target: 'src', type: 'dir' },
+        { file: 'outside-link', target: path.join('..', 'private.txt'), type: 'file' },
+      ] as const;
+      for (const link of links) {
+        try {
+          await symlink(link.target, path.join(checkout, link.file), link.type);
+        } catch (error) {
+          // Windows requires Developer Mode or an elevated token for symbolic links.
+          if (process.platform === 'win32' && ['EPERM', 'EACCES'].includes((error as NodeJS.ErrnoException).code ?? '')) {
+            skip('Symbolic link creation is not permitted.');
+          }
+          throw error;
+        }
+        expect(await getFullFile(context, link.file, 'new')).toBe(link.target);
+      }
+      expect(await getFullFile(context, 'src/file.ts', 'new')).toBe('export const value = 1;\n');
+      await rm(path.join(checkout, 'src', 'file.ts'));
+      expect(await getFullFile(context, 'src/file.ts', 'new')).toBeNull();
+      expect(await getFullFile(context, 'file-link', 'new')).toBe(path.join('src', 'file.ts'));
     } finally {
       await rm(root, { recursive: true, force: true });
     }

@@ -186,6 +186,41 @@ exports.run = async () => {
     await assert.rejects(workbench.handleAction({ type: 'task.create', title: 'Stale view', body: '' }, session), /仓库已切换/);
     assert.equal((await state()).workflow.changes.length, count + 1);
 
+    // A pure executable-bit change has identical text on both sides of the native diff.
+    await fs.chmod(path.join(workspace, 'README.md'), 0o755);
+    git('update-index', '--chmod=+x', 'README.md');
+    git('-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-qm', 'Make README executable');
+    await workbench.refresh();
+    const modeFile = (await workbench.getChildren(tasks[0])).find((row) => row.file.path === 'README.md');
+    assert(modeFile, 'a mode-only change remains in the review inventory');
+    assert.equal(modeFile.file.additions + modeFile.file.deletions, 0);
+    assert.match(workbench.getTreeItem(modeFile).description, /100644 → 100755/);
+    assert.match(workbench.getTreeItem(modeFile).tooltip, /100644 → 100755/);
+    await workbench.openDiff(modeFile);
+    const modeDiff = vscode.window.tabGroups.all.flatMap((group) => group.tabs).find((tab) => tab.label.includes('100644 → 100755'));
+    assert(modeDiff?.input instanceof vscode.TabInputTextDiff, 'the native diff title exposes the mode-only change');
+    const modeBefore = await vscode.workspace.openTextDocument(modeDiff.input.original);
+    const modeAfter = await vscode.workspace.openTextDocument(modeDiff.input.modified);
+    assert.equal(modeBefore.getText(), modeAfter.getText(), 'mode metadata does not alter the immutable source snapshots');
+
+    // Index a symlink without requiring the OS account to have symlink creation privileges.
+    git('config', 'core.symlinks', 'false');
+    await fs.writeFile(path.join(workspace, 'README.md'), 'agent.txt');
+    git('add', 'README.md');
+    const linkBlob = git('rev-parse', ':README.md');
+    git('update-index', '--cacheinfo', `120000,${linkBlob},README.md`);
+    git('-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-qm', 'Replace README with a symlink');
+    await workbench.refresh();
+    const typeFiles = await workbench.getChildren(tasks[0]);
+    const typeChanges = typeFiles.filter((row) => row.file.path === 'README.md');
+    assert.equal(typeChanges.length, 1, 'a file-type change has one native tree node');
+    assert.equal(new Set(typeFiles.map((row) => workbench.getTreeItem(row).id)).size, typeFiles.length);
+    assert.match(workbench.getTreeItem(typeChanges[0]).description, /100644 → 120000/);
+    await workbench.openDiff(typeChanges[0]);
+    const typeDiff = vscode.window.tabGroups.all.flatMap((group) => group.tabs).find((tab) => tab.label.includes('100644 → 120000'));
+    assert(typeDiff?.input instanceof vscode.TabInputTextDiff, 'the native diff shows the complete file-type transition');
+    assert.equal((await vscode.workspace.openTextDocument(typeDiff.input.modified)).getText(), 'agent.txt');
+
     // Exercise the bundled ACP host through its command, configured profile and panel action boundary.
     const configuration = vscode.workspace.getConfiguration('warden');
     await configuration.update(

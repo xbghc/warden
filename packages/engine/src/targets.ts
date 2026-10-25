@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { readFile } from 'node:fs/promises';
+import { lstat, readFile, readlink } from 'node:fs/promises';
 import type { FileDiff, FileSummary, Target, TargetKey, WorktreeInfo, DiffSide } from '@warden/shared';
 import { parseTargetKey, TargetKeyError } from '@warden/shared';
 import { DIFF_OUTPUT_ARGS, EMPTY_TREE_SHA, mergeBase, refExists, revParse, runGit } from './git.js';
@@ -243,7 +243,10 @@ export async function getFullFile(ctx: TargetContext, filePath: string, side: Di
   const ref = await refForSide(ctx, side);
   if (ref === undefined) {
     try {
-      const buf = await readFile(path.join(ctx.cwd, filePath));
+      const fullPath = path.join(ctx.cwd, filePath);
+      // Git stores a symlink's destination text, including dangling and directory links.
+      if ((await lstat(fullPath)).isSymbolicLink()) return await readlink(fullPath);
+      const buf = await readFile(fullPath);
       return buf.toString('utf8');
     } catch {
       return null;

@@ -19,4 +19,20 @@ describe('webview protocol boundary', () => {
     const rebase = { type: 'rebase.run', items: [{ changeId: 'task', sourceHead: 'a', developmentHead: 'b' }] };
     expect(parseWorkbenchAction(rebase)).toEqual(rebase);
   });
+  it('preserves unavailable source checks while rejecting malformed rebase identities', () => {
+    const item = { changeId: 'task', sourceHead: '', developmentHead: 'a'.repeat(40) };
+    const action = { type: 'rebase.run', items: [item] };
+    expect(parseWorkbenchAction(action)).toEqual(action);
+    for (const invalid of [
+      { sourceHead: undefined },
+      { sourceHead: null },
+      { sourceHead: 1 },
+      { sourceHead: {} },
+      { sourceHead: 'a'.repeat(301) },
+      { changeId: '' },
+      { developmentHead: '' },
+      { developmentHead: undefined },
+    ])
+      expect(() => parseWorkbenchAction({ ...action, items: [{ ...item, ...invalid }] })).toThrow();
+  });
 });

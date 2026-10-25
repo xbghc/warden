@@ -21,6 +21,7 @@ const model: AcpModel = {
   },
   profiles: [{ id: 'configured-agent', label: '我的 Agent' }],
   status: 'disconnected',
+  sending: false,
   permissions: [],
   authMethods: [],
   draft: '为订单列表增加筛选参数，保留旧调用方式。',

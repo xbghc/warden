@@ -1,8 +1,9 @@
 import os from 'node:os';
 import path from 'node:path';
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import type { DevelopmentChange } from '@warden/shared';
+import { parseWorkbenchAction, taskReview } from '@warden/shared';
 import { createApp, resolveRepo, StateStore, WorkflowService } from './compat/index.js';
 import { GitSandbox, applyPatch, oid, patchBetween } from '../packages/engine/src/git-sandbox.js';
 import { PreviewService } from '../packages/engine/src/preview.js';
@@ -60,6 +61,39 @@ async function deliver(c: DevelopmentChange, message: string) {
 }
 
 describe('continuous workspace delivery and passive synchronization', () => {
+  it('delivers the refreshed review after a manual rebase and rejects the previous boundary', { timeout: longGitTimeout }, async () => {
+    const a = await task('Manual rebase');
+    await edit(a, 'task.txt', 'Task change\n', true);
+    await fx.write('primary.txt', 'Primary change\n');
+    fx.git('add', 'primary.txt');
+    fx.git('commit', '-qm', 'Primary change');
+    const target = head();
+    fx.git('-C', a.worktree, 'fetch', '--quiet', fx.root, target);
+    fx.git('-C', a.worktree, 'rebase', target);
+
+    const review = taskReview(await workflow.get(), a.id, await listWorktreesDetailed(await resolveRepo(fx.root)))!;
+    expect(review).toMatchObject({ sourceBase: target, sourceHead: sourceHead(a), developmentHead: target });
+    expect((await store.load()).workflow!.changes.find((row) => row.id === a.id)).toMatchObject({ base: a.base });
+    const request = {
+      sourceHead: review.sourceHead!,
+      sourceBase: review.sourceBase,
+      developmentHead: review.developmentHead!,
+      message: 'Reviewed manual rebase',
+    };
+    await expect(workflow.deliver(a.id, { ...request, sourceBase: a.base })).rejects.toMatchObject({ code: 'review_changed' });
+    expect(head()).toBe(target);
+    expect(fx.git('status', '--porcelain')).toBe('');
+    expect((await workflow.get()).preparation).toBeUndefined();
+
+    const delivered = await workflow.deliver(a.id, request);
+    expect(delivered.deliveries!.at(-1)).toMatchObject({ sourceBase: target, source: review.sourceHead });
+    expect(fx.git('show', '--format=', '--name-only', 'HEAD').trim()).toBe('task.txt');
+    expect(await file(fx.root, 'task.txt')).toBe('Task change\n');
+    expect(await file(fx.root, 'primary.txt')).toBe('Primary change\n');
+    expect(sourceHead(a)).toBe(review.sourceHead);
+    expect(() => fx.git('cat-file', '-e', review.sourceHead!)).toThrow();
+  });
+
   it('delivers nested additions without stripping their directory when diff.noprefix is enabled', async () => {
     const a = await task('Nested addition');
     fx.git('-C', a.worktree, 'config', 'diff.noprefix', 'true');
@@ -163,6 +197,47 @@ describe('continuous workspace delivery and passive synchronization', () => {
     expect(response.results.map((r) => r.status)).toEqual(['failed', 'updated']);
     await edit(b, 'b.txt', 'unsaved\n');
     expect((await workflow.rebaseChecks()).checks.find((x) => x.changeId === b.id)?.status).toBe('blocked');
+  });
+
+  it('reports unavailable workspaces per item and requires a fresh check after they return', { timeout: longGitTimeout }, async () => {
+    const unavailable = await task('Unavailable');
+    const available = await task('Available');
+    await edit(available, 'task.txt', 'Task change\n', true);
+    await fx.write('primary.txt', 'Primary change\n');
+    fx.git('add', 'primary.txt');
+    fx.git('commit', '-qm', 'Primary change');
+    const target = head();
+    const before = sourceHead(unavailable);
+    const moved = path.join(data, 'unavailable-workspace');
+    await rename(unavailable.worktree, moved);
+    const unavailableItem = { changeId: unavailable.id, sourceHead: '', developmentHead: target };
+    try {
+      const checks = (await workflow.rebaseChecks()).checks;
+      expect(checks.find((check) => check.changeId === unavailable.id)).toMatchObject({ ...unavailableItem, status: 'blocked' });
+      expect(checks.find((check) => check.changeId === available.id)?.status).toBe('ready');
+      const action = parseWorkbenchAction({
+        type: 'rebase.run',
+        items: checks.map(({ changeId, sourceHead, developmentHead }) => ({ changeId, sourceHead, developmentHead })),
+      });
+      if (action.type !== 'rebase.run') throw new Error('Expected rebase action');
+      const response = await workflow.rebaseBatch(action);
+      expect(response.results).toEqual([
+        { changeId: unavailable.id, status: 'failed', message: expect.stringContaining('任务工位已不存在') },
+        { changeId: available.id, status: 'updated' },
+      ]);
+      expect(fx.git('-C', available.worktree, 'rev-parse', 'HEAD^').trim()).toBe(target);
+      expect(await file(available.worktree, 'task.txt')).toBe('Task change\n');
+      expect(head()).toBe(target);
+    } finally {
+      await rename(moved, unavailable.worktree);
+    }
+
+    expect((await workflow.rebaseBatch({ items: [unavailableItem] })).results).toEqual([
+      { changeId: unavailable.id, status: 'failed', message: expect.stringContaining('重新检查') },
+    ]);
+    expect(sourceHead(unavailable)).toBe(before);
+    expect(fx.git('-C', unavailable.worktree, 'status', '--porcelain')).toBe('');
+    expect(await listSafetyBackups(store)).toEqual([]);
   });
 });
 
@@ -560,5 +635,25 @@ describe('commit history arrangement', () => {
     expect((await post('/api/history/preview', { head: '--help' })).status).toBe(400);
     expect((await post('/api/workflow/rebase', { items: [{ changeId: 'x', sourceHead: '--help' }] })).status).toBe(400);
     expect((await post('/api/workspace/input', { path: fx.root, text: 'echo hello' })).status).toBe(404);
+
+    const a = await task('Malformed batch');
+    const before = sourceHead(a);
+    await fx.write('primary.txt', 'Primary change\n');
+    fx.git('add', 'primary.txt');
+    fx.git('commit', '-qm', 'Primary change');
+    const valid = { changeId: a.id, sourceHead: before, developmentHead: head() };
+    for (const invalid of [
+      { sourceHead: undefined },
+      { sourceHead: null },
+      { sourceHead: 1 },
+      { sourceHead: 'not-an-oid' },
+      { sourceHead: ' ' },
+      { sourceHead: '', developmentHead: '' },
+      { sourceHead: '', developmentHead: '--help' },
+    ]) {
+      expect((await post('/api/workflow/rebase', { items: [valid, { ...valid, ...invalid }] })).status).toBe(400);
+      expect(sourceHead(a)).toBe(before);
+    }
+    expect(await listSafetyBackups(store)).toEqual([]);
   });
 });

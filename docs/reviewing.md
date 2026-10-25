@@ -72,6 +72,14 @@ Diffs use immutable `warden-review:` documents and cannot modify source files or
 Select a line or range and run **Warden: 复制审阅位置** (`Ctrl+Alt+C`, macOS `Cmd+Alt+C`) to copy
 `path:start-end`. Native diff navigation, folding and search remain available.
 
+The file tree and native diff title display Git file-mode changes, including executable-bit and
+file-type changes. A mode-only change remains visible even when both read-only text snapshots are
+identical; the snapshots themselves contain only the original file content.
+
+Symbolic links display their destination text on both sides of the comparison, matching Git's
+stored content. Live review does not read the linked file or directory; dangling links and links
+outside the repository remain reviewable as link destinations.
+
 There are no read markers, inline comments or staging controls. Staging and unstaging through
 external Git tools do not change the review scope or establish that content has been read. Formal
 delivery still prepares the selected delivery in primary and commits with normal Git hooks.
