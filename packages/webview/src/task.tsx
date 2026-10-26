@@ -12,7 +12,7 @@ export interface ViewState {
   read<T>(key: string, fallback: T): T;
   save(key: string, value: unknown): void;
 }
-type Draft = { title: string; body: string; agent: string; kind: 'shared' | 'clone'; section: TaskSection; options: boolean };
+type Draft = { title: string; body: string; agent: string; kind: 'shared' | 'clone'; section: TaskSection; options: boolean; request?: string };
 export const taskDraftKey = (model: WorkbenchModel) =>
   `task:v1:${model.repository}:${model.creating ? `new:${model.workflow?.workflow?.developmentBranch ?? ''}` : (model.task?.id ?? 'none')}`;
 
@@ -39,7 +39,9 @@ export function Task({ model, send, state }: { model: WorkbenchModel; send(actio
     state.save(key, value);
   };
   useEffect(() => {
-    if (model.taskSection) update({ section: model.taskSection.section });
+    // Host commands are one-time navigation requests, not the restored pane's source of truth.
+    if (model.taskSection && model.taskSection.request !== latest.current.request)
+      update({ section: model.taskSection.section, request: model.taskSection.request });
   }, [model.taskSection?.request]);
   useEffect(() => {
     if (saving && task?.title === draft.title && (task.body ?? '') === draft.body) {

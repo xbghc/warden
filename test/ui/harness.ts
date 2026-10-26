@@ -23,7 +23,7 @@ let preview: HistoryPreviewResponse | undefined;
 const session = 'browser-fixture';
 const manifest = JSON.parse(await readFile('packages/vscode/package.json', 'utf8'));
 const assets = unzipSync(await readFile(`packages/vscode/warden-${manifest.version}.vsix`));
-const model = async (surface: Surface): Promise<WorkbenchModel> => {
+const model = async (surface: Surface, edit = false): Promise<WorkbenchModel> => {
   const workflow = await engine.execute('workflow.get', undefined);
   const [composed, history, workspaces] = await Promise.all([
     engine.execute('preview.get', undefined),
@@ -38,6 +38,7 @@ const model = async (surface: Surface): Promise<WorkbenchModel> => {
     workflow,
     task,
     creating,
+    taskSection: edit ? { request: 'fixture-edit', section: 'edit' } : undefined,
     preview: composed,
     hasPreviewCommand: false,
     history,
@@ -54,6 +55,7 @@ const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url!, 'http://localhost');
     const surface = (url.searchParams.get('surface') ?? 'task') as Surface;
+    const edit = url.searchParams.get('section') === 'edit';
     if (url.pathname === '/inspect') {
       response.setHeader('Content-Type', 'text/html');
       response.end(`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>Warden · 侧栏验证</title><body style="background:#eee;font:13px sans-serif;padding:20px;display:flex;gap:24px">
@@ -63,7 +65,7 @@ const server = createServer(async (request, response) => {
     }
     if (url.pathname === '/model') {
       response.setHeader('Content-Type', 'application/json');
-      response.end(JSON.stringify(await model(surface)));
+      response.end(JSON.stringify(await model(surface, edit)));
       return;
     }
     if (url.pathname === '/action' && request.method === 'POST') {
@@ -126,7 +128,7 @@ const server = createServer(async (request, response) => {
           break;
       }
       response.setHeader('Content-Type', 'application/json');
-      response.end(JSON.stringify(await model(surface)));
+      response.end(JSON.stringify(await model(surface, edit)));
       return;
     }
     if (url.pathname === '/index.js' || url.pathname === '/index.css') {
@@ -141,13 +143,14 @@ const server = createServer(async (request, response) => {
       ${dark ? `<style>:root { --vscode-editor-background:#1f1f1f; --vscode-sideBar-background:#181818; --vscode-editor-foreground:#ddd; --vscode-button-background:#0e639c; --vscode-button-foreground:#fff; --vscode-descriptionForeground:#aaa; --vscode-textCodeBlock-background:#252525; --vscode-list-hoverBackground:#333; --vscode-widget-border:#555; --vscode-input-border:#666; --vscode-focusBorder:#007fd4; ${theme === 'contrast' ? '--vscode-contrastBorder:#fff; --vscode-focusBorder:#f38518; --vscode-widget-border:#fff; --vscode-input-border:#fff;' : ''} }</style>` : ''}
       </head><body class="${dark ? (theme === 'contrast' ? 'vscode-high-contrast' : 'vscode-dark') : 'vscode-light'}"><div id="root"></div><script>
       const surface = new URL(location.href).searchParams.get('surface') || 'task';
+      const section = new URL(location.href).searchParams.get('section') || '';
       let saved = JSON.parse(sessionStorage.getItem('warden-state') || '{}');
       let queue = Promise.resolve();
       window.__actions = [];
       window.acquireVsCodeApi = () => ({ getState: () => saved, setState: s => { saved=s; sessionStorage.setItem('warden-state', JSON.stringify(s)); }, postMessage: message => {
         if (message.action) window.__actions.push(message.action);
         queue = queue.then(async () => {
-          const response = await fetch((message.type === 'ready' ? '/model' : '/action') + '?surface=' + surface,
+          const response = await fetch((message.type === 'ready' ? '/model' : '/action') + '?surface=' + surface + '&section=' + section,
             message.type === 'ready' ? {} : { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify(message.action) });
           if (!response.ok) throw new Error(await response.text());
           window.postMessage({ type:'model', model:await response.json() }, '*');

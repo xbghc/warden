@@ -89,6 +89,15 @@ try:
         page.screenshot(path=str(artifacts / 'task.png'), full_page=True)
         page.set_viewport_size({'width': 1100, 'height': 900})
 
+        page.goto(origin + '?section=edit')
+        expect(page.get_by_role('textbox', name='说明', exact=True)).to_be_visible()
+        page.get_by_role('textbox', name='说明', exact=True).fill('保存后的订单说明')
+        page.get_by_role('button', name='保存说明', exact=True).click()
+        expect(page.get_by_role('textbox', name='提交信息', exact=True)).to_be_visible()
+        page.reload()
+        expect(page.get_by_role('textbox', name='提交信息', exact=True)).to_have_value('保留提交草稿')
+        expect(page.get_by_role('textbox', name='说明', exact=True)).to_have_count(0)
+
         page.goto(origin + '?surface=settings')
         expect(page.get_by_role('heading', name='ACP Agent', exact=True)).to_be_visible()
         expect(page.locator('.acp-setup pre')).not_to_be_visible()
