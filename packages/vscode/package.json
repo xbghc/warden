@@ -2,7 +2,7 @@
   "name": "warden",
   "displayName": "Warden Workspace Review",
   "description": "Plan parallel workspaces, review with native diffs, and run an isolated live preview.",
-  "version": "0.19.1",
+  "version": "0.19.2",
   "publisher": "xbghc",
   "license": "MIT",
   "repository": {
