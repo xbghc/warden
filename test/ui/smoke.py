@@ -67,6 +67,8 @@ try:
         page.get_by_role('menuitem', name='任务详情', exact=True).click()
         expect(page.get_by_text('增加查询参数\n保留旧调用方式', exact=True)).to_be_visible()
         expect(page.get_by_role('textbox', name='提交信息', exact=True)).to_have_count(0)
+        more.focus()
+        expect(page.get_by_role('tooltip', name='更多任务操作', exact=True)).to_be_visible()
         page.get_by_role('button', name='返回提交', exact=True).click()
         expect(page.get_by_role('textbox', name='提交信息', exact=True)).to_have_value('保留提交草稿')
         more.click()

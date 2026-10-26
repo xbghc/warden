@@ -101,6 +101,10 @@ h1 {
   padding: 10px 0;
   border-bottom: 1px solid var(--color-border);
 }
+/* Include the portal wrapper so focused labels cannot cover adjacent controls. */
+[data-radix-popper-content-wrapper]:has(> .icon-tooltip) {
+  pointer-events: none;
+}
 .icon-tooltip {
   z-index: 100;
   max-width: min(260px, calc(100vw - 16px));
