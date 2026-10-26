@@ -96,11 +96,16 @@ the selected object and its actions; it does not duplicate global navigation.
 
 Task rows display at most two relevant facts, without “完成”, “待验收” or “agent 空闲” badges.
 Dragging the list changes plan order only; label the action “调整计划顺序”. “同步工作区” opens a batch
-operation sheet rather than a fourth permanent page. Settings hold workspace hooks,
-not general project-management configuration.
+operation sheet rather than a fourth permanent page. Settings hold workspace hooks and an ACP
+configuration entry with a collapsed example.
 
 Assumption: one repository and primary development branch in the current context. Cross-repository
 and multi-requirement dashboards are outside this design.
+
+Before the branch is selected, show only the next setup action: choose the repository if needed,
+then choose the primary development branch. Hide task, preview, history and synchronization surfaces,
+their toolbar actions and preview status until configuration exists. A workflow page opened directly
+uses the same short setup prompt. Keep errors visible and put workflow education in documentation.
 
 ## Plan and create a workspace
 

@@ -21,6 +21,9 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const NewWorkspace: Story = {};
+export const ChooseRepository: Story = { args: { model: { ...base, repository: '', workflow: undefined, creating: false } } };
+export const ChooseBranch: Story = { args: { model: { ...base, workflow: { workflow: null }, creating: false } } };
+export const Loading: Story = { args: { model: { ...base, workflow: undefined, creating: false } } };
 export const HookFailure: Story = {
   args: {
     model: {

@@ -38,6 +38,7 @@ export interface WorkbenchModel {
 }
 
 export type WorkbenchAction =
+  | { type: 'setup.repository' | 'setup.branch' | 'settings.agents' }
   | { type: 'task.create'; title: string; body: string }
   | { type: 'task.update'; taskId: string; title: string; body: string }
   | { type: 'task.start'; taskId: string; kind: 'shared' | 'clone'; agent?: string }
@@ -81,6 +82,10 @@ function historyDraft(value: unknown): HistoryPreviewRequest {
 export function parseWorkbenchAction(value: unknown): WorkbenchAction {
   const action = object(value);
   switch (action.type) {
+    case 'setup.repository':
+    case 'setup.branch':
+    case 'settings.agents':
+      return { type: action.type };
     case 'task.create':
       return { type: action.type, title: string(action.title, 200), body: string(action.body) };
     case 'task.update':

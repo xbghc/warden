@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { parseWorkbenchAction } from '@warden/shared';
 import type { Surface, WorkbenchAction, WorkbenchModel } from '@warden/shared';
 
-const titles: Record<Surface, string> = { task: '当前任务', preview: '预览', history: '提交历史', settings: '脚本设置', rebase: '同步工作区' };
+const titles: Record<Surface, string> = { task: '当前任务', preview: '预览', history: '提交历史', settings: '设置', rebase: '同步工作区' };
 
 export class Views implements vscode.WebviewViewProvider, vscode.Disposable {
   private readonly panels = new Map<Surface, vscode.WebviewPanel>();
@@ -60,7 +60,7 @@ export class Views implements vscode.WebviewViewProvider, vscode.Disposable {
           if (envelope.session !== this.model(surface).session) throw new Error('仓库已切换，请使用当前界面重试');
           const action = parseWorkbenchAction(envelope.action);
           const prefix = action.type.split('.')[0];
-          if (prefix !== (surface === 'settings' ? 'settings' : surface)) throw new Error('此界面不能执行该操作');
+          if (prefix !== 'setup' && prefix !== surface) throw new Error('此界面不能执行该操作');
           await this.action(action, envelope.session);
         } catch (error) {
           this.error(error, surface);

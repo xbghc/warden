@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { AcpSetup } from './components/AcpSetup';
 import type { AcpAction, AcpConfigOption, AcpMessage, AcpModel, AcpPermission, AcpStatus } from '@warden/shared';
 import { Button } from './components/ui/button';
 import { Checkbox } from './components/ui/checkbox';
@@ -276,7 +277,7 @@ export function AcpApp({ model, send }: Props) {
         </div>
       </header>
 
-      {!model.profiles.length && <p className="notice">先配置支持 ACP 的 Agent，再发送任务说明。配置入口位于上方。</p>}
+      <AcpSetup />
       {needsRestore && (
         <p className="notice">
           {record.canLoad ? '已有会话尚未连接。请选择「继续会话」，或新建会话重新开始。' : '此 Agent 未声明支持恢复旧会话。可以查看记录，或新建会话继续。'}

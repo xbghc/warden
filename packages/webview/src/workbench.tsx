@@ -3,6 +3,7 @@ import type { HistoryPreviewRequest, WorkbenchAction, WorkbenchModel } from '@wa
 import { Button } from './components/ui/button';
 import { Input } from './components/ui/input';
 import { Textarea } from './components/ui/textarea';
+import { AcpSetup } from './components/AcpSetup';
 
 type Props = { model: WorkbenchModel; send(action: WorkbenchAction): void };
 const labels: Record<string, string> = {
@@ -44,7 +45,13 @@ export function WorkbenchApp({ model, send }: Props) {
           </div>
         ))}
       {!model.repository ? (
-        <p>请在 Warden 侧栏选择仓库。</p>
+        <Setup repository={false} busy={!!model.busy} send={send} />
+      ) : !model.workflow ? (
+        <p className="muted" role="status">
+          正在加载…
+        </p>
+      ) : !model.workflow.workflow && model.surface !== 'settings' ? (
+        <Setup repository busy={!!model.busy} send={send} />
       ) : (
         <>
           {model.surface === 'task' && <Task key={model.creating ? 'new' : (model.task?.id ?? 'none')} model={model} send={send} />}
@@ -55,6 +62,17 @@ export function WorkbenchApp({ model, send }: Props) {
         </>
       )}
     </main>
+  );
+}
+
+function Setup({ repository, busy, send }: { repository: boolean; busy: boolean; send: Props['send'] }) {
+  return (
+    <div className="setup">
+      <p>{repository ? '选择本需求使用的主开发分支。' : '选择主目录所在的 Git 仓库。'}</p>
+      <Button disabled={busy} onClick={() => send({ type: repository ? 'setup.branch' : 'setup.repository' })}>
+        {repository ? '选择主开发分支' : '选择仓库'}
+      </Button>
+    </div>
   );
 }
 
@@ -304,7 +322,16 @@ function Settings({ model, send }: Props) {
   const [setup, setSetup] = useState(config?.previewSetup ?? '');
   return (
     <>
-      <h1>脚本设置</h1>
+      <h1>设置</h1>
+      <section aria-label="ACP Agent">
+        <h2>ACP Agent</h2>
+        <p className="muted">使用支持 ACP v1 的 Agent 或适配器，通过 stdio 连接。</p>
+        <Button variant="secondary" size="sm" onClick={() => send({ type: 'settings.agents' })}>
+          配置 Agent
+        </Button>
+        <AcpSetup />
+      </section>
+      <h2>脚本</h2>
       <p className="path">{model.repository}</p>
       <form
         onSubmit={(event) => {

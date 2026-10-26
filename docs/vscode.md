@@ -20,6 +20,10 @@ browser-only virtual filesystems are unsupported. SSH, WSL and containers use th
 
 ## Workbench
 
+Before configuration, the sidebar shows only the next setup action: **选择仓库**, then
+**选择主开发分支**. The task pane, preview status and operational navigation appear after branch
+selection. Opening a workflow page early shows the same setup action instead of empty controls.
+
 The Warden navigation contains preview, history, the ordered plan, synchronization and settings.
 Task rows expand to the complete changed-file list. Selecting a task opens its current-task form and,
 when available, its first native diff. Task connection actions remain on the task rows. Drag-and-drop
@@ -33,13 +37,16 @@ is internal: users do not select or adopt an old workspace.
 The compatibility clone option is available under workspace options. Existing task associations and
 delivery records are preserved on upgrade; delivery never recycles another active task's workspace.
 
-Preview, history, batch rebase and script settings open as editor-area webviews. Their resources are
+Preview, history, batch rebase and settings open as editor-area webviews. Their resources are
 packaged locally, use VS Code theme colors, and send a finite validated action vocabulary to the host.
 Git operations do not require editing a JSON draft. Command Palette entry points remain available.
 ACP conversations open in separate task-bound panels and keep their original repository when the
 workbench selection changes.
 
 ## ACP agent configuration
+
+Open **设置 → ACP Agent** or **ACP 配置说明与示例** in a task conversation for the inline setup
+example. **配置 Agent** opens the matching VS Code setting; the guide stays collapsed until requested.
 
 Configure `warden.acpAgents` in VS Code User settings, or Remote User settings for SSH, WSL and
 containers. Executable profiles cannot come from workspace or folder settings. The executable must
@@ -54,14 +61,14 @@ capabilities or provide a shell runner, agent sandbox or execution guard.
       "id": "local-agent",
       "label": "My ACP agent",
       "command": "/path/to/agent",
-      "args": ["--acp"]
+      "args": []
     }
   ]
 }
 ```
 
 This is a profile shape, not a vendor command recipe. Replace the executable and arguments with those
-required by your agent or adapter; `--acp` is only an illustrative flag. An optional `env` object supplies
+required by your agent or adapter; there is no universal ACP startup flag. An optional `env` object supplies
 string environment overrides. Use the agent's existing login and inherited environment as appropriate;
 Warden does not add a credential store. A normal CLI without ACP support cannot use this connection.
 

@@ -12,7 +12,6 @@ import { makeFixtureRepo } from '../fixtures/make-repo.js';
 const fixture = await makeFixtureRepo('warden-ui-');
 const data = await mkdtemp(path.join(os.tmpdir(), 'warden-ui-data-'));
 const engine = await Engine.open(fixture.root, path.join(data, 'state.json'));
-await engine.execute('workflow.configure', { branch: 'main' });
 let selected: string | undefined;
 let creating = true;
 let draft: HistoryPreviewRequest | undefined;
@@ -21,10 +20,10 @@ const session = 'browser-fixture';
 const manifest = JSON.parse(await readFile('packages/vscode/package.json', 'utf8'));
 const assets = unzipSync(await readFile(`packages/vscode/warden-${manifest.version}.vsix`));
 const model = async (surface: Surface): Promise<WorkbenchModel> => {
-  const [workflow, composed, history, workspaces] = await Promise.all([
-    engine.execute('workflow.get', undefined),
+  const workflow = await engine.execute('workflow.get', undefined);
+  const [composed, history, workspaces] = await Promise.all([
     engine.execute('preview.get', undefined),
-    engine.execute('history.get', undefined),
+    workflow.workflow ? engine.execute('history.get', undefined) : undefined,
     engine.execute('workspaces.list', undefined),
   ]);
   const task = workflow.workflow?.changes.find((row) => row.id === selected);
@@ -43,7 +42,7 @@ const model = async (surface: Surface): Promise<WorkbenchModel> => {
     reviewCurrent: false,
     message: task?.title ?? '',
     errors: [],
-    checks: surface === 'rebase' ? await engine.execute('rebase.check', undefined) : undefined,
+    checks: workflow.workflow && surface === 'rebase' ? await engine.execute('rebase.check', undefined) : undefined,
   };
 };
 const server = createServer(async (request, response) => {
@@ -63,6 +62,9 @@ const server = createServer(async (request, response) => {
       }
       const action = parseWorkbenchAction(JSON.parse(text));
       switch (action.type) {
+        case 'setup.branch':
+          await engine.execute('workflow.configure', { branch: 'main' });
+          break;
         case 'task.create': {
           const task = await engine.execute('task.create', { title: action.title, body: action.body });
           selected = task.id;
@@ -118,7 +120,9 @@ const server = createServer(async (request, response) => {
       const surface = new URL(location.href).searchParams.get('surface') || 'task';
       let saved;
       let queue = Promise.resolve();
+      window.__actions = [];
       window.acquireVsCodeApi = () => ({ getState: () => saved, setState: s => saved=s, postMessage: message => {
+        if (message.action) window.__actions.push(message.action);
         queue = queue.then(async () => {
           const response = await fetch((message.type === 'ready' ? '/model' : '/action') + '?surface=' + surface,
             message.type === 'ready' ? {} : { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify(message.action) });

@@ -22,6 +22,8 @@ try {
   await writeFile(path.join(root, '.gitignore'), 'node_modules/\n');
   git('add', '.');
   git('commit', '-qm', 'Initial');
+  const unconfigured = path.join(directory, 'unconfigured');
+  git('clone', '--no-hardlinks', root, unconfigured);
   process.env.XDG_DATA_HOME = path.join(directory, 'data');
   const state = stateFilePath(root);
   backend = await Engine.open(root, state);
@@ -35,7 +37,14 @@ try {
   const fixture = path.join(directory, 'fixture.json');
   await writeFile(
     fixture,
-    JSON.stringify({ root, state, node: process.execPath, agent: path.resolve('test/fixtures/acp-agent.mjs'), journal: path.join(directory, 'acp.jsonl') }),
+    JSON.stringify({
+      root,
+      state,
+      unconfigured,
+      node: process.execPath,
+      agent: path.resolve('test/fixtures/acp-agent.mjs'),
+      journal: path.join(directory, 'acp.jsonl'),
+    }),
   );
   const manifest = JSON.parse(await readFile('packages/vscode/package.json', 'utf8'));
   const archive = unzipSync(await readFile(`packages/vscode/warden-${manifest.version}.vsix`));

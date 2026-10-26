@@ -51,7 +51,8 @@
         {
           "id": "warden.task",
           "name": "当前任务",
-          "type": "webview"
+          "type": "webview",
+          "when": "warden.hasDevelopmentBranch"
         }
       ]
     },
@@ -215,17 +216,17 @@
       "view/title": [
         {
           "command": "warden.refresh",
-          "when": "view == warden.workbench",
+          "when": "view == warden.workbench && warden.hasDevelopmentBranch",
           "group": "navigation@1"
         },
         {
           "command": "warden.createTask",
-          "when": "view == warden.workbench",
+          "when": "view == warden.workbench && warden.hasDevelopmentBranch",
           "group": "navigation@2"
         },
         {
           "command": "warden.configure",
-          "when": "view == warden.workbench"
+          "when": "view == warden.workbench && warden.hasDevelopmentBranch"
         },
         {
           "command": "warden.selectRepository",
@@ -233,15 +234,15 @@
         },
         {
           "command": "warden.configureScripts",
-          "when": "view == warden.workbench"
+          "when": "view == warden.workbench && warden.hasDevelopmentBranch"
         },
         {
           "command": "warden.rebase",
-          "when": "view == warden.workbench"
+          "when": "view == warden.workbench && warden.hasDevelopmentBranch"
         },
         {
           "command": "warden.editHistory",
-          "when": "view == warden.workbench"
+          "when": "view == warden.workbench && warden.hasDevelopmentBranch"
         }
       ],
       "view/item/context": [
@@ -397,7 +398,13 @@
     "viewsWelcome": [
       {
         "view": "warden.workbench",
-        "contents": "打开主目录开始编程。\n[选择仓库](command:warden.selectRepository)\n[选择主开发分支](command:warden.configure)"
+        "when": "!warden.hasRepository",
+        "contents": "选择主目录所在的 Git 仓库。\n[选择仓库](command:warden.selectRepository)"
+      },
+      {
+        "view": "warden.workbench",
+        "when": "warden.hasRepository && !warden.hasDevelopmentBranch",
+        "contents": "选择本需求使用的主开发分支。\n[选择主开发分支](command:warden.configure)"
       }
     ],
     "keybindings": [

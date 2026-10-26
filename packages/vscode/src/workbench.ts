@@ -104,7 +104,7 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
       (action, session) => this.handleAction(action, session),
       (error, surface) => this.report(error, surface === 'task' ? `task:${this.selected ?? 'new'}` : surface),
     );
-    this.tree = vscode.window.createTreeView('warden.workbench', { treeDataProvider: this, showCollapseAll: true, dragAndDropController: this });
+    this.tree = vscode.window.createTreeView('warden.workbench', { treeDataProvider: this, dragAndDropController: this });
     context.subscriptions.push(
       this.output,
       this.status,
@@ -235,6 +235,8 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
   private async open(directory: string) {
     this.switching = true;
     this.session = randomUUID();
+    this.status.hide();
+    await this.updateContext();
     try {
       await Promise.allSettled([...this.navigation]);
       await this.reading;
@@ -265,6 +267,8 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
       throw error;
     } finally {
       this.switching = false;
+      await this.updateContext();
+      if (!this.backend) this.tree.description = undefined;
       this.emitter.fire(undefined);
       this.views.render();
     }
@@ -272,6 +276,13 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
   private async selectRepository() {
     const selected = await vscode.window.showWorkspaceFolderPick({ placeHolder: '选择主目录所在的仓库' });
     if (selected) await this.open(selected.uri.fsPath);
+  }
+  private async updateContext() {
+    const hasRepository = !!this.backend && !this.switching;
+    await Promise.all([
+      vscode.commands.executeCommand('setContext', 'warden.hasRepository', hasRepository),
+      vscode.commands.executeCommand('setContext', 'warden.hasDevelopmentBranch', hasRepository && !!this.data?.workflow),
+    ]);
   }
   refresh(afterMutation = false): Promise<void> {
     // A read begun before a write cannot acknowledge that write to the next user action.
@@ -298,7 +309,8 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
         this.checks = await this.api('rebase.check', undefined);
         this.checkSignature = checkSignature;
       }
-      this.tree.description = data.workflow?.developmentBranch;
+      this.tree.description = data.workflow?.developmentBranch ?? path.basename(this.backend!.root);
+      await this.updateContext();
       this.views.render();
       for (const key of this.files.keys()) {
         try {
@@ -312,7 +324,8 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
       }
       this.status.text = `$(layers) Warden: ${statusLabels[preview.syncStatus ?? preview.status] ?? preview.status}${preview.setup?.status === 'failed' ? ' · setup 失败' : ''}`;
       this.status.tooltip = `运行目录：${preview.worktree ?? '尚未初始化'}\n${preview.message ?? '主目录保存后自动同步至预览'}\n${data.error ?? ''}`;
-      this.status.show();
+      if (data.workflow) this.status.show();
+      else this.status.hide();
       if (changed) this.emitter.fire(undefined);
       if (data.workflow)
         await this.backend!.start(
@@ -403,7 +416,7 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
     return item;
   }
   async getChildren(node?: Node): Promise<Node[]> {
-    if (!this.backend || this.switching) return [];
+    if (!this.backend || this.switching || !this.data?.workflow) return [];
     if (!node) return [{ kind: 'preview' }, { kind: 'history' }, { kind: 'tasks' }, { kind: 'rebase' }, { kind: 'settings' }];
     if (node.kind === 'tasks') return this.tasks().map((task) => ({ kind: 'task', task }));
     if (node.kind === 'history')
@@ -721,7 +734,12 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
     if (this.backend) await this.context.workspaceState.update(`warden.history:${this.backend.root}`, this.historyDraft);
   }
   private async handleAction(action: WorkbenchAction, session: string) {
-    if (session !== this.session || !this.backend || this.switching) throw new Error('仓库已切换，请使用当前界面重试');
+    if (session !== this.session || this.switching) throw new Error('仓库已切换，请使用当前界面重试');
+    if (action.type === 'setup.repository' || action.type === 'setup.branch') {
+      await this.perform(() => (action.type === 'setup.repository' ? this.selectRepository() : this.configure()), '正在选择…');
+      return;
+    }
+    if (!this.backend) throw new Error('请先选择仓库');
     const taskId = 'taskId' in action ? action.taskId : undefined;
     const task = taskId ? this.tasks().find((row) => row.id === taskId) : undefined;
     if (taskId && !task) throw new Error('任务已不属于当前主开发分支');
@@ -740,7 +758,7 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
       this.views.render();
       return;
     }
-    const navigation = ['task.review', 'task.copy', 'task.brief', 'task.chat', 'preview.copy', 'preview.terminal'];
+    const navigation = ['task.review', 'task.copy', 'task.brief', 'task.chat', 'preview.copy', 'preview.terminal', 'settings.agents'];
     await this.perform(
       async () => {
         // A queued message must never be interpreted in the next repository session.
@@ -811,6 +829,9 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
           case 'settings.save':
             await this.api('config.save', action.config);
             void vscode.window.showInformationMessage('脚本配置已保存');
+            break;
+          case 'settings.agents':
+            await vscode.commands.executeCommand('workbench.action.openSettings', 'warden.acpAgents');
             break;
           case 'rebase.check':
             this.checks = await this.api('rebase.check', undefined);

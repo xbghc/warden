@@ -92,6 +92,20 @@ summary {
   cursor: pointer;
   padding: 8px 0;
 }
+.setup {
+  max-width: 400px;
+}
+.setup p {
+  margin: 0 0 12px;
+}
+.acp-setup {
+  margin-top: 8px;
+  max-width: 640px;
+  line-height: 1.6;
+}
+.acp-setup summary {
+  color: var(--color-muted-foreground);
+}
 select {
   color: var(--vscode-dropdown-foreground, inherit);
   background: var(--vscode-dropdown-background, transparent);

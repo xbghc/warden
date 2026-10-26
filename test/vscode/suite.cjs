@@ -20,6 +20,29 @@ exports.run = async () => {
   const workbench = await extension.activate();
   try {
     assert.equal(workbench.backend?.store.file, fixture.state, 'fixture setup and extension activation must use the same canonical state path');
+    await workbench.open(fixture.unconfigured);
+    assert.equal(workbench.model('task').workflow.workflow, null, 'opening a repository does not choose its development branch');
+    assert.deepEqual(await workbench.getChildren(), [], 'unconfigured repositories show setup instead of operational navigation');
+    assert.deepEqual(await workbench.getChildren({ kind: 'history' }), [], 'previous repository history is unavailable during setup');
+    for (const surface of ['task', 'preview', 'history', 'rebase']) {
+      const model = workbench.model(surface);
+      assert.equal(model.repository, fixture.unconfigured);
+      assert.equal(model.workflow.workflow, null, 'directly opened workflow pages receive setup state');
+    }
+    await workbench.handleAction({ type: 'settings.agents' }, workbench.session);
+    assert.equal(workbench.errors.has('settings'), false, 'ACP settings remain available before branch configuration');
+    assert(
+      vscode.window.tabGroups.all.some((group) => group.tabs.some((tab) => tab.label === 'Settings')),
+      'ACP configuration opens VS Code settings',
+    );
+    await workbench.backend.execute('workflow.configure', { branch: 'main' });
+    await workbench.refresh();
+    assert.deepEqual(
+      (await workbench.getChildren()).map((node) => node.kind),
+      ['preview', 'history', 'tasks', 'rebase', 'settings'],
+    );
+    await workbench.open(fixture.root);
+    assert.equal(workbench.backend.store.file, fixture.state);
     const tasks = await workbench.getChildren({ kind: 'tasks' });
     assert.equal(tasks.length, 1);
     await vscode.commands.executeCommand('warden.connect', tasks[0]);
