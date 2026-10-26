@@ -13,6 +13,7 @@ pnpm package:vscode
 code --install-extension packages/vscode/warden-0.19.2.vsix
 ```
 
+Warden automatically uses the Git repository of the single open folder; there is no separate project selector.
 Open the primary directory and choose **Warden: 选择主开发分支**. The branch must be checked out in
 primary. In a multi-root window, **Warden: 选择仓库** selects one repository; the selection is remembered.
 Git and user-script dependencies must exist where the workspace lives. Workspace Trust is required;
@@ -24,9 +25,12 @@ Before configuration, the sidebar shows only the next setup action: **选择仓�
 **选择主开发分支**. The task pane, preview status and operational navigation appear after branch
 selection. Opening a workflow page early shows the same setup action instead of empty controls.
 
-The Warden navigation contains preview, history, the ordered plan, synchronization and settings.
-Task rows expand to the complete changed-file list. Selecting a task opens its current-task form and,
-when available, its first native diff. Task connection actions remain on the task rows. Drag-and-drop
+The Warden navigation contains preview, history, the ordered plan and settings. The synchronization
+icon sits beside the add-task icon in the workspace heading. A workspace needing synchronization or
+with a predicted conflict exposes an inline icon that opens the checks with only that workspace selected.
+Task rows independently expand to the complete changed-file list and remember their expansion per
+repository. Selecting a task opens its sidebar form and preserves its existing native diff, file selection
+and editor scroll. The first selection opens a diff when one is available; refresh never expands the row. Task connection actions remain on the task rows. Drag-and-drop
 changes plan order only; the context menu also offers a keyboard-accessible move action.
 Rows show at most two status facts, with full context in the tooltip. History starts collapsed.
 Visible forms retain scoped errors; native notifications report errors in hidden forms.
@@ -37,11 +41,17 @@ new task branch. The optional executor name is a label. Copying a task brief wri
 clipboard; the user can paste it into an ACP task conversation or an external tool. Physical slot reuse
 is internal: users do not select or adopt an old workspace.
 The optional executor label and compatibility clone option are available under workspace options.
-The task's more-actions menu contains **复制路径** and **复制任务说明**; the edit icon opens its notes.
+The compact task heading exposes **打开工作区**, **与 Agent 对话** and a keyboard-accessible
+more-actions menu. Workspace opening uses a new native VS Code window. Details, delivery records,
+script output and editing appear on demand inside the sidebar; closing them returns to the commit
+form without losing its draft. Failed hooks keep a visible link to their output. Task notes, optional
+workspace choices and sidebar scroll survive hiding/reopening the webview. Copy actions stay in the menu.
+Default workspace creation and commit submission execute directly; there is no extra confirmation dialog.
 Existing task associations and
 delivery records are preserved on upgrade; delivery never recycles another active task's workspace.
 
-Preview, history, batch rebase and settings open as editor-area webviews. Their resources are
+Task review reserves the editor area for native read-only diffs; task headings and commit forms stay
+in the sidebar. Preview, history, batch rebase and settings open as editor-area webviews. Their resources are
 packaged locally, use VS Code theme colors, and send a finite validated action vocabulary to the host.
 Git operations do not require editing a JSON draft. Command Palette entry points remain available.
 ACP conversations open in separate task-bound panels and keep their original repository when the

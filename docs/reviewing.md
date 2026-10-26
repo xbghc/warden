@@ -12,13 +12,16 @@ there is no separate review-mode switch. The baseline is the last delivered sour
 primary baseline already incorporated by the workspace. Live uncommitted edits remain visible;
 formal delivery in this version requires a clean committed source.
 
-Delivery history and successful workspace-hook output are collapsed on the task page. Expand
-**交付记录** to inspect previous batches or **初始化脚本** to inspect hook output. Failed hooks remain visible. The file-list heading shows
-the total number of changed files; layout controls use icons with accessible labels and tooltips.
+Delivery history, task details and workspace-hook output open on demand from the sidebar task menu.
+Choose **交付记录** to inspect previous batches or **初始化脚本** to inspect hook output. Failed hooks
+keep visible feedback and recovery actions. Closing the inline details restores the commit form and its
+draft. The native editor contains only the diff. File-list expansion is independent per task and survives
+refresh or reselection; it does not replace the current file or reset its scroll. Icon actions expose
+accessible names and hover/focus tooltips.
 The same [interface copy rules](design.md#interface-copy) apply to preview, history, synchronization
 and settings. Operational consequences and recovery instructions stay beside their actions.
 
-The task page is read-only for source files. Enter a message and choose **提交到主开发分支**
+The native task diff is read-only for source files. Enter a message and choose **提交到主开发分支**
 to deliver the complete reviewed increment with ordinary Git hooks. Preparation is internal to that
 action, with recovery controls shown only when interrupted. No validation checkbox or readiness declaration is required. Failed hooks preserve
 files; successful delivery preserves the workspace. See [Squash acceptance](worktrees.md#squash-acceptance).

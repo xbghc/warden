@@ -80,9 +80,13 @@ pnpm test:vscode
 ```
 
 `test/ui/smoke.py` starts and closes `test/ui/harness.ts`, exercises initialization, empty states, task
-menus and optional settings, preview setup, collapsed history editing/application and rebase selection, and saves screenshots under
+menus, inline details, task/commit draft preservation, optional settings, preview setup, collapsed history
+editing/application and rebase selection, and saves screenshots under
 `WARDEN_UI_ARTIFACTS` (default `/tmp/warden-ui-artifacts`). The harness is test-only and is not shipped.
 Inspect screenshots and console errors. Preserve intentional error cases in native-host tests as well.
+For manual verification, run `node --import tsx test/ui/harness.ts` and open its reported port. `/inspect`
+embeds the task pane at 320 pixels in light, dark and high-contrast themes. `WARDEN_UI_PORT` and
+`WARDEN_UI_HOST` optionally select the local test binding; defaults remain an ephemeral loopback port.
 `test/ui/acp-smoke.py` uses the same packaged assets with real ACP subprocesses to exercise concurrent
 task conversations, permission choices, cancellation, explicit recovery and draft preservation.
 Set `CHROMIUM_PATH` to use an existing browser. CI runs this test against assets read directly from

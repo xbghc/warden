@@ -18,7 +18,9 @@ function App() {
   }, []);
   if (!view) return <main>正在读取工作区…</main>;
   if (view.type === 'acp-model') return <AcpApp key={view.model.panelId} model={view.model} send={(action) => bridge.acpAction(view.model, action)} />;
-  return <WorkbenchApp key={`${view.model.session}:${view.model.surface}`} model={view.model} send={(action) => bridge.action(view.model, action)} />;
+  return (
+    <WorkbenchApp key={`${view.model.session}:${view.model.surface}`} model={view.model} state={bridge} send={(action) => bridge.action(view.model, action)} />
+  );
 }
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

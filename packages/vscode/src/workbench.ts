@@ -16,7 +16,7 @@ import type {
 } from '@warden/shared';
 import { Engine, WardenError } from '@warden/engine';
 import type { EngineCommand, EngineInput, EngineOutput } from '@warden/engine';
-import type { WorkbenchAction, WorkbenchModel, Surface, WorkbenchError, RebaseBatchResponse } from '@warden/shared';
+import type { WorkbenchAction, WorkbenchModel, Surface, TaskSection, WorkbenchError, RebaseBatchResponse } from '@warden/shared';
 import type { AcpBinding } from '@warden/shared';
 import { Documents } from './documents.js';
 import { Views } from './views.js';
@@ -46,7 +46,6 @@ type Node =
   | { kind: 'preview' }
   | { kind: 'tasks' }
   | { kind: 'history' }
-  | { kind: 'rebase' }
   | { kind: 'settings' }
   | { kind: 'task'; task: WorkflowTask }
   | { kind: 'file'; file: FileEntry; target: string; task?: WorkflowTask; review?: TaskReview }
@@ -80,6 +79,9 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
   private readonly tree: vscode.TreeView<Node>;
   private readonly conversations: AcpConversations;
   private selected?: string;
+  private expanded: Record<string, boolean> = {};
+  private selectedFiles: Record<string, string> = {};
+  private taskSection?: WorkbenchModel['taskSection'];
   private creating = false;
   private session = randomUUID();
   private busy?: string;
@@ -88,6 +90,7 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
   private historyDraft?: HistoryPreviewRequest;
   private historyPreview?: HistoryPreviewResponse;
   private rebaseResult?: RebaseBatchResponse;
+  private rebaseSelection?: WorkbenchModel['rebaseSelection'];
   private checkSignature?: string;
 
   constructor(private readonly context: vscode.ExtensionContext) {
@@ -115,6 +118,8 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
         if (event.affectsConfiguration('warden.previewCommand')) this.views.render();
       }),
       this.tree,
+      this.tree.onDidExpandElement(({ element }) => this.rememberExpansion(element, true)),
+      this.tree.onDidCollapseElement(({ element }) => this.rememberExpansion(element, false)),
       this.views,
       vscode.window.registerWebviewViewProvider('warden.task', this.views),
     );
@@ -127,11 +132,12 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
       taskActions: (node) => this.selectTask(node),
       selectTask: (node) => this.selectTask(node),
       startTask: (node) => this.startTask(node),
-      editTask: (node) => this.selectTask(node, false),
+      editTask: (node) => this.selectTask(node, false, 'edit'),
       moveTask: (node) => this.moveTask(node),
       connect: (node) => this.connect(node),
       openDiff: (node) => this.openDiff(node),
-      deliver: (node) => this.selectTask(node, false),
+      deliver: (node) => this.selectTask(node, false, 'commit'),
+      openWorkspace: (node) => this.openWorkspace(node),
       retryHook: (node) => this.taskOperation(node, 'task.hook'),
       resumeTask: (node) => this.taskOperation(node, 'task.resume'),
       previewTerminal: () => this.previewTerminal(),
@@ -140,9 +146,11 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
       refreshPreview: () => this.api('preview.refresh', undefined),
       setup: () => this.setup(),
       configureScripts: () => this.views.show('settings'),
-      rebase: () => this.showRebase(),
+      rebase: (node) => this.showRebase(node),
+      syncTask: (node) => this.showRebase(node),
+      syncConflict: (node) => this.showRebase(node),
       editHistory: () => this.views.show('history'),
-      taskDetails: (node) => this.selectTask(node, false),
+      taskDetails: (node) => this.selectTask(node, false, 'details'),
       copyWorkspace: (node) => this.copyWorkspace(node),
       importNotes: () => this.importNotes(),
       showPreview: () => this.views.show('preview'),
@@ -162,6 +170,7 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
       'editHistory',
       'taskDetails',
       'copyWorkspace',
+      'openWorkspace',
       'showPreview',
       'copyLocation',
       'chat',
@@ -246,6 +255,10 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
       await this.backend?.close();
       this.backend = await Engine.open(directory);
       this.selected = this.context.workspaceState.get<string>(`warden.selected:${this.backend.root}`);
+      this.expanded = this.context.workspaceState.get<Record<string, boolean>>(`warden.expanded:${this.backend.root}`, {});
+      this.selectedFiles = this.context.workspaceState.get<Record<string, string>>(`warden.files:${this.backend.root}`, {});
+      this.taskSection = undefined;
+      this.rebaseSelection = undefined;
       this.messages = this.context.workspaceState.get<Record<string, string>>(`warden.messages:${this.backend.root}`, {});
       this.historyDraft = this.context.workspaceState.get<HistoryPreviewRequest>(`warden.history:${this.backend.root}`);
       this.historyPreview = undefined;
@@ -285,6 +298,7 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
     await Promise.all([
       vscode.commands.executeCommand('setContext', 'warden.hasRepository', hasRepository),
       vscode.commands.executeCommand('setContext', 'warden.hasDevelopmentBranch', hasRepository && !!this.data?.workflow),
+      vscode.commands.executeCommand('setContext', 'warden.multipleRoots', (vscode.workspace.workspaceFolders?.length ?? 0) > 1),
     ]);
   }
   refresh(afterMutation = false): Promise<void> {
@@ -347,11 +361,11 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
     return this.reading;
   }
   getTreeItem(node: Node): vscode.TreeItem {
-    if (node.kind === 'rebase' || node.kind === 'settings') {
-      const item = new vscode.TreeItem(node.kind === 'rebase' ? '同步工作区' : '设置');
+    if (node.kind === 'settings') {
+      const item = new vscode.TreeItem('设置');
       item.id = node.kind;
-      item.iconPath = new vscode.ThemeIcon(node.kind === 'rebase' ? 'sync' : 'settings-gear');
-      item.command = { command: node.kind === 'rebase' ? 'warden.rebase' : 'warden.configureScripts', title: item.label as string };
+      item.iconPath = new vscode.ThemeIcon('settings-gear');
+      item.command = { command: 'warden.configureScripts', title: '设置' };
       return item;
     }
     if (node.kind === 'tasks' || node.kind === 'history') {
@@ -382,12 +396,20 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
     }
     if (node.kind === 'task') {
       const task = node.task;
-      const item = new vscode.TreeItem(task.title, task.worktree ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None);
+      const item = new vscode.TreeItem(
+        task.title,
+        task.worktree
+          ? this.expanded[task.id]
+            ? vscode.TreeItemCollapsibleState.Expanded
+            : vscode.TreeItemCollapsibleState.Collapsed
+          : vscode.TreeItemCollapsibleState.None,
+      );
       item.id = `task:${task.id}`;
       item.contextValue = task.worktree ? (this.preview?.connectedIds.includes(task.id) ? 'task-connected' : 'task') : 'plan';
       const source = this.preview?.sources?.find((s) => s.changeId === task.id);
       const connected = this.preview?.connectedIds.includes(task.id);
       const sync = this.checks?.checks.find((c) => c.changeId === task.id);
+      if (task.worktree && sync && sync.status !== 'current') item.contextValue += sync.status === 'conflict' ? '-conflict' : '-sync';
       const connection = task.worktree ? (connected ? (source ? statusLabels[source.status] : '待同步') : '未连接') : statusLabels[task.status];
       const connectionProblem = source?.status === 'conflict' || source?.status === 'error';
       const activity = this.backend && this.conversations.activity(this.backend.root, task.id);
@@ -401,13 +423,14 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
         task.worktree && task.workspaceHook?.status === 'failed' ? '初始化失败' : '',
         activity !== 'Agent 等待授权' ? activity : '',
         task.status === 'integrating' ? '待提交' : '',
-        sync && sync.status !== 'current' ? '可检查 rebase' : '',
         !connectionProblem ? connection : '',
         task.agent,
       ].filter(Boolean);
       item.description = facts.slice(0, 2).join(' · ');
       item.iconPath = new vscode.ThemeIcon(connected ? 'plug' : task.worktree ? 'git-branch' : 'circle-outline');
-      item.tooltip = [task.title, task.body, task.worktree ?? '尚未分配工作区', facts.join(' · ')].filter(Boolean).join('\n\n');
+      item.tooltip = [task.title, task.body, task.worktree ?? '尚未分配工作区', facts.join(' · '), sync?.status !== 'current' ? sync?.message : '']
+        .filter(Boolean)
+        .join('\n\n');
       item.command = { command: 'warden.selectTask', title: '查看任务变更', arguments: [node] };
       return item;
     }
@@ -429,7 +452,7 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
   }
   async getChildren(node?: Node): Promise<Node[]> {
     if (!this.backend || this.switching || !this.data?.workflow) return [];
-    if (!node) return [{ kind: 'preview' }, { kind: 'history' }, { kind: 'tasks' }, { kind: 'rebase' }, { kind: 'settings' }];
+    if (!node) return [{ kind: 'preview' }, { kind: 'history' }, { kind: 'tasks' }, { kind: 'settings' }];
     if (node.kind === 'tasks') return this.tasks().map((task) => ({ kind: 'task', task }));
     if (node.kind === 'history')
       return (this.history?.commits ?? [])
@@ -478,7 +501,6 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
         .filter((tab) => tab.input instanceof vscode.TabInputTextDiff && uris?.has(tab.input.modified.toString()));
       await vscode.window.tabGroups.close(tabs, true);
       this.reviewUris.delete(review.changeId);
-      if (previous) void vscode.window.showInformationMessage('审查版本已更新，请完整审查本次交付。');
     }
     this.reviews.set(review.changeId, review);
   }
@@ -507,25 +529,54 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
     if (!(await this.api('workflow.get', undefined)).workflow) return;
     this.creating = true;
     this.selected = undefined;
+    this.taskSection = undefined;
     this.views.render();
     await this.views.show('task');
   }
-  private async selectTask(node?: Node, openFile = true) {
+  private async rememberExpansion(node: Node, expanded: boolean) {
+    if (node.kind !== 'task' || !this.backend) return;
+    this.expanded[node.task.id] = expanded;
+    await this.context.workspaceState.update(`warden.expanded:${this.backend.root}`, this.expanded);
+  }
+  private async selectTask(node?: Node, openFile = true, section?: TaskSection, refreshReview = false) {
     const task = await this.pickTask(node);
     if (!task) return;
+    if (this.selected !== task.id) this.taskSection = undefined;
     this.selected = task.id;
     this.creating = false;
+    if (section) this.taskSection = { request: randomUUID(), section };
     await this.context.workspaceState.update(`warden.selected:${this.backend!.root}`, task.id);
     this.views.render();
     await this.views.show('task');
     if (openFile && task.worktree) {
+      const uris = this.reviewUris.get(task.id);
+      const tabs = vscode.window.tabGroups.all
+        .flatMap((group) => group.tabs)
+        .filter((tab) => tab.input instanceof vscode.TabInputTextDiff && uris?.has(tab.input.modified.toString()));
+      const lastUri = uris && [...uris].at(-1);
+      const existing =
+        tabs.find((tab) => tab.isActive) ??
+        tabs.find((tab) => tab.input instanceof vscode.TabInputTextDiff && tab.input.modified.toString() === lastUri) ??
+        tabs.at(-1);
+      // Selecting or collapsing a row must not replace the user's pinned diff or scroll position.
+      // Refreshing a stale review is a separate explicit action in the task form/file list.
+      if (!refreshReview && existing?.input instanceof vscode.TabInputTextDiff) {
+        if (!existing.isActive)
+          await vscode.commands.executeCommand('vscode.diff', existing.input.original, existing.input.modified, existing.label, {
+            viewColumn: existing.group.viewColumn,
+          });
+        return;
+      }
       const files = await this.getChildren({ kind: 'task', task });
-      await this.tree.reveal({ kind: 'task', task }, { expand: true, select: true }).then(undefined, () => {});
-      if (files[0]) await this.openDiff(files[0]);
+      const file = files.find((entry) => entry.kind === 'file' && entry.file.path === this.selectedFiles[task.id]) ?? files[0];
+      if (file) await this.openDiff(file);
     }
   }
   private async startTask(node?: Node) {
-    await this.selectTask(node, false);
+    const task = await this.pickTask(node);
+    if (!task || task.worktree || task.status === 'archived') return;
+    await this.api('task.start', { taskId: task.id, kind: 'shared' });
+    await this.selectTask({ kind: 'task', task }, false);
   }
   private async moveTask(node?: Node) {
     const task = await this.pickTask(node);
@@ -549,8 +600,12 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
   private async openDiff(node?: Node) {
     if (node?.kind !== 'file') return;
     if (node.task) {
+      if (this.selected !== node.task.id) this.taskSection = undefined;
       this.selected = node.task.id;
       this.creating = false;
+      this.selectedFiles[node.task.id] = node.file.path;
+      await this.context.workspaceState.update(`warden.selected:${this.backend!.root}`, node.task.id);
+      await this.context.workspaceState.update(`warden.files:${this.backend!.root}`, this.selectedFiles);
     }
     const review = node.review;
     if (node.task && (!review || !sameReview(review, await this.readReview(node.task.id)))) throw new Error('审查版本已变化，请刷新文件列表并重新打开差异');
@@ -668,7 +723,8 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
     this.output.appendLine(result.setup?.output ?? '尚未配置 setup 脚本');
     this.output.show(true);
   }
-  private async showRebase() {
+  private async showRebase(node?: Node) {
+    this.rebaseSelection = { request: randomUUID(), taskIds: node?.kind === 'task' ? [node.task.id] : [] };
     await this.views.show('rebase');
     this.checks = await this.api('rebase.check', undefined);
     this.views.render();
@@ -676,6 +732,10 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
   private async copyWorkspace(node?: Node) {
     const task = await this.pickTask(node);
     if (task?.worktree) await vscode.env.clipboard.writeText(task.worktree);
+  }
+  private async openWorkspace(node?: Node) {
+    const task = await this.pickTask(node);
+    if (task?.worktree) await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(task.worktree), { forceNewWindow: true });
   }
   private async openConversation(node?: Node) {
     const task = await this.pickTask(node);
@@ -731,6 +791,7 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
       workflow: this.data,
       task,
       creating: this.creating,
+      taskSection: this.taskSection,
       preview: this.preview,
       hasPreviewCommand: typeof previewCommand === 'string' && !!previewCommand.trim(),
       history: this.history,
@@ -738,6 +799,7 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
       historyPreview: this.historyPreview,
       checks: this.checks,
       rebaseResult: this.rebaseResult,
+      rebaseSelection: this.rebaseSelection,
       review,
       reviewCurrent: !!task && !!this.data && sameReview(review, taskReview(this.data, task.id, this.checkouts?.worktrees ?? [])),
       message: task ? (this.messages[task.id] ?? task.title) : '',
@@ -773,7 +835,7 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
       this.views.render();
       return;
     }
-    const navigation = ['task.review', 'task.copy', 'task.brief', 'task.chat', 'preview.copy', 'preview.terminal', 'settings.agents'];
+    const navigation = ['task.review', 'task.open', 'task.copy', 'task.brief', 'task.chat', 'preview.copy', 'preview.terminal', 'settings.agents'];
     await this.perform(
       async () => {
         // A queued message must never be interpreted in the next repository session.
@@ -796,7 +858,10 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
             await this.api('task.start', { taskId: action.taskId, kind: action.kind, agent: action.agent });
             break;
           case 'task.review':
-            await this.selectTask(node);
+            await this.selectTask(node, true, undefined, true);
+            break;
+          case 'task.open':
+            await this.openWorkspace(node);
             break;
           case 'task.chat':
             await this.openConversation(node);

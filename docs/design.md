@@ -2,7 +2,7 @@
 
 The VS Code extension implements the [workflow](workflow.md). See [VS Code](vscode.md) for the native tree, review editors and packaged webview forms. Human editing uses
 primary; runtime composition uses the independent preview directory. The new page is implemented.
-Wireframes describe intent rather than exact labels. Updated 2026-10-23.
+Wireframes describe intent rather than exact labels. Updated 2026-10-26.
 
 ## Design method
 
@@ -15,6 +15,24 @@ Warden is a passive tool. Users operate through it rather than reporting readine
 task completion. It shows Git facts, connections and operation results. One workspace corresponds
 to one linear task, can deliver several commits and remains available. Rebase is user-triggered.
 The component and visual language is shadcn/ui.
+
+## Compact VS Code layout
+
+The current Git repository supplies context; Warden has no separate project card or project dialog.
+Single-folder windows initialize automatically; multi-root selection and explicit development-branch
+configuration remain native VS Code controls.
+
+Workspace file lists collapse independently, retain that choice across refresh and selection, and do
+not disturb native diff selection, scroll or task drafts. The workspace heading places synchronization
+beside add-task as an icon; per-workspace synchronization and conflict icons occupy the task row.
+There is no separate synchronization navigation row.
+
+Task review leaves the editor area to the native diff. The sidebar task heading uses workspace, Agent
+and more-action icons with hover/focus help. The default body is the commit form. Notes, workspace
+metadata, delivery records and script output appear inline on request and close back to that form.
+Task edit/create forms, synchronization checks/results and recovery paths remain available. Opening
+workspaces and terminals uses native VS Code actions; creating a default workspace and submitting an
+already specified commit do not add explanatory or redundant confirmation dialogs.
 
 ## Interface copy
 

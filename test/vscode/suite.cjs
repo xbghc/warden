@@ -52,7 +52,7 @@ exports.run = async () => {
     await workbench.refresh();
     assert.deepEqual(
       (await workbench.getChildren()).map((node) => node.kind),
-      ['preview', 'history', 'tasks', 'rebase', 'settings'],
+      ['preview', 'history', 'tasks', 'settings'],
     );
     await workbench.open(fixture.root);
     assert.equal(workbench.backend.store.file, fixture.state);
@@ -70,6 +70,22 @@ exports.run = async () => {
     });
     assert.equal(attention.description, '提交失败 · 初始化失败', 'task rows prioritize problems and show at most two facts');
     assert(attention.tooltip.includes('待提交') && attention.tooltip.includes('fixture-agent'), 'secondary context remains in the tooltip');
+    const checked = workbench.checks;
+    for (const [status, suffix] of [
+      ['ready', '-sync'],
+      ['conflict', '-conflict'],
+    ]) {
+      workbench.checks = { checks: [{ changeId: tasks[0].task.id, status, message: 'Fixture sync check' }] };
+      const item = workbench.getTreeItem(tasks[0]);
+      assert(item.contextValue.endsWith(suffix), 'sync conditions expose an inline action on the workspace row');
+      assert(!item.description.includes('rebase'), 'sync conditions do not add a text row');
+      assert(item.tooltip.includes('Fixture sync check'));
+    }
+    workbench.checks = checked;
+    await workbench.showRebase(tasks[0]);
+    assert.deepEqual(workbench.model('rebase').rebaseSelection.taskIds, [tasks[0].task.id]);
+    await workbench.showRebase();
+    assert.deepEqual(workbench.model('rebase').rebaseSelection.taskIds, [], 'batch sync does not inherit the last single-task selection');
     await vscode.commands.executeCommand('warden.connect', tasks[0]);
     const state = () => fs.readFile(fixture.state, 'utf8').then(JSON.parse);
     let preview = (await state()).connectionPreview;
@@ -80,6 +96,13 @@ exports.run = async () => {
     assert.notEqual(await commonGit(preview.worktree), await commonGit(fixture.root), 'primary Git storage stays independent');
     assert.equal(textLines(await fs.readFile(path.join(preview.worktree, 'agent.txt'), 'utf8')), 'Agent addition\n');
     await assert.rejects(fs.access(path.join(fixture.root, 'agent.txt')));
+    await workbench.rememberExpansion(tasks[0], false);
+    await workbench.open(fixture.root);
+    assert.equal(
+      workbench.getTreeItem(tasks[0]).collapsibleState,
+      vscode.TreeItemCollapsibleState.Collapsed,
+      'collapsed state survives reopening the repository',
+    );
     const files = await workbench.getChildren(tasks[0]);
     assert.equal(files.length, 1);
     await vscode.commands.executeCommand('warden.openDiff', files[0]);
@@ -91,6 +114,24 @@ exports.run = async () => {
     const doc = await vscode.workspace.openTextDocument(diff.input.modified);
     const originalText = doc.getText();
     assert.equal(textLines(originalText), 'Agent addition\n');
+    await workbench.rememberExpansion(tasks[0], false);
+    await workbench.handleAction({ type: 'task.message', taskId: tasks[0].task.id, message: 'Keep this draft' }, workbench.session);
+    await workbench.selectTask(tasks[0]);
+    assert.equal(
+      workbench.getTreeItem(tasks[0]).collapsibleState,
+      vscode.TreeItemCollapsibleState.Collapsed,
+      'selecting a task does not reopen its changed files',
+    );
+    assert(
+      vscode.window.tabGroups.all.flatMap((group) => group.tabs).some((tab) => tab === diff),
+      'selecting the task retains the existing native diff',
+    );
+    assert.equal(workbench.model('task').message, 'Keep this draft');
+    assert.equal(workbench.views.panels.has('task'), false, 'task controls stay out of the editor area');
+    await workbench.selectTask(tasks[0], false, 'details');
+    assert.equal(workbench.model('task').taskSection.section, 'details', 'task details use the sidebar');
+    assert.equal(workbench.views.panels.has('task'), false);
+    await workbench.selectTask(tasks[0], false, 'commit');
     await vscode.commands.executeCommand('type', { text: 'Forbidden' });
     assert.equal(doc.getText(), originalText, 'native typing cannot edit review content');
     await assert.rejects(vscode.workspace.fs.writeFile(doc.uri, Buffer.from('Forbidden')), 'review documents cannot be saved');

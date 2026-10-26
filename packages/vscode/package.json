@@ -82,7 +82,8 @@
       {
         "command": "warden.taskActions",
         "title": "任务操作",
-        "category": "Warden"
+        "category": "Warden",
+        "icon": "$(ellipsis)"
       },
       {
         "command": "warden.startTask",
@@ -93,7 +94,8 @@
       {
         "command": "warden.editTask",
         "title": "编辑任务",
-        "category": "Warden"
+        "category": "Warden",
+        "icon": "$(edit)"
       },
       {
         "command": "warden.moveTask",
@@ -159,7 +161,8 @@
       {
         "command": "warden.rebase",
         "title": "同步工作区",
-        "category": "Warden"
+        "category": "Warden",
+        "icon": "$(sync)"
       },
       {
         "command": "warden.editHistory",
@@ -169,7 +172,8 @@
       {
         "command": "warden.taskDetails",
         "title": "查看任务说明",
-        "category": "Warden"
+        "category": "Warden",
+        "icon": "$(info)"
       },
       {
         "command": "warden.copyWorkspace",
@@ -210,6 +214,24 @@
         "command": "warden.sendSelectionToAgent",
         "title": "发送选区到任务对话",
         "category": "Warden"
+      },
+      {
+        "command": "warden.openWorkspace",
+        "title": "打开工作区",
+        "category": "Warden",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "warden.syncTask",
+        "title": "需要同步",
+        "category": "Warden",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "warden.syncConflict",
+        "title": "同步冲突：查看详情",
+        "category": "Warden",
+        "icon": "$(warning)"
       }
     ],
     "menus": {
@@ -230,7 +252,7 @@
         },
         {
           "command": "warden.selectRepository",
-          "when": "view == warden.workbench"
+          "when": "view == warden.workbench && (warden.multipleRoots || !warden.hasRepository)"
         },
         {
           "command": "warden.configureScripts",
@@ -238,7 +260,8 @@
         },
         {
           "command": "warden.rebase",
-          "when": "view == warden.workbench && warden.hasDevelopmentBranch"
+          "when": "view == warden.workbench && warden.hasDevelopmentBranch",
+          "group": "navigation@3"
         },
         {
           "command": "warden.editHistory",
@@ -286,7 +309,8 @@
         },
         {
           "command": "warden.startTask",
-          "when": "view == warden.workbench && viewItem == plan"
+          "when": "view == warden.workbench && viewItem == plan",
+          "group": "inline@1"
         },
         {
           "command": "warden.editTask",
@@ -319,11 +343,34 @@
         {
           "command": "warden.editHistory",
           "when": "view == warden.workbench && viewItem == history"
+        },
+        {
+          "command": "warden.syncTask",
+          "when": "view == warden.workbench && viewItem =~ /-sync$/",
+          "group": "inline@2"
+        },
+        {
+          "command": "warden.syncConflict",
+          "when": "view == warden.workbench && viewItem =~ /-conflict$/",
+          "group": "inline@2"
+        },
+        {
+          "command": "warden.openWorkspace",
+          "when": "view == warden.workbench && viewItem =~ /^task/",
+          "group": "navigation@2"
         }
       ],
       "commandPalette": [
         {
           "command": "warden.openDiff",
+          "when": "false"
+        },
+        {
+          "command": "warden.syncTask",
+          "when": "false"
+        },
+        {
+          "command": "warden.syncConflict",
           "when": "false"
         }
       ],

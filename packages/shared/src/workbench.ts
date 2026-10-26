@@ -12,6 +12,7 @@ import type {
 import type { TaskReview } from './review.js';
 
 export type Surface = 'task' | 'preview' | 'history' | 'settings' | 'rebase';
+export type TaskSection = 'commit' | 'details' | 'edit' | 'history' | 'hook';
 export interface WorkbenchError {
   scope: string;
   message: string;
@@ -24,6 +25,7 @@ export interface WorkbenchModel {
   workflow?: WorkflowResponse;
   task?: WorkflowTask;
   creating: boolean;
+  taskSection?: { request: string; section: TaskSection };
   preview?: PreviewResponse;
   hasPreviewCommand: boolean;
   history?: HistoryResponse;
@@ -31,6 +33,7 @@ export interface WorkbenchModel {
   historyPreview?: HistoryPreviewResponse;
   checks?: RebaseResponse;
   rebaseResult?: RebaseBatchResponse;
+  rebaseSelection?: { request: string; taskIds: string[] };
   review?: TaskReview;
   reviewCurrent: boolean;
   message: string;
@@ -43,7 +46,7 @@ export type WorkbenchAction =
   | { type: 'task.create'; title: string; body: string }
   | { type: 'task.update'; taskId: string; title: string; body: string }
   | { type: 'task.start'; taskId: string; kind: 'shared' | 'clone'; agent?: string }
-  | { type: 'task.review' | 'task.hook' | 'task.resume' | 'task.copy' | 'task.brief' | 'task.restore' | 'task.chat'; taskId: string }
+  | { type: 'task.review' | 'task.open' | 'task.hook' | 'task.resume' | 'task.copy' | 'task.brief' | 'task.restore' | 'task.chat'; taskId: string }
   | { type: 'task.deliver'; taskId: string; message: string }
   | { type: 'task.message'; taskId: string; message: string }
   | { type: 'preview.refresh' | 'preview.setup' | 'preview.terminal' | 'preview.run' | 'preview.copy' | 'rebase.check' | 'history.discard' }
@@ -101,6 +104,7 @@ export function parseWorkbenchAction(value: unknown): WorkbenchAction {
         ...(action.agent === undefined ? {} : { agent: string(action.agent, 100) }),
       };
     case 'task.review':
+    case 'task.open':
     case 'task.hook':
     case 'task.resume':
     case 'task.copy':

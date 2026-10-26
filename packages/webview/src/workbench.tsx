@@ -1,15 +1,15 @@
-import { useEffect, useRef, useState } from 'react';
-import { ArrowDown, ArrowUp, Check, MoreHorizontal, Pencil } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowDown, ArrowUp, Check, Pencil } from 'lucide-react';
 import type { HistoryPreviewRequest, WorkbenchAction, WorkbenchModel } from '@warden/shared';
 import { Button } from './components/ui/button';
-import { Input } from './components/ui/input';
 import { Textarea } from './components/ui/textarea';
 import { AcpSetup } from './components/AcpSetup';
 import { Checkbox } from './components/ui/checkbox';
 import { NativeSelect, NativeSelectOption } from './components/ui/native-select';
-import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from './components/ui/dropdown-menu';
+import { Task, taskDraftKey } from './task';
+import type { ViewState } from './task';
 
-type Props = { model: WorkbenchModel; send(action: WorkbenchAction): void };
+type Props = { model: WorkbenchModel; send(action: WorkbenchAction): void; state?: ViewState };
 const labels: Record<string, string> = {
   pending: '待同步',
   updating: '同步中',
@@ -31,10 +31,27 @@ const labels: Record<string, string> = {
 };
 const label = (value: string | undefined) => (value ? (labels[value] ?? value) : '未检查');
 
-export function WorkbenchApp({ model, send }: Props) {
+export function WorkbenchApp({ model, send, state: persisted }: Props) {
+  const memory = useRef<Record<string, unknown>>({});
+  const state = useMemo<ViewState>(
+    () =>
+      persisted ?? {
+        read: <T,>(key: string, fallback: T) => (memory.current[key] as T | undefined) ?? fallback,
+        save: (key, value) => {
+          memory.current[key] = value;
+        },
+      },
+    [persisted],
+  );
+  const previous = useRef(model);
+  useEffect(() => {
+    if (previous.current.creating && !model.creating && model.task && previous.current.repository === model.repository)
+      state.save(taskDraftKey(previous.current), undefined);
+    previous.current = model;
+  }, [model.creating, model.task?.id, model.repository]);
   const scope = model.surface === 'task' ? `task:${model.task?.id ?? 'new'}` : model.surface;
   return (
-    <main>
+    <main className={model.surface === 'task' ? 'task-pane' : undefined}>
       {model.busy && (
         <p role="status" className="muted">
           {model.busy}
@@ -58,7 +75,7 @@ export function WorkbenchApp({ model, send }: Props) {
         <Setup repository busy={!!model.busy} send={send} />
       ) : (
         <>
-          {model.surface === 'task' && <Task key={model.creating ? 'new' : (model.task?.id ?? 'none')} model={model} send={send} />}
+          {model.surface === 'task' && <Task key={taskDraftKey(model)} model={model} send={send} state={state} />}
           {model.surface === 'preview' && <Preview model={model} send={send} />}
           {model.surface === 'history' && <History model={model} send={send} />}
           {model.surface === 'settings' && <Settings model={model} send={send} />}
@@ -77,204 +94,6 @@ function Setup({ repository, busy, send }: { repository: boolean; busy: boolean;
         {repository ? '选择主开发分支' : '选择仓库'}
       </Button>
     </div>
-  );
-}
-
-function Task({ model, send }: Props) {
-  const task = model.task;
-  const [editing, setEditing] = useState(model.creating);
-  const [title, setTitle] = useState(task?.title ?? '');
-  const [body, setBody] = useState(task?.body ?? '');
-  const [kind, setKind] = useState<'shared' | 'clone'>('shared');
-  const [agent, setAgent] = useState(task?.agent ?? '');
-  const [message, setMessage] = useState(model.message);
-  if (!task && !model.creating) return <p className="muted">请选择任务，或在工作区列表添加任务。</p>;
-  const taskId = task?.id ?? '';
-  const action = (type: 'task.review' | 'task.chat' | 'task.hook' | 'task.resume' | 'task.copy' | 'task.brief' | 'task.restore') => send({ type, taskId });
-  return (
-    <>
-      <div className="page-heading">
-        <h1>{model.creating ? '新增任务' : task?.title}</h1>
-        {!editing && (
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="编辑说明"
-            title="编辑说明"
-            onClick={() => {
-              setTitle(task!.title);
-              setBody(task!.body ?? '');
-              setEditing(true);
-            }}
-          >
-            <Pencil aria-hidden="true" />
-          </Button>
-        )}
-      </div>
-      {editing ? (
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            send(model.creating ? { type: 'task.create', title, body } : { type: 'task.update', taskId, title, body });
-            if (!model.creating) setEditing(false);
-          }}
-        >
-          <label className="field">
-            标题
-            <Input required maxLength={200} value={title} onChange={(event) => setTitle(event.target.value)} />
-          </label>
-          <label className="field">
-            说明
-            <Textarea rows={5} maxLength={10000} value={body} onChange={(event) => setBody(event.target.value)} />
-          </label>
-          <div className="actions">
-            <Button disabled={!!model.busy || !title.trim()} type="submit">
-              {model.creating ? '添加任务' : '保存说明'}
-            </Button>
-            {!model.creating && (
-              <Button variant="secondary" type="button" onClick={() => setEditing(false)}>
-                取消
-              </Button>
-            )}
-          </div>
-        </form>
-      ) : (
-        task?.body && (
-          <details>
-            <summary>说明</summary>
-            <p className="whitespace-pre-wrap">{task.body}</p>
-          </details>
-        )
-      )}
-      {task && !task.worktree && (
-        <section>
-          {task.status === 'archived' ? (
-            <>
-              <p>此计划已归档。</p>
-              <Button disabled={!!model.busy} onClick={() => action('task.restore')}>
-                恢复计划
-              </Button>
-            </>
-          ) : (
-            <>
-              <p className="muted">尚无工作区</p>
-              <details>
-                <summary>工作区选项</summary>
-                <label className="field">
-                  执行者（可选）
-                  <Input maxLength={100} value={agent} onChange={(event) => setAgent(event.target.value)} placeholder="名称标签" />
-                </label>
-                <label className="field">
-                  Git 存储方式
-                  <NativeSelect value={kind} onChange={(event) => setKind(event.target.value as typeof kind)}>
-                    <NativeSelectOption value="shared">共享 Git 存储</NativeSelectOption>
-                    <NativeSelectOption value="clone">独立 clone（兼容模式）</NativeSelectOption>
-                  </NativeSelect>
-                </label>
-              </details>
-              <Button disabled={!!model.busy} onClick={() => send({ type: 'task.start', taskId, kind, agent })}>
-                创建工作区
-              </Button>
-            </>
-          )}
-        </section>
-      )}
-      {task?.worktree && (
-        <>
-          <section>
-            {task.agent && <p className="muted">执行者：{task.agent}</p>}
-            <p>{task.branch}</p>
-            <p className="path">{task.worktree}</p>
-            <div className="actions">
-              <Button size="sm" onClick={() => action('task.review')}>
-                打开变更
-              </Button>
-              <Button size="sm" variant="secondary" onClick={() => action('task.chat')}>
-                与 Agent 对话
-              </Button>
-              <DropdownMenu modal={false}>
-                <DropdownMenuTrigger asChild>
-                  <Button size="icon-sm" variant="ghost" aria-label="更多任务操作" title="更多任务操作">
-                    <MoreHorizontal aria-hidden="true" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onSelect={() => action('task.copy')}>复制路径</DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => action('task.brief')}>复制任务说明</DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          </section>
-          {task.workspaceHook && (
-            <details open={task.workspaceHook.status === 'failed'}>
-              <summary>初始化脚本 · {label(task.workspaceHook.status)}</summary>
-              <p>退出码：{task.workspaceHook.exitCode ?? '—'}</p>
-              <pre>{task.workspaceHook.output ?? '等待输出'}</pre>
-              <Button size="sm" variant="secondary" disabled={!!model.busy} onClick={() => action('task.hook')}>
-                重试初始化脚本
-              </Button>
-            </details>
-          )}
-          <section>
-            <h2>未交付变更</h2>
-            {!model.review ? (
-              <p className="muted">打开差异，审阅本次交付的完整内容。</p>
-            ) : !model.reviewCurrent ? (
-              <p className="notice">审阅版本已变化，请重新打开差异。</p>
-            ) : (
-              <p className="muted">审阅版本：{(model.review.sourceHead ?? model.review.preparation?.head)?.slice(0, 8) ?? '未提交内容'}</p>
-            )}
-            {task.integration?.error && (
-              <p role="alert" className="error">
-                {task.integration.error}
-              </p>
-            )}
-            {model.workflow?.preparation?.changeId === task.id && (
-              <p className="notice">{model.workflow.preparation.message ?? '已保留提交准备内容。请重新打开差异后继续。'}</p>
-            )}
-            <label className="field">
-              提交信息
-              <Textarea
-                rows={4}
-                value={message}
-                maxLength={10000}
-                onChange={(event) => {
-                  setMessage(event.target.value);
-                  send({ type: 'task.message', taskId, message: event.target.value });
-                }}
-              />
-            </label>
-            <Button disabled={!!model.busy || !message.trim()} onClick={() => send({ type: 'task.deliver', taskId, message })}>
-              {task.integration && !task.integration.prepared
-                ? '恢复提交准备'
-                : model.review?.preparation?.canRecord
-                  ? '记录已审阅的提交'
-                  : `提交到 ${model.workflow?.workflow?.developmentBranch ?? '主开发分支'}`}
-            </Button>
-            <p className="muted">使用普通 Git commit hooks 与签名。</p>
-            {task.integration && (
-              <details>
-                <summary>提交恢复</summary>
-                <p>手动恢复原主目录内容后，可结束本次准备。Warden 会先验证恢复结果。</p>
-                <Button size="sm" variant="secondary" disabled={!!model.busy} onClick={() => action('task.resume')}>
-                  结束已恢复的提交准备
-                </Button>
-              </details>
-            )}
-          </section>
-          {!!task.deliveries?.length && (
-            <details>
-              <summary>交付记录 · {task.deliveries.length}</summary>
-              {task.deliveries.map((delivery) => (
-                <p key={delivery.id}>
-                  <code>{delivery.commit.slice(0, 8)}</code> {delivery.message}
-                </p>
-              ))}
-            </details>
-          )}
-        </>
-      )}
-    </>
   );
 }
 
@@ -572,6 +391,9 @@ function CommitMessage({ message }: { message: string }) {
 
 function Rebase({ model, send }: Props) {
   const [selected, setSelected] = useState<string[]>([]);
+  useEffect(() => {
+    if (model.rebaseSelection) setSelected(model.rebaseSelection.taskIds);
+  }, [model.rebaseSelection?.request]);
   const checks = model.checks?.checks ?? [];
   const selectedChecks = checks.filter((check) => selected.includes(check.changeId));
   const retry = !model.checks || model.errors.some((error) => error.scope === 'rebase' || error.scope === 'repository');

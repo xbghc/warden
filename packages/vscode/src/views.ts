@@ -26,7 +26,8 @@ export class Views implements vscode.WebviewViewProvider, vscode.Disposable {
   }
   async show(surface: Surface) {
     if (surface === 'task') {
-      await vscode.commands.executeCommand('warden.task.focus');
+      if (this.task) this.task.show(true);
+      else await vscode.commands.executeCommand('warden.task.focus');
       return;
     }
     const existing = this.panels.get(surface);
