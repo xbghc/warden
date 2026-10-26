@@ -10,7 +10,7 @@ HTTP, a listening port, a browser server or an installed Warden CLI.
 pnpm install
 pnpm build:native
 pnpm package:vscode
-code --install-extension packages/vscode/warden-0.18.2.vsix
+code --install-extension packages/vscode/warden-0.19.0.vsix
 ```
 
 Open the primary directory and choose **Warden: 选择主开发分支**. The branch must be checked out in

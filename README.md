@@ -10,7 +10,7 @@ Install **Warden Workspace Review** (`xbghc.warden`) in VS Code, open the primar
 choose **Warden: 选择主开发分支**. Git must be available in the workspace environment. The extension
 runs in desktop VS Code, Remote SSH, WSL and Dev Containers. It requires Workspace Trust.
 There is no Warden server, browser application or CLI to start, and no separate Node/Rust installation
-is needed to use the extension. This working copy has not been published as a new release.
+is needed to use the extension.
 
 To build a local VSIX:
 
@@ -18,7 +18,7 @@ To build a local VSIX:
 pnpm install
 pnpm build:native
 pnpm package:vscode
-code --install-extension packages/vscode/warden-0.18.2.vsix
+code --install-extension packages/vscode/warden-0.19.0.vsix
 ```
 
 ## Development workflow
