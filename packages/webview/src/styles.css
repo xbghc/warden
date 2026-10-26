@@ -34,6 +34,18 @@ h1 {
   font-weight: 600;
   margin-bottom: 14px;
 }
+.page-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.page-heading h1 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
 h2 {
   font-size: 14px;
   font-weight: 600;
@@ -106,13 +118,14 @@ summary {
 .acp-setup summary {
   color: var(--color-muted-foreground);
 }
-select {
+[data-slot="native-select"] {
   color: var(--vscode-dropdown-foreground, inherit);
   background: var(--vscode-dropdown-background, transparent);
-  border: 1px solid var(--color-input);
-  padding: 7px;
-  border-radius: 4px;
+}
+.field [data-slot="native-select-wrapper"] {
+  width: 100%;
   max-width: 100%;
+  min-width: 0;
 }
 .history-columns {
   display: grid;
@@ -134,6 +147,13 @@ select {
 .commit-heading span {
   flex: 1;
 }
+.commit-title,
+.commit-message {
+  overflow-wrap: anywhere;
+}
+.commit-message summary {
+  padding: 4px 0;
+}
 .check {
   display: flex;
   gap: 10px;
@@ -141,9 +161,8 @@ select {
   padding: 12px 0;
   border-bottom: 1px solid var(--color-border);
 }
-.check input {
+.check [data-slot="checkbox"] {
   margin-top: 4px;
-  accent-color: var(--color-primary);
 }
 .check-body {
   flex: 1;
@@ -198,27 +217,26 @@ summary {
   max-width: 360px;
   margin: 0;
 }
-.acp-profile [data-slot="native-select-wrapper"] {
-  width: 100%;
-}
 .acp-profile button {
   margin-bottom: 2px;
 }
 .acp-session-settings {
+  margin-top: 16px;
+}
+.acp-config-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 12px 16px;
-  margin-top: 16px;
+}
+.acp-extra-options {
+  margin-top: 8px;
 }
 .acp-session-settings label.field {
   flex: 1;
   min-width: 160px;
   max-width: 300px;
   margin: 0;
-}
-.acp-session-settings [data-slot="native-select-wrapper"] {
-  width: 100%;
 }
 .acp-control-description {
   display: block;

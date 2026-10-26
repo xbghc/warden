@@ -10,6 +10,7 @@ const base: WorkbenchModel = {
   message: '',
   errors: [],
   reviewCurrent: false,
+  hasPreviewCommand: false,
   workflow: { workflow: { developmentBranch: 'feature/orders', changes: [] } },
 };
 const meta = {

@@ -72,6 +72,11 @@ export class Views implements vscode.WebviewViewProvider, vscode.Disposable {
     if (this.task) void this.task.webview.postMessage({ type: 'model', model: this.model('task') });
     for (const [surface, panel] of this.panels) void panel.webview.postMessage({ type: 'model', model: this.model(surface) });
   }
+  displaysError(scope: string): boolean {
+    if (scope === 'repository') return !!this.task?.visible || [...this.panels.values()].some((panel) => panel.visible);
+    if (scope.startsWith('task:')) return !!this.task?.visible && scope === `task:${this.model('task').task?.id ?? 'new'}`;
+    return [...this.panels].some(([surface, panel]) => surface === scope && panel.visible);
+  }
   dispose() {
     for (const panel of this.panels.values()) panel.dispose();
     for (const subscription of this.subscriptions) subscription.dispose();

@@ -111,6 +111,9 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
       this.emitter,
       vscode.workspace.registerTextDocumentContentProvider('warden-review', this.documents),
       vscode.workspace.onDidCloseTextDocument((doc) => this.documents.remove(doc.uri)),
+      vscode.workspace.onDidChangeConfiguration((event) => {
+        if (event.affectsConfiguration('warden.previewCommand')) this.views.render();
+      }),
       this.tree,
       this.views,
       vscode.window.registerWebviewViewProvider('warden.task', this.views),
@@ -218,7 +221,7 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
     this.errors.set(scope, { scope, message, code });
     this.output.appendLine(`${code ?? 'error'}: ${message}`);
     this.views.render();
-    void vscode.window.showErrorMessage(`Warden: ${message}`);
+    if (!this.views.displaysError(scope)) void vscode.window.showErrorMessage(`Warden: ${message}`);
   }
   async initialize() {
     const folders = vscode.workspace.workspaceFolders;
@@ -352,7 +355,10 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
       return item;
     }
     if (node.kind === 'tasks' || node.kind === 'history') {
-      const item = new vscode.TreeItem(node.kind === 'tasks' ? '任务' : '提交历史', vscode.TreeItemCollapsibleState.Expanded);
+      const item = new vscode.TreeItem(
+        node.kind === 'tasks' ? '任务' : '提交历史',
+        node.kind === 'tasks' ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed,
+      );
       item.id = node.kind;
       item.contextValue = node.kind;
       item.iconPath = new vscode.ThemeIcon(node.kind === 'tasks' ? 'list-ordered' : 'history');
@@ -382,20 +388,26 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
       const source = this.preview?.sources?.find((s) => s.changeId === task.id);
       const connected = this.preview?.connectedIds.includes(task.id);
       const sync = this.checks?.checks.find((c) => c.changeId === task.id);
-      item.description = [
-        task.agent,
-        task.worktree ? (connected ? (source ? statusLabels[source.status] : '待同步') : '未连接') : statusLabels[task.status],
-        task.status === 'integrating' ? '待提交' : '',
+      const connection = task.worktree ? (connected ? (source ? statusLabels[source.status] : '待同步') : '未连接') : statusLabels[task.status];
+      const connectionProblem = source?.status === 'conflict' || source?.status === 'error';
+      const activity = this.backend && this.conversations.activity(this.backend.root, task.id);
+      const facts = [
+        activity === 'Agent 等待授权' ? activity : '',
+        task.integration?.error ? '提交失败' : '',
+        connectionProblem ? connection : '',
         this.reviews.has(task.id) && !sameReview(this.reviews.get(task.id), taskReview(this.data!, task.id, this.checkouts?.worktrees ?? []))
-          ? '审查版本已变化'
+          ? '审阅版本已变化'
           : '',
+        task.worktree && task.workspaceHook?.status === 'failed' ? '初始化失败' : '',
+        activity !== 'Agent 等待授权' ? activity : '',
+        task.status === 'integrating' ? '待提交' : '',
         sync && sync.status !== 'current' ? '可检查 rebase' : '',
-        this.backend && this.conversations.activity(this.backend.root, task.id),
-      ]
-        .filter(Boolean)
-        .join(' · ');
+        !connectionProblem ? connection : '',
+        task.agent,
+      ].filter(Boolean);
+      item.description = facts.slice(0, 2).join(' · ');
       item.iconPath = new vscode.ThemeIcon(connected ? 'plug' : task.worktree ? 'git-branch' : 'circle-outline');
-      item.tooltip = new vscode.MarkdownString(`${task.title}\n\n${task.body ?? ''}\n\n${task.worktree ?? '尚未分配工作区'}`);
+      item.tooltip = [task.title, task.body, task.worktree ?? '尚未分配工作区', facts.join(' · ')].filter(Boolean).join('\n\n');
       item.command = { command: 'warden.selectTask', title: '查看任务变更', arguments: [node] };
       return item;
     }
@@ -710,6 +722,8 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
   private model(surface: Surface): WorkbenchModel {
     const task = this.creating ? undefined : this.tasks().find((row) => row.id === this.selected);
     const review = task ? this.reviews.get(task.id) : undefined;
+    const folder = this.backend ? vscode.workspace.getWorkspaceFolder(vscode.Uri.file(this.backend.root)) : undefined;
+    const previewCommand = vscode.workspace.getConfiguration('warden', folder).get<unknown>('previewCommand');
     return {
       session: this.session,
       repository: this.switching ? '' : (this.backend?.root ?? ''),
@@ -718,6 +732,7 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
       task,
       creating: this.creating,
       preview: this.preview,
+      hasPreviewCommand: typeof previewCommand === 'string' && !!previewCommand.trim(),
       history: this.history,
       historyDraft: this.historyDraft,
       historyPreview: this.historyPreview,

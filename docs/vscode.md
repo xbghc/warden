@@ -28,13 +28,17 @@ The Warden navigation contains preview, history, the ordered plan, synchronizati
 Task rows expand to the complete changed-file list. Selecting a task opens its current-task form and,
 when available, its first native diff. Task connection actions remain on the task rows. Drag-and-drop
 changes plan order only; the context menu also offers a keyboard-accessible move action.
+Rows show at most two status facts, with full context in the tooltip. History starts collapsed.
+Visible forms retain scoped errors; native notifications report errors in hidden forms.
 
 The current-task form provides multiline notes, workspace creation, script results, multiline commit
 messages and delivery recovery. Every workspace creation produces a fresh logical workspace with a
 new task branch. The optional executor name is a label. Copying a task brief writes context to the
 clipboard; the user can paste it into an ACP task conversation or an external tool. Physical slot reuse
 is internal: users do not select or adopt an old workspace.
-The compatibility clone option is available under workspace options. Existing task associations and
+The optional executor label and compatibility clone option are available under workspace options.
+The task's more-actions menu contains **复制路径** and **复制任务说明**; the edit icon opens its notes.
+Existing task associations and
 delivery records are preserved on upgrade; delivery never recycles another active task's workspace.
 
 Preview, history, batch rebase and settings open as editor-area webviews. Their resources are
@@ -83,6 +87,9 @@ agent's offered values and wait for confirmation before another prompt can be se
 commands can be inserted into the draft without sending it. Streamed thoughts, reported context usage
 and cost, live notices and context-compaction updates are displayed when the agent provides them.
 These reports do not change task state or run Git operations.
+At most two common selectors stay visible, favoring model and mode categories. Other controls live
+under **更多会话选项**; **任务与会话信息** holds the reported agent name, session title and usage.
+Permission requests, live notices and connection errors remain directly visible.
 
 **Warden: 发送选区到任务对话** appends selected editor text to a chosen task's draft; it does not send
 the message. The excerpt includes its file or immutable review snapshot, line range and an unsaved
@@ -126,6 +133,9 @@ selected combination; later conflicts keep the last coherent preview and report 
 **打开预览终端** sets a native terminal's cwd to preview. **运行预览** executes the optional
 `warden.previewCommand` through VS Code Tasks there. Other user terminals, tasks and debug sessions
 are not redirected. Use the displayed preview path or `${command:warden.previewPath}` where supported.
+The preview page shows **运行预览** only when that command is configured, keeping **打开预览终端**
+available in either case. Environment setup appears only for a configured script or a recorded result;
+rerun is offered only while the script remains configured.
 
 The engine combines repository-change hints, state-file notifications and periodic checks. Preview
 publication still compares content hashes and debounces updates. A separate background-owner lease
@@ -148,6 +158,10 @@ Scripts use the existing POSIX shell selection, ten-minute timeout and bounded o
 Git for Windows' shell. Task descriptions never become executable script configuration.
 
 ## Delivery and history
+
+History displays commit titles with expandable bodies. Starting a draft opens the comparison column;
+each draft message is edited on demand and remains saved when its editor closes or its row moves.
+The preview's full order is expandable, while conflicts and application consequences remain visible.
 
 Enter a commit message in **当前任务**, review the intended version, then submit to the named primary
 branch. The submitted message and reviewed versions are fixed for that operation. Unrelated primary

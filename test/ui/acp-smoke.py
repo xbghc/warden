@@ -329,6 +329,8 @@ try:
         model_selector = first.get_by_role('combobox', name='模型', exact=True)
         thinking = first.get_by_role('checkbox', name='显示思考', exact=True)
         expect(model_selector).to_have_value('fast')
+        expect(thinking).not_to_be_visible()
+        first.locator('.acp-extra-options summary').click()
         expect(thinking).not_to_be_checked()
         expect(first.get_by_role('combobox', name='会话模式', exact=True)).to_have_count(0)
 
@@ -350,6 +352,8 @@ try:
 
         send(first, 'session-updates')
         connected(first)
+        expect(first.get_by_text('Agent 会话：测试会话标题', exact=True)).not_to_be_visible()
+        first.get_by_text('任务与会话信息', exact=True).click()
         expect(first.get_by_text('Agent 会话：测试会话标题', exact=True)).to_be_visible()
         expect(first.get_by_label('会话用量', exact=True)).to_contain_text('1,200 / 8,000 tokens')
         expect(first.get_by_label('会话用量', exact=True)).to_contain_text('0.02 USD')

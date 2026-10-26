@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
+import { ArrowDown, ArrowUp, Check, MoreHorizontal, Pencil } from 'lucide-react';
 import type { HistoryPreviewRequest, WorkbenchAction, WorkbenchModel } from '@warden/shared';
 import { Button } from './components/ui/button';
 import { Input } from './components/ui/input';
 import { Textarea } from './components/ui/textarea';
 import { AcpSetup } from './components/AcpSetup';
+import { Checkbox } from './components/ui/checkbox';
+import { NativeSelect, NativeSelectOption } from './components/ui/native-select';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from './components/ui/dropdown-menu';
 
 type Props = { model: WorkbenchModel; send(action: WorkbenchAction): void };
 const labels: Record<string, string> = {
@@ -89,7 +93,24 @@ function Task({ model, send }: Props) {
   const action = (type: 'task.review' | 'task.chat' | 'task.hook' | 'task.resume' | 'task.copy' | 'task.brief' | 'task.restore') => send({ type, taskId });
   return (
     <>
-      <h1>{model.creating ? '新增任务' : task?.title}</h1>
+      <div className="page-heading">
+        <h1>{model.creating ? '新增任务' : task?.title}</h1>
+        {!editing && (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="编辑说明"
+            title="编辑说明"
+            onClick={() => {
+              setTitle(task!.title);
+              setBody(task!.body ?? '');
+              setEditing(true);
+            }}
+          >
+            <Pencil aria-hidden="true" />
+          </Button>
+        )}
+      </div>
       {editing ? (
         <form
           onSubmit={(event) => {
@@ -118,25 +139,12 @@ function Task({ model, send }: Props) {
           </div>
         </form>
       ) : (
-        <>
-          {task?.body && (
-            <details>
-              <summary>说明</summary>
-              <p className="whitespace-pre-wrap">{task.body}</p>
-            </details>
-          )}
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => {
-              setTitle(task!.title);
-              setBody(task!.body ?? '');
-              setEditing(true);
-            }}
-          >
-            编辑说明
-          </Button>
-        </>
+        task?.body && (
+          <details>
+            <summary>说明</summary>
+            <p className="whitespace-pre-wrap">{task.body}</p>
+          </details>
+        )
       )}
       {task && !task.worktree && (
         <section>
@@ -150,18 +158,18 @@ function Task({ model, send }: Props) {
           ) : (
             <>
               <p className="muted">尚无工作区</p>
-              <label className="field">
-                执行者（可选）
-                <Input maxLength={100} value={agent} onChange={(event) => setAgent(event.target.value)} placeholder="名称标签" />
-              </label>
               <details>
                 <summary>工作区选项</summary>
                 <label className="field">
+                  执行者（可选）
+                  <Input maxLength={100} value={agent} onChange={(event) => setAgent(event.target.value)} placeholder="名称标签" />
+                </label>
+                <label className="field">
                   Git 存储方式
-                  <select value={kind} onChange={(event) => setKind(event.target.value as typeof kind)}>
-                    <option value="shared">共享 Git 存储</option>
-                    <option value="clone">独立 clone（兼容模式）</option>
-                  </select>
+                  <NativeSelect value={kind} onChange={(event) => setKind(event.target.value as typeof kind)}>
+                    <NativeSelectOption value="shared">共享 Git 存储</NativeSelectOption>
+                    <NativeSelectOption value="clone">独立 clone（兼容模式）</NativeSelectOption>
+                  </NativeSelect>
                 </label>
               </details>
               <Button disabled={!!model.busy} onClick={() => send({ type: 'task.start', taskId, kind, agent })}>
@@ -184,12 +192,17 @@ function Task({ model, send }: Props) {
               <Button size="sm" variant="secondary" onClick={() => action('task.chat')}>
                 与 Agent 对话
               </Button>
-              <Button size="sm" variant="secondary" onClick={() => action('task.copy')}>
-                复制路径
-              </Button>
-              <Button size="sm" variant="secondary" onClick={() => action('task.brief')}>
-                复制任务说明
-              </Button>
+              <DropdownMenu modal={false}>
+                <DropdownMenuTrigger asChild>
+                  <Button size="icon-sm" variant="ghost" aria-label="更多任务操作" title="更多任务操作">
+                    <MoreHorizontal aria-hidden="true" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onSelect={() => action('task.copy')}>复制路径</DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => action('task.brief')}>复制任务说明</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </section>
           {task.workspaceHook && (
@@ -267,6 +280,7 @@ function Task({ model, send }: Props) {
 
 function Preview({ model, send }: Props) {
   const preview = model.preview;
+  const hasSetup = !!model.workflow?.workspaceConfig?.previewSetup?.trim();
   const names = preview?.connectedIds.map((id) => model.workflow?.workflow?.changes.find((task) => task.id === id)?.title ?? id);
   return (
     <>
@@ -291,27 +305,32 @@ function Preview({ model, send }: Props) {
         <Button variant="secondary" onClick={() => send({ type: 'preview.terminal' })}>
           打开预览终端
         </Button>
-        <Button variant="secondary" onClick={() => send({ type: 'preview.run' })}>
-          运行预览
-        </Button>
+        {model.hasPreviewCommand && (
+          <Button variant="secondary" onClick={() => send({ type: 'preview.run' })}>
+            运行预览
+          </Button>
+        )}
         <Button variant="secondary" onClick={() => send({ type: 'preview.copy' })}>
           复制路径
         </Button>
       </div>
-      <section>
-        <h2>环境 setup</h2>
-        <p>{preview?.setup ? label(preview.setup.status) : '尚未配置脚本'}</p>
-        {preview?.setup && (
-          <details open={preview.setup.status === 'failed'}>
-            <summary>输出 · 退出码 {preview.setup.exitCode ?? '—'}</summary>
-            <pre>{preview.setup.output ?? '等待输出'}</pre>
-          </details>
-        )}
-        <Button variant="secondary" disabled={!!model.busy} onClick={() => send({ type: 'preview.setup' })}>
-          重跑 setup
-        </Button>
-      </section>
-      <p className="muted">代码在主目录或任务工作区修改；测试和开发服务在预览目录运行。</p>
+      {(hasSetup || preview?.setup) && (
+        <section>
+          <h2>环境准备</h2>
+          <p>{preview?.setup ? label(preview.setup.status) : '尚未运行'}</p>
+          {preview?.setup && (
+            <details open={preview.setup.status === 'failed'}>
+              <summary>输出 · 退出码 {preview.setup.exitCode ?? '—'}</summary>
+              <pre>{preview.setup.output ?? '等待输出'}</pre>
+            </details>
+          )}
+          {hasSetup && (
+            <Button variant="secondary" disabled={!!model.busy} onClick={() => send({ type: 'preview.setup' })}>
+              {preview?.setup ? '重新运行' : '运行准备脚本'}
+            </Button>
+          )}
+        </section>
+      )}
     </>
   );
 }
@@ -352,7 +371,7 @@ function Settings({ model, send }: Props) {
           </details>
         )}
         <label className="field">
-          预览 setup
+          预览准备脚本
           <Textarea rows={4} value={setup} onChange={(event) => setSetup(event.target.value)} />
         </label>
         <p className="muted">在预览初始化及代码更新后运行。请使用幂等脚本，依赖与缓存应被 Git 忽略。</p>
@@ -367,9 +386,13 @@ function Settings({ model, send }: Props) {
 function History({ model, send }: Props) {
   const history = model.history;
   const [draft, setDraft] = useState<HistoryPreviewRequest | undefined>(model.historyDraft);
+  const [editingCommit, setEditingCommit] = useState<string>();
   const previousDraft = useRef(model.historyDraft);
   useEffect(() => {
-    if (previousDraft.current && !model.historyDraft) setDraft(undefined);
+    if (previousDraft.current && !model.historyDraft) {
+      setDraft(undefined);
+      setEditingCommit(undefined);
+    }
     previousDraft.current = model.historyDraft;
   }, [model.historyDraft]);
   const [start, setStart] = useState(model.historyDraft?.start ?? '');
@@ -379,6 +402,7 @@ function History({ model, send }: Props) {
   };
   const build = () => {
     if (!history) return;
+    setEditingCommit(undefined);
     const index = history.commits.findIndex((commit) => commit.sha === start);
     if (index < 0) return;
     save({ head: history.head, start, commits: history.commits.slice(index).map(({ sha, message }) => ({ sha, message })) });
@@ -397,105 +421,131 @@ function History({ model, send }: Props) {
       <p>{history?.branch ?? '尚未选择主开发分支'} · 早 → 晚</p>
       <label className="field">
         编排起点
-        <select value={start} onChange={(event) => setStart(event.target.value)}>
-          <option value="">选择起点，范围到当前 HEAD</option>
+        <NativeSelect value={start} onChange={(event) => setStart(event.target.value)}>
+          <NativeSelectOption value="">选择起点，范围到当前 HEAD</NativeSelectOption>
           {history?.commits.map((commit) => (
-            <option key={commit.sha} value={commit.sha}>
+            <NativeSelectOption key={commit.sha} value={commit.sha}>
               {commit.sha.slice(0, 8)} {commit.message.split('\n')[0]}
-            </option>
+            </NativeSelectOption>
           ))}
-        </select>
+        </NativeSelect>
       </label>
       <Button variant="secondary" disabled={!!model.busy || !start} onClick={build}>
         {stale ? '基于最新历史重建草稿' : '创建历史草稿'}
       </Button>
       {stale && <div className="notice">主开发分支已变化。草稿仍保留，重新选择起点并预览后才能应用。</div>}
-      <div className="history-columns">
-        <section>
+      <div className={draft ? 'history-columns' : undefined}>
+        <section aria-label="当前历史">
           <h2>当前历史</h2>
           {history?.commits.map((commit) => (
             <div className="commit" key={commit.sha}>
               <code>{commit.sha.slice(0, 8)}</code>
-              <p className="whitespace-pre-wrap">{commit.message}</p>
+              <CommitMessage message={commit.message} />
               {commit.changeId && (
                 <small className="muted">来源：{model.workflow?.workflow?.changes.find((task) => task.id === commit.changeId)?.title ?? commit.changeId}</small>
               )}
             </div>
           ))}
         </section>
-        <section>
-          <h2>草稿顺序</h2>
-          {!draft && <p className="muted">选择起点以编辑顺序和提交信息。</p>}
-          {draft?.commits.map((commit, index) => (
-            <div
-              className="commit"
-              key={commit.sha}
-              draggable
-              onDragStart={(event) => event.dataTransfer.setData('text/plain', String(index))}
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={(event) => {
-                event.preventDefault();
-                move(Number(event.dataTransfer.getData('text/plain')), index);
-              }}
-            >
-              <div className="commit-heading">
-                <span>
-                  {index + 1}. <code>{commit.sha.slice(0, 8)}</code>
-                </span>
-                <Button size="xs" variant="secondary" disabled={index === 0} aria-label={`上移提交 ${index + 1}`} onClick={() => move(index, index - 1)}>
-                  ↑
-                </Button>
-                <Button
-                  size="xs"
-                  variant="secondary"
-                  disabled={index === draft.commits.length - 1}
-                  aria-label={`下移提交 ${index + 1}`}
-                  onClick={() => move(index, index + 1)}
-                >
-                  ↓
-                </Button>
+        {draft && (
+          <section aria-label="草稿顺序">
+            <h2>草稿顺序</h2>
+            {draft.commits.map((commit, index) => (
+              <div
+                className="commit"
+                key={commit.sha}
+                draggable={editingCommit !== commit.sha}
+                onDragStart={(event) => event.dataTransfer.setData('text/plain', String(index))}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  move(Number(event.dataTransfer.getData('text/plain')), index);
+                }}
+              >
+                <div className="commit-heading">
+                  <span>
+                    {index + 1}. <code>{commit.sha.slice(0, 8)}</code>
+                  </span>
+                  <Button
+                    size="icon-xs"
+                    variant="ghost"
+                    disabled={index === 0}
+                    aria-label={`上移提交 ${index + 1}`}
+                    title="上移"
+                    onClick={() => move(index, index - 1)}
+                  >
+                    <ArrowUp aria-hidden="true" />
+                  </Button>
+                  <Button
+                    size="icon-xs"
+                    variant="ghost"
+                    disabled={index === draft.commits.length - 1}
+                    aria-label={`下移提交 ${index + 1}`}
+                    title="下移"
+                    onClick={() => move(index, index + 1)}
+                  >
+                    <ArrowDown aria-hidden="true" />
+                  </Button>
+                  <Button
+                    size="icon-xs"
+                    variant="ghost"
+                    aria-label={editingCommit === commit.sha ? `完成编辑提交 ${index + 1}` : `编辑提交信息 ${index + 1}`}
+                    title={editingCommit === commit.sha ? '完成编辑' : '编辑提交信息'}
+                    onClick={() => setEditingCommit(editingCommit === commit.sha ? undefined : commit.sha)}
+                  >
+                    {editingCommit === commit.sha ? <Check aria-hidden="true" /> : <Pencil aria-hidden="true" />}
+                  </Button>
+                </div>
+                {editingCommit === commit.sha ? (
+                  <Textarea
+                    autoFocus
+                    rows={4}
+                    aria-label={`提交信息 ${index + 1}`}
+                    value={commit.message}
+                    onChange={(event) =>
+                      save({ ...draft, commits: draft.commits.map((row, i) => (i === index ? { ...row, message: event.target.value } : row)) })
+                    }
+                  />
+                ) : (
+                  <CommitMessage message={commit.message} />
+                )}
               </div>
-              <Textarea
-                aria-label={`提交信息 ${index + 1}`}
-                value={commit.message}
-                onChange={(event) => save({ ...draft, commits: draft.commits.map((row, i) => (i === index ? { ...row, message: event.target.value } : row)) })}
-              />
+            ))}
+            <p className="muted">实际分支尚未改变。调整顺序不会合并提交。</p>
+            <div className="actions">
+              <Button disabled={!!model.busy || stale} onClick={() => send({ type: 'history.preview', draft })}>
+                预览改写结果
+              </Button>
+              <Button
+                variant="secondary"
+                disabled={!!model.busy}
+                onClick={() => {
+                  setDraft(undefined);
+                  setEditingCommit(undefined);
+                  send({ type: 'history.discard' });
+                }}
+              >
+                丢弃草稿
+              </Button>
             </div>
-          ))}
-          {draft && (
-            <>
-              <p className="muted">实际分支尚未改变。调整顺序不会合并提交。</p>
-              <div className="actions">
-                <Button disabled={!!model.busy || stale} onClick={() => send({ type: 'history.preview', draft })}>
-                  预览改写结果
-                </Button>
-                <Button
-                  variant="secondary"
-                  disabled={!!model.busy}
-                  onClick={() => {
-                    setDraft(undefined);
-                    send({ type: 'history.discard' });
-                  }}
-                >
-                  丢弃草稿
-                </Button>
-              </div>
-            </>
-          )}
-        </section>
+          </section>
+        )}
       </div>
       {preview && (
         <section>
           <h2>编排预览</h2>
           <p>{preview.canApply ? '最终文件内容一致，可以应用。' : (preview.message ?? '此编排不能应用。')}</p>
           {!!preview.conflicts.length && <pre>{preview.conflicts.join('\n')}</pre>}
-          <ol>
-            {preview.commits.map((commit) => (
-              <li key={commit.source} className="whitespace-pre-wrap">
-                {commit.message}
-              </li>
-            ))}
-          </ol>
+          <details>
+            <summary>预览顺序 · {preview.commits.length} 个提交</summary>
+            <ol>
+              {preview.commits.map((commit) => (
+                <li key={commit.source}>
+                  <CommitMessage message={commit.message} />
+                </li>
+              ))}
+            </ol>
+          </details>
           <Button disabled={!!model.busy || stale || !preview.canApply} onClick={() => send({ type: 'history.apply', id: preview.id!, head: preview.head })}>
             应用到 {history?.branch}
           </Button>
@@ -506,34 +556,56 @@ function History({ model, send }: Props) {
   );
 }
 
+function CommitMessage({ message }: { message: string }) {
+  const newline = message.indexOf('\n');
+  const title = newline < 0 ? message : message.slice(0, newline);
+  const body = newline < 0 ? '' : message.slice(newline + 1);
+  return body.trim() ? (
+    <details className="commit-message">
+      <summary>{title || '（无标题）'}</summary>
+      <p className="whitespace-pre-wrap">{body}</p>
+    </details>
+  ) : (
+    <p className="commit-title">{title || '（无标题）'}</p>
+  );
+}
+
 function Rebase({ model, send }: Props) {
   const [selected, setSelected] = useState<string[]>([]);
   const checks = model.checks?.checks ?? [];
+  const selectedChecks = checks.filter((check) => selected.includes(check.changeId));
+  const retry = !model.checks || model.errors.some((error) => error.scope === 'rebase' || error.scope === 'repository');
   return (
     <>
       <h1>同步工作区</h1>
       <p>
         基于 {model.workflow?.workflow?.developmentBranch} · {model.workflow?.developmentHead?.slice(0, 8)}
       </p>
-      <div className="actions">
-        <Button variant="secondary" disabled={!!model.busy} onClick={() => send({ type: 'rebase.check' })}>
-          重新检查
-        </Button>
-        <Button variant="secondary" onClick={() => setSelected(checks.map((check) => check.changeId))}>
-          选择全部
-        </Button>
-        <Button variant="secondary" onClick={() => setSelected([])}>
-          清空选择
-        </Button>
-      </div>
+      {(checks.length > 0 || retry) && (
+        <div className="actions">
+          <Button variant="secondary" disabled={!!model.busy} onClick={() => send({ type: 'rebase.check' })}>
+            重新检查
+          </Button>
+          {checks.length > 0 && (
+            <>
+              <Button variant="secondary" onClick={() => setSelected(checks.map((check) => check.changeId))}>
+                选择全部
+              </Button>
+              <Button variant="secondary" onClick={() => setSelected([])}>
+                清空选择
+              </Button>
+            </>
+          )}
+        </div>
+      )}
       {!model.checks && <p>尚未检查</p>}
       {model.checks && !checks.length && <p>暂无工作区</p>}
       {checks.map((check) => (
         <label className="check" key={check.changeId}>
-          <input
-            type="checkbox"
+          <Checkbox
+            aria-label={model.workflow?.workflow?.changes.find((task) => task.id === check.changeId)?.title ?? check.changeId}
             checked={selected.includes(check.changeId)}
-            onChange={(event) => setSelected(event.target.checked ? [...selected, check.changeId] : selected.filter((id) => id !== check.changeId))}
+            onCheckedChange={(checked) => setSelected(checked === true ? [...selected, check.changeId] : selected.filter((id) => id !== check.changeId))}
           />
           <div className="check-body">
             <strong>{model.workflow?.workflow?.changes.find((task) => task.id === check.changeId)?.title ?? check.changeId}</strong>
@@ -545,22 +617,24 @@ function Rebase({ model, send }: Props) {
           </div>
         </label>
       ))}
-      <div className="actions">
-        <Button
-          disabled={!!model.busy || !selected.length}
-          onClick={() =>
-            send({
-              type: 'rebase.run',
-              items: checks
-                .filter((check) => selected.includes(check.changeId))
-                .map(({ changeId, sourceHead, developmentHead }) => ({ changeId, sourceHead, developmentHead })),
-            })
-          }
-        >
-          Rebase 所选工作区
-        </Button>
-      </div>
-      <p className="muted">只执行本次选择。未提交改动、版本变化和冲突会逐项报告。</p>
+      {checks.length > 0 && (
+        <>
+          <div className="actions">
+            <Button
+              disabled={!!model.busy || !selectedChecks.length}
+              onClick={() =>
+                send({
+                  type: 'rebase.run',
+                  items: selectedChecks.map(({ changeId, sourceHead, developmentHead }) => ({ changeId, sourceHead, developmentHead })),
+                })
+              }
+            >
+              Rebase 所选工作区
+            </Button>
+          </div>
+          <p className="muted">只执行本次选择。未提交改动、版本变化和冲突会逐项报告。</p>
+        </>
+      )}
       {model.rebaseResult && (
         <section>
           <h2>执行结果</h2>

@@ -10,6 +10,9 @@ import type { Surface, WorkbenchModel, HistoryPreviewRequest, HistoryPreviewResp
 import { makeFixtureRepo } from '../fixtures/make-repo.js';
 
 const fixture = await makeFixtureRepo('warden-ui-');
+await fixture.write('guide.txt', 'Independent history entry\n');
+fixture.git('add', 'guide.txt');
+fixture.git('commit', '-qm', 'c3: add guide');
 const data = await mkdtemp(path.join(os.tmpdir(), 'warden-ui-data-'));
 const engine = await Engine.open(fixture.root, path.join(data, 'state.json'));
 let selected: string | undefined;
@@ -35,6 +38,7 @@ const model = async (surface: Surface): Promise<WorkbenchModel> => {
     task,
     creating,
     preview: composed,
+    hasPreviewCommand: false,
     history,
     historyDraft: draft,
     historyPreview: preview,
@@ -64,6 +68,7 @@ const server = createServer(async (request, response) => {
       switch (action.type) {
         case 'setup.branch':
           await engine.execute('workflow.configure', { branch: 'main' });
+          await engine.execute('preview.refresh', undefined);
           break;
         case 'task.create': {
           const task = await engine.execute('task.create', { title: action.title, body: action.body });

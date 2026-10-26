@@ -1,12 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { GitBranch, Plus, Search } from 'lucide-react';
+import { Plus, Search } from 'lucide-react';
 import { Button } from './button';
-import { Badge } from './badge';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from './card';
 import { Checkbox } from './checkbox';
 import { Input } from './input';
 import { NativeSelect, NativeSelectOption } from './native-select';
-import { Separator } from './separator';
 import { Textarea } from './textarea';
 
 const meta = {
@@ -18,12 +15,9 @@ type Story = StoryObj<typeof meta>;
 
 export const Controls: Story = {
   render: () => (
-    <Card className="w-[560px] max-w-full">
-      <CardHeader>
-        <CardTitle>组件与视觉规范</CardTitle>
-        <CardDescription>任务编排与代码审查使用同一套 shadcn/ui 组件。</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-6">
+    <section className="w-[560px] max-w-full">
+      <h1>表单控件</h1>
+      <div className="space-y-6">
         <div className="flex flex-wrap gap-2">
           <Button>
             <Plus />
@@ -36,16 +30,6 @@ export const Controls: Story = {
           </Button>
           <Button disabled>创建中…</Button>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Badge>
-            <GitBranch />
-            审查中
-          </Badge>
-          <Badge variant="secondary">空闲</Badge>
-          <Badge variant="outline">3 个提交</Badge>
-          <Badge variant="secondary">2 个文件</Badge>
-        </div>
-        <Separator />
         <label className="field">
           分支
           <Input placeholder="agent/review" />
@@ -65,11 +49,11 @@ export const Controls: Story = {
           <Checkbox defaultChecked />
           选择此工作区
         </label>
-      </CardContent>
-      <CardFooter className="justify-between border-t">
+      </div>
+      <div className="actions">
         <Button variant="ghost">取消</Button>
         <Button>创建工作区</Button>
-      </CardFooter>
-    </Card>
+      </div>
+    </section>
   ),
 };

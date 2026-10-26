@@ -33,6 +33,14 @@ shared review controls. The wireframes below describe workflows, not required li
   and history rewriting, where an icon alone would leave the scope unclear.
 - Keep secondary content on demand: delivery records and script output. Preserve accessible names
   and tooltips on icon buttons. Errors and recovery actions must remain visible.
+- Task rows show at most two facts, prioritizing permission requests, failures and stale reviews;
+  the tooltip retains the complete context. History starts collapsed in the navigation.
+- Empty preview setup and synchronization controls stay hidden until their configuration or
+  workspaces exist. A failed check still offers retry. A visible form owns its scoped error;
+  native notifications draw attention to errors whose form is not visible.
+- Task copy actions use the more-actions menu; optional executor and storage choices live under
+  workspace options. History uses one column until a draft exists, with commit bodies and message
+  editors opened on demand. Collapsing an editor never discards the saved draft.
 - Empty states give one next step or a short fact, such as **请选择任务** or **暂无变更**. Loading,
   unavailable data, stale checks and empty results are distinct; do not turn unknown data into
   a zero count or claim successful synchronization before it runs.
@@ -399,25 +407,20 @@ the page with dashboard cards. Do not use green task-completion badges.
 
 | Purpose | Components |
 |---|---|
-| Single navigation area | `Sidebar`, `SidebarMenu`, `ScrollArea` |
-| Files and diff | `ResizablePanelGroup`, `ScrollArea`, `Separator` |
-| Actions | `Button`, `DropdownMenu` |
-| Creation, delivery and rebase panels | `Sheet` |
-| Rebase selection and commits | `Table`, `Checkbox` |
-| Connections | `Switch` with workspace labels and pending/error feedback |
-| Observable facts | Restrained `Badge`, `Alert`, `Tooltip` |
-| Notes, inputs and operation output | `Collapsible`, `Textarea` |
-| Short feedback | `Sonner` |
-| Sorting | shadcn-style rows with drag and accessible move-up/down actions |
+| Navigation, connections and file review | Native VS Code tree, commands and read-only diff editors |
+| Actions | `Button`, `DropdownMenu`; icon buttons retain names and tooltips |
+| Forms and selection | `Input`, `Textarea`, `NativeSelect`, `Checkbox` |
+| Details and output | Native `details` disclosures; errors and recovery stay visible |
+| Feedback | Scoped inline messages; native notifications when the affected view is hidden |
+| History sorting | Rows with drag and accessible move-up/down actions |
 
 Proposed desktop dimensions: navigation 248–280 px, file list 240–300 px, remaining width for diff,
 36–40 px action rows and approximately 14 px body text. Paths, SHAs and diffs use monospace. Keep
 one prominent current action per surface; secondary operations use ordinary buttons or menus.
 
-On narrow screens, the same navigation becomes a drawer opened by “工作导航”; do not add a second
-bottom navigation system. Files and diff use local layers and unified diff. Sheets become nearly
-full-screen. History before/after lists stack vertically and retain move-up/down controls. Rebase
-rows wrap without hiding selection, uncertainty or errors.
+VS Code owns navigation and diff editor sizing. Webview forms wrap to the available editor or sidebar
+width without a second navigation system. History before/after lists stack vertically and retain
+move-up/down controls. Rebase rows wrap without hiding selection, uncertainty or errors.
 
 ## First-version boundaries and explicit exclusions
 

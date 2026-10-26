@@ -35,6 +35,19 @@ exports.run = async () => {
       vscode.window.tabGroups.all.some((group) => group.tabs.some((tab) => tab.label === 'Settings')),
       'ACP configuration opens VS Code settings',
     );
+    await workbench.views.show('settings');
+    await eventually(() => workbench.views.displaysError('settings'));
+    assert.equal(workbench.views.displaysError('repository'), true);
+    assert.equal(workbench.views.displaysError('preview'), false, 'errors for hidden pages still need native notification');
+    assert.equal(workbench.views.displaysError('task:another-task'), false);
+    await workbench.views.show('preview');
+    await eventually(() => workbench.views.displaysError('preview') && !workbench.views.displaysError('settings'));
+    const settings = vscode.workspace.getConfiguration('warden');
+    assert.equal(workbench.model('preview').hasPreviewCommand, false);
+    await settings.update('previewCommand', 'echo preview', vscode.ConfigurationTarget.Global);
+    assert.equal(workbench.model('preview').hasPreviewCommand, true);
+    await settings.update('previewCommand', undefined, vscode.ConfigurationTarget.Global);
+    assert.equal(workbench.model('preview').hasPreviewCommand, false);
     await workbench.backend.execute('workflow.configure', { branch: 'main' });
     await workbench.refresh();
     assert.deepEqual(
@@ -45,6 +58,18 @@ exports.run = async () => {
     assert.equal(workbench.backend.store.file, fixture.state);
     const tasks = await workbench.getChildren({ kind: 'tasks' });
     assert.equal(tasks.length, 1);
+    const attention = workbench.getTreeItem({
+      ...tasks[0],
+      task: {
+        ...tasks[0].task,
+        agent: 'fixture-agent',
+        status: 'integrating',
+        integration: { error: 'Fixture commit failure' },
+        workspaceHook: { status: 'failed' },
+      },
+    });
+    assert.equal(attention.description, '提交失败 · 初始化失败', 'task rows prioritize problems and show at most two facts');
+    assert(attention.tooltip.includes('待提交') && attention.tooltip.includes('fixture-agent'), 'secondary context remains in the tooltip');
     await vscode.commands.executeCommand('warden.connect', tasks[0]);
     const state = () => fs.readFile(fixture.state, 'utf8').then(JSON.parse);
     let preview = (await state()).connectionPreview;

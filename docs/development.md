@@ -79,8 +79,8 @@ python3 test/ui/acp-smoke.py
 pnpm test:vscode
 ```
 
-`test/ui/smoke.py` starts and closes `test/ui/harness.ts`, exercises task creation, initialization/settings,
-preview setup, history preview/application and rebase selection, and saves screenshots under
+`test/ui/smoke.py` starts and closes `test/ui/harness.ts`, exercises initialization, empty states, task
+menus and optional settings, preview setup, collapsed history editing/application and rebase selection, and saves screenshots under
 `WARDEN_UI_ARTIFACTS` (default `/tmp/warden-ui-artifacts`). The harness is test-only and is not shipped.
 Inspect screenshots and console errors. Preserve intentional error cases in native-host tests as well.
 `test/ui/acp-smoke.py` uses the same packaged assets with real ACP subprocesses to exercise concurrent

@@ -25,6 +25,7 @@ export interface WorkbenchModel {
   task?: WorkflowTask;
   creating: boolean;
   preview?: PreviewResponse;
+  hasPreviewCommand: boolean;
   history?: HistoryResponse;
   historyDraft?: HistoryPreviewRequest;
   historyPreview?: HistoryPreviewResponse;
