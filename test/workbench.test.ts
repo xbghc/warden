@@ -24,8 +24,8 @@ const file = (root: string, name: string) => readFile(path.join(root, name), 'ut
 // Complete delivery and replay scenarios repeatedly start Git in several repositories.
 // Keep their Windows startup allowance local so other failures are still detected quickly.
 const longGitTimeout = process.platform === 'win32' ? 90_000 : 30_000;
-// The combined delivery, history replay and rebase path exceeds 30 seconds on Intel macOS runners.
-const historyRebaseTimeout = process.platform === 'darwin' ? 60_000 : longGitTimeout;
+// History replay and recovery, including a subsequent rebase, exceed 30 seconds on Intel macOS runners.
+const historyReplayTimeout = process.platform === 'darwin' ? 60_000 : longGitTimeout;
 
 beforeEach(async () => {
   fx = await makeFixtureRepo('warden-workbench-');
@@ -531,7 +531,7 @@ describe('commit history arrangement', () => {
     await deliver(a, 'A2');
     return { a, b };
   }
-  it('previews and applies A1,A2,B1 with a new message while keeping files and agent checkouts unchanged', { timeout: historyRebaseTimeout }, async () => {
+  it('previews and applies A1,A2,B1 with a new message while keeping files and agent checkouts unchanged', { timeout: historyReplayTimeout }, async () => {
     const { a, b } = await three();
     const current = await history.get();
     const entries = current.commits.slice(-3);
@@ -576,7 +576,7 @@ describe('commit history arrangement', () => {
     expect(fx.git('log', '-1', '--format=%s').trim()).toBe('External update');
   });
 
-  it('finishes a published history mapping after an interrupted state write without rewriting twice', { timeout: longGitTimeout }, async () => {
+  it('finishes a published history mapping after an interrupted state write without rewriting twice', { timeout: historyReplayTimeout }, async () => {
     await three();
     const current = await history.get();
     const last = current.commits.at(-1)!;

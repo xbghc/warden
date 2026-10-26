@@ -90,9 +90,23 @@ exports.run = async () => {
       'Primary advanced',
     ]);
     await assert.rejects(workbench.deliver(tasks[0]), /重新打开/, 'a changed primary baseline also needs renewed review');
-    await fs.writeFile(path.join(fixture.root, 'human.txt'), 'Human code\n');
-    await vscode.commands.executeCommand('warden.refreshPreview');
-    preview = (await state()).connectionPreview;
+    // A background composition can own the repository lock longer than the command's
+    // wait budget. A reported refusal does not mean the requested version was published.
+    await workbench.backend.store.withRepositoryLock(async () => {
+      await fs.writeFile(path.join(fixture.root, 'human.txt'), 'Human code\n');
+      assert.equal(await vscode.commands.executeCommand('warden.refreshPreview'), undefined);
+      assert.equal(workbench.errors.get('repository')?.code, 'operation_locked');
+    });
+    const refreshDeadline = Date.now() + 60_000;
+    for (;;) {
+      preview = await vscode.commands.executeCommand('warden.refreshPreview');
+      if (preview) break;
+      const error = workbench.errors.get('repository');
+      assert.equal(error?.code, 'operation_locked', JSON.stringify(error));
+      assert(Date.now() < refreshDeadline, 'Preview refresh remained blocked by another operation');
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    assert.equal(preview.syncStatus, 'synced', JSON.stringify(preview));
     assert.equal(textLines(await fs.readFile(path.join(preview.worktree, 'human.txt'), 'utf8')), 'Human code\n');
     await vscode.commands.executeCommand('warden.previewTerminal');
     const terminal = vscode.window.terminals.find((t) => t.name === 'Warden · 预览');
