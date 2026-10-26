@@ -295,6 +295,12 @@ export class AcpConversations {
       case 'authenticate':
         await session.authenticate(action.methodId);
         break;
+      case 'set-config':
+        await session.setConfigOption(action.configId, action.value);
+        break;
+      case 'set-mode':
+        await session.setMode(action.modeId);
+        break;
       case 'review':
         await validateAcpBinding(entry.engine, entry.binding);
         await this.review(entry.binding);

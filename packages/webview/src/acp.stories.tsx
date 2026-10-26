@@ -90,3 +90,62 @@ export const Interrupted: Story = {
 export const UnsupportedRestore: Story = {
   args: { model: { ...model, record: { ...model.record, profileId: 'configured-agent', sessionId: 'agent-session' } } },
 };
+
+export const SessionControls: Story = {
+  args: {
+    model: {
+      ...model,
+      status: 'connected',
+      record: {
+        ...model.record,
+        profileId: 'configured-agent',
+        sessionId: 'agent-session',
+        messages: [
+          { id: 'thought', role: 'thought', text: '先检查参数默认值与调用位置。' },
+          { id: 'answer', role: 'agent', text: '已找到需要调整的参数入口。' },
+        ],
+      },
+      controls: {
+        configuring: false,
+        configOptions: [
+          {
+            id: 'model',
+            name: '模型',
+            type: 'select',
+            currentValue: 'fast',
+            category: 'model',
+            options: [
+              { value: 'fast', name: '快速', group: '常用模型' },
+              { value: 'deep', name: '深入', group: '常用模型' },
+            ],
+          },
+          { id: 'thinking', name: '显示思考', type: 'boolean', currentValue: false },
+        ],
+        commands: [{ name: 'explain', description: '解释选中内容', inputHint: '问题或路径' }],
+        usage: { used: 1200, size: 8000, cost: { amount: 0.02, currency: 'USD' } },
+        title: '订单参数兼容性',
+        notices: [{ id: 'notice', title: '当前模型使用有限上下文', severity: 'info' }],
+      },
+    },
+  },
+};
+
+export const LegacyModes: Story = {
+  args: {
+    model: {
+      ...SessionControls.args!.model!,
+      controls: {
+        configuring: false,
+        commands: [],
+        notices: [],
+        modes: {
+          currentModeId: 'ask',
+          availableModes: [
+            { id: 'ask', name: '询问' },
+            { id: 'code', name: '编码', description: '允许 Agent 使用自己的工具修改工作区' },
+          ],
+        },
+      },
+    },
+  },
+};

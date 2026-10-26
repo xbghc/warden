@@ -70,6 +70,13 @@ does not launch the agent. The panel shows replies, tool activity and permission
 the agent. Select an advertised authentication method if needed; terminal-based login must be completed
 separately on the same host. There are no client-side file or terminal tool callbacks.
 
+Connected conversations display the agent's session configuration selectors, such as model, mode or
+reasoning level. Older agents can expose the legacy mode selector instead. Changes use only the
+agent's offered values and wait for confirmation before another prompt can be sent. Available slash
+commands can be inserted into the draft without sending it. Streamed thoughts, reported context usage
+and cost, live notices and context-compaction updates are displayed when the agent provides them.
+These reports do not change task state or run Git operations.
+
 **Warden: 发送选区到任务对话** appends selected editor text to a chosen task's draft; it does not send
 the message. The excerpt includes its file or immutable review snapshot, line range and an unsaved
 content label when applicable. The original editor and native review remain unchanged.

@@ -52,8 +52,8 @@ the configured process, negotiates capabilities and creates the session. One exe
 is allowed per task; separate tasks can have separate conversations. Each connection accepts one
 prompt at a time while other tasks, diff review and preview remain usable.
 
-The first version includes text prompts, streamed agent text, reported tool activity, user permission
-requests, authentication, cancellation, disconnect, new sessions and supported session loading.
+The client includes text prompts, streamed agent text and thoughts, reported tool activity, user
+permission requests, authentication, cancellation, disconnect, new sessions and supported session loading.
 It does not automatically attach editor buffers, diagnostics, primary code or preview output.
 Users can paste chosen context or use **Warden: 发送选区到任务对话** to append selected editor text to
 the task's draft without sending it. The excerpt identifies its file or immutable review snapshot,
@@ -76,6 +76,36 @@ connection, another panel or another window.
 The webview receives a finite, validated action vocabulary. Repository/session identity comes from
 the host-owned panel binding, not arbitrary message fields. Agent content is displayed as text;
 it cannot invoke a VS Code command or supply executable profile settings.
+
+## Session controls and updates
+
+The stable v1 connection supports `session/set_config_option` and the older `session/set_mode`.
+Session creation and loading read the agent's initial selectors. When `configOptions` is present,
+including an empty array, it takes precedence over `modes`. Select options preserve agent ordering
+and grouped labels; boolean options are enabled through the corresponding initialization capability.
+Selectors can expose models, modes, reasoning levels or other agent-defined settings without
+provider-specific configuration. Only identifiers and values currently offered by the agent are accepted.
+Warden waits for the agent's confirmed state rather than changing selectors optimistically. A
+configuration change and a prompt cannot run concurrently in the same task conversation.
+
+`config_option_update` replaces the entire configuration list. Mode, command, usage and session-title
+updates are also accepted between turns. These controls are live connection state: disconnecting
+clears them, and explicit restoration obtains fresh state from the agent. An agent's session title
+does not rename the Warden task or change its binding.
+
+`available_commands_update` supplies slash commands and optional input hints. Choosing a command
+adds its text to the task draft while retaining unsent text. The user still sends the prompt explicitly;
+Warden never executes command text as a shell command.
+
+Agent-provided thoughts are displayed separately from replies. Usage updates show the reported context
+window and optional cumulative cost. These values describe agent reports, not local metering or
+execution state. Live notices are displayed without adding them to saved history. Context compaction
+updates keep one timeline entry per compaction ID, support replacement and streamed summaries, and
+preserve summary/error patch state in saved history. Unknown extension metadata is ignored.
+
+The client advertises support for notices, context compaction and boolean configuration options.
+It continues to advertise no filesystem or terminal capabilities. Rich attachments, MCP forwarding,
+global agent-session management and experimental v2 APIs are outside this integration.
 
 ## Ownership, cancellation and recovery
 
@@ -145,6 +175,9 @@ session-loading behavior; no particular vendor is required to use the generic pr
 - [ACP roles and methods](https://agentclientprotocol.com/protocol/v1/overview)
 - [Initialization and capabilities](https://agentclientprotocol.com/protocol/v1/initialization)
 - [Session creation and loading](https://agentclientprotocol.com/protocol/v1/session-setup)
+- [Session configuration options](https://agentclientprotocol.com/protocol/v1/session-config-options)
+- [Legacy session modes](https://agentclientprotocol.com/protocol/v1/session-modes)
+- [Slash commands](https://agentclientprotocol.com/protocol/v1/slash-commands)
 - [Tool calls and permission options](https://agentclientprotocol.com/protocol/v1/tool-calls)
 - [Prompt cancellation](https://agentclientprotocol.com/protocol/v1/prompt-turn#cancellation)
 - [Authentication](https://agentclientprotocol.com/protocol/v1/authentication)

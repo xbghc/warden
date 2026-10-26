@@ -16,10 +16,12 @@ export interface AcpProfileSummary {
 export type AcpStatus = 'disconnected' | 'connecting' | 'connected' | 'running' | 'waiting_permission' | 'cancelling' | 'error';
 export interface AcpMessage {
   id: string;
-  role: 'user' | 'agent' | 'tool' | 'notice';
+  role: 'user' | 'agent' | 'thought' | 'tool' | 'notice';
   text: string;
   status?: string;
   toolCallId?: string;
+  compactionId?: string;
+  compaction?: { summary?: string; error?: string };
   uncertain?: boolean;
 }
 export interface AcpPermission {
@@ -32,6 +34,29 @@ export interface AcpAuthMethod {
   id: string;
   name: string;
   description?: string;
+}
+export type AcpConfigOption = {
+  id: string;
+  name: string;
+  description?: string;
+  category?: string;
+} & (
+  | { type: 'boolean'; currentValue: boolean }
+  | {
+      type: 'select';
+      currentValue: string;
+      options: { value: string; name: string; description?: string; group?: string }[];
+    }
+);
+/** Agent-provided controls are live connection state, never executable configuration. */
+export interface AcpControls {
+  configOptions?: AcpConfigOption[];
+  modes?: { currentModeId: string; availableModes: { id: string; name: string; description?: string }[] };
+  commands: { name: string; description: string; inputHint?: string }[];
+  usage?: { used: number; size: number; cost?: { amount: number; currency: string } };
+  title?: string;
+  configuring: boolean;
+  notices: { id: string; title: string; description?: string; severity: string }[];
 }
 export interface AcpRecord {
   schemaVersion: 1;
@@ -52,6 +77,7 @@ export interface AcpSnapshot {
   error?: string;
   permissions: AcpPermission[];
   authMethods: AcpAuthMethod[];
+  controls?: AcpControls;
 }
 export type AcpDraftChange = { version: number; type: 'append'; text: string } | { version: number; type: 'clear'; revision: number };
 export interface AcpDraftEdit {
@@ -78,7 +104,9 @@ export type AcpAction =
   | { type: 'cancel' | 'disconnect' | 'new' | 'configure' | 'review' }
   | ({ type: 'draft' } & AcpDraftEdit)
   | { type: 'permission'; requestId: string; optionId: string }
-  | { type: 'authenticate'; methodId: string };
+  | { type: 'authenticate'; methodId: string }
+  | { type: 'set-config'; configId: string; value: string | boolean }
+  | { type: 'set-mode'; modeId: string };
 
 export function parseAcpAction(value: unknown): AcpAction {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('对话操作格式错误');
@@ -117,6 +145,12 @@ export function parseAcpAction(value: unknown): AcpAction {
       return { type: 'permission', requestId: id('requestId'), optionId: id('optionId') };
     case 'authenticate':
       return { type: 'authenticate', methodId: id('methodId') };
+    case 'set-config': {
+      const value = typeof action.value === 'boolean' ? action.value : id('value');
+      return { type: 'set-config', configId: id('configId'), value };
+    }
+    case 'set-mode':
+      return { type: 'set-mode', modeId: id('modeId') };
     default:
       throw new Error('未知对话操作');
   }

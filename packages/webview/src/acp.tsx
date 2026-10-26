@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import type { AcpAction, AcpMessage, AcpModel, AcpPermission, AcpStatus } from '@warden/shared';
+import type { AcpAction, AcpConfigOption, AcpMessage, AcpModel, AcpPermission, AcpStatus } from '@warden/shared';
 import { Button } from './components/ui/button';
-import { NativeSelect, NativeSelectOption } from './components/ui/native-select';
+import { Checkbox } from './components/ui/checkbox';
+import { NativeSelect, NativeSelectOptGroup, NativeSelectOption } from './components/ui/native-select';
 import { Textarea } from './components/ui/textarea';
 
 type Props = { model: AcpModel; send(action: AcpAction): void };
@@ -43,12 +44,15 @@ export function AcpApp({ model, send }: Props) {
   const sendRef = useRef(send);
   const timer = useRef<ReturnType<typeof setTimeout>>();
   const transcript = useRef<HTMLDivElement>(null);
+  const composer = useRef<HTMLTextAreaElement>(null);
   const followOutput = useRef(true);
   sendRef.current = send;
 
-  const busy = model.sending || status === 'connecting' || status === 'running' || status === 'waiting_permission' || status === 'cancelling';
   // An error may leave an agent waiting for login or cancellation. Keep disconnect reachable.
   const hasConnection = status !== 'disconnected';
+  const controls = hasConnection ? model.controls : undefined;
+  const busy =
+    model.sending || !!controls?.configuring || status === 'connecting' || status === 'running' || status === 'waiting_permission' || status === 'cancelling';
   const canChooseProfile = !record.profileId && !record.sessionId && !hasConnection && !busy && !sending;
   const availableProfile = model.profiles.some((profile) => profile.id === profileId);
   const needsRestore = !!record.sessionId && !hasConnection;
@@ -134,6 +138,7 @@ export function AcpApp({ model, send }: Props) {
     setDraft(text);
     scheduleDraft();
   };
+  const commandDraft = (name: string, inputHint?: string) => `/${name}${draftRef.current ? ` ${draftRef.current}` : inputHint ? ' ' : ''}`;
   const submit = () => {
     if (!canSend) return;
     flushDraft();
@@ -183,6 +188,70 @@ export function AcpApp({ model, send }: Props) {
           </Button>
         </div>
         {record.agentName && <p className="muted">当前 Agent：{record.agentName}</p>}
+        {controls?.title && <p className="muted acp-message-text">Agent 会话：{controls.title}</p>}
+        {controls && (controls.configOptions !== undefined || controls.modes) && (
+          <section className="acp-session-settings" aria-label="会话配置" aria-busy={controls.configuring}>
+            {controls.configOptions !== undefined ? (
+              controls.configOptions.map((option) =>
+                option.type === 'boolean' ? (
+                  <label className="acp-config-toggle" key={option.id}>
+                    <Checkbox
+                      aria-label={option.name}
+                      checked={option.currentValue}
+                      disabled={busy || sending || status !== 'connected'}
+                      onCheckedChange={(checked) => send({ type: 'set-config', configId: option.id, value: checked === true })}
+                    />
+                    <span>
+                      {option.name}
+                      {option.description && <span className="muted acp-control-description">{option.description}</span>}
+                    </span>
+                  </label>
+                ) : (
+                  <label className="field" key={option.id}>
+                    {option.name}
+                    <NativeSelect
+                      aria-label={option.name}
+                      value={option.currentValue}
+                      disabled={busy || sending || status !== 'connected'}
+                      onChange={(event) => send({ type: 'set-config', configId: option.id, value: event.target.value })}
+                    >
+                      <ConfigValues options={option.options} />
+                    </NativeSelect>
+                    {option.description && <span className="muted acp-control-description">{option.description}</span>}
+                  </label>
+                ),
+              )
+            ) : (
+              <label className="field">
+                会话模式
+                <NativeSelect
+                  aria-label="会话模式"
+                  value={controls.modes!.currentModeId}
+                  disabled={busy || sending || status !== 'connected'}
+                  onChange={(event) => send({ type: 'set-mode', modeId: event.target.value })}
+                >
+                  {controls.modes!.availableModes.map((mode) => (
+                    <NativeSelectOption key={mode.id} value={mode.id} title={mode.description}>
+                      {mode.name}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+              </label>
+            )}
+            {controls.configuring && (
+              <p className="muted" role="status">
+                正在应用配置…
+              </p>
+            )}
+          </section>
+        )}
+        {controls?.usage && (
+          <p className="muted acp-usage" aria-label="会话用量">
+            上下文：{controls.usage.used.toLocaleString('zh-CN')} / {controls.usage.size.toLocaleString('zh-CN')} tokens
+            {controls.usage.cost &&
+              ` · 累计费用：${controls.usage.cost.amount.toLocaleString('zh-CN', { maximumFractionDigits: 6 })} ${controls.usage.cost.currency}`}
+          </p>
+        )}
         <div className="actions acp-session-actions">
           {!hasConnection && (
             <Button
@@ -218,6 +287,16 @@ export function AcpApp({ model, send }: Props) {
         <div className="error" role="alert">
           {model.error}
         </div>
+      )}
+      {!!controls?.notices.length && (
+        <section aria-label="会话通知" className="acp-notices">
+          {controls.notices.map((notice) => (
+            <div className={notice.severity === 'error' ? 'error' : 'notice'} key={notice.id} role={notice.severity === 'error' ? 'alert' : 'status'}>
+              <strong className="acp-message-text">{notice.title}</strong>
+              {notice.description && <p className="acp-message-text">{notice.description}</p>}
+            </div>
+          ))}
+        </section>
       )}
       {!!model.authMethods.length && (status === 'error' || !record.sessionId) && (
         <section className="notice acp-auth" aria-label="Agent 登录">
@@ -270,9 +349,38 @@ export function AcpApp({ model, send }: Props) {
           submit();
         }}
       >
+        {!!controls?.commands.length && (
+          <details className="acp-commands">
+            <summary>Agent 命令</summary>
+            <p className="muted">选择命令后会加入消息草稿。</p>
+            <div className="acp-command-list">
+              {controls.commands.map((command) => (
+                <div key={command.name}>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    disabled={busy || sending || commandDraft(command.name, command.inputHint).length > 100_000}
+                    onClick={() => {
+                      updateDraft(commandDraft(command.name, command.inputHint));
+                      composer.current?.focus();
+                    }}
+                  >
+                    /{command.name}
+                  </Button>
+                  <span className="muted acp-message-text">
+                    {command.description}
+                    {command.inputHint ? ` · ${command.inputHint}` : ''}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
         <label className="field">
           消息
           <Textarea
+            ref={composer}
             value={draft}
             maxLength={100_000}
             rows={5}
@@ -303,16 +411,49 @@ export function AcpApp({ model, send }: Props) {
   );
 }
 
+function ConfigValues({ options }: { options: Extract<AcpConfigOption, { type: 'select' }>['options'] }) {
+  const groups: { label?: string; options: typeof options }[] = [];
+  for (const option of options) {
+    const previous = groups.at(-1);
+    if (previous && previous.label === option.group) previous.options.push(option);
+    else groups.push({ label: option.group, options: [option] });
+  }
+  return groups.map((group) => {
+    const values = group.options.map((option) => (
+      <NativeSelectOption key={option.value} value={option.value} title={option.description}>
+        {option.name}
+      </NativeSelectOption>
+    ));
+    return group.label === undefined ? (
+      values
+    ) : (
+      <NativeSelectOptGroup key={group.options[0]!.value} label={group.label}>
+        {values}
+      </NativeSelectOptGroup>
+    );
+  });
+}
+
 function Message({ message }: { message: AcpMessage }) {
-  const role = { user: '你', agent: 'Agent', tool: '操作记录', notice: '会话提示' }[message.role];
+  const role = { user: '你', agent: 'Agent', thought: 'Agent 思考', tool: '操作记录', notice: '会话提示' }[message.role];
+  const labels: Record<string, string> = message.compactionId
+    ? { in_progress: '正在压缩', completed: '压缩完成', failed: '压缩失败', cancelled: '压缩已取消' }
+    : toolLabels;
   return (
     <article className={`acp-message acp-message-${message.role}`}>
       <div className="acp-message-heading">
         <strong>{role}</strong>
-        {message.status && <span className="muted">{toolLabels[message.status] ?? message.status}</span>}
+        {message.status && <span className="muted">{labels[message.status] ?? message.status}</span>}
         {message.uncertain && <span className="acp-status">结果未确认</span>}
       </div>
-      <div className="acp-message-text">{message.text}</div>
+      {message.role === 'thought' ? (
+        <details className="acp-thought">
+          <summary>查看思考过程</summary>
+          <div className="acp-message-text">{message.text}</div>
+        </details>
+      ) : (
+        <div className="acp-message-text">{message.text}</div>
+      )}
     </article>
   );
 }

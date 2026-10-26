@@ -92,6 +92,215 @@ afterEach(async () => {
 });
 
 describe('ACP subprocess conversations', () => {
+  it('advertises implemented extensions and captures early controls with config options taking precedence over modes', async () => {
+    const f = await fixture('task', 'controls-grouped');
+    await f.session.connect(f.profile, { resume: false });
+    const controls = f.session.snapshot().controls!;
+    expect(controls.modes).toBeUndefined();
+    expect(controls.title).toBe('初始会话标题');
+    expect(controls.commands).toEqual([{ name: 'explain', description: '解释选中内容', inputHint: '问题或路径' }]);
+    expect(controls.configOptions).toEqual([
+      {
+        id: 'model',
+        name: '模型',
+        category: 'model',
+        type: 'select',
+        currentValue: 'fast',
+        options: [
+          { value: 'fast', name: '快速', group: '推荐' },
+          { value: 'deep', name: '深入', group: '推荐' },
+        ],
+      },
+      { id: 'thinking', name: '显示思考', type: 'boolean', currentValue: false },
+    ]);
+    expect((await journal(f.file)).find((message) => message.method === 'initialize')?.params).toMatchObject({
+      protocolVersion: 1,
+      clientCapabilities: {
+        fs: { readTextFile: false, writeTextFile: false },
+        terminal: false,
+        session: { configOptions: { boolean: {} }, notices: {}, compaction: {} },
+      },
+    });
+    await expect(f.session.setMode('code')).rejects.toThrow();
+    await expect(f.session.setConfigOption('invented', 'fast')).rejects.toThrow();
+    await expect(f.session.setConfigOption('model', 'invented')).rejects.toThrow();
+    await expect(f.session.setConfigOption('thinking', 'true')).rejects.toThrow();
+    expect((await journal(f.file)).filter((message) => message.method?.startsWith('session/set_'))).toHaveLength(0);
+    await f.session.setConfigOption('model', 'deep');
+    expect(f.session.snapshot().controls?.configOptions?.map((option) => option.currentValue)).toEqual(['deep', true]);
+    await f.session.setConfigOption('thinking', false);
+    expect((await journal(f.file)).filter((message) => message.method === 'session/set_config_option').map((message) => message.params)).toEqual([
+      { sessionId: f.session.snapshot().record.sessionId, configId: 'model', value: 'deep' },
+      { sessionId: f.session.snapshot().record.sessionId, configId: 'thinking', type: 'boolean', value: false },
+    ]);
+  });
+
+  it('replaces dynamic configuration and command lists completely, including empty lists', async () => {
+    const f = await fixture('task', 'controls');
+    await f.session.connect(f.profile, { resume: false });
+    await f.session.send('controls-update');
+    expect(f.session.snapshot().controls?.configOptions).toHaveLength(1);
+    expect(f.session.snapshot().controls?.configOptions?.[0]).toMatchObject({ currentValue: 'deep', options: [{ value: 'deep', name: '深入' }] });
+    await expect(f.session.setConfigOption('model', 'fast')).rejects.toThrow();
+    await f.session.send('clear-controls');
+    expect(f.session.snapshot().controls).toMatchObject({ configOptions: [], commands: [] });
+    expect(f.session.snapshot().controls?.modes).toBeUndefined();
+    await expect(f.session.setMode('code')).rejects.toThrow();
+    await f.session.disconnect();
+    expect(f.session.snapshot().controls).toEqual({ commands: [], configuring: false, notices: [] });
+    await f.session.connect(f.profile, { resume: true });
+    expect(f.session.snapshot().controls?.configOptions).toHaveLength(2);
+    expect(f.session.snapshot().controls?.commands[0]?.name).toBe('explain');
+  });
+
+  it('supports legacy modes only when config options are absent, including empty config precedence', async () => {
+    const f = await fixture('task', 'legacy-modes');
+    await f.session.connect(f.profile, { resume: false });
+    expect(f.session.snapshot().controls?.modes?.currentModeId).toBe('ask');
+    await expect(f.session.setMode('invented')).rejects.toThrow();
+    await f.session.setMode('code');
+    expect(f.session.snapshot().controls?.modes?.currentModeId).toBe('code');
+    const empty = await fixture('empty', 'controls-empty');
+    await empty.session.connect(empty.profile, { resume: false });
+    expect(empty.session.snapshot().controls?.configOptions).toEqual([]);
+    expect(empty.session.snapshot().controls?.modes).toBeUndefined();
+    await expect(empty.session.setMode('code')).rejects.toThrow();
+  });
+
+  it('serializes configuration against prompts, other configuration and task validation', async () => {
+    const f = await fixture('task', 'controls-delayed');
+    await f.session.connect(f.profile, { resume: false });
+    const configured = f.session.setConfigOption('model', 'deep');
+    expect(f.session.snapshot().controls?.configuring).toBe(true);
+    await expect(f.session.send('must not race config')).rejects.toThrow();
+    await expect(f.session.setConfigOption('thinking', true)).rejects.toThrow();
+    await configured;
+    expect(f.session.snapshot().controls?.configuring).toBe(false);
+    f.validate.mockRejectedValueOnce(new Error('Workspace allocation changed'));
+    await expect(f.session.setConfigOption('thinking', true)).rejects.toThrow('Workspace allocation changed');
+    expect((await journal(f.file)).filter((message) => message.method === 'session/set_config_option')).toHaveLength(1);
+    const sent = f.session.send('hold');
+    await expect.poll(() => f.session.snapshot().status).toBe('running');
+    await expect(f.session.setConfigOption('thinking', true)).rejects.toThrow();
+    await f.session.cancel();
+    await sent;
+  });
+
+  it.each(['before', 'race'] as const)('preserves wire ordering when a configuration notification arrives %s the response continuation', async (order) => {
+    const f = await fixture('config', `controls-response-${order}`);
+    await f.session.connect(f.profile, { resume: false });
+    await f.session.setConfigOption('model', 'deep');
+    expect(f.session.snapshot().controls?.configOptions?.[0]?.currentValue).toBe(order === 'before' ? 'deep' : 'fast');
+    const legacy = await fixture('mode', `legacy-mode-response-${order}`);
+    await legacy.session.connect(legacy.profile, { resume: false });
+    await legacy.session.setMode('code');
+    expect(legacy.session.snapshot().controls?.modes?.currentModeId).toBe(order === 'before' ? 'code' : 'ask');
+  });
+
+  it('retires a timed-out configuration connection and drops its late updates before reconnecting', async () => {
+    const f = await fixture('task', 'controls-timeout', 1_000);
+    await f.session.connect(f.profile, { resume: false });
+    await expect(f.session.setConfigOption('model', 'deep')).rejects.toThrow('会话配置更新超时');
+    expect(f.storage.claimed).toBe(false);
+    expect(f.session.snapshot().status).toBe('error');
+    expect(f.session.snapshot().controls).toEqual({ commands: [], configuring: false, notices: [] });
+    await f.session.connect(f.profile, { resume: true });
+    expect(f.session.snapshot().controls?.configOptions?.[0]?.currentValue).toBe('fast');
+    expect(JSON.stringify(f.session.snapshot())).not.toContain('LATE_TIMED_OUT_CONFIG');
+    await f.session.send('fresh prompt');
+    expect(transcript(f.session).at(-1)).toEqual({ role: 'agent', text: 'Echo: fresh prompt' });
+  });
+
+  it('keeps notices live while persisting thought chunks and accepting idle metadata updates', async () => {
+    const f = await fixture('task', 'controls');
+    const storage = new AcpSessionStorage(path.join(directory, 'data'), f.binding);
+    const session = f.create(storage);
+    await session.connect(f.profile, { resume: false });
+    await session.send('session-updates');
+    expect(
+      session
+        .snapshot()
+        .record.messages.filter((message) => message.role === 'thought')
+        .map((message) => message.text),
+    ).toEqual(['正在检查任务上下文']);
+    expect(session.snapshot().controls).toMatchObject({
+      title: '测试会话标题',
+      usage: { used: 1200, size: 8000, cost: { amount: 0.02, currency: 'USD' } },
+      notices: [{ title: '会话更新提示', severity: 'warning' }],
+    });
+    expect(JSON.stringify(await storage.load())).not.toContain('会话更新提示');
+    await session.send('idle-updates');
+    await expect.poll(() => session.snapshot().controls?.usage?.used).toBe(1400);
+    expect(session.snapshot().controls).toMatchObject({
+      title: '测试会话标题',
+      usage: { used: 1400, size: 8000 },
+      commands: [{ name: 'idle', description: 'Idle command' }],
+      configOptions: [{ currentValue: 'deep' }],
+    });
+    expect(session.snapshot().controls?.usage?.cost).toBeUndefined();
+    expect(session.snapshot().controls?.notices.at(-1)?.title).toBe('Idle notice');
+    await session.disconnect();
+    await session.connect(f.profile, { resume: true });
+    expect(session.snapshot().controls?.notices).toEqual([]);
+    expect(
+      session
+        .snapshot()
+        .record.messages.filter((message) => message.role === 'thought')
+        .map((message) => message.text),
+    ).toEqual(['正在检查任务上下文']);
+  });
+
+  it('upserts compactions by ID with stable positions, replacement summaries and independent nullable patches', async () => {
+    const f = await fixture();
+    const storage = new AcpSessionStorage(path.join(directory, 'data'), f.binding);
+    const session = f.create(storage);
+    await session.connect(f.profile, { resume: false });
+    const observed: string[] = [];
+    f.changed.mockImplementation(() => {
+      const item = session.snapshot().record.messages.find((message) => message.compactionId === 'first');
+      if (item) observed.push(item.text);
+    });
+    await session.send('compactions');
+    const messages = session.snapshot().record.messages;
+    const first = messages.find((message) => message.compactionId === 'first')!;
+    const second = messages.find((message) => message.compactionId === 'second')!;
+    expect(observed).toContain('上下文压缩\nDraft summary\nTemporary error');
+    expect(observed).toContain('上下文压缩\nReplacement');
+    expect(first).toMatchObject({ text: '上下文压缩\nFinal', status: 'completed', compaction: { summary: 'Final' } });
+    expect(first.compaction?.error).toBeUndefined();
+    expect(second).toMatchObject({ text: '上下文压缩', status: 'cancelled', compaction: {} });
+    expect(messages.filter((message) => message.compactionId)).toHaveLength(2);
+    expect(messages.indexOf(first)).toBeLessThan(messages.findIndex((message) => message.text === 'Between compactions'));
+    expect(messages.indexOf(second)).toBeGreaterThan(messages.indexOf(first));
+    expect((await storage.load())?.messages.find((message) => message.compactionId === 'first')?.compaction?.summary).toBe('Final');
+    await session.disconnect();
+    await session.connect(f.profile, { resume: true });
+    await session.send('compaction-followup');
+    expect(session.snapshot().record.messages.filter((message) => message.compactionId)).toHaveLength(2);
+    expect(session.snapshot().record.messages.find((message) => message.compactionId === 'first')).toMatchObject({
+      text: '上下文压缩\nFinal\nFollow-up failure',
+      status: 'failed',
+      compaction: { summary: 'Final', error: 'Follow-up failure' },
+    });
+  });
+
+  it('persists large compaction summaries and errors within their actual character bounds', async () => {
+    const f = await fixture();
+    const storage = new AcpSessionStorage(path.join(directory, 'data'), f.binding);
+    const session = f.create(storage);
+    await session.connect(f.profile, { resume: false });
+    await session.send('large-compaction');
+    const saved = await storage.load();
+    const compaction = saved?.messages.find((message) => message.compactionId === 'large');
+    expect(compaction?.compaction?.summary).toHaveLength(256_000);
+    expect(compaction?.compaction?.error).toHaveLength(256_000);
+    expect(compaction?.text).toHaveLength(256_000);
+    expect(session.snapshot().status).toBe('connected');
+    await session.disconnect();
+    await session.connect(f.profile, { resume: true });
+    expect(session.snapshot().record.messages.find((message) => message.compactionId === 'large')?.compaction).toEqual(compaction?.compaction);
+  });
+
   it('keeps a new connection busy until its session record has been persisted', async () => {
     const f = await fixture();
     let release!: () => void;

@@ -12,10 +12,50 @@ let sessionId;
 let turn;
 let authenticated = false;
 let delayedLoad;
+let delayedConfig;
+let model = 'fast';
+let thinking = false;
+const controlsMode = mode.startsWith('controls');
+const legacyMode = mode.startsWith('legacy-mode');
+const modes = {
+  currentModeId: 'ask',
+  availableModes: [
+    { id: 'ask', name: '询问' },
+    { id: 'code', name: '编码' },
+  ],
+};
+const configOptions = () => [
+  {
+    id: 'model',
+    name: '模型',
+    category: 'model',
+    type: 'select',
+    currentValue: model,
+    options:
+      mode === 'controls-grouped'
+        ? [
+            {
+              group: 'recommended',
+              name: '推荐',
+              options: [
+                { value: 'fast', name: '快速' },
+                { value: 'deep', name: '深入' },
+              ],
+            },
+          ]
+        : [
+            { value: 'fast', name: '快速' },
+            { value: 'deep', name: '深入' },
+          ],
+  },
+  { id: 'thinking', name: '显示思考', type: 'boolean', currentValue: thinking },
+];
 const requiresAuth = mode === 'auth' || mode === 'auth-delayed-load';
 const write = (message) => process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`);
+const batch = (...messages) => process.stdout.write(messages.map((message) => JSON.stringify({ jsonrpc: '2.0', ...message })).join('\n') + '\n');
 const result = (id, value) => write({ id, result: value });
 const error = (id, code, message) => write({ id, error: { code, message } });
+const notify = (update, target = sessionId) => write({ method: 'session/update', params: { sessionId: target, update } });
 const remember = (role, text) => appendFileSync(historyFile, `${JSON.stringify({ role, text })}\n`);
 const update = (role, text, target = sessionId) =>
   write({ method: 'session/update', params: { sessionId: target, update: { sessionUpdate: `${role}_message_chunk`, content: { type: 'text', text } } } });
@@ -95,7 +135,59 @@ async function handle(message) {
         update(message.role, message.text.slice(1));
       }
     }
-    result(id, method === 'session/new' ? { sessionId } : {});
+    if (controlsMode || legacyMode) {
+      notify({ sessionUpdate: 'available_commands_update', availableCommands: [{ name: 'foreign', description: 'Foreign command' }] }, `${sessionId}-foreign`);
+      notify({
+        sessionUpdate: 'available_commands_update',
+        availableCommands: [{ name: 'explain', description: '解释选中内容', input: { hint: '问题或路径' } }],
+      });
+      notify({ sessionUpdate: 'session_info_update', title: '初始会话标题' });
+    }
+    result(id, {
+      ...(method === 'session/new' ? { sessionId } : {}),
+      ...(controlsMode || legacyMode ? { modes } : {}),
+      ...(controlsMode ? { configOptions: mode === 'controls-empty' ? [] : configOptions() } : {}),
+    });
+    return;
+  }
+  if (method === 'session/set_config_option') {
+    if (mode === 'controls-response-race' || mode === 'controls-response-before') {
+      model = 'deep';
+      const response = configOptions();
+      model = 'fast';
+      const messages = [
+        { id, result: { configOptions: response } },
+        { method: 'session/update', params: { sessionId, update: { sessionUpdate: 'config_option_update', configOptions: configOptions() } } },
+      ];
+      batch(...(mode === 'controls-response-before' ? messages.reverse() : messages));
+      return;
+    }
+    if (mode === 'controls-delayed') await new Promise((resolve) => setTimeout(resolve, 300));
+    if (mode === 'controls-timeout' && !existsSync(`${journal}.delayed-config`)) {
+      writeFileSync(`${journal}.delayed-config`, String(process.pid));
+      delayedConfig = { id };
+      await new Promise((resolve) => setTimeout(resolve, 30_000));
+    }
+    if (params.configId === 'model') model = params.value;
+    else if (params.configId === 'thinking' && params.type === 'boolean') thinking = params.value;
+    else return error(id, -32602, 'Unknown config option');
+    // Changing one choice can also change another, so clients must replace the full result.
+    if (model === 'deep') thinking = true;
+    result(id, { configOptions: configOptions() });
+    return;
+  }
+  if (method === 'session/set_mode') {
+    if (mode === 'legacy-mode-response-race' || mode === 'legacy-mode-response-before') {
+      const messages = [
+        { id, result: {} },
+        { method: 'session/update', params: { sessionId, update: { sessionUpdate: 'current_mode_update', currentModeId: 'ask' } } },
+      ];
+      batch(...(mode === 'legacy-mode-response-before' ? messages.reverse() : messages));
+      return;
+    }
+    modes.currentModeId = params.modeId;
+    notify({ sessionUpdate: 'current_mode_update', currentModeId: params.modeId });
+    result(id, {});
     return;
   }
   if (method === 'session/cancel') {
@@ -117,6 +209,78 @@ async function handle(message) {
   if (text === 'malformed') return result(id, { stopReason: 42 });
   if (text === 'recoverable-json') process.stdout.write('not valid JSON\n');
   if (text === 'hold' || text === 'neverfinish') return;
+  if (text === 'controls-update') {
+    notify({
+      sessionUpdate: 'config_option_update',
+      configOptions: [{ ...configOptions()[0], currentValue: 'deep', options: [{ value: 'deep', name: '深入' }] }],
+    });
+    notify({ sessionUpdate: 'current_mode_update', currentModeId: 'code' });
+    answer(id, 'Controls updated');
+    return;
+  }
+  if (text === 'clear-controls') {
+    notify({ sessionUpdate: 'config_option_update', configOptions: [] });
+    notify({ sessionUpdate: 'available_commands_update', availableCommands: [] });
+    answer(id, 'Controls cleared');
+    return;
+  }
+  if (text === 'session-updates') {
+    toolUpdate({ sessionUpdate: 'agent_thought_chunk', messageId: 'thought-one', content: { type: 'text', text: '正在检查' } });
+    toolUpdate({ sessionUpdate: 'agent_thought_chunk', messageId: 'thought-one', content: { type: 'text', text: '任务上下文' } });
+    notify({ sessionUpdate: 'usage_update', used: 1200, size: 8000, cost: { amount: 0.02, currency: 'USD' } });
+    notify({ sessionUpdate: 'session_info_update', title: '测试会话标题' });
+    notify({ sessionUpdate: 'notice', title: '会话更新提示', severity: 'warning', description: 'Agent 已更新会话状态' });
+    toolUpdate({ sessionUpdate: 'compaction_update', compactionId: 'ui-compaction', status: 'in_progress' });
+    toolUpdate({ sessionUpdate: 'compaction_summary_chunk', compactionId: 'ui-compaction', content: { type: 'text', text: '已保留任务目标与关键结论' } });
+    toolUpdate({ sessionUpdate: 'compaction_update', compactionId: 'ui-compaction', status: 'completed' });
+    answer(id, 'Session updated');
+    return;
+  }
+  if (text === 'idle-updates') {
+    answer(id, 'Idle updates scheduled');
+    // These are legitimate live updates even without an active prompt.
+    setTimeout(() => {
+      notify({ sessionUpdate: 'usage_update', used: 1400, size: 8000, cost: null });
+      notify({ sessionUpdate: 'available_commands_update', availableCommands: [{ name: 'idle', description: 'Idle command' }] });
+      notify({ sessionUpdate: 'config_option_update', configOptions: [{ ...configOptions()[0], currentValue: 'deep' }] });
+      notify({ sessionUpdate: 'session_info_update', updatedAt: new Date().toISOString() });
+      notify({ sessionUpdate: 'notice', title: 'Idle notice', severity: 'info' });
+    }, 30);
+    return;
+  }
+  if (text === 'compactions') {
+    const chunk = (compactionId, text) => toolUpdate({ sessionUpdate: 'compaction_summary_chunk', compactionId, content: { type: 'text', text } });
+    const patch = (compactionId, fields) => toolUpdate({ sessionUpdate: 'compaction_update', compactionId, ...fields });
+    chunk('first', 'Draft');
+    patch('first', { status: 'in_progress', error: 'Temporary error' });
+    chunk('first', ' summary');
+    update('agent', 'Between compactions');
+    patch('second', { status: 'failed', summary: [{ type: 'text', text: 'Second summary' }], error: 'Second failure' });
+    patch('first', { status: 'failed', summary: [{ type: 'text', text: 'Replacement' }], error: 'First failure' });
+    patch('first', { status: 'completed', error: null });
+    patch('first', { status: 'in_progress', summary: null });
+    chunk('first', 'Final');
+    patch('first', { status: 'completed' });
+    patch('second', { status: 'cancelled', summary: [], error: null });
+    answer(id, 'Compactions completed');
+    return;
+  }
+  if (text === 'large-compaction') {
+    toolUpdate({
+      sessionUpdate: 'compaction_update',
+      compactionId: 'large',
+      status: 'failed',
+      summary: [{ type: 'text', text: 's'.repeat(260_000) }],
+      error: 'e'.repeat(260_000),
+    });
+    answer(id, 'Large compaction completed');
+    return;
+  }
+  if (text === 'compaction-followup') {
+    toolUpdate({ sessionUpdate: 'compaction_update', compactionId: 'first', status: 'failed', error: 'Follow-up failure' });
+    answer(id, 'Compaction patched');
+    return;
+  }
   if (text === 'tool-progress') {
     const content = (text) => [{ type: 'content', content: { type: 'text', text } }];
     toolUpdate({ sessionUpdate: 'tool_call', toolCallId: 'progress', title: 'Run tests', status: 'in_progress', content: content('Partial output') });
@@ -210,6 +374,15 @@ if (mode === 'auth-delayed-load') {
 if (mode === 'late-on-disconnect') {
   process.on('SIGTERM', () => {
     update('agent', 'LATE_DISCONNECTED_OUTPUT');
+    setTimeout(() => process.exit(0), 10);
+  });
+}
+if (mode === 'controls-timeout') {
+  process.on('SIGTERM', () => {
+    if (delayedConfig) {
+      notify({ sessionUpdate: 'session_info_update', title: 'LATE_TIMED_OUT_CONFIG' });
+      result(delayedConfig.id, { configOptions: [{ ...configOptions()[0], currentValue: 'deep' }] });
+    }
     setTimeout(() => process.exit(0), 10);
   });
 }

@@ -62,6 +62,28 @@ function signal() {
 }
 
 describe('external ACP session storage', () => {
+  it('retains thoughts and independent compaction summary and error state across reloads', async () => {
+    const storage = new AcpSessionStorage(directory, binding);
+    const record = conversation();
+    record.messages.push(
+      { id: 'thought', role: 'thought', text: 'Inspect the existing parameter handling.' },
+      {
+        id: 'compaction',
+        role: 'notice',
+        text: 'Context compaction failed\nSummary retained\nRetry later',
+        status: 'failed',
+        compactionId: 'compact-one',
+        compaction: { summary: 'Summary retained', error: 'Retry later' },
+      },
+    );
+    await storage.save(record);
+    expect(await new AcpSessionStorage(directory, binding).load()).toEqual(record);
+    const saved = JSON.parse(await readFile(storage.file, 'utf8'));
+    saved.messages.at(-1).compaction.summary = { command: 'untrusted' };
+    await writeFile(storage.file, JSON.stringify(saved));
+    await expect(storage.load()).rejects.toThrow('原文件已保留');
+  });
+
   it('persists interrupted conversation data across instances without writing code directories', async () => {
     const storage = new AcpSessionStorage(directory, binding);
     expect(await storage.load()).toBeUndefined();

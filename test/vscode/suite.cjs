@@ -225,7 +225,7 @@ exports.run = async () => {
     const configuration = vscode.workspace.getConfiguration('warden');
     await configuration.update(
       'acpAgents',
-      [{ id: 'fixture', label: 'Test agent', command: fixture.node, args: [fixture.agent, fixture.journal] }],
+      [{ id: 'fixture', label: 'Test agent', command: fixture.node, args: [fixture.agent, fixture.journal, 'controls'] }],
       vscode.ConfigurationTarget.Global,
     );
     const chatTask = (await workbench.getChildren({ kind: 'tasks' })).find((row) => row.task.id === newTask.id);
@@ -246,9 +246,19 @@ exports.run = async () => {
     await assert.rejects(fs.access(path.join(preview.worktree, 'agent-output.txt')));
     const journal = () => fs.readFile(fixture.journal, 'utf8').then((text) => text.trim().split('\n').map(JSON.parse));
     const initialized = (await journal()).find((row) => row.method === 'initialize');
-    assert.deepEqual(initialized.params.clientCapabilities, { fs: { readTextFile: false, writeTextFile: false }, terminal: false });
+    assert.deepEqual(initialized.params.clientCapabilities, {
+      fs: { readTextFile: false, writeTextFile: false },
+      terminal: false,
+      session: { configOptions: { boolean: {} }, notices: {}, compaction: {} },
+    });
     assert.equal(initialized.cwd, chat.binding.workspace);
     assert.equal(chat.draft.text, '', 'completed prompt clears the submitted draft');
+    assert.equal(chat.session.snapshot().controls.configOptions.find((option) => option.id === 'model').currentValue, 'fast');
+    await conversations.handle(chat, { type: 'set-config', configId: 'model', value: 'deep' });
+    await conversations.handle(chat, { type: 'set-config', configId: 'thinking', value: true });
+    assert.equal(chat.session.snapshot().controls.configOptions.find((option) => option.id === 'model').currentValue, 'deep');
+    assert.equal(chat.session.snapshot().controls.configOptions.find((option) => option.id === 'thinking').currentValue, true);
+    assert.equal(chat.session.snapshot().controls.modes, undefined, 'session config takes precedence over legacy modes');
     const asking = conversations.handle(chat, { type: 'send', profileId: 'fixture', ...edit('permission') });
     await eventually(() => chat.session.snapshot().permissions.length === 1);
     const permission = chat.session.snapshot().permissions[0];
@@ -281,6 +291,13 @@ exports.run = async () => {
     await conversations.handle(chat, { type: 'connect', profileId: 'fixture', resume: true });
     assert.equal(chat.session.snapshot().record.sessionId, savedSession);
     assert.equal((await journal()).filter((row) => row.method === 'session/prompt').length, 3, 'resume never resends a prompt');
+    await conversations.handle(chat, { type: 'send', profileId: 'fixture', ...edit('session-updates') });
+    assert.equal(chat.session.snapshot().controls.title, '测试会话标题');
+    assert.equal(chat.session.snapshot().controls.usage.used, 1200);
+    assert(
+      chat.session.snapshot().record.messages.some((item) => item.role === 'thought'),
+      'the packaged host retains streamed thoughts',
+    );
     await workbench.open(fixture.root);
     assert.equal(chat.binding.taskId, newTask.id, 'workbench navigation does not retarget the conversation');
     assert.equal(chat.session.snapshot().status, 'connected');

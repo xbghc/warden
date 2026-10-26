@@ -13,9 +13,16 @@ const actions: AcpAction[] = [
   { type: 'draft', text: '', version: 2, revision: 3 },
   { type: 'permission', requestId: 'request-2', optionId: 'reject-once' },
   { type: 'authenticate', methodId: 'agent-login' },
+  { type: 'set-config', configId: 'model', value: 'fast' },
+  { type: 'set-config', configId: 'reasoning', value: false },
+  { type: 'set-mode', modeId: 'plan' },
 ];
 
 describe('ACP panel action validation', () => {
+  it.each([undefined, null, 0, 1, {}, []])('rejects a non-select or non-boolean config value: %j', (value) => {
+    expect(() => parseAcpAction({ type: 'set-config', configId: 'model', value })).toThrow();
+  });
+
   it.each(actions)('accepts $type and forwards only its defined fields', (action) => {
     const payload = {
       ...action,
@@ -50,6 +57,9 @@ describe('ACP panel action validation', () => {
     { action: { type: 'permission', requestId: 'request', optionId: 'option' }, field: 'requestId' },
     { action: { type: 'permission', requestId: 'request', optionId: 'option' }, field: 'optionId' },
     { action: { type: 'authenticate', methodId: 'login' }, field: 'methodId' },
+    { action: { type: 'set-config', configId: 'model', value: 'fast' }, field: 'configId' },
+    { action: { type: 'set-config', configId: 'model', value: 'fast' }, field: 'value' },
+    { action: { type: 'set-mode', modeId: 'plan' }, field: 'modeId' },
   ])('validates $action.type identifiers in $field without coercion', ({ action, field }) => {
     for (const invalid of [undefined, null, '', 0, {}, 'x'.repeat(501)]) {
       expect(() => parseAcpAction({ ...action, [field]: invalid })).toThrow();

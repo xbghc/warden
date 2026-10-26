@@ -190,6 +190,60 @@ summary {
 .acp-profile button {
   margin-bottom: 2px;
 }
+.acp-session-settings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+  margin-top: 16px;
+}
+.acp-session-settings label.field {
+  flex: 1;
+  min-width: 160px;
+  max-width: 300px;
+  margin: 0;
+}
+.acp-session-settings [data-slot="native-select-wrapper"] {
+  width: 100%;
+}
+.acp-control-description {
+  display: block;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.acp-config-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-wrap: anywhere;
+}
+.acp-usage,
+.acp-command-list {
+  overflow-wrap: anywhere;
+}
+.acp-commands {
+  margin-bottom: 16px;
+}
+.acp-commands summary,
+.acp-thought summary {
+  cursor: pointer;
+  color: var(--color-muted-foreground);
+}
+.acp-command-list > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.acp-command-list button {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.acp-thought .acp-message-text {
+  margin-top: 8px;
+}
 .acp-transcript {
   border-block: 1px solid var(--color-border);
   min-height: 220px;

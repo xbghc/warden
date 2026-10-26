@@ -72,9 +72,16 @@ for (const [index, title] of ['订单筛选参数', '分页默认值'].entries()
   await engine.execute('task.start', { taskId: task.id, kind: 'shared' });
   const binding = await resolveAcpBinding(engine, task.id);
   await writeFile(path.join(binding.workspace, 'context.txt'), `task ${index + 1}\n`);
-  const profiles = ['normal', 'no-load', 'auth', 'incompatible'].map((mode) => ({
+  const profiles = ['normal', 'no-load', 'auth', 'incompatible', 'controls', 'legacy-modes'].map((mode) => ({
     id: mode,
-    label: { normal: '测试 Agent', 'no-load': '不支持恢复的 Agent', auth: '需要登录的 Agent', incompatible: '不兼容的 Agent' }[mode]!,
+    label: {
+      normal: '测试 Agent',
+      'no-load': '不支持恢复的 Agent',
+      auth: '需要登录的 Agent',
+      incompatible: '不兼容的 Agent',
+      controls: '支持会话配置的 Agent',
+      'legacy-modes': '支持旧模式的 Agent',
+    }[mode]!,
     command: process.execPath,
     args: [path.resolve('test/fixtures/acp-agent.mjs'), path.join(data, `${index}-${mode}.jsonl`), mode],
   }));
@@ -144,6 +151,12 @@ async function act(entry: Entry, action: AcpAction) {
       break;
     case 'authenticate':
       await entry.session.authenticate(action.methodId);
+      break;
+    case 'set-config':
+      await entry.session.setConfigOption(action.configId, action.value);
+      break;
+    case 'set-mode':
+      await entry.session.setMode(action.modeId);
       break;
     case 'configure':
     case 'review':

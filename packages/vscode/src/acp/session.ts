@@ -7,13 +7,17 @@ import {
   PROTOCOL_VERSION,
   type AuthMethod,
   type ClientConnection,
+  type CompactionSummaryChunk,
+  type CompactionUpdate,
+  type ContentBlock,
   type RequestPermissionRequest,
   type RequestPermissionResponse,
   type SessionNotification,
   type ToolCallUpdate,
 } from '@agentclientprotocol/sdk';
-import type { AcpMessage, AcpPermission, AcpRecord, AcpSnapshot, AcpStatus } from '@warden/shared';
+import type { AcpControls, AcpMessage, AcpPermission, AcpRecord, AcpSnapshot, AcpStatus } from '@warden/shared';
 import type { AcpProfile, AcpSessionOptions } from './contracts.js';
+import { availableCommands, configOptions, emptyControls, sessionModes } from './session-controls.js';
 
 declare const __WARDEN_VERSION__: string;
 const CLIENT_VERSION = typeof __WARDEN_VERSION__ === 'undefined' ? 'development' : __WARDEN_VERSION__;
@@ -23,8 +27,10 @@ const MAX_HISTORY = 2_000_000;
 const MAX_HISTORY_BYTES = 6 * 1024 * 1024;
 const MAX_PERMISSION = 32;
 const STOP_REASONS = new Set(['end_turn', 'max_tokens', 'max_turn_requests', 'refusal', 'cancelled']);
+const TRUNCATION = '\n[内容已截断]';
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
-const text = (value: string, limit = MAX_TEXT) => (value.length > limit ? `${value.slice(0, limit)}\n[内容已截断]` : value);
+const text = (value: string, limit = MAX_TEXT) =>
+  value.length > limit ? value.slice(0, Math.max(0, limit - TRUNCATION.length)) + TRUNCATION.slice(0, limit) : value;
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 const authRequired = (error: unknown) => !!error && typeof error === 'object' && 'code' in error && error.code === -32000;
 
@@ -48,6 +54,12 @@ type Runtime = {
   resume: boolean;
   sessionId?: string;
   replay?: History;
+  pendingUpdates?: SessionNotification[];
+  pendingBytes?: number;
+  configUpdated?: boolean;
+  configRevision?: number;
+  modeRevision?: number;
+  modeUpdate?: string;
   stderr: string;
 };
 type Turn = { runtime: Runtime; record: AcpRecord; promise: Promise<void>; cancelling: boolean; sent: boolean; user?: AcpMessage };
@@ -69,6 +81,8 @@ export class AcpSession {
   private toolDisplays = new WeakMap<AcpMessage, { title: string; content: string }>();
   private permissions = new Map<string, Permission>();
   private authMethods: AuthMethod[] = [];
+  private controls: AcpControls = emptyControls();
+  private configuration?: { runtime: Runtime };
   private saves: Promise<void> = Promise.resolve();
   private flush?: ReturnType<typeof setTimeout>;
   private disconnecting?: Promise<void>;
@@ -106,6 +120,7 @@ export class AcpSession {
               ? `${method.description ?? ''} 请先通过 Agent 自己的终端登录；Warden 不提供终端认证。`.trim()
               : (method.description ?? undefined),
         })),
+      controls: this.controls,
     });
   }
 
@@ -238,6 +253,7 @@ export class AcpSession {
       } else if (this.record.sessionId) throw new Error('已有历史会话，请选择继续会话或先新建会话');
       this.status = 'connecting';
       this.error = undefined;
+      this.controls = emptyControls();
       this.notify();
       release = await this.options.storage.claim();
       if (generation !== this.generation || this.disposed) throw new Error('连接已取消');
@@ -272,7 +288,11 @@ export class AcpSession {
         runtime.connection.agent.request('initialize', {
           protocolVersion: PROTOCOL_VERSION,
           clientInfo: { name: 'warden', title: 'Warden', version: CLIENT_VERSION },
-          clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
+          clientCapabilities: {
+            fs: { readTextFile: false, writeTextFile: false },
+            terminal: false,
+            session: { configOptions: { boolean: {} }, notices: {}, compaction: {} },
+          },
         }),
         'Agent 初始化超时，请检查该命令是否支持 ACP，然后重新连接',
       );
@@ -344,6 +364,7 @@ export class AcpSession {
       if (this.current(runtime)) {
         this.error = reason;
         this.status = 'error';
+        this.controls = emptyControls();
         if (this.turn?.runtime === runtime) this.record.interrupted = true;
         this.cancelPermissions(runtime);
         this.changed();
@@ -364,6 +385,7 @@ export class AcpSession {
       if (this.current(runtime) && !runtime.exited) {
         this.status = 'error';
         this.error = 'ACP 连接已断开，本轮结果可能不完整；请检查代码后显式重新连接。';
+        this.controls = emptyControls();
         if (this.turn?.runtime === runtime) this.record.interrupted = true;
         this.cancelPermissions(runtime);
         this.changed();
@@ -385,11 +407,12 @@ export class AcpSession {
       runtime.sessionId = sessionId;
       runtime.replay = { messages: [] };
       try {
-        await this.timeout(
+        const session = await this.timeout(
           runtime.connection.agent.request('session/load', { sessionId, cwd: this.options.binding.workspace, mcpServers: [] }),
           '恢复会话超时，请重新连接；Warden 不会自动重发消息',
         );
         if (!this.current(runtime)) throw new Error('连接已结束');
+        this.initialControls(runtime, session);
         const uncertain = this.record.messages.filter((item) => item.role === 'user' && item.uncertain);
         this.record.messages = [...runtime.replay.messages, ...uncertain];
         this.history = { messages: this.record.messages };
@@ -397,6 +420,10 @@ export class AcpSession {
         runtime.replay = undefined;
       }
     } else {
+      // Agents can advertise session controls in the same stream batch as the new-session
+      // response. Buffer that bounded setup window until its session ID is known.
+      runtime.pendingUpdates = [];
+      runtime.pendingBytes = 0;
       const session = await this.timeout(
         runtime.connection.agent.request('session/new', { cwd: this.options.binding.workspace, mcpServers: [] }),
         '创建 Agent 会话超时，请检查 Agent 后重新连接',
@@ -406,6 +433,11 @@ export class AcpSession {
         throw new Error('Agent 返回了无效的会话标识，请检查 ACP 兼容性');
       runtime.sessionId = session.sessionId;
       this.record.sessionId = session.sessionId;
+      this.initialControls(runtime, session);
+      const pending = runtime.pendingUpdates;
+      runtime.pendingUpdates = undefined;
+      runtime.pendingBytes = undefined;
+      for (const update of pending) this.update(runtime, update);
     }
     await this.persist();
     if (!this.current(runtime)) throw new Error('连接已结束');
@@ -419,7 +451,7 @@ export class AcpSession {
     if (!value.trim() || value.length > 100_000) return Promise.reject(new Error('消息不能为空，且不能超过 100000 个字符'));
     const runtime = this.runtime;
     if (!runtime || !this.current(runtime) || !runtime.sessionId || this.status !== 'connected') return Promise.reject(new Error('请先连接 Agent 会话'));
-    if (this.turn || this.connecting || this.authenticating) return Promise.reject(new Error('此会话已有请求正在进行，请等待或停止本轮'));
+    if (this.turn || this.connecting || this.authenticating || this.configuration) return Promise.reject(new Error('此会话已有请求正在进行，请等待或停止本轮'));
     const turn: Turn = { runtime, record: this.record, promise: Promise.resolve(), cancelling: false, sent: false };
     this.turn = turn;
     turn.promise = this.runPrompt(turn, value);
@@ -515,7 +547,7 @@ export class AcpSession {
   async authenticate(methodId: string): Promise<void> {
     const runtime = this.runtime;
     if (!runtime || !this.current(runtime) || !runtime.initialized) throw new Error('请先连接 Agent 以获取认证方式');
-    if (this.turn || this.connecting || this.authenticating) throw new Error('请等待当前请求结束后再登录');
+    if (this.turn || this.connecting || this.authenticating || this.configuration) throw new Error('请等待当前请求结束后再登录');
     const method = this.authMethods.find((item) => item.id === methodId);
     if (!method) throw new Error('Agent 未提供此认证方式');
     if ('type' in method && method.type === 'terminal') throw new Error('此认证方式需要 Agent 自己的终端，请在外部完成登录后重新连接');
@@ -549,13 +581,162 @@ export class AcpSession {
     }
   }
 
+  private initialControls(runtime: Runtime, session: unknown) {
+    if (!object(session)) return;
+    if (Array.isArray(session.configOptions) && !runtime.configUpdated) {
+      this.controls.configOptions = configOptions(session.configOptions);
+      delete this.controls.modes;
+    } else if (this.controls.configOptions === undefined) {
+      this.controls.modes = sessionModes(session.modes);
+      if (this.controls.modes && runtime.modeUpdate !== undefined) this.controls.modes.currentModeId = runtime.modeUpdate;
+    }
+  }
+
+  setConfigOption(configId: string, value: string | boolean): Promise<void> {
+    const option = this.controls.configOptions?.find((item) => item.id === configId);
+    if (!option || (option.type === 'boolean' ? typeof value !== 'boolean' : typeof value !== 'string' || !option.options.some((item) => item.value === value)))
+      return Promise.reject(new Error('请选择 Agent 当前提供的配置值'));
+    return this.configure((runtime) => {
+      const current = this.controls.configOptions?.find((item) => item.id === configId);
+      if (!current || (current.type === 'boolean' ? typeof value !== 'boolean' : !current.options.some((item) => item.value === value)))
+        throw new Error('Agent 的配置选项已变化，请重新选择');
+      return runtime.connection.agent
+        .request('session/set_config_option', {
+          sessionId: runtime.sessionId!,
+          configId,
+          ...(typeof value === 'boolean' ? { type: 'boolean' as const, value } : { value }),
+        })
+        .then((result) => {
+          // Capture at the direct response continuation, before the SDK dispatches following
+          // notifications. The timeout wrapper resumes later and must not overwrite them.
+          const revision = runtime.configRevision;
+          return () => {
+            if (runtime.configRevision !== revision) return;
+            this.controls.configOptions = configOptions(result.configOptions);
+            delete this.controls.modes;
+          };
+        });
+    });
+  }
+
+  setMode(modeId: string): Promise<void> {
+    if (this.controls.configOptions !== undefined || !this.controls.modes?.availableModes.some((mode) => mode.id === modeId))
+      return Promise.reject(new Error('请选择 Agent 当前提供的会话模式'));
+    return this.configure((runtime) => {
+      if (this.controls.configOptions !== undefined || !this.controls.modes?.availableModes.some((mode) => mode.id === modeId))
+        throw new Error('Agent 的会话模式已变化，请重新选择');
+      return runtime.connection.agent.request('session/set_mode', { sessionId: runtime.sessionId!, modeId }).then(() => {
+        const revision = runtime.modeRevision;
+        return () => {
+          if (runtime.modeRevision === revision && this.controls.configOptions === undefined && this.controls.modes) this.controls.modes.currentModeId = modeId;
+        };
+      });
+    });
+  }
+
+  private async configure(request: (runtime: Runtime) => Promise<() => void>): Promise<void> {
+    const runtime = this.runtime;
+    if (!runtime || !this.current(runtime) || !runtime.established || this.status !== 'connected') throw new Error('请先连接 Agent 会话并等待当前请求结束');
+    if (this.turn || this.connecting || this.authenticating || this.configuration) throw new Error('请等待当前请求结束后再修改会话配置');
+    const operation = { runtime };
+    this.configuration = operation;
+    this.controls.configuring = true;
+    this.notify();
+    let sent = false;
+    let timedOut = false;
+    try {
+      await this.options.validate();
+      if (!this.current(runtime)) throw new Error('连接已结束');
+      sent = true;
+      const apply = await this.timeout(request(runtime), '会话配置更新超时，请重新连接以确认 Agent 的当前配置').catch((error) => {
+        timedOut = error instanceof Error && error.message.startsWith('会话配置更新超时');
+        throw error;
+      });
+      if (!this.current(runtime)) throw new Error('连接已结束');
+      apply();
+      this.error = undefined;
+    } catch (error) {
+      if (this.current(runtime)) {
+        this.error = `无法修改会话配置：${message(error)}`;
+        // A timed-out RPC may still change the agent later. Retire its connection before
+        // accepting another prompt or configuration request with an uncertain value.
+        if (sent && timedOut) {
+          this.status = 'error';
+          this.controls = emptyControls();
+          await this.stopRuntime(runtime);
+        }
+      }
+      throw error;
+    } finally {
+      if (this.configuration === operation) {
+        this.configuration = undefined;
+        this.controls.configuring = false;
+        this.notify();
+      }
+    }
+  }
+
   private update(runtime: Runtime, notification: SessionNotification) {
-    if (!this.current(runtime) || notification.sessionId !== runtime.sessionId) return;
+    if (!this.current(runtime)) return;
+    if (!runtime.sessionId && runtime.pendingUpdates) {
+      const bytes = Buffer.byteLength(JSON.stringify(notification), 'utf8');
+      if (runtime.pendingUpdates.length < 100 && (runtime.pendingBytes ?? 0) + bytes <= 2 * 1024 * 1024) {
+        runtime.pendingUpdates.push(notification);
+        runtime.pendingBytes = (runtime.pendingBytes ?? 0) + bytes;
+      }
+      return;
+    }
+    if (notification.sessionId !== runtime.sessionId) return;
+    const update = notification.update;
+    if (update.sessionUpdate === 'config_option_update') {
+      runtime.configUpdated = true;
+      runtime.configRevision = (runtime.configRevision ?? 0) + 1;
+      this.controls.configOptions = configOptions(update.configOptions);
+      delete this.controls.modes;
+    } else if (update.sessionUpdate === 'current_mode_update') {
+      runtime.modeRevision = (runtime.modeRevision ?? 0) + 1;
+      runtime.modeUpdate = text(update.currentModeId, 500);
+      if (this.controls.configOptions === undefined && this.controls.modes) this.controls.modes.currentModeId = text(update.currentModeId, 500);
+    } else if (update.sessionUpdate === 'available_commands_update') {
+      this.controls.commands = availableCommands(update.availableCommands);
+    } else if (update.sessionUpdate === 'session_info_update') {
+      if (update.title === null) delete this.controls.title;
+      else if (update.title !== undefined) this.controls.title = text(update.title, 1_000);
+    } else if (update.sessionUpdate === 'usage_update') {
+      this.controls.usage = {
+        used: update.used,
+        size: update.size,
+        ...(update.cost ? { cost: { amount: update.cost.amount, currency: text(update.cost.currency, 32) } } : {}),
+      };
+    } else if (update.sessionUpdate === 'notice') {
+      this.controls.notices.push({
+        id: randomUUID(),
+        title: text(update.title, 1_000),
+        ...(update.description == null ? {} : { description: text(update.description, 4_000) }),
+        severity: text(update.severity, 100),
+      });
+      this.controls.notices = this.controls.notices.slice(-32);
+    } else if (update.sessionUpdate === 'compaction_update' || update.sessionUpdate === 'compaction_summary_chunk') {
+      this.compaction(runtime.replay ?? this.history, update);
+      if (!runtime.replay) this.changed();
+      return;
+    } else {
+      this.historyUpdate(runtime, notification);
+      return;
+    }
+    this.notify();
+  }
+
+  private historyUpdate(runtime: Runtime, notification: SessionNotification) {
     const history = runtime.replay ?? (this.turn?.runtime === runtime ? this.history : undefined);
     if (!history) return;
     const update = notification.update;
-    if (update.sessionUpdate === 'agent_message_chunk' || (runtime.replay && update.sessionUpdate === 'user_message_chunk')) {
-      const role = update.sessionUpdate === 'user_message_chunk' ? 'user' : 'agent';
+    if (
+      update.sessionUpdate === 'agent_message_chunk' ||
+      update.sessionUpdate === 'agent_thought_chunk' ||
+      (runtime.replay && update.sessionUpdate === 'user_message_chunk')
+    ) {
+      const role = update.sessionUpdate === 'user_message_chunk' ? 'user' : update.sessionUpdate === 'agent_thought_chunk' ? 'thought' : 'agent';
       const value = update.content.type === 'text' ? update.content.text : `[当前仅支持文本，未显示 ${update.content.type} 内容]`;
       const key = `${role}:${update.messageId ?? ''}`;
       const previous = history.lastChunk?.key === key ? history.messages.find((item) => item.id === history.lastChunk!.id) : undefined;
@@ -570,12 +751,38 @@ export class AcpSession {
     } else if (update.sessionUpdate === 'plan') {
       history.messages.push({ id: randomUUID(), role: 'notice', text: text(update.entries.map((entry) => `${entry.status}: ${entry.content}`).join('\n')) });
       history.lastChunk = undefined;
-    } else if (update.sessionUpdate === 'notice') {
-      history.messages.push({ id: randomUUID(), role: 'notice', text: text(`${update.title}${update.description ? `\n${update.description}` : ''}`) });
-      history.lastChunk = undefined;
     }
     this.boundHistory(history);
     if (!runtime.replay) this.changed();
+  }
+
+  private compaction(history: History, update: CompactionUpdate | CompactionSummaryChunk) {
+    const compactionId =
+      update.compactionId.length > 4_000 || update.compactionId.startsWith('warden-sha256:')
+        ? `warden-sha256:${createHash('sha256').update(update.compactionId).digest('hex')}`
+        : update.compactionId;
+    let item = history.messages.find((entry) => entry.compactionId === compactionId);
+    if (!item) {
+      item = { id: randomUUID(), role: 'notice', compactionId, compaction: {}, text: '上下文压缩', status: 'in_progress' };
+      history.messages.push(item);
+    }
+    item.compaction ??= {};
+    const display = item.compaction;
+    const content = (block: ContentBlock) => (block.type === 'text' ? block.text : `[当前仅支持文本，未显示 ${block.type} 内容]`);
+    if ('status' in update) {
+      item.status = text(update.status, 100);
+      if (update.summary !== undefined) {
+        if (update.summary === null || update.summary.length === 0) delete display.summary;
+        else display.summary = text(update.summary.map(content).join('\n'));
+      }
+      if (update.error !== undefined) {
+        if (update.error === null) delete display.error;
+        else display.error = text(update.error);
+      }
+    } else display.summary = text((display.summary ?? '') + content(update.content));
+    item.text = text(['上下文压缩', display.summary, display.error].filter(Boolean).join('\n'));
+    history.lastChunk = undefined;
+    this.boundHistory(history);
   }
 
   private tool(history: History, update: ToolCallUpdate) {
@@ -710,6 +917,8 @@ export class AcpSession {
     const operation = (async () => {
       ++this.generation;
       const runtime = this.runtime;
+      this.controls = emptyControls();
+      this.configuration = undefined;
       this.cancelPermissions();
       if (this.turn?.sent) this.record.interrupted = true;
       if (runtime) await this.stopRuntime(runtime);
