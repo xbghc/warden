@@ -363,16 +363,16 @@ export class StateStore {
           break;
         } catch (error) {
           const code = errorCode(error);
-          // Windows reports EPERM/EACCES for some existing-directory rename failures.
-          // Require an occupied target before treating those errors as contention.
-          if (code === 'EPERM' || code === 'EACCES') {
-            if (!(await lstat(lock).catch(() => undefined))) throw error;
-          } else if (!['EEXIST', 'ENOTEMPTY', 'EISDIR', 'ENOTDIR'].includes(code ?? '')) throw error;
+          const permissionFailure = code === 'EPERM' || code === 'EACCES';
+          // Windows can report contention as a permission failure, then the owner can
+          // release before inspection. Only a successful retry establishes ownership.
+          if (!permissionFailure && !['EEXIST', 'ENOTEMPTY', 'EISDIR', 'ENOTDIR'].includes(code ?? '')) throw error;
           const recovered = await reclaimLock(lock);
           const expired = Date.now() - started >= waitMs;
           // A zero-wait preview lease may recover once and immediately attempt publication.
           // Repeated disappearance or recovery races must still respect every wait budget.
           if (expired && !(waitMs === 0 && recovered && !immediateRecovery)) {
+            if (permissionFailure && recovered) throw error;
             throw new WardenError(409, '另一个 Warden 操作正在进行，请稍后重试', 'operation_locked');
           }
           if (recovered) {

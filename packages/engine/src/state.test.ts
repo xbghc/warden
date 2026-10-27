@@ -356,6 +356,45 @@ describe('what the state file will not lose', () => {
     expect(await readdir(protocol)).toEqual([]);
   });
 
+  it.each(['EPERM', 'EACCES'])('retries a Windows-style %s publication race after the previous owner disappears', async (code) => {
+    const file = path.join(dir, 'state.json');
+    const locks = new Set([`${file}.lock`, `${file}.preview-owner.lock`].map((container) => path.join(container, 'v2', 'active')));
+    const originalRename = fs.rename;
+    vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+      // The owner can release its directory before the contender handles the rename failure.
+      if (locks.delete(String(to))) throw Object.assign(new Error('Destination was occupied'), { code });
+      return originalRename(from, to);
+    });
+    syncBuiltinESMExports();
+    const store = new StateStore(file, '/repo');
+    await store.update((state) => {
+      state.prefs.viewMode = 'split';
+    });
+    expect((await store.load()).prefs.viewMode).toBe('split');
+    const lease = await store.acquirePreviewLease();
+    expect(lease).not.toBeNull();
+    await lease!.release();
+    expect(locks.size).toBe(0);
+    for (const container of [`${file}.lock`, `${file}.preview-owner.lock`]) expect(await readdir(path.join(container, 'v2'))).toEqual([]);
+  });
+
+  it.each(['EPERM', 'EACCES'])('preserves persistent %s failures after exhausting publication retries without an owner', async (code) => {
+    const file = path.join(dir, 'state.json');
+    const lock = path.join(`${file}.repository.lock`, 'v2', 'active');
+    const originalRename = fs.rename;
+    const failure = Object.assign(new Error('Publication is not permitted'), { code });
+    vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+      if (to === lock) throw failure;
+      return originalRename(from, to);
+    });
+    syncBuiltinESMExports();
+    expireLockWait();
+    const mutate = vi.fn();
+    await expect(new StateStore(file, '/repo').withRepositoryLock(mutate)).rejects.toBe(failure);
+    expect(mutate).not.toHaveBeenCalled();
+    expect(await readdir(path.dirname(lock))).toEqual([]);
+  });
+
   it('bounds repeated publication races even when the competing lock always vanishes before inspection', async () => {
     const file = path.join(dir, 'state.json');
     const protocol = path.join(`${file}.repository.lock`, 'v2');

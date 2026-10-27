@@ -27,6 +27,11 @@ the file instead of automatic deletion, since another older writer could replace
 between inspection and deletion. Close older Warden windows using that repository, inspect and
 remove the named legacy lock file, then retry. Do not remove a live owner's lock.
 
+Windows can report a directory publication collision as `EPERM` or `EACCES`, even if the other
+owner releases before inspection. Publication retries within the same wait budget; only a successful
+atomic rename grants ownership. Persistent permission failures with no competing owner retain their
+original error, and uncertain live owners are never reclaimed.
+
 The outer `.lock` and `v2` directories persist after release. New versions use exclusive directory
 creation for the outer path, so Windows directory rename cannot replace a legacy flat lock there.
 Before first using this version, close all older Warden windows and processes; upgrade them before
