@@ -26,6 +26,75 @@ afterEach(async () => {
 });
 
 describe('desktop engine', () => {
+  it('refreshes the persistent preview and its setup environment across branches at the same commit', async () => {
+    await fixture.write('.gitignore', 'node_modules/\n');
+    fixture.git('add', '.gitignore');
+    fixture.git('commit', '-qm', 'Ignore runtime dependencies');
+    fixture.git('branch', 'feature/other');
+    await engine.execute('config.save', {
+      hooks: {},
+      previewSetup: 'mkdir -p node_modules; printf "%s" "$WARDEN_DEVELOPMENT_BRANCH" > node_modules/branch',
+    });
+    const first = await engine.execute('preview.refresh', undefined);
+    expect(first.setup?.status).toBe('succeeded');
+    expect(await readFile(path.join(first.worktree!, 'node_modules/branch'), 'utf8')).toBe('main');
+    await writeFile(path.join(first.worktree!, 'node_modules/retained'), 'dependency cache');
+    fixture.git('switch', 'feature/other');
+    await engine.execute('workflow.configure', { branch: 'feature/other' });
+    expect((await engine.execute('preview.get', undefined)).syncStatus).toBe('pending');
+    const next = await engine.execute('preview.refresh', undefined);
+    expect(next.developmentBranch).toBe('feature/other');
+    expect(next.developmentHead).toBe(first.developmentHead);
+    expect(next.worktree).toBe(first.worktree);
+    expect(next.syncStatus).toBe('synced');
+    expect(next.setup?.status).toBe('succeeded');
+    expect(await readFile(path.join(next.worktree!, 'node_modules/branch'), 'utf8')).toBe('feature/other');
+    expect(await readFile(path.join(next.worktree!, 'node_modules/retained'), 'utf8')).toBe('dependency cache');
+  });
+
+  it('rejects an old branch request after it waits behind another window switching requirements', async () => {
+    fixture.git('branch', 'feature/other');
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const held = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const holding = engine.store.withRepositoryLock(async () => {
+      entered();
+      await gate;
+    });
+    await held;
+    let waiting!: () => void;
+    const attempted = new Promise<void>((resolve) => {
+      waiting = resolve;
+    });
+    const lock = engine.store.withRepositoryLock.bind(engine.store);
+    vi.spyOn(engine.store, 'withRepositoryLock').mockImplementation((fn) => {
+      waiting();
+      return lock(fn);
+    });
+    const rejected = expect(engine.execute('task.create', { title: 'Stale A task' }, { developmentBranch: 'main' })).rejects.toMatchObject({
+      code: 'requirement_changed',
+    });
+    try {
+      await attempted;
+      await engine.store.update((state) => {
+        state.workflow!.developmentBranch = 'feature/other';
+      });
+    } finally {
+      release();
+      await holding;
+    }
+    await rejected;
+    expect((await engine.execute('workflow.get', undefined)).workflow!.changes).toHaveLength(0);
+    const current = await engine.execute('task.create', { title: 'Current B task' }, { developmentBranch: 'feature/other' });
+    expect(current.developmentBranch).toBe('feature/other');
+    expect((await engine.execute('task.create', { title: 'Unscoped task' })).developmentBranch).toBe('feature/other');
+  });
+
   it('allocates a fresh logical workspace in a clean free directory without inheriting an old branch', async () => {
     const base = fixture.git('rev-parse', 'HEAD').trim();
     const old = await checkoutWorktree(engine.repo, { slot: 1, branch: 'old-task', base, kind: 'shared' });

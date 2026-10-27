@@ -3,12 +3,13 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const vscode = require('vscode');
 const { execFileSync } = require('node:child_process');
+const { checkBranches } = require('./branches.cjs');
 // Git may materialize preview text with CRLF under the user's Windows configuration.
 const textLines = (text) => text.replace(/\r\n/g, '\n');
-const eventually = async (condition) => {
-  const deadline = Date.now() + 10_000;
+const eventually = async (condition, timeout = 10_000) => {
+  const deadline = Date.now() + timeout;
   while (!(await condition())) {
-    if (Date.now() > deadline) throw new Error('Timed out waiting for ACP state');
+    if (Date.now() > deadline) throw new Error('Timed out waiting for extension state');
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
 };
@@ -54,6 +55,7 @@ exports.run = async () => {
       (await workbench.getChildren()).map((node) => node.kind),
       ['preview', 'history', 'tasks', 'settings'],
     );
+    await checkBranches(workbench, fixture.unconfigured, eventually);
     await workbench.open(fixture.root);
     assert.equal(workbench.backend.store.file, fixture.state);
     const tasks = await workbench.getChildren({ kind: 'tasks' });
@@ -244,7 +246,7 @@ exports.run = async () => {
     await workbench.refresh();
     const session = workbench.session;
     const count = (await state()).workflow.changes.length;
-    await assert.rejects(workbench.handleAction({ type: 'task.create', title: 'Wrong repository', body: '' }, 'old-session'), /仓库已切换/);
+    await assert.rejects(workbench.handleAction({ type: 'task.create', title: 'Wrong repository', body: '' }, 'old-session'), /仓库或主开发分支已切换/);
     assert.equal((await state()).workflow.changes.length, count);
     // Hold a real pre-mutation read until creation commits; it must not hide the newly saved task.
     await workbench.reading;
@@ -298,7 +300,7 @@ exports.run = async () => {
     assert.equal(await workbench.documents.provideTextDocumentContent(pinnedDoc.uri), pinnedContent, 'saved native snapshots survive memory eviction');
     await workbench.open(fixture.root);
     assert.notEqual(workbench.session, session, 'reopening the repository creates a new session');
-    await assert.rejects(workbench.handleAction({ type: 'task.create', title: 'Stale view', body: '' }, session), /仓库已切换/);
+    await assert.rejects(workbench.handleAction({ type: 'task.create', title: 'Stale view', body: '' }, session), /仓库或主开发分支已切换/);
     assert.equal((await state()).workflow.changes.length, count + 1);
 
     // A pure executable-bit change has identical text on both sides of the native diff.
@@ -433,7 +435,7 @@ exports.run = async () => {
     assert.equal(replacement.session.snapshot().record.sessionId, undefined);
     assert.equal((await state()).workflow.changes.find((task) => task.id === newTask.id).deliveries?.length ?? 0, 0, 'ACP responses never deliver code');
     console.log(
-      'Packaged extension passed: native readonly review, version guards, preview/setup, normal hooks, recovery, multiline delivery, fresh workspaces, history mapping and task-bound ACP commands, permissions, cancellation and explicit resume',
+      'Packaged extension passed: branch following and restoration, native readonly review, version guards, preview/setup, normal hooks, recovery, multiline delivery, fresh workspaces, history mapping and task-bound ACP commands, permissions, cancellation and explicit resume',
     );
   } finally {
     await workbench.close();

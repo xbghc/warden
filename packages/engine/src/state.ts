@@ -1,6 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { lstat, mkdir, open, readFile, readdir, rename, rm, rmdir, unlink, utimes, writeFile } from 'node:fs/promises';
 import type { Prefs, ReviewState } from '@warden/shared';
 import { sha1 } from './hash.js';
@@ -237,6 +238,7 @@ async function reclaimLock(lock: string): Promise<boolean> {
  * warden instances on the same repo can coexist.
  */
 export class StateStore {
+  private readonly expectedBranch = new AsyncLocalStorage<{ branch: string | null }>();
   private queue: Promise<unknown> = Promise.resolve();
 
   constructor(
@@ -244,11 +246,20 @@ export class StateStore {
     public readonly repoRoot: string,
   ) {}
 
+  /** Keep the caller's branch expectation through asynchronous work before acquiring the lock. */
+  withDevelopmentBranch<T>(branch: string | null, fn: () => Promise<T>): Promise<T> {
+    return this.expectedBranch.run({ branch }, fn);
+  }
+
   /** Shared by repository operations; independent of the short state-file lock. */
   async withRepositoryLock<T>(fn: () => Promise<T>): Promise<T> {
     await mkdir(path.dirname(this.file), { recursive: true });
     const lock = await this.acquireLock(`${this.file}.repository`);
     try {
+      // Another window may change requirements while this request waits for the lock.
+      const expected = this.expectedBranch.getStore();
+      if (expected && ((await this.load()).workflow?.developmentBranch ?? null) !== expected.branch)
+        throw new WardenError(409, '主开发分支已切换，请使用当前界面重试', 'requirement_changed');
       return await fn();
     } finally {
       await lock.release();

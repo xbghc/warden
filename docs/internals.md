@@ -153,7 +153,15 @@ primary HEADs and clean checkout state, then explicitly rebases selected workspa
 rebase or workspace recycling.
 
 Workflow reads share one checkout inventory per request instead of rebuilding every workspace's
-inventory for each task. Synchronization checks may reuse up to 64 isolated replay verdicts,
+inventory for each task. The extension follows observed primary checkout branch changes through
+`workflow.configure`, retaining its existing integration and connection guards. Branch changes rotate
+the webview session and invalidate review authorization and history/rebase results. History and check
+refreshes include the branch identity; the state-only `workflow.context` read rejects mixed snapshots
+when another window switches requirements during a refresh. Scoped engine writes verify the expected
+development branch after acquiring the repository lock, so a request queued by an old page cannot
+mutate a newly selected requirement. ACP conversations keep their task-bound engine context.
+
+Synchronization checks may reuse up to 64 isolated replay verdicts,
 including an in-flight trial, when their commits, delivery boundary, physical repository identity,
 configuration and environment match. Source HEAD, branch, clean/busy state and target HEAD are
 validated again on cache hits. Only successful `ready` or `conflict` verdicts are retained;

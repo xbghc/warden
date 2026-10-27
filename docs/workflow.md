@@ -202,8 +202,16 @@ primary development branch. Warden retains its task, workspace and review associ
 stays available for further commits without a separate “continue” or “finish” declaration. For A2,
 make clear which changes have not yet been delivered; A1 must not silently enter the delivery again.
 
-When the primary development branch changes, Warden automatically updates synchronization indicators,
-not the task branches. It can check whether a workspace needs rebase and whether replay appears
+After initial branch configuration, switching the primary checkout through Git or VS Code also switches
+Warden's requirement context. The workspace list, selected task, history and synchronization checks
+belong to that branch, even when two branches point to the same commit. Returning to a branch restores
+its selected task and history draft. Task workspaces keep their original branches, baselines and files;
+existing ACP conversations keep their original task. A detached HEAD or an unfinished Git operation
+does not select a new requirement. An unfinished delivery preparation or active preview connection
+blocks the context switch with a visible explanation; return to the original branch to resolve it first.
+
+When the primary development branch advances, Warden automatically updates synchronization indicators.
+It can check whether a workspace needs rebase and whether replay appears
 possible without conflicts. Those checks must not change files or the index in an active workspace.
 Unknown or stale results remain visibly unknown; a clean checkout alone proves neither replayability
 nor that an agent has stopped writing.

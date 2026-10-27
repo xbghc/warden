@@ -164,8 +164,11 @@ export class WorkflowService {
           fail('请先完成主目录提交并断开预览连接，再切换主开发分支', 'development_in_use');
         state.workflow = { developmentBranch: branch, changes: state.workflow?.changes ?? [] };
         // Keep the persistent runtime directory (and its dependencies) across branch switches.
-        if (state.connectionPreview?.directory) state.connectionPreview.status = 'stale';
-        else delete state.connectionPreview;
+        if (state.connectionPreview?.directory) {
+          state.connectionPreview.status = 'stale';
+          state.connectionPreview.syncStatus = 'pending';
+          state.connectionPreview.message = '主开发分支已切换，预览等待更新';
+        } else delete state.connectionPreview;
       });
       return this.get();
     });

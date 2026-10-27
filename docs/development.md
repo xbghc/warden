@@ -80,7 +80,7 @@ pnpm test:vscode
 ```
 
 `test/ui/smoke.py` starts and closes `test/ui/harness.ts`, exercises initialization, empty states, task
-menus, inline details, task/commit draft preservation, optional settings, preview setup, collapsed history
+menus, inline details, task/commit draft preservation across branch models, optional settings, preview setup, collapsed history
 editing/application and rebase selection, and saves screenshots under
 `WARDEN_UI_ARTIFACTS` (default `/tmp/warden-ui-artifacts`). The harness is test-only and is not shipped.
 Inspect screenshots and console errors. Preserve intentional error cases in native-host tests as well.
@@ -120,7 +120,9 @@ The suite checks native read-only snapshots, stale review rejection, preview iso
 ordinary commit hooks and retained-stage recovery, native commit-input cancellation and stale-version
 rejection while typing, multiline delivery, fresh workspaces, stale-session
 rejection and stable delivery mapping across history rewrites. CI runs the same VSIX in minimum and
-stable hosts on Windows, Linux and macOS.
+stable hosts on Windows, Linux and macOS. Branch-following coverage switches the primary checkout
+through Git, including branches at the same commit, verifies per-branch task/draft restoration and
+stale action rejection, and preserves dirty task workspaces and connected-preview switch guards.
 
 ## Release
 

@@ -25,6 +25,16 @@ Before configuration, the sidebar shows only the next setup action: **选择仓�
 **选择主开发分支**. The task pane, preview status and operational navigation appear after branch
 selection. Opening a workflow page early shows the same setup action instead of empty controls.
 
+After this initial choice, switching the primary checkout in Git or VS Code automatically changes
+Warden's workspace list, current task, history and synchronization checks. Selection and history drafts
+are remembered per repository and development branch. Existing task notes and commit drafts remain
+with their tasks. Branches at the same commit are still separate contexts; old page actions are rejected
+after a switch. Existing native diffs and ACP conversations retain their original task.
+
+Finish delivery preparation and disconnect preview connections before switching. If Git switches
+while either is still active, the sidebar explains why Warden remains on the previous branch and asks
+you to return there to resolve it. Detached HEAD and unfinished Git operations keep the current context.
+
 The workspace sidebar keeps preview, history, ordered tasks and settings together. Synchronization
 sits beside add-task in the native view heading. Every workspace has a persistent icon toolbar below
 its title: open workspace, Agent conversation, preview connection, commit, synchronization when needed,

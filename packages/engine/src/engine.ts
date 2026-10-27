@@ -49,6 +49,7 @@ function commands(repo: RepoContext, store: StateStore) {
     previewService: preview,
     handlers: {
       'workflow.get': () => workflow.get(),
+      'workflow.context': async () => ({ developmentBranch: (await store.load()).workflow?.developmentBranch }),
       'workflow.configure': ({ branch }: { branch: string }) => workflow.configure(branch),
       'task.create': (request: NewTask) => {
         record(request);
@@ -136,7 +137,16 @@ export type EngineCommands = ReturnType<typeof commands>['handlers'];
 export type EngineCommand = keyof EngineCommands;
 export type EngineInput<K extends EngineCommand> = Parameters<EngineCommands[K]> extends [] ? undefined : Parameters<EngineCommands[K]>[0];
 export type EngineOutput<K extends EngineCommand> = Awaited<ReturnType<EngineCommands[K]>>;
-const reads = new Set<EngineCommand>(['workflow.get', 'preview.get', 'history.get', 'workspaces.list', 'review.files', 'review.file', 'rebase.check']);
+const reads = new Set<EngineCommand>([
+  'workflow.get',
+  'workflow.context',
+  'preview.get',
+  'history.get',
+  'workspaces.list',
+  'review.files',
+  'review.file',
+  'rebase.check',
+]);
 
 /** Owns repository activity independently of the editor, webviews, and transport adapters. */
 export class Engine {
@@ -171,13 +181,14 @@ export class Engine {
     const repo = await resolveRepo(directory);
     return new Engine(repo, new StateStore(file ?? stateFilePath(repo.commonRoot), repo.commonRoot));
   }
-  execute<K extends EngineCommand>(command: K, request: EngineInput<K>): Promise<EngineOutput<K>> {
+  execute<K extends EngineCommand>(command: K, request: EngineInput<K>, context?: { developmentBranch: string | null }): Promise<EngineOutput<K>> {
     if (this.stopped) return Promise.reject(new WardenError(409, '仓库会话已关闭', 'session_closed'));
     const operation = Promise.resolve().then(async () => {
       const handler = this.handlers[command];
       if (!Object.hasOwn(this.handlers, command)) throw badRequest('未知操作', 'unknown_command');
       if (!reads.has(command) && command !== 'preview.refresh' && command !== 'preview.setup') record(request);
-      const result = await (handler as (input: never) => Promise<unknown>)(request as never);
+      const invoke = () => (handler as (input: never) => Promise<unknown>)(request as never);
+      const result = context && !reads.has(command) ? await this.store.withDevelopmentBranch(context.developmentBranch, invoke) : await invoke();
       if (command === 'workspaces.list') this.observe((result as WorktreesResponse).worktrees.map((row) => row.path));
       if (!reads.has(command)) this.changed();
       return result;

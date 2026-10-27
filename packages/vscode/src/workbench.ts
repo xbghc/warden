@@ -21,6 +21,7 @@ import type { AcpBinding } from '@warden/shared';
 import { Documents } from './documents.js';
 import { Views } from './views.js';
 import { AcpConversations } from './acp/conversations.js';
+import { BranchViews } from './branch-view.js';
 
 const statusLabels: Record<string, string> = {
   pending: '待同步',
@@ -73,6 +74,9 @@ export class Workbench {
   private commitInput?: vscode.InputBox;
   private fileErrors = new Map<string, string>();
   private readonly conversations: AcpConversations;
+  private readonly branchViews: BranchViews;
+  private branch?: string;
+  private branchTransition = false;
   private selected?: string;
   private expanded: Record<string, boolean> = {};
   private selectedFiles: Record<string, string> = {};
@@ -89,6 +93,7 @@ export class Workbench {
   private checkSignature?: string;
 
   constructor(private readonly context: vscode.ExtensionContext) {
+    this.branchViews = new BranchViews(context.workspaceState);
     this.documents = new Documents(context);
     this.conversations = new AcpConversations(
       context,
@@ -175,7 +180,7 @@ export class Workbench {
   }
   private api<K extends EngineCommand>(command: K, request: EngineInput<K>): Promise<EngineOutput<K>> {
     if (!this.backend) throw new Error('请先运行 Warden: 选择仓库');
-    return this.backend.execute(command, request);
+    return this.backend.execute(command, request, { developmentBranch: this.branch ?? null });
   }
   private async perform(action: () => unknown, busy?: string, scope = 'repository') {
     if (!vscode.workspace.isTrusted) {
@@ -183,8 +188,8 @@ export class Workbench {
       return;
     }
     if (this.closing) return;
-    if (this.switching) {
-      this.report(new Error('正在切换仓库，请稍后重试'), scope);
+    if (this.switching || this.branchTransition) {
+      this.report(new Error('正在切换仓库或主开发分支，请稍后重试'), scope);
       return;
     }
     if (busy && this.active) {
@@ -244,13 +249,14 @@ export class Workbench {
       await this.reading;
       await this.backend?.close();
       this.backend = await Engine.open(directory);
-      this.selected = this.context.workspaceState.get<string>(`warden.selected:${this.backend.root}`);
+      this.selected = undefined;
+      this.branch = undefined;
       this.expanded = this.context.workspaceState.get<Record<string, boolean>>(`warden.expanded:${this.backend.root}`, {});
       this.selectedFiles = this.context.workspaceState.get<Record<string, string>>(`warden.files:${this.backend.root}`, {});
       this.taskSection = undefined;
       this.rebaseSelection = undefined;
       this.messages = this.context.workspaceState.get<Record<string, string>>(`warden.messages:${this.backend.root}`, {});
-      this.historyDraft = this.context.workspaceState.get<HistoryPreviewRequest>(`warden.history:${this.backend.root}`);
+      this.historyDraft = undefined;
       this.historyPreview = undefined;
       this.errors.clear();
       this.checkSignature = undefined;
@@ -296,61 +302,142 @@ export class Workbench {
       vscode.commands.executeCommand('setContext', 'warden.multipleRoots', (vscode.workspace.workspaceFolders?.length ?? 0) > 1),
     ]);
   }
+  private async changeBranch(data: WorkflowResponse) {
+    this.commitInput?.hide();
+    this.branchTransition = true;
+    this.session = randomUUID();
+    this.branch = data.workflow?.developmentBranch;
+    this.selected = undefined;
+    this.creating = false;
+    this.taskSection = undefined;
+    this.historyDraft = undefined;
+    this.historyPreview = undefined;
+    this.history = undefined;
+    this.checks = undefined;
+    this.rebaseSelection = undefined;
+    this.rebaseResult = undefined;
+    this.reviews.clear();
+    this.files.clear();
+    this.fileErrors.clear();
+    this.taskTargets.clear();
+    this.errors.clear();
+    this.views.render();
+    try {
+      const saved = await this.branchViews.load(this.backend!.root, data);
+      this.selected = saved.selected;
+      this.historyDraft = saved.historyDraft;
+    } finally {
+      this.branchTransition = false;
+    }
+  }
   refresh(afterMutation = false): Promise<void> {
     // A read begun before a write cannot acknowledge that write to the next user action.
     if (this.reading) return afterMutation ? this.reading.catch(() => {}).then(() => this.refresh()) : this.reading;
     if (!this.backend || this.closing) return Promise.resolve();
     this.reading = (async () => {
-      const [data, preview, checkouts] = await Promise.all([
-        this.api('workflow.get', undefined),
-        this.api('preview.get', undefined),
-        this.api('workspaces.list', undefined),
-      ]);
-      const changedHead = data.developmentHead !== this.data?.developmentHead;
-      this.data = data;
-      this.preview = preview;
-      this.checkouts = checkouts;
-      if (data.workflow && (changedHead || !this.history)) this.history = await this.api('history.get', undefined);
-      const checkSignature = JSON.stringify([
-        data.developmentHead,
-        checkouts.worktrees.map((row) => [row.path, row.head, row.branch, row.dirty, row.busy]),
-        data.workflow?.changes.map((task) => [task.id, task.base, task.worktree ? task.sourceBase : undefined]),
-      ]);
-      if (data.workflow && checkSignature !== this.checkSignature) {
-        this.checks = await this.api('rebase.check', undefined);
-        this.checkSignature = checkSignature;
-      }
-      await this.updateContext();
-      this.views.render();
-      for (const key of this.files.keys()) {
-        try {
-          const response = await this.api('review.files', { key });
-          this.files.set(key, response.files);
-        } catch {
-          this.files.delete(key);
+      const engine = this.backend!;
+      for (let attempt = 0; attempt < 3; ++attempt) {
+        let [data, preview, checkouts] = await Promise.all([
+          engine.execute('workflow.get', undefined),
+          engine.execute('preview.get', undefined),
+          engine.execute('workspaces.list', undefined),
+        ]);
+        if (this.closing) return;
+        // Migrate the old repository-wide UI state into its original requirement before following Git.
+        if (this.branch === undefined && data.workflow) await this.branchViews.load(engine.root, data);
+        const primary = checkouts.worktrees.find((row) => row.isMain && !row.shared && !row.clone);
+        let branchProblem: WorkbenchError | undefined;
+        if (data.workflow && primary?.branch && !primary.detached && !primary.busy && !primary.foreign && primary.branch !== data.workflow.developmentBranch) {
+          const previous = data.workflow.developmentBranch;
+          try {
+            await engine.execute('workflow.configure', { branch: primary.branch }, { developmentBranch: previous });
+            [data, preview] = await Promise.all([engine.execute('workflow.get', undefined), engine.execute('preview.get', undefined)]);
+          } catch (error) {
+            if (error instanceof WardenError && error.code === 'requirement_changed') continue;
+            if (!(error instanceof WardenError) || !['development_in_use', 'operation_locked'].includes(error.code ?? '')) throw error;
+            branchProblem = {
+              scope: 'repository',
+              code: error.code,
+              message: `主目录已切到 ${primary.branch}，Warden 仍在 ${previous}。${
+                error.code === 'development_in_use' ? `请切回 ${previous} 完成交付准备并断开预览连接。` : error.message
+              }`,
+            };
+          }
         }
-      }
-      this.status.text = `$(layers) Warden: ${statusLabels[preview.syncStatus ?? preview.status] ?? preview.status}${preview.setup?.status === 'failed' ? ' · setup 失败' : ''}`;
-      this.status.tooltip = `运行目录：${preview.worktree ?? '尚未初始化'}\n${preview.message ?? '主目录保存后自动同步至预览'}\n${data.error ?? ''}`;
-      if (data.workflow) this.status.show();
-      else this.status.hide();
-      await Promise.all(
-        this.tasks()
-          .filter((task) => task.worktree && this.expanded[task.id])
-          .map((task) => this.getChildren({ kind: 'task', task })),
-      );
-      this.views.render();
-      if (data.workflow)
-        await this.backend!.start(
-          () => this.refresh(),
-          (error) => {
-            this.output.appendLine(String(error));
-            if (!(error instanceof WardenError && error.code === 'operation_locked')) {
-              this.errors.set('repository', { scope: 'repository', message: String(error) });
-              this.views.render();
-            }
-          },
+        const branch = data.workflow?.developmentBranch;
+        const changedBranch = branch !== this.branch;
+        const changedHead = data.developmentHead !== this.data?.developmentHead;
+        const history = data.workflow
+          ? changedBranch || changedHead || !this.history
+            ? await engine.execute('history.get', undefined)
+            : this.history
+          : undefined;
+        const checkSignature = JSON.stringify([
+          branch,
+          data.developmentHead,
+          checkouts.worktrees.map((row) => [row.path, row.head, row.branch, row.dirty, row.busy]),
+          data.workflow?.changes.map((task) => [task.id, task.base, task.worktree ? task.sourceBase : undefined]),
+        ]);
+        const checks = data.workflow ? (checkSignature !== this.checkSignature ? await engine.execute('rebase.check', undefined) : this.checks) : undefined;
+        const current = await engine.execute('workflow.context', undefined);
+        const taskIds =
+          data.workflow?.changes
+            .filter((task) => task.worktree && task.status !== 'accepted' && task.developmentBranch === branch)
+            .map((task) => task.id)
+            .sort() ?? [];
+        if (
+          current.developmentBranch !== branch ||
+          (history && (history.branch !== branch || history.head !== data.developmentHead)) ||
+          (checks &&
+            (JSON.stringify(checks.checks.map((check) => check.changeId).sort()) !== JSON.stringify(taskIds) ||
+              checks.checks.some((check) => check.developmentHead !== data.developmentHead)))
+        )
+          continue;
+        this.data = data;
+        this.preview = preview;
+        this.checkouts = checkouts;
+        if (changedBranch) await this.changeBranch(data);
+        this.history = history;
+        this.checks = checks;
+        this.checkSignature = checkSignature;
+        if (branchProblem) {
+          if (this.errors.get('branch')?.message !== branchProblem.message) this.output.appendLine(branchProblem.message);
+          this.errors.set('branch', branchProblem);
+        } else this.errors.delete('branch');
+        await this.updateContext();
+        this.views.render();
+        for (const key of this.files.keys()) {
+          try {
+            const response = await this.api('review.files', { key });
+            this.files.set(key, response.files);
+          } catch {
+            this.files.delete(key);
+          }
+        }
+        this.status.text = `$(layers) Warden: ${statusLabels[preview.syncStatus ?? preview.status] ?? preview.status}${preview.setup?.status === 'failed' ? ' · setup 失败' : ''}`;
+        this.status.tooltip = `运行目录：${preview.worktree ?? '尚未初始化'}\n${preview.message ?? '主目录保存后自动同步至预览'}\n${data.error ?? ''}`;
+        if (data.workflow) this.status.show();
+        else this.status.hide();
+        await Promise.all(
+          this.tasks()
+            .filter((task) => task.worktree && this.expanded[task.id])
+            .map((task) => this.getChildren({ kind: 'task', task })),
         );
+        this.views.render();
+        if (data.workflow)
+          await this.backend!.start(
+            () => this.refresh(),
+            (error) => {
+              this.output.appendLine(String(error));
+              if (!(error instanceof WardenError && error.code === 'operation_locked')) {
+                this.errors.set('repository', { scope: 'repository', message: String(error) });
+                this.views.render();
+              }
+            },
+          );
+        return;
+      }
+      throw new WardenError(409, '主开发分支正在变化，请稍后刷新', 'requirement_changed');
     })().finally(() => {
       this.reading = undefined;
     });
@@ -390,7 +477,9 @@ export class Workbench {
     };
   }
   async getChildren(node?: Node): Promise<Node[]> {
-    if (!this.backend || this.switching || !this.data?.workflow) return [];
+    if (!this.backend || this.switching || this.branchTransition || !this.data?.workflow) return [];
+    const session = this.session;
+    if (node?.kind === 'task' && !this.tasks().some((task) => task.id === node.task.id)) return [];
     if (!node) return [{ kind: 'preview' }, { kind: 'history' }, { kind: 'tasks' }, { kind: 'settings' }];
     if (node.kind === 'tasks') return this.tasks().map((task) => ({ kind: 'task', task }));
     if (node.kind === 'history')
@@ -402,7 +491,7 @@ export class Workbench {
     let review: TaskReview | undefined;
     if (node.kind === 'task' && node.task.worktree) {
       review = await this.readReview(node.task.id);
-      if (!review) return [];
+      if (!review || session !== this.session) return [];
       target = review.targetKey;
       const previous = this.taskTargets.get(node.task.id);
       if (previous && previous !== target) this.files.delete(previous);
@@ -411,10 +500,12 @@ export class Workbench {
     else return [];
     try {
       const response = await this.api('review.files', { key: target });
+      if (session !== this.session) return [];
       this.files.set(target, response.files);
       if (node.kind === 'task') this.fileErrors.delete(node.task.id);
       return response.files.map((file) => ({ kind: 'file', file, target, ...(node.kind === 'task' ? { task: node.task, review } : {}) }));
     } catch (error) {
+      if (session !== this.session) return [];
       this.output.appendLine(String(error));
       if (node.kind === 'task') this.fileErrors.set(node.task.id, error instanceof Error ? error.message : String(error));
       return [];
@@ -425,9 +516,15 @@ export class Workbench {
   }
   private async readReview(changeId: string) {
     const [data, checkouts] = await Promise.all([this.api('workflow.get', undefined), this.api('workspaces.list', undefined)]);
+    if (
+      data.workflow?.developmentBranch !== this.branch ||
+      !data.workflow?.changes.some((task) => task.id === changeId && task.developmentBranch === this.branch)
+    )
+      return undefined;
     return taskReview(data, changeId, checkouts.worktrees);
   }
   private async rememberReview(review: TaskReview) {
+    const session = this.session;
     const previous = this.reviews.get(review.changeId);
     if (!sameReview(previous, review)) {
       const uris = this.reviewUris.get(review.changeId);
@@ -435,6 +532,7 @@ export class Workbench {
         .flatMap((group) => group.tabs)
         .filter((tab) => tab.input instanceof vscode.TabInputTextDiff && uris?.has(tab.input.modified.toString()));
       await vscode.window.tabGroups.close(tabs, true);
+      this.assertSession(session);
       this.reviewUris.delete(review.changeId);
     }
     this.reviews.set(review.changeId, review);
@@ -446,22 +544,29 @@ export class Workbench {
       this.tasks().map((task) => ({ label: task.title, task })),
       { placeHolder: '选择任务' },
     );
-    return picked?.task;
+    return this.tasks().find((task) => task.id === picked?.task.id);
   }
   private async configure() {
+    const session = this.session;
     const list = await this.api('workspaces.list', undefined);
     const branch = await vscode.window.showQuickPick(
       list.branches.map((b) => b.name),
       { placeHolder: '选择主目录当前检出的主开发分支' },
     );
     if (branch) {
+      this.assertSession(session);
+      const current = await this.api('workspaces.list', undefined);
+      const primary = current.worktrees.find((row) => row.isMain && !row.shared && !row.clone);
+      if (primary?.branch !== branch || primary.detached || primary.busy) throw new Error('请先在主目录检出这个开发分支并完成当前 Git 操作');
       await this.api('workflow.configure', { branch });
+      await this.refresh(true);
       await this.api('preview.refresh', undefined);
     }
   }
   private async createTask() {
     if (!this.data?.workflow) await this.configure();
     if (!(await this.api('workflow.get', undefined)).workflow) return;
+    await this.refresh(true);
     this.creating = true;
     this.selected = undefined;
     this.taskSection = undefined;
@@ -475,15 +580,18 @@ export class Workbench {
     await this.context.workspaceState.update(`warden.expanded:${this.backend.root}`, this.expanded);
   }
   private async selectTask(node?: Node, openFile = true, section?: TaskSection, refreshReview = false) {
+    const session = this.session;
     const task = await this.pickTask(node);
-    if (!task) return;
+    if (!task || session !== this.session) return;
     if (this.selected !== task.id) this.taskSection = undefined;
     this.selected = task.id;
     this.creating = false;
     if (section) this.taskSection = { request: randomUUID(), section };
-    await this.context.workspaceState.update(`warden.selected:${this.backend!.root}`, task.id);
+    await this.branchViews.select(this.backend!.root, task.developmentBranch, task.id);
+    if (session !== this.session) return;
     this.views.render();
     await this.views.show('task');
+    if (session !== this.session) return;
     if (openFile && task.worktree) {
       const uris = this.reviewUris.get(task.id);
       const tabs = vscode.window.tabGroups.all
@@ -535,18 +643,22 @@ export class Workbench {
   }
   private async openDiff(node?: Node) {
     if (node?.kind !== 'file') return;
+    const session = this.session;
     if (node.task) {
+      if (!this.tasks().some((task) => task.id === node.task!.id)) throw new Error('任务已不属于当前主开发分支');
       if (this.selected !== node.task.id) this.taskSection = undefined;
       this.selected = node.task.id;
       this.creating = false;
       this.selectedFiles[node.task.id] = node.file.path;
-      await this.context.workspaceState.update(`warden.selected:${this.backend!.root}`, node.task.id);
+      await this.branchViews.select(this.backend!.root, node.task.developmentBranch, node.task.id);
       await this.context.workspaceState.update(`warden.files:${this.backend!.root}`, this.selectedFiles);
+      this.assertSession(session);
     }
     const review = node.review;
     if (node.task && (!review || !sameReview(review, await this.readReview(node.task.id)))) throw new Error('审查版本已变化，请刷新文件列表并重新打开差异');
     const key = node.target;
     const latest = (await this.api('review.files', { key })).files.find((f) => f.path === node.file.path);
+    this.assertSession(session);
     if (!latest) throw new Error('文件差异已变化，请刷新');
     if (latest.binary) {
       if (review) await this.rememberReview(review);
@@ -558,13 +670,16 @@ export class Workbench {
     const read = (side: 'old' | 'new') => this.api('review.file', { key, file: side === 'old' ? (latest.oldPath ?? latest.path) : latest.path, side });
     const [old, current] = await Promise.all([read('old'), read('new')]);
     const after = (await this.api('review.files', { key })).files.find((f) => f.path === latest.path);
+    this.assertSession(session);
     if (after?.contentHash !== latest.contentHash) throw new Error('读取期间文件发生变化，请重新打开差异');
     if (review) {
       if (!sameReview(review, await this.readReview(review.changeId))) throw new Error('读取期间审查版本发生变化，请重新打开差异');
+      this.assertSession(session);
       await this.rememberReview(review);
     }
     const left = await this.documents.add(path.basename(latest.oldPath ?? latest.path), old.content ?? '', this.backend!.root, latest.oldPath ?? latest.path);
     const right = await this.documents.add(path.basename(latest.path), current.content ?? '', this.backend!.root, latest.path);
+    this.assertSession(session);
     if (review) {
       const uris = this.reviewUris.get(review.changeId) ?? new Set<string>();
       uris.add(right.toString());
@@ -640,7 +755,7 @@ export class Workbench {
     await this.perform(
       async () => {
         // Typing never replaces the review pinned when this input opened, even if navigation changed it.
-        if (session !== this.session || this.switching) throw new Error('仓库已切换，请重新提交');
+        this.assertSession(session);
         if (!sameReview(pinned, this.reviews.get(task.id)) || !sameReview(pinned, await this.readReview(task.id)))
           throw new Error('输入期间审阅版本已变化，请重新打开差异后提交');
         await this.deliver({ kind: 'task', task }, message);
@@ -729,10 +844,15 @@ export class Workbench {
     this.output.show(true);
   }
   private async showRebase(node?: Node) {
+    if (node?.kind === 'task' && !this.tasks().some((task) => task.id === node.task.id)) return;
     this.rebaseSelection = { request: randomUUID(), taskIds: node?.kind === 'task' ? [node.task.id] : [] };
     await this.views.show('rebase');
-    this.checks = await this.api('rebase.check', undefined);
-    this.views.render();
+    await this.refreshChecks();
+  }
+  private async refreshChecks() {
+    await this.reading;
+    this.checkSignature = undefined;
+    await this.refresh(true);
   }
   private async copyWorkspace(node?: Node) {
     const task = await this.pickTask(node);
@@ -793,7 +913,7 @@ export class Workbench {
       session: this.session,
       repository: this.switching ? '' : (this.backend?.root ?? ''),
       surface,
-      workflow: this.data,
+      workflow: this.branchTransition ? undefined : this.data,
       task,
       creating: this.creating,
       taskSection: this.taskSection,
@@ -809,15 +929,18 @@ export class Workbench {
       review,
       reviewCurrent: !!task && !!this.data && sameReview(review, taskReview(this.data, task.id, this.checkouts?.worktrees ?? [])),
       message: task ? (this.messages[task.id] ?? task.title) : '',
-      busy: this.busy,
+      busy: this.branchTransition ? '正在切换主开发分支…' : this.busy,
       errors: [...this.errors.values()],
     };
   }
   private async saveDraft() {
-    if (this.backend) await this.context.workspaceState.update(`warden.history:${this.backend.root}`, this.historyDraft);
+    if (this.backend && this.branch) await this.branchViews.draft(this.backend.root, this.branch, this.historyDraft);
+  }
+  private assertSession(session: string) {
+    if (session !== this.session || this.switching || this.branchTransition) throw new Error('仓库或主开发分支已切换，请使用当前界面重试');
   }
   private async handleAction(action: WorkbenchAction, session: string) {
-    if (session !== this.session || this.switching) throw new Error('仓库已切换，请使用当前界面重试');
+    this.assertSession(session);
     if (action.type === 'setup.repository' || action.type === 'setup.branch') {
       await this.perform(() => (action.type === 'setup.repository' ? this.selectRepository() : this.configure()), '正在选择…');
       return;
@@ -867,7 +990,7 @@ export class Workbench {
     await this.perform(
       async () => {
         // A queued message must never be interpreted in the next repository session.
-        if (session !== this.session) throw new Error('仓库已切换');
+        this.assertSession(session);
         switch (action.type) {
           case 'workspaces.create':
             await this.createTask();
@@ -915,10 +1038,12 @@ export class Workbench {
             await this.promptDelivery(node);
             break;
           case 'task.create': {
+            const repository = this.backend!.root;
             const created = await this.api('task.create', { title: action.title, body: action.body });
+            await this.branchViews.select(repository, created.developmentBranch, created.id);
+            if (session !== this.session) break;
             this.selected = created.id;
             this.creating = false;
-            await this.context.workspaceState.update(`warden.selected:${this.backend!.root}`, created.id);
             break;
           }
           case 'task.update':
@@ -987,12 +1112,13 @@ export class Workbench {
             await vscode.commands.executeCommand('workbench.action.openSettings', 'warden.acpAgents');
             break;
           case 'rebase.check':
-            this.checks = await this.api('rebase.check', undefined);
+            await this.refreshChecks();
             break;
-          case 'rebase.run':
-            this.rebaseResult = await this.api('rebase.run', { items: action.items });
-            this.checks = await this.api('rebase.check', undefined);
+          case 'rebase.run': {
+            const result = await this.api('rebase.run', { items: action.items });
+            if (session === this.session) this.rebaseResult = result;
             break;
+          }
           case 'history.discard':
             this.historyDraft = undefined;
             this.historyPreview = undefined;
@@ -1006,7 +1132,7 @@ export class Workbench {
               files.map((row) => ({ label: row.file.path, node: row })),
               { placeHolder: `查看提交 ${commit.sha.slice(0, 8)} 的文件变更` },
             );
-            if (session !== this.session) throw new Error('仓库已切换');
+            this.assertSession(session);
             if (selected) await this.openDiff(selected.node);
             break;
           }
@@ -1015,9 +1141,10 @@ export class Workbench {
             this.historyDraft = action.draft;
             this.historyPreview = undefined;
             await this.saveDraft();
+            this.assertSession(session);
             const result = await this.api('history.preview', action.draft);
             // Typing while replay runs invalidates the candidate instead of authorizing newer edits.
-            if (candidate === JSON.stringify(this.historyDraft)) this.historyPreview = result;
+            if (session === this.session && candidate === JSON.stringify(this.historyDraft)) this.historyPreview = result;
             break;
           }
           case 'history.apply': {
@@ -1025,6 +1152,7 @@ export class Workbench {
             const appliedDraft = JSON.stringify(this.historyDraft);
             if (!candidate?.canApply || candidate.id !== action.id || candidate.head !== action.head) throw new Error('历史草稿已变化，请重新预览');
             await this.api('history.apply', { id: action.id, head: action.head });
+            if (session !== this.session) break;
             if (JSON.stringify(this.historyDraft) === appliedDraft) this.historyDraft = undefined;
             this.historyPreview = undefined;
             await this.saveDraft();

@@ -98,13 +98,20 @@ export class PreviewService {
         if ((await snapshotWorktree(target.path, snapshotStore(this.store.file))) !== saved.tree)
           conflict('预览目录有额外改动，已停止同步；请在主目录编辑代码', 'preview_dirty');
         const unchanged =
+          saved.developmentBranch === state.workflow?.developmentBranch &&
           saved.baselineTree === inputs.baseline &&
           saved.developmentHead === inputs.head &&
           inputs.sources.every((source) => saved.sources?.some((s) => s.changeId === source.change.id && s.appliedTree === source.tree));
         const command = state.workspaceConfig?.previewSetup;
         if (unchanged && saved.status !== 'stale' && (!command || (saved.setup?.command === command && !['pending', 'running'].includes(saved.setup.status))))
           return;
-        const key = JSON.stringify([inputs.head, inputs.baseline, inputs.sources.map((s) => [s.change.id, s.from, s.tree]), command]);
+        const key = JSON.stringify([
+          state.workflow?.developmentBranch,
+          inputs.head,
+          inputs.baseline,
+          inputs.sources.map((s) => [s.change.id, s.from, s.tree]),
+          command,
+        ]);
         if (this.observed?.key !== key) {
           this.observed = { key, since: Date.now() };
           await this.store.update((s) => {
@@ -321,7 +328,12 @@ export class PreviewService {
       await sandbox.fetch(target.path, await oid(target.path, 'HEAD'));
       const patch = await patchBetween(sandbox.path, previous.tree!, tree);
       const command = state.workspaceConfig?.previewSetup;
-      const needsSetup = !!command && (tree !== previous.tree || previous.setup?.command !== command || ['pending', 'running'].includes(previous.setup.status));
+      const needsSetup =
+        !!command &&
+        (previous.developmentBranch !== state.workflow!.developmentBranch ||
+          tree !== previous.tree ||
+          previous.setup?.command !== command ||
+          ['pending', 'running'].includes(previous.setup.status));
       const response: PreviewResponse = {
         developmentBranch: state.workflow!.developmentBranch,
         developmentHead: head,

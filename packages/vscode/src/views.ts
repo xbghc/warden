@@ -58,7 +58,7 @@ export class Views implements vscode.WebviewViewProvider, vscode.Disposable {
             return;
           }
           if (envelope.type !== 'action' || typeof envelope.session !== 'string') throw new Error('未知界面消息');
-          if (envelope.session !== this.model(surface).session) throw new Error('仓库已切换，请使用当前界面重试');
+          if (envelope.session !== this.model(surface).session) throw new Error('仓库或主开发分支已切换，请使用当前界面重试');
           const action = parseWorkbenchAction(envelope.action);
           const prefix = action.type.split('.')[0];
           if (prefix !== 'setup' && prefix !== surface && !(surface === 'workspaces' && prefix === 'task')) throw new Error('此界面不能执行该操作');

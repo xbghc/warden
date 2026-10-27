@@ -78,6 +78,32 @@ try:
         row.get_by_role('textbox', name='说明', exact=True).fill('尚未保存的说明草稿')
         page.reload()
         expect(row.get_by_role('textbox', name='说明', exact=True)).to_have_value('尚未保存的说明草稿')
+        # Model transitions from the native host remount the list without saving either branch's notes.
+        branch_a = page.request.get(origin + '/model').json()
+        branch_a['taskSection'] = None
+        branch_b = json.loads(json.dumps(branch_a))
+        branch_b['session'] = 'browser-other-branch'
+        branch_b['workflow']['workflow']['developmentBranch'] = 'feature/other'
+        branch_b['task'].update(id='other-branch-task', title='其他分支任务', body='B 原有说明', developmentBranch='feature/other')
+        branch_b['workspaces'] = [{**branch_b['workspaces'][0], 'task': branch_b['task']}]
+        branch_b['taskSection'] = {'request': 'edit-branch-b', 'section': 'edit'}
+        page.evaluate("model => window.postMessage({type:'model', model}, '*')", branch_b)
+        other_row = page.get_by_role('listitem', name='其他分支任务', exact=True)
+        expect(other_row).to_be_visible()
+        expect(row).to_have_count(0)
+        expect(other_row.get_by_role('textbox', name='说明', exact=True)).to_have_value('B 原有说明')
+        other_row.get_by_role('textbox', name='说明', exact=True).fill('B 未保存的说明')
+        branch_a['session'] = 'browser-return-to-main'
+        page.evaluate("model => window.postMessage({type:'model', model}, '*')", branch_a)
+        expect(row.get_by_role('textbox', name='说明', exact=True)).to_have_value('尚未保存的说明草稿')
+        expect(other_row).to_have_count(0)
+        page.screenshot(path=str(artifacts / 'branch-return-draft.png'), full_page=True)
+        branch_b['session'] = 'browser-return-to-other'
+        page.evaluate("model => window.postMessage({type:'model', model}, '*')", branch_b)
+        expect(other_row.get_by_role('textbox', name='说明', exact=True)).to_have_value('B 未保存的说明')
+        branch_a['session'] = 'browser-fixture'
+        page.evaluate("model => window.postMessage({type:'model', model}, '*')", branch_a)
+        expect(row.get_by_role('textbox', name='说明', exact=True)).to_have_value('尚未保存的说明草稿')
         row.get_by_role('button', name='取消编辑', exact=True).click()
         row.get_by_role('button', name='展开订单接口的变更文件', exact=True).click()
         files = row.get_by_role('group', name='订单接口的变更文件', exact=True)
@@ -210,7 +236,7 @@ try:
         assert not errors, errors
         assert page.evaluate('window.__hostError') is None
         browser.close()
-    print('Webview browser flows passed: icon action rows, independent file collapse, native commit routing, note drafts, keyboard and drag ordering, scripts, history and rebase.')
+    print('Webview browser flows passed: icon action rows, independent file collapse, native commit routing, branch-scoped note drafts, keyboard and drag ordering, scripts, history and rebase.')
 except Exception:
     if 'errors' in globals():
         print('Browser errors:', errors, file=sys.stderr)

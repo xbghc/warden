@@ -21,8 +21,18 @@ deliveries without being recycled. There is no task-complete declaration or rele
 notes and ordering remain available while work is in progress. Historical TODO descriptions and
 historical metadata is retained; old checked items migrate as archived notes, not accepted commits.
 
-The primary branch can change when no integration or active connection belongs to it.
-Tasks remain associated with the branch for which they were created.
+After initial configuration, switching the primary checkout branch in Git or VS Code makes Warden
+show that branch's tasks and workspaces automatically. Switching back restores the previously selected
+task and history draft. Branch names define the context even if their commits are identical. Tasks
+remain associated with their original branch; following the primary checkout never rebases, replaces
+or recycles their workspaces, and it does not redirect existing ACP conversations.
+
+Finish any delivery preparation and disconnect the preview before switching requirements. If an
+external checkout changes while either is active, Warden retains the previous context and explains
+the mismatch. Switch back to resolve the outstanding operation first. Detached HEAD and unfinished
+Git operations do not select another requirement. The independent preview directory and its ignored
+dependencies persist across switches; its synchronization status becomes pending until refreshed for
+the new branch, and the configured setup script receives the new development branch.
 
 ## Shared repository
 
