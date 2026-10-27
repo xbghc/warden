@@ -154,6 +154,7 @@ export class Engine {
   private readonly handlers: EngineCommands;
   private readonly preview: PreviewService;
   private readonly pending = new Set<Promise<unknown>>();
+  private writers = 0;
   private readonly watchers = new Map<string, RepoWatcher>();
   private stateWatcher?: FSWatcher;
   private timer?: ReturnType<typeof setInterval>;
@@ -183,9 +184,14 @@ export class Engine {
   }
   execute<K extends EngineCommand>(command: K, request: EngineInput<K>, context?: { developmentBranch: string | null }): Promise<EngineOutput<K>> {
     if (this.stopped) return Promise.reject(new WardenError(409, '仓库会话已关闭', 'session_closed'));
+    const write = !reads.has(command);
+    if (write) ++this.writers;
     const operation = Promise.resolve().then(async () => {
       const handler = this.handlers[command];
       if (!Object.hasOwn(this.handlers, command)) throw badRequest('未知操作', 'unknown_command');
+      // Our own preview can legitimately outlast the cross-window lock timeout.
+      // Finish it before a requested write starts competing for repository ownership.
+      if (write) await this.ticking;
       if (!reads.has(command) && command !== 'preview.refresh' && command !== 'preview.setup') record(request);
       const invoke = () => (handler as (input: never) => Promise<unknown>)(request as never);
       const result = context && !reads.has(command) ? await this.store.withDevelopmentBranch(context.developmentBranch, invoke) : await invoke();
@@ -194,7 +200,12 @@ export class Engine {
       return result;
     });
     this.pending.add(operation);
-    void operation.finally(() => this.pending.delete(operation)).catch(() => {});
+    void operation
+      .finally(() => {
+        this.pending.delete(operation);
+        if (write) --this.writers;
+      })
+      .catch(() => {});
     return operation as Promise<EngineOutput<K>>;
   }
   private observe(roots: string[]) {
@@ -245,7 +256,7 @@ export class Engine {
     this.stateWatcher.on('error', onError);
     this.observe([this.root]);
     this.timer = setInterval(() => {
-      if (!this.ticking)
+      if (!this.ticking && this.writers === 0)
         this.ticking = (async () => {
           this.lease ??= (await this.store.acquirePreviewLease()) ?? undefined;
           if (this.lease && !this.stopped) await this.preview.tick();

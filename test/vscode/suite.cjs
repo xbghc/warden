@@ -239,7 +239,12 @@ exports.run = async () => {
     });
     await submittedInput;
     assert.equal(primaryGit('log', '-1', '--format=%B'), 'Reviewed delivery\n\nKeep normal commit hooks');
-    const accepted = (await state()).workflow.changes[0].deliveries[0];
+    const deliveredTask = (await state()).workflow.changes[0];
+    assert(
+      deliveredTask.deliveries?.length,
+      `delivery bookkeeping is durable: ${JSON.stringify({ task: deliveredTask, errors: [...workbench.errors.values()] })}`,
+    );
+    const accepted = deliveredTask.deliveries[0];
     assert(accepted.id && accepted.commit, 'delivery is durable');
     assert.equal((await state()).workflow.changes[0].worktree, workspace);
 

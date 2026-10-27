@@ -32,6 +32,11 @@ owner releases before inspection. Publication retries within the same wait budge
 atomic rename grants ownership. Persistent permission failures with no competing owner retain their
 original error, and uncertain live owners are never reclaimed.
 
+Requested engine writes wait for that engine's active preview tick before entering the repository
+lock wait. Further ticks pause while such writes are pending, so a slow local composition cannot
+consume their cross-window wait budget. Reads remain available, and another window's ownership
+still uses the ordinary bounded lock wait.
+
 The outer `.lock` and `v2` directories persist after release. New versions use exclusive directory
 creation for the outer path, so Windows directory rename cannot replace a legacy flat lock there.
 Before first using this version, close all older Warden windows and processes; upgrade them before

@@ -152,6 +152,43 @@ describe('desktop engine', () => {
     expect(errors).toEqual([]);
   });
 
+  it('lets a requested write wait for its own slow preview without consuming the repository lock timeout', async () => {
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const running = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    vi.spyOn(PreviewService.prototype, 'tick').mockImplementation(async () => {
+      await engine.store.withRepositoryLock(async () => {
+        entered();
+        await gate;
+      });
+    });
+    const errors: unknown[] = [];
+    await engine.start(
+      async () => {},
+      (error) => errors.push(error),
+    );
+    await running;
+    const requested = engine.execute('task.create', { title: 'After preview' }).then(
+      (task) => ({ task }),
+      (error) => ({ error }),
+    );
+    try {
+      // A legitimate local composition can exceed the cross-window lock wait on Windows.
+      await new Promise((resolve) => setTimeout(resolve, 6_000));
+      expect((await engine.execute('workflow.context', undefined)).developmentBranch).toBe('main');
+      expect((await engine.store.load()).workflow!.changes).toHaveLength(0);
+    } finally {
+      release();
+    }
+    expect(await requested).toMatchObject({ task: { title: 'After preview' } });
+    expect(errors).toEqual([]);
+  });
+
   it('drains an in-flight mutation before closing and keeps the saved plan available to the next session', async () => {
     const creating = engine.execute('task.create', { title: 'Persist across reload' });
     await engine.close();
