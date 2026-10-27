@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { syncBuiltinESMExports } from 'node:module';
 import fs, { mkdir, mkdtemp, readFile, readdir, rm, utimes, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ReviewState } from '@warden/shared';
 import { StateStore, defaultState, forgetWorktreeTargets, repoHash, stateFilePath } from './state.js';
 
 let dir: string;
@@ -163,6 +164,102 @@ describe('StateStore', () => {
     const s = await a.load();
     expect(s.prefs).toMatchObject({ viewMode: 'split', autoRefresh: false });
     expect(s.todos).toHaveLength(1);
+  });
+
+  it.each(['EPERM', 'EACCES', 'EBUSY'])('retries %s replacement contention while preserving the previous state', async (code) => {
+    const file = path.join(dir, 'state.json');
+    const store = new StateStore(file, '/repo');
+    await store.update(() => {});
+    const previous = await readFile(file, 'utf8');
+    const originalRename = fs.rename;
+    let failures = 0;
+    vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+      if (to === file && failures++ < 2) {
+        expect(await readFile(file, 'utf8')).toBe(previous);
+        expect(JSON.parse(await readFile(from, 'utf8')).prefs.viewMode).toBe('split');
+        throw Object.assign(new Error('File temporarily in use'), { code });
+      }
+      return originalRename(from, to);
+    });
+    syncBuiltinESMExports();
+    const mutate = vi.fn((state: ReviewState) => {
+      state.prefs.viewMode = 'split';
+    });
+    await store.update(mutate);
+    expect(mutate).toHaveBeenCalledOnce();
+    expect((await store.load()).prefs.viewMode).toBe('split');
+    expect((await readdir(dir)).sort()).toEqual(['state.json', 'state.json.lock']);
+  });
+
+  it('bounds persistent replacement failures, keeps the old state and allows a later write', async () => {
+    const file = path.join(dir, 'state.json');
+    const store = new StateStore(file, '/repo');
+    await store.update(() => {});
+    const previous = await readFile(file, 'utf8');
+    const originalRename = fs.rename;
+    const replace = vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+      if (to === file) throw Object.assign(new Error('File remains in use'), { code: 'EPERM' });
+      return originalRename(from, to);
+    });
+    syncBuiltinESMExports();
+    await expect(
+      store.update((state) => {
+        state.prefs.viewMode = 'split';
+      }),
+    ).rejects.toMatchObject({ code: 'EPERM' });
+    expect(await readFile(file, 'utf8')).toBe(previous);
+    expect((await readdir(dir)).sort()).toEqual(['state.json', 'state.json.lock']);
+    replace.mockRestore();
+    syncBuiltinESMExports();
+    await store.update((state) => {
+      state.prefs.viewMode = 'split';
+    });
+    expect((await store.load()).prefs.viewMode).toBe('split');
+  });
+
+  it('does not retry a nontransient state replacement failure', async () => {
+    const file = path.join(dir, 'state.json');
+    const originalRename = fs.rename;
+    let attempts = 0;
+    vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+      if (to === file) {
+        ++attempts;
+        throw Object.assign(new Error('Storage failure'), { code: 'EIO' });
+      }
+      return originalRename(from, to);
+    });
+    syncBuiltinESMExports();
+    await expect(new StateStore(file, '/repo').update(() => {})).rejects.toMatchObject({ code: 'EIO' });
+    expect(attempts).toBe(1);
+    expect(await readdir(dir)).toEqual(['state.json.lock']);
+  });
+
+  it('rechecks ownership before retrying a state replacement', async () => {
+    const file = path.join(dir, 'state.json');
+    const store = new StateStore(file, '/repo');
+    await store.update(() => {});
+    const replacement = JSON.stringify({ ...defaultState('/repo'), future: 'other writer' });
+    const originalRename = fs.rename;
+    let attempts = 0;
+    vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+      if (to === file && attempts++ === 0) {
+        await rm(`${file}.lock`, { recursive: true });
+        await writeFile(`${file}.lock`, 'other:holder');
+        await writeFile(file, replacement);
+        throw Object.assign(new Error('File temporarily in use'), { code: 'EPERM' });
+      }
+      return originalRename(from, to);
+    });
+    syncBuiltinESMExports();
+    await expect(
+      store.update((state) => {
+        state.prefs.viewMode = 'split';
+      }),
+    ).rejects.toMatchObject({ code: 'state_lock_lost' });
+    expect(attempts).toBe(1);
+    expect(await readFile(file, 'utf8')).toBe(replacement);
+    expect(await readFile(`${file}.lock`, 'utf8')).toBe('other:holder');
+    expect((await readdir(dir)).sort()).toEqual(['state.json', 'state.json.lock']);
   });
 
   it('recovers from a corrupt file', async () => {

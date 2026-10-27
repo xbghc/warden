@@ -32,6 +32,11 @@ owner releases before inspection. Publication retries within the same wait budge
 atomic rename grants ownership. Persistent permission failures with no competing owner retain their
 original error, and uncertain live owners are never reclaimed.
 
+Replacing the state JSON also retries short `EPERM`, `EACCES` and `EBUSY` failures with a bounded
+backoff. Each attempt rechecks the ownership token and reuses the same fsynced temporary snapshot;
+the mutation callback runs once. The previous state remains intact if replacement keeps failing,
+and only the writer's own temporary file is removed. Publication never unlinks the current state.
+
 Requested engine writes wait for that engine's active preview tick before entering the repository
 lock wait. Further ticks pause while such writes are pending, so a slow local composition cannot
 consume their cross-window wait budget. Reads remain available, and another window's ownership

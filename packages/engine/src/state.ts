@@ -121,6 +121,7 @@ function migrateTodoPlans(state: ReviewState): void {
 
 const LOCK_STALE_MS = 5_000;
 const LOCK_WAIT_MS = 5_000;
+const RENAME_ATTEMPTS = 6;
 
 function lockOwnerHasExited(owner: string | undefined): boolean {
   const match = /^([1-9]\d*):[^:\r\n]+$/.exec(owner ?? '');
@@ -305,10 +306,7 @@ export class StateStore {
       try {
         const state = await this.load();
         const result = await fn(state);
-        // An older writer or an external lock replacement may have taken this token and
-        // changed the file meanwhile; writing our earlier copy would undo that change.
-        if (!(await lock.held())) throw new WardenError(409, 'the state lock was taken over while this change was prepared; try again', 'state_lock_lost');
-        await this.writeAtomic(state);
+        await this.writeAtomic(state, lock.held);
         return result;
       } finally {
         await lock.release();
@@ -319,18 +317,37 @@ export class StateStore {
     return p;
   }
 
-  private async writeAtomic(state: ReviewState): Promise<void> {
-    const tmp = `${this.file}.${process.pid}.${Date.now()}.tmp`;
-    const fh = await open(tmp, 'w');
+  private async writeAtomic(state: ReviewState, held: () => Promise<boolean>): Promise<void> {
+    const tmp = `${this.file}.${randomUUID()}.tmp`;
+    let temporaryPresent = false;
     try {
-      await fh.writeFile(JSON.stringify(state, null, 2) + '\n', 'utf8');
-      // Without it a power cut can leave the renamed file empty, which load() then sets aside as
-      // corrupt: saved state gone, with nothing in the copy either.
-      await fh.sync();
+      const fh = await open(tmp, 'wx');
+      temporaryPresent = true;
+      try {
+        await fh.writeFile(JSON.stringify(state, null, 2) + '\n', 'utf8');
+        // Without it a power cut can leave the renamed file empty, which load() then sets aside as
+        // corrupt: saved state gone, with nothing in the copy either.
+        await fh.sync();
+      } finally {
+        await fh.close();
+      }
+      for (let attempt = 0; ; ++attempt) {
+        // Delayed publication must not overwrite a newer writer after ownership changes.
+        if (!(await held())) throw new WardenError(409, 'the state lock was taken over while this change was prepared; try again', 'state_lock_lost');
+        try {
+          await rename(tmp, this.file);
+          temporaryPresent = false;
+          return;
+        } catch (error) {
+          if (attempt + 1 >= RENAME_ATTEMPTS || !['EPERM', 'EACCES', 'EBUSY'].includes(errorCode(error) ?? '')) throw error;
+          // Windows readers and scanners can briefly prevent replacement. Keep the previous
+          // state visible and retry the same durable snapshot, without rerunning the mutation.
+          await sleep(25 * 2 ** attempt);
+        }
+      }
     } finally {
-      await fh.close();
+      if (temporaryPresent) await rm(tmp, { force: true });
     }
-    await rename(tmp, this.file);
   }
 
   /**
