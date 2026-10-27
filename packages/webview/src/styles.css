@@ -413,3 +413,145 @@ summary {
     padding: 12px;
   }
 }
+.workspace-pane {
+  padding: 4px 8px;
+}
+.workspace-navigation {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 0 8px;
+  border-bottom: 1px solid var(--color-border);
+}
+.workspace-navigation > button:not([data-slot]) {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 7px;
+  border-radius: 3px;
+}
+.workspace-navigation > button:last-child {
+  margin-left: auto;
+}
+.workspace-navigation svg,
+.workspace-file > svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+.workspace-navigation button:hover,
+.workspace-title:hover,
+.workspace-file:hover {
+  background: var(--color-accent);
+}
+.workspace-navigation button:focus-visible,
+.workspace-title:focus-visible,
+.workspace-file:focus-visible {
+  outline: 1px solid var(--color-ring);
+  outline-offset: -1px;
+}
+.workspace-row {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--color-border);
+  border-left: 2px solid transparent;
+}
+.workspace-row.selected {
+  border-left-color: var(--vscode-list-inactiveSelectionBackground, var(--color-border));
+}
+.workspace-heading {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 2px;
+}
+.workspace-title {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 3px 2px;
+  cursor: grab;
+}
+.workspace-status {
+  max-width: 42%;
+  font-size: 11px;
+  color: var(--color-muted-foreground);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  padding-right: 4px;
+}
+.workspace-plan-icon {
+  width: 12px;
+  height: 12px;
+  margin: 6px;
+  flex: none;
+}
+.workspace-actions {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 0 1px 24px;
+  flex-wrap: wrap;
+}
+.workspace-actions [aria-pressed="true"] {
+  color: var(--vscode-textLink-foreground, var(--color-primary));
+  background: var(--vscode-list-activeSelectionBackground, var(--color-accent));
+}
+.workspace-files {
+  margin: 4px 0 0 24px;
+}
+.workspace-files p {
+  margin: 6px;
+  font-size: 12px;
+}
+.workspace-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 6px;
+  text-align: left;
+}
+.workspace-file > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workspace-file > small {
+  flex: none;
+  color: var(--color-muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+.workspace-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 8px;
+}
+.workspace-drop-end {
+  min-height: 10px;
+}
+.workspace-row > .task-inline {
+  margin: 8px 6px 4px 24px;
+}
+.task-inline {
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  padding: 8px;
+}
+.task-inline .task-section-heading {
+  margin: 0;
+}
+.workspace-row > .error,
+.workspace-row > .notice {
+  margin: 6px 4px 6px 24px;
+  font-size: 12px;
+}

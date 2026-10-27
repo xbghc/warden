@@ -5,13 +5,25 @@ import { WorkbenchApp } from './workbench';
 const base: WorkbenchModel = {
   session: 'storybook',
   repository: '/projects/orders',
-  surface: 'task',
+  surface: 'workspaces',
   creating: true,
   message: '',
   errors: [],
   reviewCurrent: false,
   hasPreviewCommand: false,
   workflow: { workflow: { developmentBranch: 'feature/orders', changes: [] } },
+};
+const task = {
+  id: 'orders',
+  title: '订单查询接口',
+  body: '增加分页查询\n保留旧调用方式',
+  developmentBranch: 'feature/orders',
+  status: 'working' as const,
+  createdAt: '2026-10-24T00:00:00Z',
+  branch: 'warden/orders',
+  base: 'abc123',
+  worktree: '/projects/orders-1',
+  workspaceHook: { event: 'create' as const, command: 'pnpm install', status: 'failed' as const, exitCode: 1, output: '依赖安装失败，请检查仓库配置后重试。' },
 };
 const meta = {
   title: 'Workbench/Forms',
@@ -30,18 +42,8 @@ export const HookFailure: Story = {
     model: {
       ...base,
       creating: false,
-      task: {
-        id: 'orders',
-        title: '订单查询接口',
-        body: '增加分页查询\n保留旧调用方式',
-        developmentBranch: 'feature/orders',
-        status: 'working',
-        createdAt: '2026-10-24T00:00:00Z',
-        branch: 'warden/orders',
-        base: 'abc123',
-        worktree: '/projects/orders-1',
-        workspaceHook: { event: 'create', command: 'pnpm install', status: 'failed', exitCode: 1, output: '依赖安装失败，请检查仓库配置后重试。' },
-      },
+      task,
+      workspaces: [{ task, expanded: false, description: '初始化失败', tooltip: task.body }],
       errors: [{ scope: 'task:orders', code: 'commit_failed', message: '提交 hook 失败；已保留主目录中准备好的内容。处理后重新打开差异审阅。' }],
     },
   },

@@ -12,19 +12,17 @@ there is no separate review-mode switch. The baseline is the last delivered sour
 primary baseline already incorporated by the workspace. Live uncommitted edits remain visible;
 formal delivery in this version requires a clean committed source.
 
-Delivery history, task details and workspace-hook output open on demand from the sidebar task menu.
-Choose **交付记录** to inspect previous batches or **初始化脚本** to inspect hook output. Failed hooks
-keep visible feedback and recovery actions. Closing the inline details restores the commit form and its
-draft. The native editor contains only the diff. File-list expansion is independent per task and survives
-refresh or reselection; it does not replace the current file or reset its scroll. Icon actions expose
-accessible names and hover/focus tooltips.
-The same [interface copy rules](design.md#interface-copy) apply to preview, history, synchronization
-and settings. Operational consequences and recovery instructions stay beside their actions.
+Each workspace has an icon action row directly below its title. Its file list collapses independently
+without hiding actions, replacing the native diff or resetting editor scroll. Notes and delivery records
+open inline; script failures expose their output and retry actions in context. There is no task-details
+or workspace-script menu entry, and no permanent commit form. Icons retain accessible names and
+hover/focus tooltips.
 
-The native task diff is read-only for source files. Enter a message and choose **提交到主开发分支**
-to deliver the complete reviewed increment with ordinary Git hooks. Preparation is internal to that
-action, with recovery controls shown only when interrupted. No validation checkbox or readiness declaration is required. Failed hooks preserve
-files; successful delivery preserves the workspace. See [Squash acceptance](worktrees.md#squash-acceptance).
+Choose the commit icon and enter a message in VS Code's native top input box. Enter submits the reviewed
+increment with ordinary Git hooks; Escape cancels without staging and retains the draft. The input keeps
+its original task, repository and pinned review. Any source, delivery-boundary or primary-version change
+while typing requires renewed review. Recovery remains explicit after interrupted preparation or failed
+hooks. Successful delivery preserves the workspace. See [Squash acceptance](worktrees.md#squash-acceptance).
 
 The read-only target APIs below underpin diff rendering.
 Task review pins the source commit, delivery boundary and primary HEAD. Background refresh does
@@ -57,7 +55,7 @@ branch clears its historical target metadata.
 
 Navigation stays together in the left sidebar: *预览*, *提交历史*, ordered tasks and the
 synchronization/settings panels. Within a task, its file list selects the diff directly. Connection
-selection is independent and remains available in each task row of the native tree.
+selection is independent and remains available in each workspace action row.
 
 Review presents the complete file list for the current comparison. Staging does not establish that
 a file has been reviewed.
@@ -75,7 +73,7 @@ Diffs use immutable `warden-review:` documents and cannot modify source files or
 Select a line or range and run **Warden: 复制审阅位置** (`Ctrl+Alt+C`, macOS `Cmd+Alt+C`) to copy
 `path:start-end`. Native diff navigation, folding and search remain available.
 
-The file tree and native diff title display Git file-mode changes, including executable-bit and
+File-list tooltips and the native diff title display Git file-mode changes, including executable-bit and
 file-type changes. A mode-only change remains visible even when both read-only text snapshots are
 identical; the snapshots themselves contain only the original file content.
 

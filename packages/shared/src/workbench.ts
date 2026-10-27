@@ -8,11 +8,21 @@ import type {
   WorkflowResponse,
   WorkflowTask,
   WorkspaceConfig,
+  FileEntry,
 } from './types.js';
 import type { TaskReview } from './review.js';
 
-export type Surface = 'task' | 'preview' | 'history' | 'settings' | 'rebase';
-export type TaskSection = 'commit' | 'details' | 'edit' | 'history' | 'hook';
+export type Surface = 'workspaces' | 'task' | 'preview' | 'history' | 'settings' | 'rebase';
+export type TaskSection = 'commit' | 'edit' | 'history' | 'hook' | 'workspace';
+export interface WorkspaceRow {
+  task: WorkflowTask;
+  expanded: boolean;
+  description: string;
+  tooltip: string;
+  files?: FileEntry[];
+  filesError?: string;
+  review?: TaskReview;
+}
 export interface WorkbenchError {
   scope: string;
   message: string;
@@ -26,6 +36,7 @@ export interface WorkbenchModel {
   task?: WorkflowTask;
   creating: boolean;
   taskSection?: { request: string; section: TaskSection };
+  workspaces?: WorkspaceRow[];
   preview?: PreviewResponse;
   hasPreviewCommand: boolean;
   history?: HistoryResponse;
@@ -43,10 +54,16 @@ export interface WorkbenchModel {
 
 export type WorkbenchAction =
   | { type: 'setup.repository' | 'setup.branch' | 'settings.agents' }
+  | { type: 'workspaces.create' | 'workspaces.refresh' }
+  | { type: 'workspaces.show'; surface: 'preview' | 'history' | 'settings' | 'rebase' }
   | { type: 'task.create'; title: string; body: string }
   | { type: 'task.update'; taskId: string; title: string; body: string }
   | { type: 'task.start'; taskId: string; kind: 'shared' | 'clone'; agent?: string }
   | { type: 'task.review' | 'task.open' | 'task.hook' | 'task.resume' | 'task.copy' | 'task.brief' | 'task.restore' | 'task.chat'; taskId: string }
+  | { type: 'task.select' | 'task.edit' | 'task.history' | 'task.output' | 'task.options' | 'task.connect' | 'task.sync' | 'task.commit'; taskId: string }
+  | { type: 'task.toggle'; taskId: string; expanded: boolean }
+  | { type: 'task.file'; taskId: string; path: string }
+  | { type: 'task.move'; taskId: string; before: string | null }
   | { type: 'task.deliver'; taskId: string; message: string }
   | { type: 'task.message'; taskId: string; message: string }
   | { type: 'preview.refresh' | 'preview.setup' | 'preview.terminal' | 'preview.run' | 'preview.copy' | 'rebase.check' | 'history.discard' }
@@ -54,6 +71,7 @@ export type WorkbenchAction =
   | { type: 'history.draft'; draft: HistoryPreviewRequest }
   | { type: 'history.preview'; draft: HistoryPreviewRequest }
   | { type: 'history.apply'; id: string; head: string }
+  | { type: 'history.review'; sha: string }
   | { type: 'rebase.run'; items: { changeId: string; sourceHead: string; developmentHead: string }[] };
 
 function object(value: unknown): Record<string, unknown> {
@@ -89,7 +107,19 @@ export function parseWorkbenchAction(value: unknown): WorkbenchAction {
     case 'setup.repository':
     case 'setup.branch':
     case 'settings.agents':
+    case 'workspaces.create':
+    case 'workspaces.refresh':
       return { type: action.type };
+    case 'workspaces.show':
+      if (!['preview', 'history', 'settings', 'rebase'].includes(String(action.surface))) throw new Error('未知工作区页面');
+      return { type: action.type, surface: action.surface as 'preview' | 'history' | 'settings' | 'rebase' };
+    case 'task.toggle':
+      if (typeof action.expanded !== 'boolean') throw new Error('文件列表展开状态无效');
+      return { type: action.type, taskId: identity(action.taskId), expanded: action.expanded };
+    case 'task.file':
+      return { type: action.type, taskId: identity(action.taskId), path: string(action.path) };
+    case 'task.move':
+      return { type: action.type, taskId: identity(action.taskId), before: action.before === null ? null : identity(action.before) };
     case 'task.create':
       return { type: action.type, title: string(action.title, 200), body: string(action.body) };
     case 'task.update':
@@ -111,6 +141,14 @@ export function parseWorkbenchAction(value: unknown): WorkbenchAction {
     case 'task.brief':
     case 'task.restore':
     case 'task.chat':
+    case 'task.select':
+    case 'task.edit':
+    case 'task.history':
+    case 'task.output':
+    case 'task.options':
+    case 'task.connect':
+    case 'task.sync':
+    case 'task.commit':
       return { type: action.type, taskId: identity(action.taskId) };
     case 'task.message':
       return { type: action.type, taskId: identity(action.taskId), message: string(action.message) };
@@ -134,6 +172,8 @@ export function parseWorkbenchAction(value: unknown): WorkbenchAction {
       return { type: action.type, draft: historyDraft(action.draft) };
     case 'history.apply':
       return { type: action.type, id: identity(action.id), head: identity(action.head) };
+    case 'history.review':
+      return { type: action.type, sha: identity(action.sha) };
     case 'rebase.run':
       if (!Array.isArray(action.items) || action.items.length > 1000) throw new Error('同步范围无效');
       return {

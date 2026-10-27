@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, ArrowUp, Check, Pencil } from 'lucide-react';
+import { ArrowDown, ArrowUp, Check, Pencil, FileDiff } from 'lucide-react';
 import type { HistoryPreviewRequest, WorkbenchAction, WorkbenchModel } from '@warden/shared';
 import { Button } from './components/ui/button';
 import { Textarea } from './components/ui/textarea';
@@ -8,6 +8,8 @@ import { Checkbox } from './components/ui/checkbox';
 import { NativeSelect, NativeSelectOption } from './components/ui/native-select';
 import { Task, taskDraftKey } from './task';
 import type { ViewState } from './task';
+import { Workspaces } from './workspaces';
+import { IconButton } from './components/ui/icon-button';
 
 type Props = { model: WorkbenchModel; send(action: WorkbenchAction): void; state?: ViewState };
 const labels: Record<string, string> = {
@@ -51,14 +53,16 @@ export function WorkbenchApp({ model, send, state: persisted }: Props) {
   }, [model.creating, model.task?.id, model.repository]);
   const scope = model.surface === 'task' ? `task:${model.task?.id ?? 'new'}` : model.surface;
   return (
-    <main className={model.surface === 'task' ? 'task-pane' : undefined}>
+    <main className={model.surface === 'workspaces' ? 'workspace-pane task-pane' : model.surface === 'task' ? 'task-pane' : undefined}>
       {model.busy && (
         <p role="status" className="muted">
           {model.busy}
         </p>
       )}
       {model.errors
-        .filter((error) => error.scope === scope || error.scope === 'repository')
+        .filter(
+          (error) => error.scope === scope || error.scope === 'repository' || (model.surface === 'workspaces' && model.creating && error.scope === 'task:new'),
+        )
         .map((error) => (
           <div role="alert" className="error" key={error.scope}>
             {error.message}
@@ -76,6 +80,7 @@ export function WorkbenchApp({ model, send, state: persisted }: Props) {
       ) : (
         <>
           {model.surface === 'task' && <Task key={taskDraftKey(model)} model={model} send={send} state={state} />}
+          {model.surface === 'workspaces' && <Workspaces model={model} send={send} state={state} />}
           {model.surface === 'preview' && <Preview model={model} send={send} />}
           {model.surface === 'history' && <History model={model} send={send} />}
           {model.surface === 'settings' && <Settings model={model} send={send} />}
@@ -258,7 +263,12 @@ function History({ model, send }: Props) {
           <h2>当前历史</h2>
           {history?.commits.map((commit) => (
             <div className="commit" key={commit.sha}>
-              <code>{commit.sha.slice(0, 8)}</code>
+              <div className="commit-heading">
+                <code>{commit.sha.slice(0, 8)}</code>
+                <IconButton label={`查看提交 ${commit.sha.slice(0, 8)} 的变更`} onClick={() => send({ type: 'history.review', sha: commit.sha })}>
+                  <FileDiff aria-hidden="true" />
+                </IconButton>
+              </div>
               <CommitMessage message={commit.message} />
               {commit.changeId && (
                 <small className="muted">来源：{model.workflow?.workflow?.changes.find((task) => task.id === commit.changeId)?.title ?? commit.changeId}</small>

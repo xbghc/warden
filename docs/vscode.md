@@ -25,37 +25,34 @@ Before configuration, the sidebar shows only the next setup action: **选择仓�
 **选择主开发分支**. The task pane, preview status and operational navigation appear after branch
 selection. Opening a workflow page early shows the same setup action instead of empty controls.
 
-The Warden navigation contains preview, history, the ordered plan and settings. The synchronization
-icon sits beside the add-task icon in the workspace heading. A workspace needing synchronization or
-with a predicted conflict exposes an inline icon that opens the checks with only that workspace selected.
-Task rows independently expand to the complete changed-file list and remember their expansion per
-repository. Selecting a task opens its sidebar form and preserves its existing native diff, file selection
-and editor scroll. The first selection opens a diff when one is available; refresh never expands the row. Task connection actions remain on the task rows. Drag-and-drop
-changes plan order only; the context menu also offers a keyboard-accessible move action.
-Rows show at most two status facts, with full context in the tooltip. History starts collapsed.
-Visible forms retain scoped errors; native notifications report errors in hidden forms.
+The workspace sidebar keeps preview, history, ordered tasks and settings together. Synchronization
+sits beside add-task in the native view heading. Every workspace has a persistent icon toolbar below
+its title: open workspace, Agent conversation, preview connection, commit, synchronization when needed,
+edit and more. Each icon has an accessible name and hover/focus help. The toolbar stays visible when
+the changed-file list is collapsed; expansion and selected files persist per repository.
 
-The current-task form provides multiline notes, workspace creation, script results, multiline commit
-messages and delivery recovery. Every workspace creation produces a fresh logical workspace with a
-new task branch. The optional executor name is a label. Copying a task brief writes context to the
-clipboard; the user can paste it into an ACP task conversation or an external tool. Physical slot reuse
-is internal: users do not select or adopt an old workspace.
-The optional executor label and compatibility clone option are available under workspace options.
-The compact task heading exposes **打开工作区**, **与 Agent 对话** and a keyboard-accessible
-more-actions menu. Workspace opening uses a new native VS Code window. Details, delivery records,
-script output and editing appear on demand inside the sidebar; closing them returns to the commit
-form without losing its draft. Failed hooks keep a visible link to their output. Task notes, optional
-workspace choices and sidebar scroll survive hiding/reopening the webview. Copy actions stay in the menu.
-Default workspace creation and commit submission execute directly; there is no extra confirmation dialog.
-Existing task associations and
-delivery records are preserved on upgrade; delivery never recycles another active task's workspace.
+Selecting a task preserves its existing native diff and editor scroll. The first selection opens an
+available diff; background refresh does not advance a pinned review. Dragging tasks or pressing
+Alt+Up/Down on a title changes only plan order. The Command Palette also offers an explicit move picker.
+There are no up/down, task-details or workspace-script entries in the more-actions menu. Copy actions,
+delivery records and optional executor/storage choices remain available there.
 
-Task review reserves the editor area for native read-only diffs; task headings and commit forms stay
-in the sidebar. Preview, history, batch rebase and settings open as editor-area webviews. Their resources are
-packaged locally, use VS Code theme colors, and send a finite validated action vocabulary to the host.
-Git operations do not require editing a JSON draft. Command Palette entry points remain available.
-ACP conversations open in separate task-bound panels and keep their original repository when the
-workbench selection changes.
+The commit icon opens VS Code's native top input box. Enter submits with ordinary Git hooks and signing;
+Escape cancels without staging and retains the draft. The task, repository and review version are fixed
+when input opens, so switching context or changing the source/baseline cannot authorize different content.
+Commit failures retain recovery data and show recovery actions beside the affected workspace.
+
+Task notes, delivery records and optional workspace settings open inline in the workspace list. Unsaved
+notes, choices and scroll survive hiding/reopening the webview. Script failures show output/retry actions
+in place; successful scripts do not add a menu entry. Default workspace creation executes directly.
+Every creation remains a fresh logical allocation and branch; physical directory reuse is internal.
+The optional executor name is only a label. Opening a workspace uses a new native VS Code window.
+
+Task review reserves the editor area for native read-only diffs. Preview, history arrangement, batch
+rebase and settings remain editor webviews. History entries expose native file review through a file
+picker. All resources are packaged locally, follow VS Code themes, and send a finite validated action
+vocabulary to the host; no arbitrary commands, paths or Git arguments cross that boundary.
+ACP conversations remain separate task-bound panels and do not follow workspace-list selection.
 
 ## ACP agent configuration
 
@@ -173,8 +170,9 @@ History displays commit titles with expandable bodies. Starting a draft opens th
 each draft message is edited on demand and remains saved when its editor closes or its row moves.
 The preview's full order is expandable, while conflicts and application consequences remain visible.
 
-Enter a commit message in **当前任务**, review the intended version, then submit to the named primary
-branch. The submitted message and reviewed versions are fixed for that operation. Unrelated primary
+Review the intended version, then use the commit icon below its workspace title. VS Code opens its
+top input box for the commit message; Enter submits and Escape cancels while preserving the draft.
+Cancellation does not stage files. The submitted message and reviewed versions are fixed for that operation. Unrelated primary
 edits block delivery. Other connections remain in the independent preview. Ordinary commit hooks and
 signing run in primary; success records the exact commit and delivery association.
 

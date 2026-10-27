@@ -29,8 +29,8 @@ code --install-extension packages/vscode/warden-0.19.2.vsix
    agents with your own tools.
 3. **Connect for preview.** Use each task's connection action. Saved primary content and connected
    task changes appear in a persistent independent preview directory for tests and dev servers.
-4. **Review and commit.** Open task files in native read-only diffs. Enter a multiline message in
-   the current-task view and submit the reviewed increment with ordinary Git hooks and signing.
+4. **Review and commit.** Open task files in native read-only diffs. Use the workspace commit icon, enter a message in
+   VS Code’s top input box and submit the reviewed increment with ordinary Git hooks and signing.
 5. **Synchronize or arrange history.** Explicitly rebase selected workspaces, or edit a history
    draft, preview it in isolation, then apply. Warden does not push rewritten history.
 

@@ -192,7 +192,8 @@ Human primary edits must be handled before delivery and cannot be silently inclu
 
 Preparation remains an internal journaled step, with explicit recovery after interruption or hook
 failure. Recovery shows the retained staged contents or manual commit for review before accepting
-that exact version. The VS Code task form supports this entire flow without requiring a terminal.
+that exact version. Workspace actions and VS Code's native commit-message input support this entire
+flow without requiring a terminal.
 
 ## Continued work and synchronization
 

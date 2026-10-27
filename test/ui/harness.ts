@@ -1,6 +1,6 @@
 // A disposable, test-only host for exercising the packaged webview in a real browser.
 import { createServer } from 'node:http';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { unzipSync } from 'fflate';
@@ -18,6 +18,9 @@ const engine = await Engine.open(fixture.root, path.join(data, 'state.json'));
 let selected: string | undefined;
 let creating = true;
 const messages: Record<string, string> = {};
+const expanded: Record<string, boolean> = {};
+let taskSection: WorkbenchModel['taskSection'];
+let navigation = 0;
 let draft: HistoryPreviewRequest | undefined;
 let preview: HistoryPreviewResponse | undefined;
 const session = 'browser-fixture';
@@ -31,6 +34,7 @@ const model = async (surface: Surface, edit = false): Promise<WorkbenchModel> =>
     engine.execute('workspaces.list', undefined),
   ]);
   const task = workflow.workflow?.changes.find((row) => row.id === selected);
+  if (edit) taskSection = { request: 'fixture-edit', section: 'edit' };
   return {
     session,
     repository: fixture.root,
@@ -38,7 +42,19 @@ const model = async (surface: Surface, edit = false): Promise<WorkbenchModel> =>
     workflow,
     task,
     creating,
-    taskSection: edit ? { request: 'fixture-edit', section: 'edit' } : undefined,
+    taskSection,
+    workspaces: await Promise.all(
+      (workflow.workflow?.changes ?? []).map(async (row) => {
+        const review = row.worktree ? taskReview(workflow, row.id, workspaces.worktrees) : undefined;
+        return {
+          task: row,
+          expanded: !!expanded[row.id],
+          description: row.worktree ? '未连接' : '待分配',
+          tooltip: [row.title, row.body, row.worktree].filter(Boolean).join('\n'),
+          files: expanded[row.id] && review ? (await engine.execute('review.files', { key: review.targetKey })).files : undefined,
+        };
+      }),
+    ),
     preview: composed,
     hasPreviewCommand: false,
     history,
@@ -48,18 +64,26 @@ const model = async (surface: Surface, edit = false): Promise<WorkbenchModel> =>
     reviewCurrent: false,
     message: task ? (messages[task.id] ?? task.title) : '',
     errors: [],
-    checks: workflow.workflow && surface === 'rebase' ? await engine.execute('rebase.check', undefined) : undefined,
+    checks: workflow.workflow && (surface === 'rebase' || surface === 'workspaces') ? await engine.execute('rebase.check', undefined) : undefined,
   };
 };
 const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url!, 'http://localhost');
-    const surface = (url.searchParams.get('surface') ?? 'task') as Surface;
+    const surface = (url.searchParams.get('surface') ?? 'workspaces') as Surface;
     const edit = url.searchParams.get('section') === 'edit';
+    if (url.pathname === '/new-task') {
+      selected = undefined;
+      creating = true;
+      taskSection = undefined;
+      response.writeHead(302, { Location: '/' });
+      response.end();
+      return;
+    }
     if (url.pathname === '/inspect') {
       response.setHeader('Content-Type', 'text/html');
       response.end(`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>Warden · 侧栏验证</title><body style="background:#eee;font:13px sans-serif;padding:20px;display:flex;gap:24px">
-        ${['light', 'dark', 'contrast'].map((theme) => `<section><h2>${{ light: '浅色', dark: '深色', contrast: '高对比' }[theme]} · 320px</h2><iframe title="${theme}" src="/?theme=${theme}" style="width:320px;height:700px;border:1px solid #888"></iframe></section>`).join('')}
+        ${['light', 'dark', 'contrast'].map((theme) => `<section><h2>${{ light: '浅色', dark: '深色', contrast: '高对比' }[theme]} · 320px</h2><iframe title="${theme}" src="/?surface=workspaces&theme=${theme}" style="width:320px;height:700px;border:1px solid #888"></iframe></section>`).join('')}
       </body></html>`);
       return;
     }
@@ -76,6 +100,45 @@ const server = createServer(async (request, response) => {
       }
       const action = parseWorkbenchAction(JSON.parse(text));
       switch (action.type) {
+        case 'workspaces.create':
+          selected = undefined;
+          creating = true;
+          taskSection = undefined;
+          break;
+        case 'task.select':
+        case 'task.file':
+        case 'task.review':
+          selected = action.taskId;
+          creating = false;
+          break;
+        case 'task.toggle':
+          expanded[action.taskId] = action.expanded;
+          break;
+        case 'task.edit':
+        case 'task.history':
+        case 'task.output':
+        case 'task.options':
+          selected = action.taskId;
+          creating = false;
+          taskSection = {
+            request: String(++navigation),
+            section: { 'task.edit': 'edit', 'task.history': 'history', 'task.output': 'hook', 'task.options': 'workspace' }[action.type] as NonNullable<
+              WorkbenchModel['taskSection']
+            >['section'],
+          };
+          break;
+        case 'task.move':
+          await engine.execute('task.move', { taskId: action.taskId, before: action.before });
+          break;
+        case 'task.connect': {
+          const current = await engine.execute('preview.get', undefined);
+          await engine.execute('preview.connect', {
+            connectedIds: current.connectedIds.includes(action.taskId)
+              ? current.connectedIds.filter((id) => id !== action.taskId)
+              : [...current.connectedIds, action.taskId],
+          });
+          break;
+        }
         case 'setup.branch':
           await engine.execute('workflow.configure', { branch: 'main' });
           await engine.execute('preview.refresh', undefined);
@@ -86,9 +149,12 @@ const server = createServer(async (request, response) => {
           creating = false;
           break;
         }
-        case 'task.start':
+        case 'task.start': {
           await engine.execute('task.start', { taskId: action.taskId, kind: action.kind, agent: action.agent });
+          const task = (await engine.execute('workflow.get', undefined)).workflow?.changes.find((row) => row.id === action.taskId);
+          if (task?.worktree) await writeFile(path.join(task.worktree, 'ui-fixture.txt'), 'Workspace file for native diff routing\n');
           break;
+        }
         case 'task.update':
           await engine.execute('task.update', { taskId: action.taskId, title: action.title, body: action.body });
           break;
@@ -142,7 +208,7 @@ const server = createServer(async (request, response) => {
     response.end(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/index.css">
       ${dark ? `<style>:root { --vscode-editor-background:#1f1f1f; --vscode-sideBar-background:#181818; --vscode-editor-foreground:#ddd; --vscode-button-background:#0e639c; --vscode-button-foreground:#fff; --vscode-descriptionForeground:#aaa; --vscode-textCodeBlock-background:#252525; --vscode-list-hoverBackground:#333; --vscode-widget-border:#555; --vscode-input-border:#666; --vscode-focusBorder:#007fd4; ${theme === 'contrast' ? '--vscode-contrastBorder:#fff; --vscode-focusBorder:#f38518; --vscode-widget-border:#fff; --vscode-input-border:#fff;' : ''} }</style>` : ''}
       </head><body class="${dark ? (theme === 'contrast' ? 'vscode-high-contrast' : 'vscode-dark') : 'vscode-light'}"><div id="root"></div><script>
-      const surface = new URL(location.href).searchParams.get('surface') || 'task';
+      const surface = new URL(location.href).searchParams.get('surface') || 'workspaces';
       const section = new URL(location.href).searchParams.get('section') || '';
       let saved = JSON.parse(sessionStorage.getItem('warden-state') || '{}');
       let queue = Promise.resolve();

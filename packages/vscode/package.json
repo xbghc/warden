@@ -46,13 +46,8 @@
       "warden": [
         {
           "id": "warden.workbench",
-          "name": "工作区"
-        },
-        {
-          "id": "warden.task",
-          "name": "当前任务",
-          "type": "webview",
-          "when": "warden.hasDevelopmentBranch"
+          "name": "工作区",
+          "type": "webview"
         }
       ]
     },
@@ -170,12 +165,6 @@
         "category": "Warden"
       },
       {
-        "command": "warden.taskDetails",
-        "title": "查看任务说明",
-        "category": "Warden",
-        "icon": "$(info)"
-      },
-      {
         "command": "warden.copyWorkspace",
         "title": "复制工作区路径",
         "category": "Warden"
@@ -268,98 +257,6 @@
           "when": "view == warden.workbench && warden.hasDevelopmentBranch"
         }
       ],
-      "view/item/context": [
-        {
-          "command": "warden.chat",
-          "when": "view == warden.workbench && viewItem =~ /^task/",
-          "group": "navigation@1"
-        },
-        {
-          "command": "warden.connect",
-          "when": "view == warden.workbench && viewItem =~ /^task/",
-          "group": "inline@1"
-        },
-        {
-          "command": "warden.deliver",
-          "when": "view == warden.workbench && viewItem =~ /^task/"
-        },
-        {
-          "command": "warden.taskDetails",
-          "when": "view == warden.workbench && viewItem =~ /^task/"
-        },
-        {
-          "command": "warden.copyWorkspace",
-          "when": "view == warden.workbench && viewItem =~ /^task/"
-        },
-        {
-          "command": "warden.retryHook",
-          "when": "view == warden.workbench && viewItem =~ /^task/"
-        },
-        {
-          "command": "warden.resumeTask",
-          "when": "view == warden.workbench && viewItem =~ /^task/"
-        },
-        {
-          "command": "warden.editTask",
-          "when": "view == warden.workbench && viewItem =~ /^task/"
-        },
-        {
-          "command": "warden.moveTask",
-          "when": "view == warden.workbench && viewItem =~ /^task/"
-        },
-        {
-          "command": "warden.startTask",
-          "when": "view == warden.workbench && viewItem == plan",
-          "group": "inline@1"
-        },
-        {
-          "command": "warden.editTask",
-          "when": "view == warden.workbench && viewItem == plan"
-        },
-        {
-          "command": "warden.moveTask",
-          "when": "view == warden.workbench && viewItem == plan"
-        },
-        {
-          "command": "warden.previewTerminal",
-          "when": "view == warden.workbench && viewItem == preview"
-        },
-        {
-          "command": "warden.runPreview",
-          "when": "view == warden.workbench && viewItem == preview"
-        },
-        {
-          "command": "warden.refreshPreview",
-          "when": "view == warden.workbench && viewItem == preview"
-        },
-        {
-          "command": "warden.setup",
-          "when": "view == warden.workbench && viewItem == preview"
-        },
-        {
-          "command": "warden.previewPath",
-          "when": "view == warden.workbench && viewItem == preview"
-        },
-        {
-          "command": "warden.editHistory",
-          "when": "view == warden.workbench && viewItem == history"
-        },
-        {
-          "command": "warden.syncTask",
-          "when": "view == warden.workbench && viewItem =~ /-sync$/",
-          "group": "inline@2"
-        },
-        {
-          "command": "warden.syncConflict",
-          "when": "view == warden.workbench && viewItem =~ /-conflict$/",
-          "group": "inline@2"
-        },
-        {
-          "command": "warden.openWorkspace",
-          "when": "view == warden.workbench && viewItem =~ /^task/",
-          "group": "navigation@2"
-        }
-      ],
       "commandPalette": [
         {
           "command": "warden.openDiff",
@@ -442,18 +339,6 @@
         }
       }
     },
-    "viewsWelcome": [
-      {
-        "view": "warden.workbench",
-        "when": "!warden.hasRepository",
-        "contents": "选择主目录所在的 Git 仓库。\n[选择仓库](command:warden.selectRepository)"
-      },
-      {
-        "view": "warden.workbench",
-        "when": "warden.hasRepository && !warden.hasDevelopmentBranch",
-        "contents": "选择本需求使用的主开发分支。\n[选择主开发分支](command:warden.configure)"
-      }
-    ],
     "keybindings": [
       {
         "command": "warden.copyLocation",

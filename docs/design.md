@@ -1,6 +1,6 @@
 # Warden page design
 
-The VS Code extension implements the [workflow](workflow.md). See [VS Code](vscode.md) for the native tree, review editors and packaged webview forms. Human editing uses
+The VS Code extension implements the [workflow](workflow.md). See [VS Code](vscode.md) for the workspace sidebar, native review editors and packaged webview forms. Human editing uses
 primary; runtime composition uses the independent preview directory. The new page is implemented.
 Wireframes describe intent rather than exact labels. Updated 2026-10-26.
 
@@ -27,12 +27,18 @@ not disturb native diff selection, scroll or task drafts. The workspace heading 
 beside add-task as an icon; per-workspace synchronization and conflict icons occupy the task row.
 There is no separate synchronization navigation row.
 
-Task review leaves the editor area to the native diff. The sidebar task heading uses workspace, Agent
-and more-action icons with hover/focus help. The default body is the commit form. Notes, workspace
-metadata, delivery records and script output appear inline on request and close back to that form.
-Task edit/create forms, synchronization checks/results and recovery paths remain available. Opening
-workspaces and terminals uses native VS Code actions; creating a default workspace and submitting an
-already specified commit do not add explanatory or redundant confirmation dialogs.
+Task review leaves the editor area to the native diff. A compact sidebar webview renders the workspace
+list, with a persistent row of icon actions immediately below each title. Collapsing changed files never
+hides the actions. Opening a workspace, Agent conversation, preview connection, commit, synchronization
+and editing use hover/focus labels. The more-actions menu keeps copy and delivery-history entries;
+up/down, task-details and workspace-script entries are removed. Plan order remains draggable, with
+Alt+Up/Down on task titles and a Command Palette alternative.
+
+Commit opens VS Code's native top input box. Enter submits, Escape cancels without staging and retains
+the draft. The task, repository and review version are pinned when it opens; source or baseline changes
+while typing require renewed review. No permanent commit form or separate current-task pane remains.
+Notes, delivery history and optional workspace choices open inline. Failed scripts expose output and
+retry only in their error context. Synchronization results and commit-recovery actions remain available.
 
 ## Interface copy
 
@@ -52,7 +58,7 @@ shared review controls. The wireframes below describe workflows, not required li
 - Keep secondary content on demand: delivery records and script output. Preserve accessible names
   and tooltips on icon buttons. Errors and recovery actions must remain visible.
 - Task rows show at most two facts, prioritizing permission requests, failures and stale reviews;
-  the tooltip retains the complete context. History starts collapsed in the navigation.
+  the tooltip retains the complete context. History opens from the navigation; commit file review remains available from each history entry.
 - Empty preview setup and synchronization controls stay hidden until their configuration or
   workspaces exist. A failed check still offers retry. A visible form owns its scoped error;
   native notifications draw attention to errors whose form is not visible.

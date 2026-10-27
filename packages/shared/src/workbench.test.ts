@@ -23,6 +23,19 @@ describe('webview protocol boundary', () => {
     expect(parseWorkbenchAction({ type: 'task.open', taskId: 'orders', path: '/outside' })).toEqual({ type: 'task.open', taskId: 'orders' });
     expect(() => parseWorkbenchAction({ type: 'task.open', taskId: '' })).toThrow();
   });
+  it('limits workspace controls to typed navigation and host-owned commit input', () => {
+    expect(parseWorkbenchAction({ type: 'task.commit', taskId: 'orders', message: 'injected', command: 'arbitrary' })).toEqual({
+      type: 'task.commit',
+      taskId: 'orders',
+    });
+    expect(parseWorkbenchAction({ type: 'task.move', taskId: 'orders', before: null })).toEqual({ type: 'task.move', taskId: 'orders', before: null });
+    for (const action of [
+      { type: 'workspaces.show', surface: 'terminal' },
+      { type: 'task.toggle', taskId: 'orders', expanded: 'true' },
+      { type: 'task.move', taskId: 'orders', before: '' },
+    ])
+      expect(() => parseWorkbenchAction(action)).toThrow();
+  });
   it('preserves unavailable source checks while rejecting malformed rebase identities', () => {
     const item = { changeId: 'task', sourceHead: '', developmentHead: 'a'.repeat(40) };
     const action = { type: 'rebase.run', items: [item] };

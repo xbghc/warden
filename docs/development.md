@@ -117,7 +117,8 @@ host (default `1.95.3`); `VSCODE_EXECUTABLE_PATH` selects an existing executable
 In environments requiring an HTTP proxy, configure the test downloader's `npm_config_https_proxy`.
 
 The suite checks native read-only snapshots, stale review rejection, preview isolation/setup/terminal,
-ordinary commit hooks and retained-stage recovery, multiline delivery, fresh workspaces, stale-session
+ordinary commit hooks and retained-stage recovery, native commit-input cancellation and stale-version
+rejection while typing, multiline delivery, fresh workspaces, stale-session
 rejection and stable delivery mapping across history rewrites. CI runs the same VSIX in minimum and
 stable hosts on Windows, Linux and macOS.
 

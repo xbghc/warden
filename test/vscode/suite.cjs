@@ -24,7 +24,7 @@ exports.run = async () => {
     assert.equal(workbench.model('task').workflow.workflow, null, 'opening a repository does not choose its development branch');
     assert.deepEqual(await workbench.getChildren(), [], 'unconfigured repositories show setup instead of operational navigation');
     assert.deepEqual(await workbench.getChildren({ kind: 'history' }), [], 'previous repository history is unavailable during setup');
-    for (const surface of ['task', 'preview', 'history', 'rebase']) {
+    for (const surface of ['workspaces', 'task', 'preview', 'history', 'rebase']) {
       const model = workbench.model(surface);
       assert.equal(model.repository, fixture.unconfigured);
       assert.equal(model.workflow.workflow, null, 'directly opened workflow pages receive setup state');
@@ -58,26 +58,20 @@ exports.run = async () => {
     assert.equal(workbench.backend.store.file, fixture.state);
     const tasks = await workbench.getChildren({ kind: 'tasks' });
     assert.equal(tasks.length, 1);
-    const attention = workbench.getTreeItem({
-      ...tasks[0],
-      task: {
-        ...tasks[0].task,
-        agent: 'fixture-agent',
-        status: 'integrating',
-        integration: { error: 'Fixture commit failure' },
-        workspaceHook: { status: 'failed' },
-      },
+    const attention = workbench.workspaceRow({
+      ...tasks[0].task,
+      agent: 'fixture-agent',
+      status: 'integrating',
+      integration: { error: 'Fixture commit failure' },
+      workspaceHook: { status: 'failed' },
     });
     assert.equal(attention.description, '提交失败 · 初始化失败', 'task rows prioritize problems and show at most two facts');
     assert(attention.tooltip.includes('待提交') && attention.tooltip.includes('fixture-agent'), 'secondary context remains in the tooltip');
     const checked = workbench.checks;
-    for (const [status, suffix] of [
-      ['ready', '-sync'],
-      ['conflict', '-conflict'],
-    ]) {
+    for (const status of ['ready', 'conflict']) {
       workbench.checks = { checks: [{ changeId: tasks[0].task.id, status, message: 'Fixture sync check' }] };
-      const item = workbench.getTreeItem(tasks[0]);
-      assert(item.contextValue.endsWith(suffix), 'sync conditions expose an inline action on the workspace row');
+      const item = workbench.workspaceRow(tasks[0].task);
+      assert.equal(workbench.model('workspaces').checks.checks[0].status, status, 'workspace actions receive synchronization conditions');
       assert(!item.description.includes('rebase'), 'sync conditions do not add a text row');
       assert(item.tooltip.includes('Fixture sync check'));
     }
@@ -98,11 +92,7 @@ exports.run = async () => {
     await assert.rejects(fs.access(path.join(fixture.root, 'agent.txt')));
     await workbench.rememberExpansion(tasks[0], false);
     await workbench.open(fixture.root);
-    assert.equal(
-      workbench.getTreeItem(tasks[0]).collapsibleState,
-      vscode.TreeItemCollapsibleState.Collapsed,
-      'collapsed state survives reopening the repository',
-    );
+    assert.equal(workbench.workspaceRow(tasks[0].task).expanded, false, 'collapsed state survives reopening the repository');
     const files = await workbench.getChildren(tasks[0]);
     assert.equal(files.length, 1);
     await vscode.commands.executeCommand('warden.openDiff', files[0]);
@@ -117,19 +107,15 @@ exports.run = async () => {
     await workbench.rememberExpansion(tasks[0], false);
     await workbench.handleAction({ type: 'task.message', taskId: tasks[0].task.id, message: 'Keep this draft' }, workbench.session);
     await workbench.selectTask(tasks[0]);
-    assert.equal(
-      workbench.getTreeItem(tasks[0]).collapsibleState,
-      vscode.TreeItemCollapsibleState.Collapsed,
-      'selecting a task does not reopen its changed files',
-    );
+    assert.equal(workbench.workspaceRow(tasks[0].task).expanded, false, 'selecting a task does not reopen its changed files');
     assert(
       vscode.window.tabGroups.all.flatMap((group) => group.tabs).some((tab) => tab === diff),
       'selecting the task retains the existing native diff',
     );
     assert.equal(workbench.model('task').message, 'Keep this draft');
     assert.equal(workbench.views.panels.has('task'), false, 'task controls stay out of the editor area');
-    await workbench.selectTask(tasks[0], false, 'details');
-    assert.equal(workbench.model('task').taskSection.section, 'details', 'task details use the sidebar');
+    await workbench.selectTask(tasks[0], false, 'history');
+    assert.equal(workbench.model('task').taskSection.section, 'history', 'delivery records use the workspace list');
     assert.equal(workbench.views.panels.has('task'), false);
     await workbench.selectTask(tasks[0], false, 'commit');
     await vscode.commands.executeCommand('type', { text: 'Forbidden' });
@@ -150,11 +136,29 @@ exports.run = async () => {
     const pinnedText = pinnedDoc.getText();
     const pinnedContent = await workbench.documents.provideTextDocumentContent(pinnedDoc.uri);
     assert.equal(textLines(pinnedText), 'Agent addition\n');
+    const cancelledInput = workbench.promptDelivery(tasks[0]);
+    await eventually(() => !!workbench.commitInput);
+    assert.match(workbench.commitInput.title, /提交到 main/);
+    workbench.commitInput.value = 'Cancelled commit draft';
+    workbench.commitInput.hide();
+    await cancelledInput;
+    assert.equal(workbench.model('workspaces').message, 'Cancelled commit draft', 'cancelling the native input retains its draft');
+    assert.equal((await state()).workflow.changes[0].integration, undefined, 'cancelling never stages primary');
+    const staleInput = workbench.promptDelivery(tasks[0]);
+    await eventually(() => !!workbench.commitInput);
+    assert.equal(workbench.commitInput.value, 'Cancelled commit draft');
     await fs.writeFile(path.join(workspace, 'later.txt'), 'Unreviewed addition\n');
     git('add', 'later.txt');
     git('-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-qm', 'Later version');
     await workbench.refresh();
     assert.equal(pinnedDoc.getText(), pinnedText, 'open documents stay immutable');
+    await eventually(async () => {
+      if (!workbench.commitInput) return true;
+      await vscode.commands.executeCommand('workbench.action.acceptSelectedQuickOpenItem');
+      return !workbench.commitInput;
+    });
+    await staleInput;
+    assert.match(workbench.errors.get(`task:${tasks[0].task.id}`).message, /输入期间审阅版本已变化/);
     await assert.rejects(workbench.deliver(tasks[0]), /重新打开/, 'background refresh cannot authorize a newer source');
     assert.equal((await state()).workflow.changes[0].integration, undefined, 'stale delivery never stages primary');
     currentFiles = await workbench.getChildren(tasks[0]);
@@ -223,7 +227,15 @@ exports.run = async () => {
     await workbench.refresh();
     currentFiles = await workbench.getChildren(tasks[0]);
     await workbench.openDiff(currentFiles[0]);
-    await workbench.deliver(tasks[0], 'Reviewed delivery\n\nKeep normal commit hooks');
+    const submittedInput = workbench.promptDelivery(tasks[0]);
+    await eventually(() => !!workbench.commitInput);
+    workbench.commitInput.value = 'Reviewed delivery\n\nKeep normal commit hooks';
+    await eventually(async () => {
+      if (!workbench.commitInput) return true;
+      await vscode.commands.executeCommand('workbench.action.acceptSelectedQuickOpenItem');
+      return !workbench.commitInput;
+    });
+    await submittedInput;
     assert.equal(primaryGit('log', '-1', '--format=%B'), 'Reviewed delivery\n\nKeep normal commit hooks');
     const accepted = (await state()).workflow.changes[0].deliveries[0];
     assert(accepted.id && accepted.commit, 'delivery is durable');
@@ -297,8 +309,9 @@ exports.run = async () => {
     const modeFile = (await workbench.getChildren(tasks[0])).find((row) => row.file.path === 'README.md');
     assert(modeFile, 'a mode-only change remains in the review inventory');
     assert.equal(modeFile.file.additions + modeFile.file.deletions, 0);
-    assert.match(workbench.getTreeItem(modeFile).description, /100644 → 100755/);
-    assert.match(workbench.getTreeItem(modeFile).tooltip, /100644 → 100755/);
+    assert.equal(modeFile.file.oldMode, '100644');
+    assert.equal(modeFile.file.newMode, '100755');
+    assert(workbench.model('workspaces').workspaces[0].files.some((file) => file.path === 'README.md' && file.newMode === '100755'));
     await workbench.openDiff(modeFile);
     const modeDiff = vscode.window.tabGroups.all.flatMap((group) => group.tabs).find((tab) => tab.label.includes('100644 → 100755'));
     assert(modeDiff?.input instanceof vscode.TabInputTextDiff, 'the native diff title exposes the mode-only change');
@@ -316,9 +329,10 @@ exports.run = async () => {
     await workbench.refresh();
     const typeFiles = await workbench.getChildren(tasks[0]);
     const typeChanges = typeFiles.filter((row) => row.file.path === 'README.md');
-    assert.equal(typeChanges.length, 1, 'a file-type change has one native tree node');
-    assert.equal(new Set(typeFiles.map((row) => workbench.getTreeItem(row).id)).size, typeFiles.length);
-    assert.match(workbench.getTreeItem(typeChanges[0]).description, /100644 → 120000/);
+    assert.equal(typeChanges.length, 1, 'a file-type change has one workspace file entry');
+    assert.equal(new Set(typeFiles.map((row) => row.file.path)).size, typeFiles.length);
+    assert.equal(typeChanges[0].file.oldMode, '100644');
+    assert.equal(typeChanges[0].file.newMode, '120000');
     await workbench.openDiff(typeChanges[0]);
     const typeDiff = vscode.window.tabGroups.all.flatMap((group) => group.tabs).find((tab) => tab.label.includes('100644 → 120000'));
     assert(typeDiff?.input instanceof vscode.TabInputTextDiff, 'the native diff shows the complete file-type transition');

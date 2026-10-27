@@ -3,11 +3,11 @@ import { randomBytes } from 'node:crypto';
 import { parseWorkbenchAction } from '@warden/shared';
 import type { Surface, WorkbenchAction, WorkbenchModel } from '@warden/shared';
 
-const titles: Record<Surface, string> = { task: '当前任务', preview: '预览', history: '提交历史', settings: '设置', rebase: '同步工作区' };
+const titles: Record<Surface, string> = { workspaces: '工作区', task: '任务', preview: '预览', history: '提交历史', settings: '设置', rebase: '同步工作区' };
 
 export class Views implements vscode.WebviewViewProvider, vscode.Disposable {
   private readonly panels = new Map<Surface, vscode.WebviewPanel>();
-  private task?: vscode.WebviewView;
+  private workspaces?: vscode.WebviewView;
   private readonly subscriptions: vscode.Disposable[] = [];
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -16,18 +16,18 @@ export class Views implements vscode.WebviewViewProvider, vscode.Disposable {
     private readonly error: (error: unknown, surface: Surface) => void,
   ) {}
   resolveWebviewView(view: vscode.WebviewView) {
-    this.task = view;
-    this.configure(view.webview, 'task');
+    this.workspaces = view;
+    this.configure(view.webview, 'workspaces');
     this.subscriptions.push(
       view.onDidDispose(() => {
-        if (this.task === view) this.task = undefined;
+        if (this.workspaces === view) this.workspaces = undefined;
       }),
     );
   }
   async show(surface: Surface) {
-    if (surface === 'task') {
-      if (this.task) this.task.show(true);
-      else await vscode.commands.executeCommand('warden.task.focus');
+    if (surface === 'task' || surface === 'workspaces') {
+      if (this.workspaces) this.workspaces.show(true);
+      else await vscode.commands.executeCommand('warden.workbench.focus');
       return;
     }
     const existing = this.panels.get(surface);
@@ -61,7 +61,7 @@ export class Views implements vscode.WebviewViewProvider, vscode.Disposable {
           if (envelope.session !== this.model(surface).session) throw new Error('仓库已切换，请使用当前界面重试');
           const action = parseWorkbenchAction(envelope.action);
           const prefix = action.type.split('.')[0];
-          if (prefix !== 'setup' && prefix !== surface) throw new Error('此界面不能执行该操作');
+          if (prefix !== 'setup' && prefix !== surface && !(surface === 'workspaces' && prefix === 'task')) throw new Error('此界面不能执行该操作');
           await this.action(action, envelope.session);
         } catch (error) {
           this.error(error, surface);
@@ -70,12 +70,17 @@ export class Views implements vscode.WebviewViewProvider, vscode.Disposable {
     );
   }
   render() {
-    if (this.task) void this.task.webview.postMessage({ type: 'model', model: this.model('task') });
+    if (this.workspaces) {
+      const model = this.model('workspaces');
+      this.workspaces.description = model.workflow?.workflow?.developmentBranch;
+      void this.workspaces.webview.postMessage({ type: 'model', model });
+    }
     for (const [surface, panel] of this.panels) void panel.webview.postMessage({ type: 'model', model: this.model(surface) });
   }
   displaysError(scope: string): boolean {
-    if (scope === 'repository') return !!this.task?.visible || [...this.panels.values()].some((panel) => panel.visible);
-    if (scope.startsWith('task:')) return !!this.task?.visible && scope === `task:${this.model('task').task?.id ?? 'new'}`;
+    if (scope === 'repository' || scope === 'workspaces') return !!this.workspaces?.visible || [...this.panels.values()].some((panel) => panel.visible);
+    if (scope.startsWith('task:'))
+      return !!this.workspaces?.visible && (scope === 'task:new' || !!this.model('workspaces').workspaces?.some((row) => scope === `task:${row.task.id}`));
     return [...this.panels].some(([surface, panel]) => surface === scope && panel.visible);
   }
   dispose() {

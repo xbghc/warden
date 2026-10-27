@@ -16,7 +16,7 @@ import type {
 } from '@warden/shared';
 import { Engine, WardenError } from '@warden/engine';
 import type { EngineCommand, EngineInput, EngineOutput } from '@warden/engine';
-import type { WorkbenchAction, WorkbenchModel, Surface, TaskSection, WorkbenchError, RebaseBatchResponse } from '@warden/shared';
+import type { WorkbenchAction, WorkbenchModel, Surface, TaskSection, WorkspaceRow, WorkbenchError, RebaseBatchResponse } from '@warden/shared';
 import type { AcpBinding } from '@warden/shared';
 import { Documents } from './documents.js';
 import { Views } from './views.js';
@@ -38,10 +38,8 @@ const statusLabels: Record<string, string> = {
   stale: '待更新',
   paused: '待迁移',
 };
-const fileModeChange = (file: FileEntry): string | undefined => {
-  if (file.oldMode === file.newMode) return undefined;
-  return `文件模式 ${file.oldMode ?? '无'} → ${file.newMode ?? '无'}`;
-};
+const fileModeChange = (file: FileEntry): string | undefined =>
+  file.oldMode === file.newMode ? undefined : `文件模式 ${file.oldMode ?? '无'} → ${file.newMode ?? '无'}`;
 type Node =
   | { kind: 'preview' }
   | { kind: 'tasks' }
@@ -51,9 +49,7 @@ type Node =
   | { kind: 'file'; file: FileEntry; target: string; task?: WorkflowTask; review?: TaskReview }
   | { kind: 'commit'; sha: string; message: string };
 
-export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDragAndDropController<Node> {
-  private emitter = new vscode.EventEmitter<Node | undefined>();
-  readonly onDidChangeTreeData = this.emitter.event;
+export class Workbench {
   private backend?: Engine;
   private data?: WorkflowResponse;
   private preview?: PreviewResponse;
@@ -73,10 +69,9 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
   private switching = false;
   private navigation = new Set<Promise<unknown>>();
 
-  readonly dragMimeTypes = ['application/vnd.code.tree.warden.workbench'];
-  readonly dropMimeTypes = ['application/vnd.code.tree.warden.workbench'];
   private readonly views: Views;
-  private readonly tree: vscode.TreeView<Node>;
+  private commitInput?: vscode.InputBox;
+  private fileErrors = new Map<string, string>();
   private readonly conversations: AcpConversations;
   private selected?: string;
   private expanded: Record<string, boolean> = {};
@@ -98,7 +93,7 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
     this.conversations = new AcpConversations(
       context,
       (binding) => this.reviewConversation(binding),
-      () => this.emitter.fire(undefined),
+      () => this.views.render(),
       (error) => this.output.appendLine(String(error)),
     );
     this.views = new Views(
@@ -107,21 +102,16 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
       (action, session) => this.handleAction(action, session),
       (error, surface) => this.report(error, surface === 'task' ? `task:${this.selected ?? 'new'}` : surface),
     );
-    this.tree = vscode.window.createTreeView('warden.workbench', { treeDataProvider: this, dragAndDropController: this });
     context.subscriptions.push(
       this.output,
       this.status,
-      this.emitter,
       vscode.workspace.registerTextDocumentContentProvider('warden-review', this.documents),
       vscode.workspace.onDidCloseTextDocument((doc) => this.documents.remove(doc.uri)),
       vscode.workspace.onDidChangeConfiguration((event) => {
         if (event.affectsConfiguration('warden.previewCommand')) this.views.render();
       }),
-      this.tree,
-      this.tree.onDidExpandElement(({ element }) => this.rememberExpansion(element, true)),
-      this.tree.onDidCollapseElement(({ element }) => this.rememberExpansion(element, false)),
       this.views,
-      vscode.window.registerWebviewViewProvider('warden.task', this.views),
+      vscode.window.registerWebviewViewProvider('warden.workbench', this.views),
     );
     this.status.command = 'warden.showPreview';
     const commands: Record<string, (node?: Node) => unknown> = {
@@ -136,7 +126,7 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
       moveTask: (node) => this.moveTask(node),
       connect: (node) => this.connect(node),
       openDiff: (node) => this.openDiff(node),
-      deliver: (node) => this.selectTask(node, false, 'commit'),
+      deliver: (node) => this.promptDelivery(node),
       openWorkspace: (node) => this.openWorkspace(node),
       retryHook: (node) => this.taskOperation(node, 'task.hook'),
       resumeTask: (node) => this.taskOperation(node, 'task.resume'),
@@ -150,7 +140,6 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
       syncTask: (node) => this.showRebase(node),
       syncConflict: (node) => this.showRebase(node),
       editHistory: () => this.views.show('history'),
-      taskDetails: (node) => this.selectTask(node, false, 'details'),
       copyWorkspace: (node) => this.copyWorkspace(node),
       importNotes: () => this.importNotes(),
       showPreview: () => this.views.show('preview'),
@@ -168,7 +157,6 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
       'openDiff',
       'configureScripts',
       'editHistory',
-      'taskDetails',
       'copyWorkspace',
       'openWorkspace',
       'showPreview',
@@ -245,6 +233,7 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
     }
   }
   private async open(directory: string) {
+    this.commitInput?.hide();
     this.switching = true;
     this.session = randomUUID();
     this.status.hide();
@@ -273,6 +262,7 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
       this.checks = undefined;
       this.checkouts = undefined;
       this.files.clear();
+      this.fileErrors.clear();
       this.taskTargets.clear();
       this.reviews.clear();
       this.reviewUris.clear();
@@ -284,8 +274,12 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
     } finally {
       this.switching = false;
       await this.updateContext();
-      if (!this.backend) this.tree.description = undefined;
-      this.emitter.fire(undefined);
+      if (this.backend)
+        await Promise.all(
+          this.tasks()
+            .filter((task) => task.worktree && this.expanded[task.id])
+            .map((task) => this.getChildren({ kind: 'task', task })),
+        );
       this.views.render();
     }
   }
@@ -312,7 +306,6 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
         this.api('workspaces.list', undefined),
       ]);
       const changedHead = data.developmentHead !== this.data?.developmentHead;
-      let changed = JSON.stringify([data, preview, checkouts]) !== JSON.stringify([this.data, this.preview, this.checkouts]);
       this.data = data;
       this.preview = preview;
       this.checkouts = checkouts;
@@ -326,24 +319,26 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
         this.checks = await this.api('rebase.check', undefined);
         this.checkSignature = checkSignature;
       }
-      this.tree.description = data.workflow?.developmentBranch ?? path.basename(this.backend!.root);
       await this.updateContext();
       this.views.render();
       for (const key of this.files.keys()) {
         try {
           const response = await this.api('review.files', { key });
-          if (JSON.stringify(response.files) !== JSON.stringify(this.files.get(key))) changed = true;
           this.files.set(key, response.files);
         } catch {
           this.files.delete(key);
-          changed = true;
         }
       }
       this.status.text = `$(layers) Warden: ${statusLabels[preview.syncStatus ?? preview.status] ?? preview.status}${preview.setup?.status === 'failed' ? ' · setup 失败' : ''}`;
       this.status.tooltip = `运行目录：${preview.worktree ?? '尚未初始化'}\n${preview.message ?? '主目录保存后自动同步至预览'}\n${data.error ?? ''}`;
       if (data.workflow) this.status.show();
       else this.status.hide();
-      if (changed) this.emitter.fire(undefined);
+      await Promise.all(
+        this.tasks()
+          .filter((task) => task.worktree && this.expanded[task.id])
+          .map((task) => this.getChildren({ kind: 'task', task })),
+      );
+      this.views.render();
       if (data.workflow)
         await this.backend!.start(
           () => this.refresh(),
@@ -360,95 +355,38 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
     });
     return this.reading;
   }
-  getTreeItem(node: Node): vscode.TreeItem {
-    if (node.kind === 'settings') {
-      const item = new vscode.TreeItem('设置');
-      item.id = node.kind;
-      item.iconPath = new vscode.ThemeIcon('settings-gear');
-      item.command = { command: 'warden.configureScripts', title: '设置' };
-      return item;
-    }
-    if (node.kind === 'tasks' || node.kind === 'history') {
-      const item = new vscode.TreeItem(
-        node.kind === 'tasks' ? '任务' : '提交历史',
-        node.kind === 'tasks' ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed,
-      );
-      item.id = node.kind;
-      item.contextValue = node.kind;
-      item.iconPath = new vscode.ThemeIcon(node.kind === 'tasks' ? 'list-ordered' : 'history');
-      if (node.kind === 'history') item.command = { command: 'warden.editHistory', title: '查看提交历史' };
-      return item;
-    }
-    if (node.kind === 'preview') {
-      const item = new vscode.TreeItem('预览运行目录');
-      item.id = 'preview';
-      item.contextValue = 'preview';
-      item.iconPath = new vscode.ThemeIcon('layers');
-      item.description = [
-        statusLabels[this.preview?.syncStatus ?? this.preview?.status ?? 'disconnected'],
-        this.preview?.setup ? statusLabels[this.preview.setup.status] : '',
-      ]
+  private workspaceRow(task: WorkflowTask): WorkspaceRow {
+    const source = this.preview?.sources?.find((row) => row.changeId === task.id);
+    const connected = this.preview?.connectedIds.includes(task.id);
+    const sync = this.checks?.checks.find((check) => check.changeId === task.id);
+    const connection = task.worktree ? (connected ? (source ? statusLabels[source.status] : '待同步') : '未连接') : statusLabels[task.status];
+    const problem = source?.status === 'conflict' || source?.status === 'error';
+    const activity = this.backend && this.conversations.activity(this.backend.root, task.id);
+    const facts = [
+      activity === 'Agent 等待授权' ? activity : '',
+      task.integration?.error ? '提交失败' : '',
+      problem ? connection : '',
+      this.reviews.has(task.id) && !sameReview(this.reviews.get(task.id), taskReview(this.data!, task.id, this.checkouts?.worktrees ?? []))
+        ? '审阅版本已变化'
+        : '',
+      task.worktree && task.workspaceHook?.status === 'failed' ? '初始化失败' : '',
+      activity !== 'Agent 等待授权' ? activity : '',
+      task.status === 'integrating' ? '待提交' : '',
+      !problem ? connection : '',
+      task.agent,
+    ].filter(Boolean);
+    const target = this.taskTargets.get(task.id);
+    return {
+      task,
+      expanded: !!this.expanded[task.id],
+      description: facts.slice(0, 2).join(' · '),
+      tooltip: [task.title, task.body, task.worktree ?? '尚未分配工作区', facts.join(' · '), sync?.status !== 'current' ? sync?.message : '']
         .filter(Boolean)
-        .join(' · ');
-      item.tooltip = `${this.preview?.worktree ?? '点击初始化'}\n${this.preview?.message ?? ''}`;
-      item.command = { command: 'warden.showPreview', title: '查看预览' };
-      return item;
-    }
-    if (node.kind === 'task') {
-      const task = node.task;
-      const item = new vscode.TreeItem(
-        task.title,
-        task.worktree
-          ? this.expanded[task.id]
-            ? vscode.TreeItemCollapsibleState.Expanded
-            : vscode.TreeItemCollapsibleState.Collapsed
-          : vscode.TreeItemCollapsibleState.None,
-      );
-      item.id = `task:${task.id}`;
-      item.contextValue = task.worktree ? (this.preview?.connectedIds.includes(task.id) ? 'task-connected' : 'task') : 'plan';
-      const source = this.preview?.sources?.find((s) => s.changeId === task.id);
-      const connected = this.preview?.connectedIds.includes(task.id);
-      const sync = this.checks?.checks.find((c) => c.changeId === task.id);
-      if (task.worktree && sync && sync.status !== 'current') item.contextValue += sync.status === 'conflict' ? '-conflict' : '-sync';
-      const connection = task.worktree ? (connected ? (source ? statusLabels[source.status] : '待同步') : '未连接') : statusLabels[task.status];
-      const connectionProblem = source?.status === 'conflict' || source?.status === 'error';
-      const activity = this.backend && this.conversations.activity(this.backend.root, task.id);
-      const facts = [
-        activity === 'Agent 等待授权' ? activity : '',
-        task.integration?.error ? '提交失败' : '',
-        connectionProblem ? connection : '',
-        this.reviews.has(task.id) && !sameReview(this.reviews.get(task.id), taskReview(this.data!, task.id, this.checkouts?.worktrees ?? []))
-          ? '审阅版本已变化'
-          : '',
-        task.worktree && task.workspaceHook?.status === 'failed' ? '初始化失败' : '',
-        activity !== 'Agent 等待授权' ? activity : '',
-        task.status === 'integrating' ? '待提交' : '',
-        !connectionProblem ? connection : '',
-        task.agent,
-      ].filter(Boolean);
-      item.description = facts.slice(0, 2).join(' · ');
-      item.iconPath = new vscode.ThemeIcon(connected ? 'plug' : task.worktree ? 'git-branch' : 'circle-outline');
-      item.tooltip = [task.title, task.body, task.worktree ?? '尚未分配工作区', facts.join(' · '), sync?.status !== 'current' ? sync?.message : '']
-        .filter(Boolean)
-        .join('\n\n');
-      item.command = { command: 'warden.selectTask', title: '查看任务变更', arguments: [node] };
-      return item;
-    }
-    if (node.kind === 'commit') {
-      const item = new vscode.TreeItem(node.message.split('\n')[0]!, vscode.TreeItemCollapsibleState.Collapsed);
-      item.id = `commit:${node.sha}`;
-      item.description = node.sha.slice(0, 8);
-      item.iconPath = new vscode.ThemeIcon('git-commit');
-      return item;
-    }
-    const item = new vscode.TreeItem(node.file.path);
-    item.id = `file:${node.target}:${node.file.path}`;
-    item.contextValue = 'reviewFile';
-    item.description = [`+${node.file.additions} −${node.file.deletions}`, fileModeChange(node.file)].filter(Boolean).join(' · ');
-    item.tooltip = [node.file.path, fileModeChange(node.file)].filter(Boolean).join('\n');
-    item.iconPath = new vscode.ThemeIcon('diff');
-    item.command = { command: 'warden.openDiff', title: '查看差异', arguments: [node] };
-    return item;
+        .join('\n\n'),
+      files: target ? this.files.get(target) : undefined,
+      filesError: this.fileErrors.get(task.id),
+      review: this.reviews.get(task.id),
+    };
   }
   async getChildren(node?: Node): Promise<Node[]> {
     if (!this.backend || this.switching || !this.data?.workflow) return [];
@@ -473,20 +411,16 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
     try {
       const response = await this.api('review.files', { key: target });
       this.files.set(target, response.files);
+      if (node.kind === 'task') this.fileErrors.delete(node.task.id);
       return response.files.map((file) => ({ kind: 'file', file, target, ...(node.kind === 'task' ? { task: node.task, review } : {}) }));
     } catch (error) {
       this.output.appendLine(String(error));
+      if (node.kind === 'task') this.fileErrors.set(node.task.id, error instanceof Error ? error.message : String(error));
       return [];
     }
   }
   private tasks() {
     return this.data?.workflow?.changes.filter((c) => c.developmentBranch === this.data?.workflow?.developmentBranch) ?? [];
-  }
-  getParent(node: Node): Node | undefined {
-    if (node.kind === 'task') return { kind: 'tasks' };
-    if (node.kind === 'file' && node.task) return { kind: 'task', task: node.task };
-    if (node.kind === 'commit') return { kind: 'history' };
-    return undefined;
   }
   private async readReview(changeId: string) {
     const [data, checkouts] = await Promise.all([this.api('workflow.get', undefined), this.api('workspaces.list', undefined)]);
@@ -536,6 +470,7 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
   private async rememberExpansion(node: Node, expanded: boolean) {
     if (node.kind !== 'task' || !this.backend) return;
     this.expanded[node.task.id] = expanded;
+    this.views.render();
     await this.context.workspaceState.update(`warden.expanded:${this.backend.root}`, this.expanded);
   }
   private async selectTask(node?: Node, openFile = true, section?: TaskSection, refreshReview = false) {
@@ -643,6 +578,75 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
       { preview: true },
     );
     this.views.render();
+  }
+  private async promptDelivery(node?: Node) {
+    if (this.commitInput) {
+      this.commitInput.show();
+      return;
+    }
+    const task = await this.pickTask(node);
+    if (!task?.worktree || !this.backend) return;
+    const session = this.session;
+    const pinned = this.reviews.get(task.id);
+    const recovery = !!task.integration && !task.integration.prepared && !(await this.readReview(task.id))?.preparation;
+    const record = !!pinned?.preparation?.canRecord;
+    if (!recovery && !sameReview(pinned, await this.readReview(task.id))) throw new Error('请重新打开任务差异，完整审查当前版本后再提交');
+    if (recovery || record) {
+      await this.perform(() => this.deliver({ kind: 'task', task }), '正在恢复提交…', `task:${task.id}`);
+      return;
+    }
+    const input = vscode.window.createInputBox();
+    this.commitInput = input;
+    input.title = `${task.title} · 提交到 ${task.developmentBranch}`;
+    input.prompt = '输入 commit message，Enter 提交，Esc 取消';
+    input.placeholder = '提交说明';
+    input.value = this.messages[task.id] ?? task.title;
+    input.ignoreFocusOut = true;
+    const validate = (value: string) => (!value.trim() ? '请输入提交说明' : value.length > 10000 ? '提交说明不能超过 10000 个字符' : undefined);
+    input.validationMessage = validate(input.value);
+    const drafts = this.messages;
+    const key = `warden.messages:${this.backend.root}`;
+    let saving = Promise.resolve();
+    const subscriptions: vscode.Disposable[] = [];
+    let message: string | undefined;
+    try {
+      message = await new Promise<string | undefined>((resolve) => {
+        subscriptions.push(
+          input.onDidChangeValue((value) => {
+            drafts[task.id] = value;
+            input.validationMessage = validate(value);
+            saving = saving.then(() => this.context.workspaceState.update(key, drafts));
+          }),
+          input.onDidAccept(() => {
+            input.validationMessage = validate(input.value);
+            if (input.validationMessage) return;
+            resolve(input.value);
+            input.hide();
+          }),
+          input.onDidHide(() => resolve(undefined)),
+        );
+        input.show();
+      });
+    } finally {
+      drafts[task.id] = input.value;
+      for (const subscription of subscriptions) subscription.dispose();
+      input.dispose();
+      if (this.commitInput === input) this.commitInput = undefined;
+      await saving;
+      await this.context.workspaceState.update(key, drafts);
+    }
+    if (message === undefined) return;
+    await this.perform(
+      async () => {
+        // Typing never replaces the review pinned when this input opened, even if navigation changed it.
+        if (session !== this.session || this.switching) throw new Error('仓库已切换，请重新提交');
+        if (!sameReview(pinned, this.reviews.get(task.id)) || !sameReview(pinned, await this.readReview(task.id)))
+          throw new Error('输入期间审阅版本已变化，请重新打开差异后提交');
+        await this.deliver({ kind: 'task', task }, message);
+      },
+      '正在提交…',
+      `task:${task.id}`,
+    );
   }
   private async deliver(node?: Node, submittedMessage?: string) {
     const task = await this.pickTask(node);
@@ -792,6 +796,7 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
       task,
       creating: this.creating,
       taskSection: this.taskSection,
+      workspaces: this.tasks().map((task) => this.workspaceRow(task)),
       preview: this.preview,
       hasPreviewCommand: typeof previewCommand === 'string' && !!previewCommand.trim(),
       history: this.history,
@@ -835,12 +840,79 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
       this.views.render();
       return;
     }
-    const navigation = ['task.review', 'task.open', 'task.copy', 'task.brief', 'task.chat', 'preview.copy', 'preview.terminal', 'settings.agents'];
+    const navigation = [
+      'task.review',
+      'task.open',
+      'task.copy',
+      'task.brief',
+      'task.chat',
+      'task.select',
+      'task.edit',
+      'task.history',
+      'task.output',
+      'task.options',
+      'task.toggle',
+      'task.file',
+      'task.sync',
+      'task.commit',
+      'workspaces.create',
+      'workspaces.show',
+      'workspaces.refresh',
+      'preview.copy',
+      'preview.terminal',
+      'settings.agents',
+      'history.review',
+    ];
     await this.perform(
       async () => {
         // A queued message must never be interpreted in the next repository session.
         if (session !== this.session) throw new Error('仓库已切换');
         switch (action.type) {
+          case 'workspaces.create':
+            await this.createTask();
+            break;
+          case 'workspaces.refresh':
+            await this.refresh();
+            break;
+          case 'workspaces.show':
+            if (action.surface === 'rebase') await this.showRebase();
+            else await this.views.show(action.surface);
+            break;
+          case 'task.select':
+            await this.selectTask(node);
+            break;
+          case 'task.edit':
+          case 'task.history':
+          case 'task.output':
+          case 'task.options':
+            await this.selectTask(
+              node,
+              false,
+              { 'task.edit': 'edit', 'task.history': 'history', 'task.output': 'hook', 'task.options': 'workspace' }[action.type] as TaskSection,
+            );
+            break;
+          case 'task.toggle':
+            await this.rememberExpansion(node!, action.expanded);
+            break;
+          case 'task.file': {
+            const file = (await this.getChildren(node)).find((entry) => entry.kind === 'file' && entry.file.path === action.path);
+            if (!file) throw new Error('文件差异已变化，请刷新列表');
+            await this.openDiff(file);
+            break;
+          }
+          case 'task.move':
+            if (action.before !== null && !this.tasks().some((row) => row.id === action.before)) throw new Error('目标任务已不属于当前主开发分支');
+            if (action.before !== action.taskId) await this.api('task.move', { taskId: action.taskId, before: action.before });
+            break;
+          case 'task.connect':
+            await this.connect(node);
+            break;
+          case 'task.sync':
+            await this.showRebase(node);
+            break;
+          case 'task.commit':
+            await this.promptDelivery(node);
+            break;
           case 'task.create': {
             const created = await this.api('task.create', { title: action.title, body: action.body });
             this.selected = created.id;
@@ -925,6 +997,18 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
             this.historyPreview = undefined;
             await this.saveDraft();
             break;
+          case 'history.review': {
+            const commit = this.history?.commits.find((row) => row.sha === action.sha);
+            if (!commit) throw new Error('提交已不在当前历史中，请刷新');
+            const files = (await this.getChildren({ kind: 'commit', sha: commit.sha, message: commit.message })).filter((row) => row.kind === 'file');
+            const selected = await vscode.window.showQuickPick(
+              files.map((row) => ({ label: row.file.path, node: row })),
+              { placeHolder: `查看提交 ${commit.sha.slice(0, 8)} 的文件变更` },
+            );
+            if (session !== this.session) throw new Error('仓库已切换');
+            if (selected) await this.openDiff(selected.node);
+            break;
+          }
           case 'history.preview': {
             const candidate = JSON.stringify(action.draft);
             this.historyDraft = action.draft;
@@ -953,19 +1037,9 @@ export class Workbench implements vscode.TreeDataProvider<Node>, vscode.TreeDrag
     );
   }
 
-  handleDrag(source: readonly Node[], transfer: vscode.DataTransfer) {
-    const task = source.find((node) => node.kind === 'task');
-    if (task?.kind === 'task') transfer.set(this.dragMimeTypes[0]!, new vscode.DataTransferItem({ session: this.session, taskId: task.task.id }));
-  }
-  async handleDrop(target: Node | undefined, transfer: vscode.DataTransfer) {
-    const value = transfer.get(this.dropMimeTypes[0]!)?.value as { session?: string; taskId?: string } | undefined;
-    if (!value || value.session !== this.session || !this.tasks().some((task) => task.id === value.taskId)) return;
-    if (target && target.kind !== 'task' && target.kind !== 'tasks') return;
-    if (target?.kind === 'task' && target.task.id === value.taskId) return;
-    await this.perform(() => this.api('task.move', { taskId: value.taskId!, before: target?.kind === 'task' ? target.task.id : null }), '正在调整计划顺序…');
-  }
   async close() {
     this.closing = true;
+    this.commitInput?.hide();
     await this.conversations.close();
     await Promise.allSettled([this.active, ...this.navigation, this.reading]);
     await this.backend?.close();
