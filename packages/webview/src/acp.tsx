@@ -14,6 +14,7 @@ const statusLabels: Record<AcpStatus, string> = {
   running: '响应中',
   waiting_permission: '等待授权',
   cancelling: '正在停止',
+  resetting: '正在新建会话',
   error: '会话出错',
 };
 const toolLabels: Record<string, string> = {
@@ -50,7 +51,7 @@ export function AcpApp({ model, send }: Props) {
   sendRef.current = send;
 
   // An error may leave an agent waiting for login or cancellation. Keep disconnect reachable.
-  const hasConnection = status !== 'disconnected';
+  const hasConnection = status !== 'disconnected' && status !== 'resetting';
   const controls = hasConnection ? model.controls : undefined;
   const configOptions = controls?.configOptions ?? [];
   const selectors = configOptions.filter((option) => option.type === 'select');
@@ -59,10 +60,16 @@ export function AcpApp({ model, send }: Props) {
   const primaryIds = new Set(primaryOptions.map((option) => option.id));
   const extraOptions = configOptions.filter((option) => !primaryIds.has(option.id));
   const busy =
-    model.sending || !!controls?.configuring || status === 'connecting' || status === 'running' || status === 'waiting_permission' || status === 'cancelling';
+    model.sending ||
+    !!controls?.configuring ||
+    status === 'connecting' ||
+    status === 'running' ||
+    status === 'waiting_permission' ||
+    status === 'cancelling' ||
+    status === 'resetting';
   const canChooseProfile = !record.profileId && !record.sessionId && !hasConnection && !busy && !sending;
   const availableProfile = model.profiles.some((profile) => profile.id === profileId);
-  const needsRestore = !!record.sessionId && !hasConnection;
+  const needsRestore = !!record.sessionId && status === 'disconnected';
   const canSend = !!draft.trim() && availableProfile && !busy && !sending && !pending && !needsRestore && status !== 'error';
   const canStop = status === 'running' || status === 'waiting_permission' || status === 'cancelling';
   const lastMessage = record.messages.at(-1);
@@ -520,7 +527,7 @@ function Permission({
             key={option.id}
             size="sm"
             variant={option.kind.startsWith('reject') ? 'secondary' : 'default'}
-            disabled={status === 'cancelling' || status === 'disconnected' || status === 'error'}
+            disabled={status === 'cancelling' || status === 'disconnected' || status === 'resetting' || status === 'error'}
             onClick={() => send({ type: 'permission', requestId: permission.id, optionId: option.id })}
           >
             {option.label}

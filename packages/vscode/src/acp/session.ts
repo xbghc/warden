@@ -107,7 +107,7 @@ export class AcpSession {
   snapshot(): AcpSnapshot {
     return structuredClone({
       record: this.record,
-      status: this.status,
+      status: this.resetting ? 'resetting' : this.status,
       ...(this.error ? { error: this.error } : {}),
       permissions: [...this.permissions.values()].map((permission) => permission.view),
       authMethods: this.authMethods
@@ -945,6 +945,7 @@ export class AcpSession {
     if (this.disposed) throw new Error('此任务对话已关闭');
     if (this.resetting || this.connecting) throw new Error('会话操作尚未结束，请稍候');
     this.resetting = true;
+    this.notify();
     try {
       await this.initialize();
       await this.disconnect();
@@ -957,13 +958,13 @@ export class AcpSession {
         this.record = this.emptyRecord();
         this.history = { messages: this.record.messages };
         await this.persist();
-        this.notify();
       } finally {
         await release();
         this.ownsClaim = false;
       }
     } finally {
       this.resetting = false;
+      this.notify();
     }
   }
 

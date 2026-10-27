@@ -133,6 +133,9 @@ On explicit **继续会话**, revalidate the binding and profile. If the same ag
 execution or new prompts. Preserve the prior local record when loading fails. If loading is
 unsupported, offer **新建会话** while retaining the previous record; local transcript storage is not
 a promise of restored model state. Changing agents likewise starts an explicit new conversation.
+While the new record is saved and its temporary ownership claim is released, the panel shows
+**正在新建会话** and disables profile selection, connection and sending. It becomes disconnected
+and available only after reset cleanup finishes, so a newly visible record cannot race that cleanup.
 
 ## Git and preview remain user-operated
 

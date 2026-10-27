@@ -13,7 +13,7 @@ export interface AcpProfileSummary {
   label: string;
 }
 
-export type AcpStatus = 'disconnected' | 'connecting' | 'connected' | 'running' | 'waiting_permission' | 'cancelling' | 'error';
+export type AcpStatus = 'disconnected' | 'connecting' | 'connected' | 'running' | 'waiting_permission' | 'cancelling' | 'resetting' | 'error';
 export interface AcpMessage {
   id: string;
   role: 'user' | 'agent' | 'thought' | 'tool' | 'notice';

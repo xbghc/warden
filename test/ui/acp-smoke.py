@@ -296,8 +296,17 @@ try:
         expect(second.get_by_role('button', name='继续会话', exact=True)).to_be_disabled()
         expect(second.get_by_text('此 Agent 未声明支持恢复旧会话', exact=False)).to_be_visible()
 
-        second.get_by_role('button', name='新建会话', exact=True).click()
-        second.wait_for_function("!window.__model.record.sessionId")
+        second.request.post(origin + '/reset-release?task=1')
+        try:
+            second.get_by_role('button', name='新建会话', exact=True).click()
+            second.wait_for_function("!window.__model.record.sessionId && window.__model.status === 'resetting'")
+            expect(second.get_by_text('正在新建会话', exact=True)).to_be_visible()
+            expect(second.get_by_role('button', name='连接 Agent', exact=True)).to_be_disabled()
+            expect(second.get_by_role('combobox', name='Agent 配置', exact=True)).to_be_disabled()
+            second.screenshot(path=str(artifacts / 'acp-resetting.png'), full_page=True)
+        finally:
+            second.request.delete(origin + '/reset-release?task=1')
+        second.wait_for_function("window.__model.status === 'disconnected'")
         second.get_by_role('combobox', name='Agent 配置', exact=True).select_option('auth')
         second.get_by_role('button', name='连接 Agent', exact=True).click()
         expect(second.get_by_role('button', name='Fixture login', exact=True)).to_be_visible()

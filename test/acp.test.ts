@@ -571,6 +571,42 @@ describe('ACP subprocess conversations', () => {
     expect(transcript(f.session)).toEqual([]);
   });
 
+  it('keeps a new conversation busy until its temporary ownership is released', async () => {
+    const f = await fixture();
+    await f.session.connect(f.profile, { resume: false });
+    await f.session.disconnect();
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const releasing = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const claim = f.storage.claim.bind(f.storage);
+    vi.spyOn(f.storage, 'claim').mockImplementationOnce(async () => {
+      const finish = await claim();
+      return async () => {
+        entered();
+        await gate;
+        await finish();
+      };
+    });
+    const reset = f.session.newConversation();
+    await releasing;
+    try {
+      expect(f.session.snapshot().record.sessionId).toBeUndefined();
+      expect(f.session.snapshot().status).toBe('resetting');
+      await expect(f.session.connect(f.profile, { resume: false })).rejects.toThrow('连接操作尚未结束');
+    } finally {
+      release();
+      await reset;
+    }
+    expect(f.session.snapshot().status).toBe('disconnected');
+    await f.session.connect(f.profile, { resume: false });
+    expect(f.session.snapshot().status).toBe('connected');
+  });
+
   it('retains local history when an advertised session load fails', async () => {
     const f = await fixture('task', 'load-fails');
     await f.session.connect(f.profile, { resume: false });

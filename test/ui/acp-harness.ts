@@ -29,6 +29,28 @@ const assets = unzipSync(await readFile(`packages/vscode/warden-${manifest.versi
 class CompletionStorage extends AcpSessionStorage {
   blocked = false;
   private completion?: { known: Set<string>; gate: Promise<void>; release(): void };
+  private resetRelease?: { gate: Promise<void>; release(): void };
+
+  holdResetRelease() {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.resetRelease = { gate, release };
+  }
+
+  releaseReset() {
+    this.resetRelease?.release();
+    this.resetRelease = undefined;
+  }
+
+  override async claim() {
+    const release = await super.claim();
+    return async () => {
+      await this.resetRelease?.gate;
+      await release();
+    };
+  }
 
   holdCompletion(record: AcpRecord) {
     if (this.completion) throw new Error('A completion save is already held');
@@ -181,6 +203,12 @@ const server = createServer(async (request, response) => {
       response.end(JSON.stringify({ blocked: entry.storage.blocked }));
       return;
     }
+    if (url.pathname === '/reset-release') {
+      if (request.method === 'POST') entry.storage.holdResetRelease();
+      if (request.method === 'DELETE') entry.storage.releaseReset();
+      response.end('{}');
+      return;
+    }
     if (url.pathname === '/reopen' && request.method === 'POST') {
       entry.panelId = randomUUID();
       entry.draft.resetPanel();
@@ -303,7 +331,10 @@ server.listen(0, '127.0.0.1', () => {
 async function close() {
   server.close();
   server.closeAllConnections();
-  for (const entry of entries) entry.storage.releaseCompletion();
+  for (const entry of entries) {
+    entry.storage.releaseCompletion();
+    entry.storage.releaseReset();
+  }
   await Promise.all(entries.map((entry) => entry.session.close()));
   await engine.close();
   await Promise.all(entries.map((entry) => rm(entry.binding.workspace, { recursive: true, force: true })));

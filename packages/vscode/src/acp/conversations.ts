@@ -283,7 +283,7 @@ export class AcpConversations {
         await session.disconnect();
         break;
       case 'new':
-        if (entry.sending || ['connecting', 'running', 'waiting_permission', 'cancelling'].includes(session.snapshot().status))
+        if (entry.sending || ['connecting', 'running', 'waiting_permission', 'cancelling', 'resetting'].includes(session.snapshot().status))
           throw new Error('请先停止并断开当前会话');
         await session.disconnect();
         await session.newConversation();
