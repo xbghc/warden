@@ -45,7 +45,7 @@
     "views": {
       "warden": [
         {
-          "id": "warden.workbench",
+          "id": "warden.task",
           "name": "工作区",
           "type": "webview"
         }
@@ -227,34 +227,34 @@
       "view/title": [
         {
           "command": "warden.refresh",
-          "when": "view == warden.workbench && warden.hasDevelopmentBranch",
+          "when": "view == warden.task && warden.hasDevelopmentBranch",
           "group": "navigation@1"
         },
         {
           "command": "warden.createTask",
-          "when": "view == warden.workbench && warden.hasDevelopmentBranch",
+          "when": "view == warden.task && warden.hasDevelopmentBranch",
           "group": "navigation@2"
         },
         {
           "command": "warden.configure",
-          "when": "view == warden.workbench && warden.hasDevelopmentBranch"
+          "when": "view == warden.task && warden.hasDevelopmentBranch"
         },
         {
           "command": "warden.selectRepository",
-          "when": "view == warden.workbench && (warden.multipleRoots || !warden.hasRepository)"
+          "when": "view == warden.task && (warden.multipleRoots || !warden.hasRepository)"
         },
         {
           "command": "warden.configureScripts",
-          "when": "view == warden.workbench && warden.hasDevelopmentBranch"
+          "when": "view == warden.task && warden.hasDevelopmentBranch"
         },
         {
           "command": "warden.rebase",
-          "when": "view == warden.workbench && warden.hasDevelopmentBranch",
+          "when": "view == warden.task && warden.hasDevelopmentBranch",
           "group": "navigation@3"
         },
         {
           "command": "warden.editHistory",
-          "when": "view == warden.workbench && warden.hasDevelopmentBranch"
+          "when": "view == warden.task && warden.hasDevelopmentBranch"
         }
       ],
       "commandPalette": [

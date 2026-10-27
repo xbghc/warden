@@ -111,7 +111,8 @@ export class Workbench {
         if (event.affectsConfiguration('warden.previewCommand')) this.views.render();
       }),
       this.views,
-      vscode.window.registerWebviewViewProvider('warden.workbench', this.views),
+      // Reuse the old task pane identity so VS Code restores its unsaved webview drafts after upgrading.
+      vscode.window.registerWebviewViewProvider('warden.task', this.views),
     );
     this.status.command = 'warden.showPreview';
     const commands: Record<string, (node?: Node) => unknown> = {
