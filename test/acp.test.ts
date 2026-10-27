@@ -230,15 +230,17 @@ describe('ACP subprocess conversations', () => {
     });
     expect(JSON.stringify(await storage.load())).not.toContain('会话更新提示');
     await session.send('idle-updates');
-    await expect.poll(() => session.snapshot().controls?.usage?.used).toBe(1400);
-    expect(session.snapshot().controls).toMatchObject({
-      title: '测试会话标题',
-      usage: { used: 1400, size: 8000 },
-      commands: [{ name: 'idle', description: 'Idle command' }],
-      configOptions: [{ currentValue: 'deep' }],
-    });
+    // Notifications may arrive in separate reads; usage does not acknowledge the later notice.
+    await expect
+      .poll(() => session.snapshot().controls)
+      .toMatchObject({
+        title: '测试会话标题',
+        usage: { used: 1400, size: 8000 },
+        commands: [{ name: 'idle', description: 'Idle command' }],
+        configOptions: [{ currentValue: 'deep' }],
+        notices: [{ title: '会话更新提示', severity: 'warning' }, { title: 'Idle notice' }],
+      });
     expect(session.snapshot().controls?.usage?.cost).toBeUndefined();
-    expect(session.snapshot().controls?.notices.at(-1)?.title).toBe('Idle notice');
     await session.disconnect();
     await session.connect(f.profile, { resume: true });
     expect(session.snapshot().controls?.notices).toEqual([]);
