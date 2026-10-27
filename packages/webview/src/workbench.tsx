@@ -47,10 +47,17 @@ export function WorkbenchApp({ model, send, state: persisted }: Props) {
   );
   const previous = useRef(model);
   useEffect(() => {
-    if (previous.current.creating && !model.creating && model.task && previous.current.repository === model.repository)
+    if (
+      previous.current.creating &&
+      !model.creating &&
+      model.task &&
+      model.createdTaskId === model.task.id &&
+      previous.current.session === model.session &&
+      previous.current.repository === model.repository
+    )
       state.save(taskDraftKey(previous.current), undefined);
     previous.current = model;
-  }, [model.creating, model.task?.id, model.repository]);
+  }, [model.creating, model.createdTaskId, model.task?.id, model.repository, model.session]);
   const scope = model.surface === 'task' ? `task:${model.task?.id ?? 'new'}` : model.surface;
   return (
     <main className={model.surface === 'workspaces' ? 'workspace-pane task-pane' : model.surface === 'task' ? 'task-pane' : undefined}>

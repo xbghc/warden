@@ -82,6 +82,7 @@ export class Workbench {
   private selectedFiles: Record<string, string> = {};
   private taskSection?: WorkbenchModel['taskSection'];
   private creating = false;
+  private createdTaskId?: string;
   private session = randomUUID();
   private busy?: string;
   private errors = new Map<string, WorkbenchError>();
@@ -262,6 +263,7 @@ export class Workbench {
       this.checkSignature = undefined;
       this.rebaseResult = undefined;
       this.creating = false;
+      this.createdTaskId = undefined;
       await this.context.workspaceState.update('warden.repository', this.backend.root);
       this.data = undefined;
       this.preview = undefined;
@@ -309,6 +311,7 @@ export class Workbench {
     this.branch = data.workflow?.developmentBranch;
     this.selected = undefined;
     this.creating = false;
+    this.createdTaskId = undefined;
     this.taskSection = undefined;
     this.historyDraft = undefined;
     this.historyPreview = undefined;
@@ -568,7 +571,7 @@ export class Workbench {
     if (!(await this.api('workflow.get', undefined)).workflow) return;
     await this.refresh(true);
     this.creating = true;
-    this.selected = undefined;
+    this.createdTaskId = undefined;
     this.taskSection = undefined;
     this.views.render();
     await this.views.show('task');
@@ -916,6 +919,7 @@ export class Workbench {
       workflow: this.branchTransition ? undefined : this.data,
       task,
       creating: this.creating,
+      createdTaskId: this.createdTaskId,
       taskSection: this.taskSection,
       workspaces: this.tasks().map((task) => this.workspaceRow(task)),
       preview: this.preview,
@@ -951,6 +955,16 @@ export class Workbench {
     if (taskId && !task) throw new Error('任务已不属于当前主开发分支');
     const node: Node | undefined = task ? { kind: 'task', task } : undefined;
     const scope = action.type.startsWith('task.') ? `task:${taskId ?? 'new'}` : action.type.split('.')[0]!;
+    if (action.type === 'task.cancelCreate') {
+      if (this.creating) {
+        this.creating = false;
+        this.createdTaskId = undefined;
+        this.taskSection = undefined;
+        this.errors.delete('task:new');
+        this.views.render();
+      }
+      return;
+    }
     // Draft edits do not queue behind Git operations and cannot change their pinned inputs.
     if (action.type === 'task.message') {
       this.messages[action.taskId] = action.message;
@@ -1044,6 +1058,7 @@ export class Workbench {
             if (session !== this.session) break;
             this.selected = created.id;
             this.creating = false;
+            this.createdTaskId = created.id;
             break;
           }
           case 'task.update':

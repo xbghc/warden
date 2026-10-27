@@ -49,31 +49,59 @@ export function Task({ model, send, state }: { model: WorkbenchModel; send(actio
   useEffect(() => {
     if (task?.worktree && draft.section === 'workspace') update({ section: 'commit' });
   }, [task?.worktree]);
+  if (model.creating)
+    return (
+      <section className="task-inline task-create" aria-label="新增任务">
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!model.busy && draft.title.trim()) send({ type: 'task.create', title: draft.title.trim(), body: '' });
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape' && !event.nativeEvent.isComposing && !model.busy) {
+              event.preventDefault();
+              event.stopPropagation();
+              send({ type: 'task.cancelCreate' });
+            }
+          }}
+        >
+          <Input
+            aria-label="任务说明"
+            placeholder="输入任务说明"
+            required
+            autoFocus
+            maxLength={200}
+            value={draft.title}
+            onChange={(event) => update({ title: event.target.value })}
+          />
+          <IconButton label="添加任务" variant="default" type="submit" disabled={!!model.busy || !draft.title.trim()}>
+            <Check aria-hidden="true" />
+          </IconButton>
+          <IconButton label="取消新增任务" disabled={!!model.busy} onClick={() => send({ type: 'task.cancelCreate' })}>
+            <X aria-hidden="true" />
+          </IconButton>
+        </form>
+      </section>
+    );
   if (!model.creating && (!task || draft.section === 'commit')) return null;
   const taskId = task?.id ?? '';
   const hook = task?.worktree ? task.workspaceHook : undefined;
   const deliveries = task?.worktree ? task.deliveries : undefined;
-  const title = model.creating ? '新增任务' : { commit: '', edit: '编辑说明', history: '交付记录', hook: '初始化脚本', workspace: '工作区选项' }[draft.section];
+  const title = { commit: '', edit: '编辑说明', history: '交付记录', hook: '初始化脚本', workspace: '工作区选项' }[draft.section];
   return (
     <section className="task-inline" aria-label={title}>
       <div className="task-section-heading">
         <h2>{title}</h2>
-        {!model.creating && (
-          <IconButton label="关闭面板" onClick={() => update({ section: 'commit' })}>
-            <X aria-hidden="true" />
-          </IconButton>
-        )}
+        <IconButton label="关闭面板" onClick={() => update({ section: 'commit' })}>
+          <X aria-hidden="true" />
+        </IconButton>
       </div>
-      {model.creating || draft.section === 'edit' ? (
+      {draft.section === 'edit' ? (
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            send(
-              model.creating
-                ? { type: 'task.create', title: draft.title, body: draft.body }
-                : { type: 'task.update', taskId, title: draft.title, body: draft.body },
-            );
-            if (!model.creating) setSaving(true);
+            send({ type: 'task.update', taskId, title: draft.title, body: draft.body });
+            setSaving(true);
           }}
         >
           <label className="field">
@@ -85,20 +113,18 @@ export function Task({ model, send, state }: { model: WorkbenchModel; send(actio
             <Textarea rows={5} maxLength={10000} value={draft.body} onChange={(event) => update({ body: event.target.value })} />
           </label>
           <div className="actions">
-            <IconButton label={model.creating ? '添加任务' : '保存说明'} variant="default" type="submit" disabled={!!model.busy || !draft.title.trim()}>
+            <IconButton label="保存说明" variant="default" type="submit" disabled={!!model.busy || !draft.title.trim()}>
               <Check aria-hidden="true" />
             </IconButton>
-            {!model.creating && (
-              <IconButton
-                label="取消编辑"
-                onClick={() => {
-                  setSaving(false);
-                  update({ section: 'commit', title: task!.title, body: task!.body ?? '' });
-                }}
-              >
-                <X aria-hidden="true" />
-              </IconButton>
-            )}
+            <IconButton
+              label="取消编辑"
+              onClick={() => {
+                setSaving(false);
+                update({ section: 'commit', title: task!.title, body: task!.body ?? '' });
+              }}
+            >
+              <X aria-hidden="true" />
+            </IconButton>
           </div>
         </form>
       ) : draft.section === 'history' ? (

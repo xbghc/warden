@@ -35,6 +35,7 @@ export interface WorkbenchModel {
   workflow?: WorkflowResponse;
   task?: WorkflowTask;
   creating: boolean;
+  createdTaskId?: string;
   taskSection?: { request: string; section: TaskSection };
   workspaces?: WorkspaceRow[];
   preview?: PreviewResponse;
@@ -57,6 +58,7 @@ export type WorkbenchAction =
   | { type: 'workspaces.create' | 'workspaces.refresh' }
   | { type: 'workspaces.show'; surface: 'preview' | 'history' | 'settings' | 'rebase' }
   | { type: 'task.create'; title: string; body: string }
+  | { type: 'task.cancelCreate' }
   | { type: 'task.update'; taskId: string; title: string; body: string }
   | { type: 'task.start'; taskId: string; kind: 'shared' | 'clone'; agent?: string }
   | { type: 'task.review' | 'task.open' | 'task.hook' | 'task.resume' | 'task.copy' | 'task.brief' | 'task.restore' | 'task.chat'; taskId: string }
@@ -109,6 +111,7 @@ export function parseWorkbenchAction(value: unknown): WorkbenchAction {
     case 'settings.agents':
     case 'workspaces.create':
     case 'workspaces.refresh':
+    case 'task.cancelCreate':
       return { type: action.type };
     case 'workspaces.show':
       if (!['preview', 'history', 'settings', 'rebase'].includes(String(action.surface))) throw new Error('未知工作区页面');

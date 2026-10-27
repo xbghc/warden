@@ -24,6 +24,7 @@ describe('webview protocol boundary', () => {
     expect(() => parseWorkbenchAction({ type: 'task.open', taskId: '' })).toThrow();
   });
   it('limits workspace controls to typed navigation and host-owned commit input', () => {
+    expect(parseWorkbenchAction({ type: 'task.cancelCreate', taskId: 'unrelated', command: 'arbitrary' })).toEqual({ type: 'task.cancelCreate' });
     expect(parseWorkbenchAction({ type: 'task.commit', taskId: 'orders', message: 'injected', command: 'arbitrary' })).toEqual({
       type: 'task.commit',
       taskId: 'orders',

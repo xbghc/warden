@@ -141,7 +141,10 @@ uses the same short setup prompt. Keep errors visible and put workflow education
 
 ## Plan and create a workspace
 
-`＋` creates a plan item with a title and optional description. It does not allocate a workspace,
+`＋` opens one compact inline input for the task description, stored as its title. Enter or the check
+icon creates the plan item. One `×` icon, labelled **取消新增任务**, and Escape close the input without
+creating anything. Cancellation preserves the draft and previous selection; a successful creation
+clears the new-task draft. Existing longer task notes remain editable. It does not allocate a workspace,
 ask for an owner or lifecycle state, or impose a dependency or delivery-report form.
 
 ```text

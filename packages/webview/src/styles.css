@@ -550,6 +550,19 @@ summary {
 .task-inline .task-section-heading {
   margin: 0;
 }
+.task-create {
+  margin-bottom: 8px;
+  padding: 4px;
+}
+.task-create form {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.task-create input {
+  flex: 1;
+  min-width: 0;
+}
 .workspace-row > .error,
 .workspace-row > .notice {
   margin: 6px 4px 6px 24px;

@@ -17,6 +17,7 @@ const data = await mkdtemp(path.join(os.tmpdir(), 'warden-ui-data-'));
 const engine = await Engine.open(fixture.root, path.join(data, 'state.json'));
 let selected: string | undefined;
 let creating = true;
+let createdTaskId: string | undefined;
 const messages: Record<string, string> = {};
 const expanded: Record<string, boolean> = {};
 let taskSection: WorkbenchModel['taskSection'];
@@ -33,7 +34,7 @@ const model = async (surface: Surface, edit = false): Promise<WorkbenchModel> =>
     workflow.workflow ? engine.execute('history.get', undefined) : undefined,
     engine.execute('workspaces.list', undefined),
   ]);
-  const task = workflow.workflow?.changes.find((row) => row.id === selected);
+  const task = creating ? undefined : workflow.workflow?.changes.find((row) => row.id === selected);
   if (edit) taskSection = { request: 'fixture-edit', section: 'edit' };
   return {
     session,
@@ -42,6 +43,7 @@ const model = async (surface: Surface, edit = false): Promise<WorkbenchModel> =>
     workflow,
     task,
     creating,
+    createdTaskId,
     taskSection,
     workspaces: await Promise.all(
       (workflow.workflow?.changes ?? []).map(async (row) => {
@@ -73,8 +75,8 @@ const server = createServer(async (request, response) => {
     const surface = (url.searchParams.get('surface') ?? 'workspaces') as Surface;
     const edit = url.searchParams.get('section') === 'edit';
     if (url.pathname === '/new-task') {
-      selected = undefined;
       creating = true;
+      createdTaskId = undefined;
       taskSection = undefined;
       response.writeHead(302, { Location: '/' });
       response.end();
@@ -101,8 +103,13 @@ const server = createServer(async (request, response) => {
       const action = parseWorkbenchAction(JSON.parse(text));
       switch (action.type) {
         case 'workspaces.create':
-          selected = undefined;
           creating = true;
+          createdTaskId = undefined;
+          taskSection = undefined;
+          break;
+        case 'task.cancelCreate':
+          creating = false;
+          createdTaskId = undefined;
           taskSection = undefined;
           break;
         case 'task.select':
@@ -147,6 +154,7 @@ const server = createServer(async (request, response) => {
           const task = await engine.execute('task.create', { title: action.title, body: action.body });
           selected = task.id;
           creating = false;
+          createdTaskId = task.id;
           break;
         }
         case 'task.start': {

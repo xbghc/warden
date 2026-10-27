@@ -251,6 +251,17 @@ exports.run = async () => {
     await workbench.refresh();
     const session = workbench.session;
     const count = (await state()).workflow.changes.length;
+    const previousTask = workbench.model('workspaces').task.id;
+    await workbench.handleAction({ type: 'workspaces.create' }, session);
+    assert.equal(workbench.model('workspaces').creating, true);
+    assert.equal(workbench.model('workspaces').task, undefined);
+    await assert.rejects(workbench.handleAction({ type: 'task.cancelCreate' }, 'old-session'), /仓库或主开发分支已切换/);
+    assert.equal(workbench.model('workspaces').creating, true);
+    await workbench.handleAction({ type: 'task.cancelCreate' }, session);
+    assert.equal(workbench.model('workspaces').creating, false);
+    assert.equal(workbench.model('workspaces').createdTaskId, undefined);
+    assert.equal(workbench.model('workspaces').task.id, previousTask, 'cancel preserves the prior task selection');
+    assert.equal((await state()).workflow.changes.length, count, 'cancel never creates a task');
     await assert.rejects(workbench.handleAction({ type: 'task.create', title: 'Wrong repository', body: '' }, 'old-session'), /仓库或主开发分支已切换/);
     assert.equal((await state()).workflow.changes.length, count);
     // Hold a real pre-mutation read until creation commits; it must not hide the newly saved task.
@@ -286,6 +297,7 @@ exports.run = async () => {
       engine.execute = execute;
     }
     const newTask = (await state()).workflow.changes.at(-1);
+    assert.equal(workbench.model('workspaces').createdTaskId, newTask.id, 'successful creation has an explicit draft-clear receipt');
     assert.equal(newTask.body, 'Line one\nLine two');
     await workbench.handleAction({ type: 'task.start', taskId: newTask.id, kind: 'shared', agent: 'worker-b' }, session);
     await workbench.handleAction({ type: 'task.brief', taskId: newTask.id }, session);
