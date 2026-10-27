@@ -10,9 +10,10 @@ HTTP, a listening port, a browser server or an installed Warden CLI.
 pnpm install
 pnpm build:native
 pnpm package:vscode
-code --install-extension packages/vscode/warden-0.19.2.vsix
+code --install-extension packages/vscode/warden-0.20.0.vsix
 ```
 
+Warden automatically uses the Git repository of the single open folder; there is no separate project selector.
 Open the primary directory and choose **Warden: 选择主开发分支**. The branch must be checked out in
 primary. In a multi-root window, **Warden: 选择仓库** selects one repository; the selection is remembered.
 Git and user-script dependencies must exist where the workspace lives. Workspace Trust is required;
@@ -24,28 +25,44 @@ Before configuration, the sidebar shows only the next setup action: **选择仓�
 **选择主开发分支**. The task pane, preview status and operational navigation appear after branch
 selection. Opening a workflow page early shows the same setup action instead of empty controls.
 
-The Warden navigation contains preview, history, the ordered plan, synchronization and settings.
-Task rows expand to the complete changed-file list. Selecting a task opens its current-task form and,
-when available, its first native diff. Task connection actions remain on the task rows. Drag-and-drop
-changes plan order only; the context menu also offers a keyboard-accessible move action.
-Rows show at most two status facts, with full context in the tooltip. History starts collapsed.
-Visible forms retain scoped errors; native notifications report errors in hidden forms.
+After this initial choice, switching the primary checkout in Git or VS Code automatically changes
+Warden's workspace list, current task, history and synchronization checks. Selection and history drafts
+are remembered per repository and development branch. Existing task notes and commit drafts remain
+with their tasks. Branches at the same commit are still separate contexts; old page actions are rejected
+after a switch. Existing native diffs and ACP conversations retain their original task.
 
-The current-task form provides multiline notes, workspace creation, script results, multiline commit
-messages and delivery recovery. Every workspace creation produces a fresh logical workspace with a
-new task branch. The optional executor name is a label. Copying a task brief writes context to the
-clipboard; the user can paste it into an ACP task conversation or an external tool. Physical slot reuse
-is internal: users do not select or adopt an old workspace.
-The optional executor label and compatibility clone option are available under workspace options.
-The task's more-actions menu contains **复制路径** and **复制任务说明**; the edit icon opens its notes.
-Existing task associations and
-delivery records are preserved on upgrade; delivery never recycles another active task's workspace.
+Finish delivery preparation and disconnect preview connections before switching. If Git switches
+while either is still active, the sidebar explains why Warden remains on the previous branch and asks
+you to return there to resolve it. Detached HEAD and unfinished Git operations keep the current context.
 
-Preview, history, batch rebase and settings open as editor-area webviews. Their resources are
-packaged locally, use VS Code theme colors, and send a finite validated action vocabulary to the host.
-Git operations do not require editing a JSON draft. Command Palette entry points remain available.
-ACP conversations open in separate task-bound panels and keep their original repository when the
-workbench selection changes.
+The workspace sidebar keeps preview, history, ordered tasks and settings together. Synchronization
+sits beside add-task in the native view heading. Every workspace has a persistent icon toolbar below
+its title: open workspace, Agent conversation, preview connection, commit, synchronization when needed,
+edit and more. Each icon has an accessible name and hover/focus help. The toolbar stays visible when
+the changed-file list is collapsed; expansion and selected files persist per repository.
+
+Selecting a task preserves its existing native diff and editor scroll. The first selection opens an
+available diff; background refresh does not advance a pinned review. Dragging tasks or pressing
+Alt+Up/Down on a title changes only plan order. The Command Palette also offers an explicit move picker.
+There are no up/down, task-details or workspace-script entries in the more-actions menu. Copy actions,
+delivery records and optional executor/storage choices remain available there.
+
+The commit icon opens VS Code's native top input box. Enter submits with ordinary Git hooks and signing;
+Escape cancels without staging and retains the draft. The task, repository and review version are fixed
+when input opens, so switching context or changing the source/baseline cannot authorize different content.
+Commit failures retain recovery data and show recovery actions beside the affected workspace.
+
+Task notes, delivery records and optional workspace settings open inline in the workspace list. Unsaved
+notes, choices and scroll survive hiding/reopening the webview. Script failures show output/retry actions
+in place; successful scripts do not add a menu entry. Default workspace creation executes directly.
+Every creation remains a fresh logical allocation and branch; physical directory reuse is internal.
+The optional executor name is only a label. Opening a workspace uses a new native VS Code window.
+
+Task review reserves the editor area for native read-only diffs. Preview, history arrangement, batch
+rebase and settings remain editor webviews. History entries expose native file review through a file
+picker. All resources are packaged locally, follow VS Code themes, and send a finite validated action
+vocabulary to the host; no arbitrary commands, paths or Git arguments cross that boundary.
+ACP conversations remain separate task-bound panels and do not follow workspace-list selection.
 
 ## ACP agent configuration
 
@@ -163,8 +180,9 @@ History displays commit titles with expandable bodies. Starting a draft opens th
 each draft message is edited on demand and remains saved when its editor closes or its row moves.
 The preview's full order is expandable, while conflicts and application consequences remain visible.
 
-Enter a commit message in **当前任务**, review the intended version, then submit to the named primary
-branch. The submitted message and reviewed versions are fixed for that operation. Unrelated primary
+Review the intended version, then use the commit icon below its workspace title. VS Code opens its
+top input box for the commit message; Enter submits and Escape cancels while preserving the draft.
+Cancellation does not stage files. The submitted message and reviewed versions are fixed for that operation. Unrelated primary
 edits block delivery. Other connections remain in the independent preview. Ordinary commit hooks and
 signing run in primary; success records the exact commit and delivery association.
 
