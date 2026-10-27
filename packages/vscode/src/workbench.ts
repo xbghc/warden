@@ -956,7 +956,8 @@ export class Workbench {
     const node: Node | undefined = task ? { kind: 'task', task } : undefined;
     const scope = action.type.startsWith('task.') ? `task:${taskId ?? 'new'}` : action.type.split('.')[0]!;
     if (action.type === 'task.cancelCreate') {
-      if (this.creating) {
+      // The webview may send cancellation before it receives the submitting state.
+      if (this.creating && !this.active) {
         this.creating = false;
         this.createdTaskId = undefined;
         this.taskSection = undefined;

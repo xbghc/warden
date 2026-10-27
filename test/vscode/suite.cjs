@@ -264,6 +264,7 @@ exports.run = async () => {
     assert.equal((await state()).workflow.changes.length, count, 'cancel never creates a task');
     await assert.rejects(workbench.handleAction({ type: 'task.create', title: 'Wrong repository', body: '' }, 'old-session'), /仓库或主开发分支已切换/);
     assert.equal((await state()).workflow.changes.length, count);
+    await workbench.handleAction({ type: 'workspaces.create' }, session);
     // Hold a real pre-mutation read until creation commits; it must not hide the newly saved task.
     await workbench.reading;
     const engine = workbench.backend;
@@ -276,23 +277,42 @@ exports.run = async () => {
     const captured = new Promise((resolve) => {
       capturedRead = resolve;
     });
+    let releaseCreate;
+    let creationStarted = false;
+    const heldCreate = new Promise((resolve) => {
+      releaseCreate = resolve;
+    });
     let hold = true;
     engine.execute = async (command, request) => {
-      const result = await execute.call(engine, command, request);
-      if (command === 'workflow.get' && hold) {
-        hold = false;
-        capturedRead();
-        await heldRead;
+      if (command === 'task.create') {
+        creationStarted = true;
+        await heldCreate;
       }
-      if (command === 'task.create') releaseRead();
-      return result;
+      try {
+        const result = await execute.call(engine, command, request);
+        if (command === 'workflow.get' && hold) {
+          hold = false;
+          capturedRead();
+          await heldRead;
+        }
+        return result;
+      } finally {
+        if (command === 'task.create') releaseRead();
+      }
     };
     try {
       const reading = workbench.refresh();
       await captured;
-      await workbench.handleAction({ type: 'task.create', title: 'Fresh workspace', body: 'Line one\nLine two' }, session);
+      const creating = workbench.handleAction({ type: 'task.create', title: 'Fresh workspace', body: 'Line one\nLine two' }, session);
+      await eventually(() => creationStarted);
+      await workbench.handleAction({ type: 'task.cancelCreate' }, session);
+      assert.equal(workbench.model('workspaces').creating, true, 'an in-flight creation cannot appear cancelled');
+      assert(workbench.model('workspaces').busy, 'creation stays visibly in progress');
+      releaseCreate();
+      await creating;
       await reading;
     } finally {
+      releaseCreate();
       releaseRead();
       engine.execute = execute;
     }

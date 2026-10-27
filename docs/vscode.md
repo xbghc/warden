@@ -59,7 +59,8 @@ Every creation remains a fresh logical allocation and branch; physical directory
 
 Add-task opens a compact single-line **任务说明** input. Enter or the check icon saves it; the sole `×`
 button (**取消新增任务**) or Escape closes it without creating a task. Cancelling keeps the draft and
-previous selection. The draft clears only after the host confirms successful creation.
+previous selection. The draft clears only after the host confirms successful creation. Cancellation
+is disabled while creation is in progress, including before the webview receives the busy state.
 The optional executor name is only a label. Opening a workspace uses a new native VS Code window.
 
 Task review reserves the editor area for native read-only diffs. Preview, history arrangement, batch
