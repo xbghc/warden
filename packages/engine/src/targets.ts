@@ -277,7 +277,9 @@ export async function getFullFile(ctx: TargetContext, filePath: string, side: Di
   try {
     const commit = await gitlink(ctx.cwd, filePath, ref);
     if (commit) return `Subproject commit ${commit}\n`;
-    const r = await runGit(['show', `${ref}:${filePath}`], { cwd: ctx.cwd });
+    // Without the separator Git also stats the entire revision:path as a filename,
+    // which can exceed filesystem limits even when the actual file path is valid.
+    const r = await runGit(['show', `${ref}:${filePath}`, '--'], { cwd: ctx.cwd });
     return r.stdout;
   } catch (e) {
     if (e instanceof WardenError && e.code === 'git_failed') return null;

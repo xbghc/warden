@@ -84,6 +84,8 @@ removed and returns 404.
 Formal delivery still prepares the primary index and commits through its validated workflow.
 Review reads `ls-tree -z <revision> -- <literal-path>` to identify submodule gitlinks without loading
 their commits from the parent repository; index comparisons use the existing `ls-files --stage` read.
+Blob reads use `git show <revision>:<path> --` so Git never tests the version-qualified name as a
+competing filesystem path, which can exceed path limits before the actual filename does.
 The sole `fsck` read shape is `git fsck --full --no-dangling`, used against independently copied
 backup metadata to verify object connectivity before publishing a shared-repository backup. Caller-
 supplied flags and the write-capable `--lost-found` form remain forbidden.

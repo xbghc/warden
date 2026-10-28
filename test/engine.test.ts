@@ -26,6 +26,20 @@ afterEach(async () => {
 });
 
 describe('desktop engine', () => {
+  it('reads long committed file names without treating revision expressions as disk paths', async () => {
+    // The file itself fits each filesystem; the additional object ID can exceed its path limit.
+    const file = `${'long'.repeat(process.platform === 'win32' ? 40 : 55)}.txt`;
+    await fixture.write(file, 'Committed content\n');
+    fixture.git('add', file);
+    fixture.git('commit', '-qm', 'Add a long file name');
+    const key = `commit:${fixture.git('rev-parse', 'HEAD').trim()}`;
+    expect((await engine.execute('review.file', { key, file, side: 'new' })).content).toBe('Committed content\n');
+    await fixture.write(file, 'Staged content\n');
+    fixture.git('add', file);
+    expect((await engine.execute('review.file', { key: 'staged', file, side: 'old' })).content).toBe('Committed content\n');
+    expect((await engine.execute('review.file', { key: 'staged', file, side: 'new' })).content).toBe('Staged content\n');
+  });
+
   it('reviews submodule versions without requiring their objects in the primary repository', async () => {
     const before = '1'.repeat(40);
     const after = '2'.repeat(40);

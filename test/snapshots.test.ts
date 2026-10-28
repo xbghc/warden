@@ -25,7 +25,7 @@ it.each(indexFormats)('keeps $objectFormat v$version split-index files and times
     gitAt('config', 'core.splitIndex', 'true');
     gitAt('update-index', '--split-index');
     await write('src/a.ts', 'staged\n');
-    const longName = `${'long'.repeat(40)}.txt`;
+    const longName = `${'long'.repeat(process.platform === 'win32' ? 40 : 55)}.txt`;
     await write(longName, 'long staged filename\n');
     gitAt('add', 'src/a.ts', longName);
     if (version === 3) gitAt('update-index', '--skip-worktree', 'src/b.ts');
@@ -43,7 +43,7 @@ it.each(indexFormats)('keeps $objectFormat v$version split-index files and times
     const store = snapshotStore(path.join(data, 'state.json'));
     const tree = await snapshotWorktree(cwd, store);
     const snapshot = await snapshotObjects(cwd, store);
-    const read = (name: string) => runGit(['show', `${tree}:${name}`], { cwd, snapshot });
+    const read = (name: string) => runGit(['show', `${tree}:${name}`, '--'], { cwd, snapshot });
     expect((await read('src/a.ts')).stdout).toBe('working\n');
     expect((await read('new.txt')).stdout).toBe('untracked\n');
     expect((await read('tracked.local')).stdout).toBe('updated tracked content\n');
@@ -99,7 +99,7 @@ it('captures saved tracked and untracked content externally without changing the
     const store = snapshotStore(path.join(data, 'state.json'));
     const tree = await snapshotWorktree(fx.root, store);
     const snapshot = await snapshotObjects(fx.root, store);
-    const read = (file: string) => runGit(['show', `${tree}:${file}`], { cwd: fx.root, snapshot });
+    const read = (file: string) => runGit(['show', `${tree}:${file}`, '--'], { cwd: fx.root, snapshot });
     expect((await read('src/a.ts')).stdout).toBe('other\n');
     expect((await read('new.txt')).stdout).toBe('untracked\n');
     expect(await snapshotWorktree(fx.root, store)).toBe(tree);
