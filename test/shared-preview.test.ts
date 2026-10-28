@@ -3,7 +3,7 @@ import path from 'node:path';
 import { chmod, mkdir, mkdtemp, open, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resolveRepo, StateStore, WorkflowService } from './compat/index.js';
-import { GitSandbox, oid } from '../packages/engine/src/git-sandbox.js';
+import { GitSandbox, oid, patchBetween } from '../packages/engine/src/git-sandbox.js';
 import { PreviewService } from '../packages/engine/src/preview.js';
 import { sharedRepositoryPath } from '../packages/engine/src/shared-repository.js';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
@@ -39,6 +39,31 @@ afterEach(async () => {
 });
 
 describe('shared preview worktrees', () => {
+  it('suppresses index hooks while applying internal composition patches', { timeout }, async () => {
+    const head = fx.git('rev-parse', 'HEAD').trim();
+    const sandbox = await GitSandbox.create(store, fx.root, head);
+    try {
+      await fx.write('added.txt', 'Reviewed change\n');
+      fx.git('add', 'added.txt');
+      fx.git('commit', '-qm', 'Change to compose');
+      const source = fx.git('rev-parse', 'HEAD').trim();
+      const hooks = path.join(data, 'hooks');
+      await mkdir(hooks);
+      const hook = path.join(hooks, 'post-index-change');
+      await writeFile(hook, '#!/bin/sh\nprintf "unexpected internal hook\\n" > index-hook.txt\n');
+      await chmod(hook, 0o755);
+      fx.git('-C', sandbox.path, 'config', 'core.hooksPath', hooks.replaceAll('\\', '/'));
+      await sandbox.fetch(fx.root, source);
+      await sandbox.apply(await patchBetween(sandbox.path, head, source), true, true);
+      await expect(readFile(path.join(sandbox.path, 'index-hook.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
+      await sandbox.commit();
+      expect(fx.git('-C', sandbox.path, 'rev-parse', 'HEAD^{tree}').trim()).toBe(fx.git('rev-parse', 'HEAD^{tree}').trim());
+      expect(fx.git('-C', sandbox.path, 'config', '--get', 'core.hooksPath').trim()).toBe(hooks.replaceAll('\\', '/'));
+    } finally {
+      await sandbox.dispose();
+    }
+  });
+
   it('keeps concurrent trial heads separate and removes only the finished trial', { timeout }, async () => {
     const head = fx.git('rev-parse', 'HEAD').trim();
     const [a, b] = await Promise.all([GitSandbox.create(store, fx.root, head), GitSandbox.create(store, fx.root, head)]);

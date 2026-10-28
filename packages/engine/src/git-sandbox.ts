@@ -21,7 +21,13 @@ export async function patchBetween(cwd: string, from: string, to: string, snapsh
 }
 
 /** Server-generated patches only. No shell, no partial/reject application, no automatic stash. */
-export async function applyPatch(cwd: string, patch: string, index: boolean, threeWay = false) {
+export async function applyPatch(
+  cwd: string,
+  patch: string,
+  index: boolean,
+  threeWay = false,
+  write: (args: string[]) => Promise<unknown> = (args) => runGitWrite(args, { cwd }),
+) {
   if (!patch) return;
   const tmp = await mkdtemp(path.join((await import('node:os')).tmpdir(), 'warden-patch-'));
   try {
@@ -30,9 +36,9 @@ export async function applyPatch(cwd: string, patch: string, index: boolean, thr
     const flags = ['--whitespace=nowarn', ...(index ? ['--index'] : []), ...(threeWay ? ['--3way'] : [])];
     // Preview intentionally leaves index stat data untouched. Once staging is explicitly
     // requested, refresh it so restored-but-identical files satisfy apply --index's check.
-    if (index) await runGitWrite(['update-index', '--refresh'], { cwd });
-    if (!threeWay) await runGitWrite(['apply', '--check', ...flags, file], { cwd });
-    await runGitWrite(['apply', ...flags, file], { cwd });
+    if (index) await write(['update-index', '--refresh']);
+    if (!threeWay) await write(['apply', '--check', ...flags, file]);
+    await write(['apply', ...flags, file]);
   } finally {
     await rm(tmp, { recursive: true, force: true });
   }
@@ -134,7 +140,8 @@ export class GitSandbox {
 
   async apply(patch: string, index: boolean, threeWay = false) {
     await this.repository();
-    await applyPatch(this.path, patch, index, threeWay);
+    // Applying also writes the index, so it needs the same hook isolation as trial commits.
+    await applyPatch(this.path, patch, index, threeWay, (args) => this.write(args));
   }
 
   async fetch(source: string, head: string) {

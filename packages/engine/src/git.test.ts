@@ -7,6 +7,7 @@ describe('git whitelist', () => {
     expect(() => assertAllowedGitArgs(['diff', '--cached'])).not.toThrow();
     expect(() => assertAllowedGitArgs(['worktree', 'list', '--porcelain'])).not.toThrow();
     expect(() => assertAllowedGitArgs(['ls-files', '--others'])).not.toThrow();
+    expect(() => assertAllowedGitArgs(['ls-tree', '-z', 'HEAD', '--', ':(literal)dependency'])).not.toThrow();
   });
   it('rejects anything else with a 400-class error', async () => {
     for (const args of [['commit', '-m', 'x'], ['checkout', 'main'], ['reset', '--hard'], ['stash'], ['worktree', 'add', '/tmp/x'], ['push'], []]) {

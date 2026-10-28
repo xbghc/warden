@@ -1,6 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
-import { mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import type { DevelopmentChange } from '@warden/shared';
 import { parseWorkbenchAction, taskReview } from '@warden/shared';
@@ -10,6 +10,7 @@ import { PreviewService } from '../packages/engine/src/preview.js';
 import { HistoryService } from '../packages/engine/src/history.js';
 import { listSafetyBackups } from '../packages/engine/src/backups.js';
 import { listWorktreesDetailed } from '../packages/engine/src/worktrees.js';
+import { getFullFile, listTargetDiffs, resolveTargetContext } from '../packages/engine/src/targets.js';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
 let fx: FixtureRepo;
@@ -107,6 +108,58 @@ describe('continuous workspace delivery and passive synchronization', () => {
     expect(fx.git('rev-parse', 'HEAD^{tree}').trim()).toBe(fx.git('-C', a.worktree, 'rev-parse', 'HEAD^{tree}').trim());
     expect(delivered.sourceBase).toBe(sourceHead(a));
   });
+
+  it.each(['local', 'global'] as const)(
+    'reviews, previews and delivers submodule versions despite %s ignore settings',
+    { timeout: longGitTimeout },
+    async (scope) => {
+      const before = fx.git('rev-parse', 'HEAD^').trim();
+      const after = head();
+      await fx.write('.gitmodules', '[submodule "dependency"]\n\tpath = dependency\n\turl = ./dependency.git\n');
+      fx.git('add', '.gitmodules');
+      fx.git('update-index', '--add', '--cacheinfo', `160000,${before},dependency`);
+      fx.git('commit', '-qm', 'Record dependency');
+      await mkdir(path.join(fx.root, 'dependency'));
+      const a = await task('Update dependency');
+      fx.git('-C', a.worktree, 'update-index', '--cacheinfo', `160000,${after},dependency`);
+      await edit(a, 'task.txt', 'Update dependency and code\n', true);
+      if (scope === 'global') {
+        const config = path.join(data, 'ignore-submodules.gitconfig');
+        fx.git('config', '--file', config, 'diff.ignoreSubmodules', 'all');
+        vi.stubEnv('GIT_CONFIG_GLOBAL', config);
+      } else {
+        fx.git('config', 'diff.ignoreSubmodules', 'all');
+        fx.git('-C', a.worktree, 'config', 'diff.ignoreSubmodules', 'all');
+      }
+      const repo = await resolveRepo(fx.root);
+      const checkouts = await listWorktreesDetailed(repo);
+      const review = taskReview(await workflow.get(), a.id, checkouts)!;
+      const context = resolveTargetContext(repo, checkouts, review.targetKey);
+      const files = await listTargetDiffs(context);
+      expect(files.map((entry) => entry.path)).toEqual(['dependency', 'task.txt']);
+      expect(await getFullFile(context, 'dependency', 'old')).toBe(`Subproject commit ${before}\n`);
+      expect(await getFullFile(context, 'dependency', 'new')).toBe(`Subproject commit ${after}\n`);
+      const connected = await preview.set([a.id]);
+      expect(connected.status).toBe('current');
+      expect(fx.git('-C', connected.worktree!, 'rev-parse', 'HEAD:dependency').trim()).toBe(after);
+      await workflow.prepare(a.id, { sourceHead: sourceHead(a), developmentHead: head() });
+      const staged = resolveTargetContext(repo, checkouts, 'staged');
+      expect(await getFullFile(staged, 'dependency', 'old')).toBe(`Subproject commit ${before}\n`);
+      expect(await getFullFile(staged, 'dependency', 'new')).toBe(`Subproject commit ${after}\n`);
+      const delivered = await deliver(a, 'Update dependency and code');
+      expect(fx.git('rev-parse', 'HEAD:dependency').trim()).toBe(after);
+      expect(fx.git('rev-parse', 'HEAD^{tree}').trim()).toBe(fx.git('-C', a.worktree, 'rev-parse', 'HEAD^{tree}').trim());
+      expect(delivered.sourceBase).toBe(sourceHead(a));
+      const live = { cwd: a.worktree, key: 'all', target: { kind: 'all' as const } };
+      expect(await getFullFile(live, 'dependency', 'new')).toBe(`Subproject commit ${after}\n`);
+      const nested = path.join(a.worktree, 'dependency');
+      fx.git('clone', '--quiet', '--no-checkout', fx.root, nested);
+      fx.git('-C', nested, 'switch', '--detach', after);
+      expect(await getFullFile(live, 'dependency', 'new')).toBe(`Subproject commit ${after}\n`);
+      await writeFile(path.join(nested, 'src/a.ts'), 'Saved submodule edit\n');
+      expect(await getFullFile(live, 'dependency', 'new')).toBe(`Subproject commit ${after}-dirty\n`);
+    },
+  );
 
   it.each(['local', 'global'] as const)(
     'preserves preview and delivery paths and bytes under %s Git display configuration',

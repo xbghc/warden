@@ -1,5 +1,6 @@
 import { execFile, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import path from 'node:path';
 import { WardenError } from './errors.js';
 
 /** Sub-commands the server is allowed to run. Everything else is rejected before spawning. */
@@ -10,6 +11,7 @@ const ALLOWED_SUBCOMMANDS = new Set([
   'log',
   'worktree',
   'ls-files',
+  'ls-tree',
   'status',
   'merge-base',
   'rev-list',
@@ -35,7 +37,16 @@ export const EMPTY_TREE_SHA = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
  * Textconv would substitute converted content, custom prefixes would change the paths apply
  * strips, and submodule summaries would hide gitlink changes. Keep context for ordinary apply.
  */
-export const DIFF_OUTPUT_ARGS = ['--no-color', '--no-ext-diff', '--no-textconv', '--src-prefix=a/', '--dst-prefix=b/', '--submodule=short', '-U3'] as const;
+export const DIFF_OUTPUT_ARGS = [
+  '--no-color',
+  '--no-ext-diff',
+  '--no-textconv',
+  '--src-prefix=a/',
+  '--dst-prefix=b/',
+  '--submodule=short',
+  '--ignore-submodules=none',
+  '-U3',
+] as const;
 
 export class GitError extends WardenError {
   constructor(
@@ -260,18 +271,33 @@ export const LONG_GIT_TIMEOUT_MS = 10 * 60_000;
 
 /**
  * The writes a snapshot needs, and nothing else: `add --all` (with `--intent-to-add` for a diff)
- * and `write-tree --missing-ok`, always into an index and an object directory of warden's own. No
+ * and `write-tree --missing-ok`, always into an index and an object directory of warden's own.
+ * A copied split index is expanded with `update-index --no-split-index` in private Git metadata. No
  * alternates are set here, deliberately: git "freshens" an object it finds in one — touches its
  * mtime — so the repository's objects would be written after all. Without them the entries git
  * does not re-hash point at objects this store lacks, which `--missing-ok` allows; reads of the
  * tree pass the alternates (see `SnapshotEnv`). Only snapshots.ts calls it, with fixed arguments.
  */
-export async function runGitSnapshot(args: readonly string[], opts: { cwd: string; objects: string; index: string; timeoutMs?: number }): Promise<GitResult> {
-  const allowed =
-    (args[0] === 'add' && args[1] === '--all' && args.slice(2).every((a) => a === '--intent-to-add')) ||
-    (args[0] === 'write-tree' && args[1] === '--missing-ok' && args.length === 2);
+export async function runGitSnapshot(
+  args: readonly string[],
+  opts: { cwd: string; objects: string; index: string; gitDirectory?: string; timeoutMs?: number },
+): Promise<GitResult> {
+  const allowed = opts.gitDirectory
+    ? args.length === 2 && args[0] === 'update-index' && args[1] === '--no-split-index'
+    : (args[0] === 'add' && args[1] === '--all' && args.slice(2).every((a) => a === '--intent-to-add')) ||
+      (args[0] === 'write-tree' && args[1] === '--missing-ok' && args.length === 2);
   if (!allowed) throw new GitError(`not a snapshot command: git ${args.join(' ')}`, null, '', 400, 'git_subcommand_forbidden');
-  return execWrite(args, opts, { GIT_OBJECT_DIRECTORY: opts.objects, GIT_INDEX_FILE: opts.index });
+  // Index writes can invoke post-index-change hooks or create shared indexes in the source
+  // Git directory. Snapshot bookkeeping must stay external and never invoke those hooks.
+  return execWrite(
+    ['-c', 'core.splitIndex=false', '-c', 'core.fsmonitor=false', '-c', `core.hooksPath=${path.join(opts.index, 'disabled-hooks')}`, ...args],
+    opts,
+    {
+      GIT_OBJECT_DIRECTORY: opts.objects,
+      GIT_INDEX_FILE: opts.index,
+      ...(opts.gitDirectory ? { GIT_DIR: opts.gitDirectory, GIT_WORK_TREE: opts.cwd } : {}),
+    },
+  );
 }
 
 /** How a command failed, as `execFile` reports it: an exit code, or `ENOENT` and the like. */

@@ -6,6 +6,31 @@ import { resolveRepo } from './repo.js';
 import { listWorktreesDetailed, nextSlot, slotPath } from './worktrees.js';
 
 describe('worktree comparison', () => {
+  it('reports unfinished operations in primary and non-slot development checkouts', async () => {
+    const fx = await makeFixtureRepo();
+    const linked = `${fx.root}-development`;
+    try {
+      fx.git('switch', '-qc', 'conflicting');
+      await fx.write('src/b.ts', 'Conflicting change\n');
+      fx.git('commit', '-qam', 'Conflicting change');
+      fx.git('switch', 'main');
+      await fx.write('src/b.ts', 'Primary change\n');
+      fx.git('commit', '-qam', 'Primary change');
+      fx.git('worktree', 'add', '-b', 'development', linked, 'main');
+      expect(() => fx.git('merge', 'conflicting')).toThrow();
+      expect(() => fx.git('-C', linked, 'cherry-pick', 'conflicting')).toThrow();
+      const rows = await listWorktreesDetailed(await resolveRepo(fx.root));
+      expect(rows.find((row) => row.isMain)).toMatchObject({ busy: 'merge', free: false });
+      expect(rows.find((row) => row.path === linked)).toMatchObject({ busy: 'cherry-pick', free: false });
+      fx.git('merge', '--abort');
+      fx.git('-C', linked, 'cherry-pick', '--abort');
+      expect((await listWorktreesDetailed(await resolveRepo(fx.root))).every((row) => !row.busy)).toBe(true);
+    } finally {
+      await rm(linked, { recursive: true, force: true });
+      await fx.cleanup();
+    }
+  });
+
   it('compares a branch without an upstream against the main checkout branch, including after a merge and branch switch', async () => {
     const fx = await makeFixtureRepo();
     try {

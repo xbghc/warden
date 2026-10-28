@@ -1,11 +1,12 @@
 import path from 'node:path';
-import { lstat, readFile, readlink } from 'node:fs/promises';
+import { lstat, readFile, readlink, realpath } from 'node:fs/promises';
 import type { FileDiff, FileSummary, Target, TargetKey, WorktreeInfo, DiffSide } from '@warden/shared';
 import { parseTargetKey, TargetKeyError } from '@warden/shared';
 import { DIFF_OUTPUT_ARGS, EMPTY_TREE_SHA, mergeBase, refExists, revParse, runGit } from './git.js';
 import { parseUnifiedDiff } from './diffparse.js';
 import { badRequest, WardenError } from './errors.js';
 import type { RepoContext } from './repo.js';
+import { readWorktreeState } from './worktree-state.js';
 
 export interface TargetContext {
   key: TargetKey;
@@ -237,6 +238,17 @@ async function refForSide(ctx: TargetContext, side: DiffSide): Promise<string | 
   }
 }
 
+/** Gitlinks name commits in another repository; show must not dereference them as local objects. */
+async function gitlink(cwd: string, file: string, ref: string): Promise<string | undefined> {
+  const staged = ref === ':0';
+  const args = staged ? ['ls-files', '--stage', '-z', '--', literal(file)] : ['ls-tree', '-z', ref, '--', literal(file)];
+  const result = await runGit(args, { cwd });
+  const entry = result.stdout.split('\0')[0] ?? '';
+  const fields = entry.slice(0, entry.indexOf('\t')).split(' ');
+  if (fields[0] !== '160000' || (staged ? fields[2] !== '0' : fields[1] !== 'commit')) return undefined;
+  return fields[staged ? 1 : 2];
+}
+
 /** Full content of a file on one side of the target; null when it does not exist there. */
 export async function getFullFile(ctx: TargetContext, filePath: string, side: DiffSide): Promise<string | null> {
   assertRepoPath(filePath);
@@ -245,7 +257,17 @@ export async function getFullFile(ctx: TargetContext, filePath: string, side: Di
     try {
       const fullPath = path.join(ctx.cwd, filePath);
       // Git stores a symlink's destination text, including dangling and directory links.
-      if ((await lstat(fullPath)).isSymbolicLink()) return await readlink(fullPath);
+      const info = await lstat(fullPath);
+      if (info.isSymbolicLink()) return await readlink(fullPath);
+      if (info.isDirectory()) {
+        const indexed = await gitlink(ctx.cwd, filePath, ':0');
+        if (!indexed) return null;
+        const top = (await runGit(['rev-parse', '--show-toplevel'], { cwd: fullPath })).stdout.trim();
+        // An uninitialized submodule is an empty directory where Git discovers the parent.
+        if ((await realpath(top)) !== (await realpath(fullPath))) return `Subproject commit ${indexed}\n`;
+        const state = await readWorktreeState(fullPath);
+        return `Subproject commit ${state.head ?? indexed}${state.dirtyCount ? '-dirty' : ''}\n`;
+      }
       const buf = await readFile(fullPath);
       return buf.toString('utf8');
     } catch {
@@ -253,6 +275,8 @@ export async function getFullFile(ctx: TargetContext, filePath: string, side: Di
     }
   }
   try {
+    const commit = await gitlink(ctx.cwd, filePath, ref);
+    if (commit) return `Subproject commit ${commit}\n`;
     const r = await runGit(['show', `${ref}:${filePath}`], { cwd: ctx.cwd });
     return r.stdout;
   } catch (e) {

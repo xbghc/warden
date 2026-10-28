@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
+const { writeFileSync } = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
@@ -139,4 +140,24 @@ exports.checkBranches = async (workbench, root, eventually) => {
     [b.id],
   );
   assert.equal(workbench.preview.worktree, preview, 'the preview directory persists across requirements');
+
+  // Finish the synchronous Git sequence before allowing an observer to follow the new branch.
+  const originalBranch = branch();
+  const originalHead = git('rev-parse', 'HEAD');
+  git('switch', '-c', 'guard/conflicting');
+  writeFileSync(path.join(root, 'branch-conflict.txt'), 'Side content\n');
+  git('add', 'branch-conflict.txt');
+  git('-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-qm', 'Create conflicting branch');
+  git('switch', '-c', 'guard/merging', originalHead);
+  writeFileSync(path.join(root, 'branch-conflict.txt'), 'Target content\n');
+  git('add', 'branch-conflict.txt');
+  git('-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-qm', 'Create merge target');
+  assert.throws(() => git('-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'merge', 'guard/conflicting'));
+  await workbench.refresh(true);
+  assert.equal(workbench.checkouts.worktrees.find((row) => row.isMain).busy, 'merge');
+  assert.equal(branch(), originalBranch, 'an unfinished merge does not select a new requirement');
+  assert.equal(workbench.model('task').task.id, b.id, 'the previous requirement selection stays visible during a merge');
+  git('merge', '--abort');
+  await follow('guard/merging');
+  assert.deepEqual(workbench.model('workspaces').workspaces, [], 'following resumes after the Git operation ends');
 };

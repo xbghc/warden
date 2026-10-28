@@ -73,7 +73,7 @@ Single user, in the VS Code workspace extension host (local, SSH, WSL or contain
 production HTTP listener. The internal engine executes Git with argument arrays,
 through Node's `execFile` or the Rust core's fixed status operation, without a shell. General
 reads go through an argument whitelist (`rev-parse`, `diff`, `show`, `log`,
-`worktree list`, `ls-files`, `status`, `merge-base`, `rev-list`, `for-each-ref`, `check-ref-format`,
+`worktree list`, `ls-files`, `ls-tree`, `status`, `merge-base`, `rev-list`, `for-each-ref`, `check-ref-format`,
 `grep` without `-O` / `--open-files-in-pager`, and `config` only as `--get`, `--get-all` or
 `--get-regexp` of one name or pattern; `var` only for `GIT_ATTR_GLOBAL` and `GIT_ATTR_SYSTEM`)
 that refuses option-looking refs and any write-capable
@@ -82,6 +82,8 @@ own arguments. Diff review is read-only: the legacy `POST /api/targets/:key/stag
 partial index-patch writer have been removed. The `PUT /api/targets/:key/viewed` endpoint is also
 removed and returns 404.
 Formal delivery still prepares the primary index and commits through its validated workflow.
+Review reads `ls-tree -z <revision> -- <literal-path>` to identify submodule gitlinks without loading
+their commits from the parent repository; index comparisons use the existing `ls-files --stage` read.
 The sole `fsck` read shape is `git fsck --full --no-dangling`, used against independently copied
 backup metadata to verify object connectivity before publishing a shared-repository backup. Caller-
 supplied flags and the write-capable `--lost-found` form remain forbidden.
@@ -106,6 +108,11 @@ the repository. Internal snapshots write only there: `git add --all` and
 `git write-tree --missing-ok`, with `GIT_INDEX_FILE` and `GIT_OBJECT_DIRECTORY` set to files in
 Warden's data directory and no alternates. Reads add the repository's objects as alternates;
 writes must not, because Git can freshen alternate objects. `snapshots.ts` owns these operations.
+For split indexes, it copies the referenced shared index into disposable private Git metadata and
+runs only `git update-index --no-split-index` there before capturing content. Source shared indexes
+are never passed to Git during that expansion, because even reading one refreshes its timestamp.
+Snapshot commands disable split-index creation, filesystem-monitor shortcuts and index-change hooks;
+the final `add` still uses the source repository's attributes, filters and ignore rules.
 
 New clone workspaces copy the primary repository's effective `user.name` and `user.email` with
 fixed `git config` writes only when they differ from the clone's inherited defaults. This preserves
@@ -123,7 +130,8 @@ can already read each other's objects. Shared initialization preserves the prima
 Clone refs remain independent, while composition imports the clone commits it needs into the shared
 object store. This never imports agent development history into primary.
 Internal commands disable hooks/signing through command-local configuration, never by changing the
-shared repository's ordinary commit configuration.
+shared repository's ordinary commit configuration. Internal patch application and its index refresh
+use the same isolation; staging the real delivery in primary retains its normal index and commit hooks.
 Deleting a shared task branch first proves its tip is included in the primary commit or its explicit
 upstream. Only then does `update-ref -d <ref> <observed-tip>` remove that exact ref in the external
 repository. A squash delivery does not establish ancestry of its source branch; such branches are
@@ -170,7 +178,9 @@ rebase or workspace recycling.
 Workflow reads share one checkout inventory per request instead of rebuilding every workspace's
 inventory for each task. The extension follows observed primary checkout branch changes through
 `workflow.configure`, retaining its existing integration and connection guards. Branch changes rotate
-the webview session and invalidate review authorization and history/rebase results. History and check
+the webview session and invalidate review authorization and history/rebase results. Checkout
+observations include operation markers for primary and non-slot development checkouts, so unfinished
+merges and cherry-picks suppress branch following until the user finishes or aborts them. History and check
 refreshes include the branch identity; the state-only `workflow.context` read rejects mixed snapshots
 when another window switches requirements during a refresh. Scoped engine writes verify the expected
 development branch after acquiring the repository lock, so a request queued by an old page cannot

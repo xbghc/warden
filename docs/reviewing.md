@@ -80,6 +80,9 @@ identical; the snapshots themselves contain only the original file content.
 Symbolic links display their destination text on both sides of the comparison, matching Git's
 stored content. Live review does not read the linked file or directory; dangling links and links
 outside the repository remain reviewable as link destinations.
+Submodules display their recorded commit IDs on both sides. Live comparisons use the initialized
+submodule's HEAD and mark uncommitted content with `-dirty`; uninitialized submodules use the index's
+recorded version. Review does not fetch or initialize submodules.
 
 There are no read markers, inline comments or staging controls. Staging and unstaging through
 external Git tools do not change the review scope or establish that content has been read. Formal
@@ -99,6 +102,8 @@ belongs to its baseline. Uncommitted primary edits block task delivery until the
 Comments such as `debug:start`, `debug:end` and `nocommit` have no special meaning to Warden:
 all changed lines remain ordinary review and delivery content. Context expansion and manual code
 folding remain available.
+Submodule version changes remain part of the complete comparison and delivery, even when local or
+global `diff.ignoreSubmodules` or per-submodule ignore settings hide them in ordinary Git output.
 
 ## Auto-refresh
 

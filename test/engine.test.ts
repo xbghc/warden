@@ -26,6 +26,19 @@ afterEach(async () => {
 });
 
 describe('desktop engine', () => {
+  it('reviews submodule versions without requiring their objects in the primary repository', async () => {
+    const before = '1'.repeat(40);
+    const after = '2'.repeat(40);
+    fixture.git('update-index', '--add', '--cacheinfo', `160000,${before},dependency`);
+    fixture.git('commit', '-qm', 'Record external submodule version');
+    fixture.git('update-index', '--cacheinfo', `160000,${after},dependency`);
+    fixture.git('commit', '-qm', 'Update external submodule version');
+    const key = `commit:${fixture.git('rev-parse', 'HEAD').trim()}`;
+    expect((await engine.execute('review.files', { key })).files.map((file) => file.path)).toEqual(['dependency']);
+    expect((await engine.execute('review.file', { key, file: 'dependency', side: 'old' })).content).toBe(`Subproject commit ${before}\n`);
+    expect((await engine.execute('review.file', { key, file: 'dependency', side: 'new' })).content).toBe(`Subproject commit ${after}\n`);
+  });
+
   it('refreshes the persistent preview and its setup environment across branches at the same commit', async () => {
     await fixture.write('.gitignore', 'node_modules/\n');
     fixture.git('add', '.gitignore');

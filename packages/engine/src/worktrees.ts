@@ -132,7 +132,9 @@ export async function listWorktreesDetailed(ctx: RepoContext): Promise<WorktreeD
     all.map(async (w) => {
       const slot = w.isMain || w.bare ? undefined : slotOf(ctx, w.path);
       const dirty = w.prunable || w.bare ? 0 : await dirtyCount(w.path).catch(() => -1);
-      const state = slot === undefined || w.prunable ? { foreign: false } : await checkoutState(ctx, w);
+      // Primary and non-slot checkouts also carry operation markers. Branch following
+      // must not treat their unfinished merge or cherry-pick as a new requirement.
+      const state = w.bare || w.prunable ? { foreign: false } : await checkoutState(ctx, w);
       const detail: WorktreeDetail = {
         ...w,
         dirty,

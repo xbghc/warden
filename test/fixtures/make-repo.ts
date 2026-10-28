@@ -15,7 +15,7 @@ export interface FixtureRepo {
  *  c1: src/a.ts, src/b.ts, README.md
  *  c2: modifies src/a.ts, adds src/util/c.ts
  */
-export async function makeFixtureRepo(prefix = 'warden-fixture-'): Promise<FixtureRepo> {
+export async function makeFixtureRepo(prefix = 'warden-fixture-', options: { objectFormat?: 'sha1' | 'sha256' } = {}): Promise<FixtureRepo> {
   // macOS exposes its temporary directory through a symlink; Git resolves it.
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), prefix)));
   const env = {
@@ -34,7 +34,7 @@ export async function makeFixtureRepo(prefix = 'warden-fixture-'): Promise<Fixtu
     await mkdir(path.dirname(full), { recursive: true });
     await writeFile(full, content);
   };
-  git('init', '-q', '-b', 'main');
+  git('init', '-q', '-b', 'main', ...(options.objectFormat ? [`--object-format=${options.objectFormat}`] : []));
   // Server-side commits do not inherit the fixture helper's identity environment.
   git('config', 'user.name', 'Fixture');
   git('config', 'user.email', 'fixture@example.com');
