@@ -78,7 +78,7 @@ h1 {
 .task-pane section {
   margin: 10px 0 0;
 }
-.task-pane label.field {
+.task-pane .field {
   margin: 10px 0;
 }
 .task-pane textarea {
@@ -127,7 +127,7 @@ p {
 section {
   margin: 16px 0;
 }
-label.field {
+.field {
   display: grid;
   gap: 6px;
   margin: 12px 0;
@@ -138,6 +138,105 @@ label.field {
   gap: 8px;
   margin-top: 12px;
   align-items: center;
+}
+.metadata,
+.section-heading,
+.surface-toolbar,
+.selection-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.metadata,
+.section-heading,
+.surface-toolbar {
+  flex-wrap: wrap;
+}
+.metadata > svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  color: var(--color-muted-foreground);
+}
+.metadata > span,
+.metadata > code,
+.check-body {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.branch {
+  overflow-wrap: anywhere;
+}
+.surface-toolbar {
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.surface-toolbar .actions {
+  margin: 0;
+}
+.section-heading h2 {
+  margin: 0;
+}
+.section-heading {
+  margin-bottom: 8px;
+}
+.path-row {
+  flex-wrap: nowrap;
+}
+.path-row .path {
+  min-width: 0;
+}
+.preview-composition {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 16px 0 12px;
+}
+.composition-item {
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 3px 8px;
+  overflow-wrap: anywhere;
+}
+.status-badge {
+  display: inline-block;
+  width: fit-content;
+  padding: 2px 7px;
+  border: 1px solid var(--vscode-contrastBorder, var(--color-border));
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1.5;
+  background: var(--color-muted);
+}
+.status-badge-success {
+  color: var(--vscode-testing-iconPassed, #28733c);
+}
+.status-badge-warning {
+  color: var(--vscode-editorWarning-foreground, #895b00);
+}
+.status-badge-error {
+  color: var(--color-destructive);
+}
+.vscode-dark .status-badge-success,
+.vscode-high-contrast .status-badge-success {
+  color: var(--vscode-testing-iconPassed, #89d185);
+}
+.vscode-dark .status-badge-warning,
+.vscode-high-contrast .status-badge-warning {
+  color: var(--vscode-editorWarning-foreground, #cca700);
+}
+.history-start {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.history-start [data-slot="native-select-wrapper"] {
+  flex: 1 1 240px;
+}
+.check-body .metadata {
+  margin: 6px 0;
 }
 .muted {
   color: var(--color-muted-foreground);
@@ -263,13 +362,6 @@ summary {
   margin: 0;
   overflow-wrap: anywhere;
 }
-.acp-status {
-  display: inline-block;
-  padding: 3px 8px;
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-  font-size: 12px;
-}
 .acp-context summary {
   padding: 2px 0;
   color: var(--color-muted-foreground);
@@ -281,14 +373,11 @@ summary {
   gap: 8px;
   margin-top: 12px;
 }
-.acp-profile label.field {
+.acp-profile .field {
   flex: 1;
   min-width: 180px;
   max-width: 360px;
   margin: 0;
-}
-.acp-profile button {
-  margin-bottom: 2px;
 }
 .acp-session-settings {
   margin-top: 16px;
@@ -422,14 +511,6 @@ summary {
   gap: 4px;
   padding: 2px 0 8px;
   border-bottom: 1px solid var(--color-border);
-}
-.workspace-navigation > button:not([data-slot]) {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 28px;
-  padding: 0 7px;
-  border-radius: 3px;
 }
 .workspace-navigation > button:last-child {
   margin-left: auto;

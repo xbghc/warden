@@ -104,14 +104,26 @@ export function Task({ model, send, state }: { model: WorkbenchModel; send(actio
             setSaving(true);
           }}
         >
-          <label className="field">
-            标题
-            <Input required maxLength={200} value={draft.title} onChange={(event) => update({ title: event.target.value })} />
-          </label>
-          <label className="field">
-            说明
-            <Textarea rows={5} maxLength={10000} value={draft.body} onChange={(event) => update({ body: event.target.value })} />
-          </label>
+          <div className="field">
+            <Input
+              aria-label="标题"
+              placeholder="任务标题"
+              required
+              maxLength={200}
+              value={draft.title}
+              onChange={(event) => update({ title: event.target.value })}
+            />
+          </div>
+          <div className="field">
+            <Textarea
+              aria-label="说明"
+              placeholder="补充说明（可选）"
+              rows={5}
+              maxLength={10000}
+              value={draft.body}
+              onChange={(event) => update({ body: event.target.value })}
+            />
+          </div>
           <div className="actions">
             <IconButton label="保存说明" variant="default" type="submit" disabled={!!model.busy || !draft.title.trim()}>
               <Check aria-hidden="true" />
@@ -155,17 +167,21 @@ export function Task({ model, send, state }: { model: WorkbenchModel; send(actio
             send({ type: 'task.start', taskId, kind: draft.kind, agent: draft.agent });
           }}
         >
-          <label className="field">
-            执行者（可选）
-            <Input maxLength={100} value={draft.agent} onChange={(event) => update({ agent: event.target.value })} placeholder="名称标签" />
-          </label>
-          <label className="field">
-            Git 存储方式
-            <NativeSelect value={draft.kind} onChange={(event) => update({ kind: event.target.value as Draft['kind'] })}>
+          <div className="field">
+            <Input
+              aria-label="执行者（可选）"
+              maxLength={100}
+              value={draft.agent}
+              onChange={(event) => update({ agent: event.target.value })}
+              placeholder="执行者名称（可选）"
+            />
+          </div>
+          <div className="field">
+            <NativeSelect aria-label="Git 存储方式" value={draft.kind} onChange={(event) => update({ kind: event.target.value as Draft['kind'] })}>
               <NativeSelectOption value="shared">共享 Git 存储</NativeSelectOption>
               <NativeSelectOption value="clone">独立 clone（兼容模式）</NativeSelectOption>
             </NativeSelect>
-          </label>
+          </div>
           <IconButton label="创建工作区" variant="default" type="submit" disabled={!!model.busy}>
             <Plus aria-hidden="true" />
           </IconButton>

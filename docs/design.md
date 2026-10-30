@@ -2,7 +2,7 @@
 
 The VS Code extension implements the [workflow](workflow.md). See [VS Code](vscode.md) for the workspace sidebar, native review editors and packaged webview forms. Human editing uses
 primary; runtime composition uses the independent preview directory. The new page is implemented.
-Wireframes describe intent rather than exact labels. Updated 2026-10-26.
+Wireframes describe intent rather than exact labels. Updated 2026-10-30.
 
 ## Design method
 
@@ -51,10 +51,19 @@ shared review controls. The wireframes below describe workflows, not required li
 - Use nouns for headings and verbs for actions. Within an identified object, shorten labels to
   the needed distinction: **说明**, **起点**, **调整历史**. Keep destinations on actions
   where they matter, such as **提交到主开发分支** and **应用到 feature/order**.
-- Prefer familiar icons for refresh, edit, save, cancel, add, delete and reorder. Use
-  compact square buttons with an accessible name and a tooltip; retain shortcuts in tooltips.
-  Keep short text for navigation and consequential actions such as integration, synchronization
-  and history rewriting, where an icon alone would leave the scope unclear.
+- Prefer familiar icons for navigation, refresh, edit, copy, terminal, settings, cancel, add,
+  delete and reorder. Use the shared `IconButton` with an accessible name and a hover/focus
+  tooltip; retain shortcuts in tooltips. Keep short text for primary actions and operations
+  whose scope needs explanation, such as integration, Rebase, ending an Agent process,
+  permission decisions and history rewriting. Menus retain their readable action names.
+- Omit page headings that repeat the native tab title. Show branches, paths, timestamps and
+  task associations directly, using icons, monospace and muted text for hierarchy. Preview
+  composition uses task chips; observable sync and connection states use text badges with
+  VS Code theme colors and high-contrast borders. Color never carries state by itself.
+- Compact task edits, executor inputs, the history-start selector and the conversation composer
+  use placeholders and accessible names instead of repeated standalone labels. Preserve visible
+  labels for script fields and agent-provided configuration whose values need disambiguation.
+  Rebase selection uses one select-all checkbox with partial-selection feedback and a count.
 - Keep secondary content on demand: delivery records and script output. Preserve accessible names
   and tooltips on icon buttons. Errors and recovery actions must remain visible.
 - Task rows show at most two facts, prioritizing permission requests, failures and stale reviews;

@@ -60,8 +60,14 @@ try:
 
         first.goto(origin + '?task=0')
         second.goto(origin + '?task=1')
-        expect(first.get_by_role('heading', name='订单筛选参数 · Agent 对话')).to_be_visible()
-        expect(second.get_by_role('heading', name='分页默认值 · Agent 对话')).to_be_visible()
+        expect(first.get_by_role('heading', name='订单筛选参数', exact=True)).to_be_visible()
+        expect(second.get_by_role('heading', name='分页默认值', exact=True)).to_be_visible()
+        review = first.get_by_role('button', name='查看任务差异', exact=True)
+        review.focus()
+        expect(first.get_by_role('tooltip', name='查看任务差异', exact=True)).to_be_visible()
+        review.press('Escape')
+        review.click()
+        first.wait_for_function("window.__actions.some(message => message.action?.type === 'review')")
         assert all(not journal for entry in inspect()['entries'] for journal in entry['journals'])
 
         first.evaluate("async () => { await window.__fixture.pauseModels(); window.__fixture.deliver({ ...window.__model, profiles: [] }); }")

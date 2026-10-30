@@ -1,10 +1,13 @@
 import { useEffect, useId, useRef, useState } from 'react';
+import { FileDiff, FolderOpen, MessageSquarePlus, Settings, Square, Unplug } from 'lucide-react';
 import { AcpSetup } from './components/AcpSetup';
 import type { AcpAction, AcpConfigOption, AcpMessage, AcpModel, AcpPermission, AcpStatus } from '@warden/shared';
 import { Button } from './components/ui/button';
 import { Checkbox } from './components/ui/checkbox';
 import { NativeSelect, NativeSelectOptGroup, NativeSelectOption } from './components/ui/native-select';
 import { Textarea } from './components/ui/textarea';
+import { IconButton } from './components/ui/icon-button';
+import { StatusBadge } from './components/ui/status-badge';
 
 type Props = { model: AcpModel; send(action: AcpAction): void };
 const statusLabels: Record<AcpStatus, string> = {
@@ -170,12 +173,15 @@ export function AcpApp({ model, send }: Props) {
     <main className="acp-app">
       <header className="acp-header">
         <div className="acp-heading">
-          <h1>{binding.title} · Agent 对话</h1>
-          <span className="acp-status" role="status" aria-live="polite">
-            {statusLabels[status]}
+          <h1>{binding.title}</h1>
+          <span role="status" aria-live="polite">
+            <StatusBadge status={status}>{statusLabels[status]}</StatusBadge>
           </span>
         </div>
-        <p className="path">工作区：{binding.workspace}</p>
+        <p className="metadata path" aria-label="工作区" title="工作区">
+          <FolderOpen aria-hidden="true" />
+          <span>{binding.workspace}</span>
+        </p>
         <details className="acp-context">
           <summary>任务与会话信息</summary>
           <p className="path">主目录：{binding.repository}</p>
@@ -191,8 +197,7 @@ export function AcpApp({ model, send }: Props) {
           )}
         </details>
         <div className="acp-profile">
-          <label className="field">
-            Agent
+          <div className="field">
             <NativeSelect aria-label="Agent 配置" value={profileId} disabled={!canChooseProfile} onChange={(event) => setProfileId(event.target.value)}>
               {!model.profiles.length && <NativeSelectOption value="">尚未配置 Agent</NativeSelectOption>}
               {!!profileId && !availableProfile && <NativeSelectOption value={profileId}>配置已移除：{profileId}</NativeSelectOption>}
@@ -202,13 +207,13 @@ export function AcpApp({ model, send }: Props) {
                 </NativeSelectOption>
               ))}
             </NativeSelect>
-          </label>
-          <Button variant="secondary" size="sm" onClick={() => send({ type: 'configure' })}>
-            配置 Agent
-          </Button>
-          <Button variant="secondary" size="sm" onClick={() => send({ type: 'review' })}>
-            查看任务差异
-          </Button>
+          </div>
+          <IconButton label="配置 Agent" size="icon-sm" onClick={() => send({ type: 'configure' })}>
+            <Settings aria-hidden="true" />
+          </IconButton>
+          <IconButton label="查看任务差异" size="icon-sm" onClick={() => send({ type: 'review' })}>
+            <FileDiff aria-hidden="true" />
+          </IconButton>
         </div>
         {controls && (controls.configuring || (controls.configOptions !== undefined ? configOptions.length > 0 : controls.modes)) && (
           <section className="acp-session-settings" aria-label="会话配置" aria-busy={controls.configuring}>
@@ -269,15 +274,20 @@ export function AcpApp({ model, send }: Props) {
               {needsRestore ? '继续会话' : '连接 Agent'}
             </Button>
           )}
-          {hasConnection && (
-            <Button variant="secondary" size="sm" onClick={() => send({ type: 'disconnect' })}>
-              {busy || status === 'error' ? '结束 Agent 进程' : '断开连接'}
-            </Button>
-          )}
+          {hasConnection &&
+            (busy || status === 'error' ? (
+              <Button variant="secondary" size="sm" onClick={() => send({ type: 'disconnect' })}>
+                结束 Agent 进程
+              </Button>
+            ) : (
+              <IconButton label="断开连接" size="icon-sm" onClick={() => send({ type: 'disconnect' })}>
+                <Unplug aria-hidden="true" />
+              </IconButton>
+            ))}
           {(record.profileId || record.sessionId || record.messages.length > 0) && (
-            <Button variant="secondary" size="sm" disabled={busy || sending} onClick={() => send({ type: 'new' })}>
-              新建会话
-            </Button>
+            <IconButton label="新建会话" size="icon-sm" disabled={busy || sending} onClick={() => send({ type: 'new' })}>
+              <MessageSquarePlus aria-hidden="true" />
+            </IconButton>
           )}
         </div>
       </header>
@@ -382,9 +392,9 @@ export function AcpApp({ model, send }: Props) {
             </div>
           </details>
         )}
-        <label className="field">
-          消息
+        <div className="field">
           <Textarea
+            aria-label="消息"
             ref={composer}
             value={draft}
             maxLength={100_000}
@@ -399,17 +409,21 @@ export function AcpApp({ model, send }: Props) {
               }
             }}
           />
-        </label>
+        </div>
         <div className="actions">
-          <Button type="submit" disabled={!canSend}>
+          <Button type="submit" disabled={!canSend} title="发送（Ctrl / ⌘ + Enter）" aria-keyshortcuts="Control+Enter Meta+Enter">
             {sending ? '正在发送…' : '发送'}
           </Button>
           {canStop && (
-            <Button type="button" variant="secondary" disabled={status === 'cancelling'} onClick={() => send({ type: 'cancel' })}>
-              {status === 'cancelling' ? '正在停止…' : '停止本轮'}
-            </Button>
+            <IconButton
+              label={status === 'cancelling' ? '正在停止…' : '停止本轮'}
+              size="icon"
+              disabled={status === 'cancelling'}
+              onClick={() => send({ type: 'cancel' })}
+            >
+              <Square aria-hidden="true" />
+            </IconButton>
           )}
-          <span className="muted">Ctrl / ⌘ + Enter 发送</span>
         </div>
       </form>
     </main>
@@ -488,7 +502,7 @@ function Message({ message }: { message: AcpMessage }) {
       <div className="acp-message-heading">
         <strong>{role}</strong>
         {message.status && <span className="muted">{labels[message.status] ?? message.status}</span>}
-        {message.uncertain && <span className="acp-status">结果未确认</span>}
+        {message.uncertain && <StatusBadge status="uncertain">结果未确认</StatusBadge>}
       </div>
       {message.role === 'thought' ? (
         <details className="acp-thought">

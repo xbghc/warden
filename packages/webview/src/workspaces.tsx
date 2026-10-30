@@ -5,11 +5,11 @@ import {
   Copy,
   FileDiff,
   FileText,
+  Eye,
   FolderOpen,
   GitBranch,
   GitCommitHorizontal,
   History,
-  Layers,
   MessageSquare,
   MoreHorizontal,
   Pencil,
@@ -57,14 +57,12 @@ export function Workspaces({ model, send, state }: Props) {
   return (
     <>
       <nav className="workspace-navigation" aria-label="Warden 导航">
-        <button type="button" onClick={() => send({ type: 'workspaces.show', surface: 'preview' })}>
-          <Layers aria-hidden="true" />
-          预览
-        </button>
-        <button type="button" onClick={() => send({ type: 'workspaces.show', surface: 'history' })}>
+        <IconButton label="预览" onClick={() => send({ type: 'workspaces.show', surface: 'preview' })}>
+          <Eye aria-hidden="true" />
+        </IconButton>
+        <IconButton label="提交历史" onClick={() => send({ type: 'workspaces.show', surface: 'history' })}>
           <History aria-hidden="true" />
-          提交历史
-        </button>
+        </IconButton>
         <IconButton label="设置" onClick={() => send({ type: 'workspaces.show', surface: 'settings' })}>
           <Settings aria-hidden="true" />
         </IconButton>
