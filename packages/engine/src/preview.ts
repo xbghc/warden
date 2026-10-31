@@ -13,9 +13,9 @@ function conflict(message: string, code = 'preview_conflict'): never {
 }
 export async function primaryCheckout(repo: RepoContext, branch: string) {
   const row = (await listWorktreesAll(repo)).find((w) => !w.clone && !w.shared && w.branch === branch && !w.prunable);
-  if (!row) return conflict('请先在主目录检出主开发分支', 'development_checkout_missing');
+  if (!row) return conflict('Check out the base branch in the primary folder first.', 'development_checkout_missing');
   const state = await checkoutState(repo, row);
-  if (state.foreign || state.busy) return conflict('主目录有未完成的 Git 操作，请先处理', 'development_busy');
+  if (state.foreign || state.busy) return conflict('Finish the Git operation in the primary folder first.', 'development_busy');
   return row;
 }
 
@@ -41,7 +41,8 @@ export class PreviewService {
   }
 
   set(ids: string[]) {
-    if (!Array.isArray(ids) || ids.some((id) => typeof id !== 'string') || new Set(ids).size !== ids.length) throw badRequest('连接列表格式错误');
+    if (!Array.isArray(ids) || ids.some((id) => typeof id !== 'string') || new Set(ids).size !== ids.length)
+      throw badRequest('Invalid preview connection list.');
     return this.store.withRepositoryLock(async () => {
       try {
         return await this.compose(ids);
@@ -96,7 +97,7 @@ export class PreviewService {
         const target = GitSandbox.open(this.store, saved.directory!);
         await target.validate();
         if ((await snapshotWorktree(target.path, snapshotStore(this.store.file))) !== saved.tree)
-          conflict('预览目录有额外改动，已停止同步；请在主目录编辑代码', 'preview_dirty');
+          conflict('The preview folder has unexpected changes. Sync stopped; edit code in the primary folder.', 'preview_dirty');
         const unchanged =
           saved.developmentBranch === state.workflow?.developmentBranch &&
           saved.baselineTree === inputs.baseline &&
@@ -164,7 +165,13 @@ export class PreviewService {
       s.connectionPreview!.setup = { command, ...result };
     });
     if ((await snapshotWorktree(directory, snapshotStore(this.store.file))) !== saved.tree)
-      await this.failed(new WardenError(409, 'setup 修改了预览代码；请让脚本仅管理被忽略的环境文件，并恢复预览代码后重试', 'preview_dirty'));
+      await this.failed(
+        new WardenError(
+          409,
+          'The preview setup script changed source files. Restrict it to ignored environment files, restore the preview code and retry.',
+          'preview_dirty',
+        ),
+      );
   }
 
   /** Upgrade only a proven old composition; never silently turn agent preview files into the user's baseline. */
@@ -180,7 +187,8 @@ export class PreviewService {
       const actual = await snapshotWorktree(primary.path, snapshotStore(this.store.file));
       if (actual === pending.tree) {
         Object.assign(saved, pending.response, { tree: pending.tree, sandbox: pending.sandbox, snapshot: pending.snapshot });
-      } else if (actual !== saved.tree) conflict('旧预览更新被中断；请先处理主目录改动后再迁移', 'preview_interrupted');
+      } else if (actual !== saved.tree)
+        conflict('A legacy preview sync was interrupted. Handle primary-folder changes before migrating.', 'preview_interrupted');
       delete saved.pending;
       await this.store.update((s) => {
         s.connectionPreview = saved;
@@ -198,7 +206,10 @@ export class PreviewService {
           (actual !== saved.tree && !(saved.migrating && actual === baseline)) ||
           (await runGit(['diff', '--cached', '--quiet', saved.developmentHead, '--'], { cwd: primary.path, okCodes: [0, 1] })).code !== 0
         )
-          conflict('旧预览仍在主目录且存在其他改动；请先在旧版中断开连接或恢复原预览后重试迁移', 'preview_migration_required');
+          conflict(
+            'The legacy preview is still in the primary folder with other changes. Disconnect it or restore the original preview in the older version before retrying migration.',
+            'preview_migration_required',
+          );
         await this.store.update((s) => {
           s.connectionPreview!.migrating = true;
         });
@@ -230,7 +241,11 @@ export class PreviewService {
       await this.store.update((s) => {
         delete s.connectionPreview!.pending;
       });
-    } else conflict('预览更新被中断且目录有额外改动；请检查预览目录后重试，主目录未被修改', 'preview_interrupted');
+    } else
+      conflict(
+        'A preview sync was interrupted and the folder has unexpected changes. Inspect the preview folder and retry. The primary folder was not changed.',
+        'preview_interrupted',
+      );
     await GitSandbox.open(this.store, pending.sandbox).dispose();
   }
 
@@ -243,9 +258,10 @@ export class PreviewService {
     const sources = [];
     for (const id of ids) {
       const change = workflow.changes.find((c): c is DevelopmentChange => c.id === id && !!c.worktree);
-      if (!change || change.developmentBranch !== workflow.developmentBranch || change.status === 'accepted') throw badRequest('工作区不属于当前主开发分支');
+      if (!change || change.developmentBranch !== workflow.developmentBranch || change.status === 'accepted')
+        throw badRequest('This workspace does not belong to the current base branch.');
       const checkout = checkouts.find((w) => w.path === change.worktree && w.branch === change.branch && !w.prunable && !w.foreign && !w.busy);
-      if (!checkout || checkout.path === primary.path) conflict('工作区不可用或有未完成的 Git 操作', 'preview_source_busy');
+      if (!checkout || checkout.path === primary.path) conflict('The workspace is unavailable or has an unfinished Git operation.', 'preview_source_busy');
       const from = await deliveryBase(change, await oid(checkout.path, 'HEAD'), head);
       const tree = await snapshotWorktree(checkout.path, snapshotStore(this.store.file));
       sources.push({ change, from, tree });
@@ -268,7 +284,7 @@ export class PreviewService {
     let state = await this.store.load();
     if (!state.workflow) {
       if (!requestedIds?.length) return this.get();
-      throw badRequest('请先选择主开发分支');
+      throw badRequest('Select a base branch first.');
     }
     await this.migrateLegacy(state);
     state = await this.store.load();
@@ -297,7 +313,9 @@ export class PreviewService {
           );
         } catch (error) {
           const conflicts = await sandbox.conflicts();
-          conflict(`连接失败，${change.title} 的改动无法组合${conflicts.length ? `：${conflicts.join('、')}` : `：${gitMessage(error)}`}。原预览保持不变。`);
+          conflict(
+            `Cannot connect ${change.title}: its changes could not be combined${conflicts.length ? `: ${conflicts.join(', ')}` : `: ${gitMessage(error)}`}. The previous preview is unchanged.`,
+          );
         }
       }
       const snapshot = await sandbox.commit();
@@ -324,7 +342,7 @@ export class PreviewService {
       const target = GitSandbox.open(this.store, previous.directory!);
       await target.validate();
       if ((await snapshotWorktree(target.path, snapshotStore(this.store.file))) !== previous.tree)
-        conflict('预览目录有额外改动，已停止同步以保留这些文件；请在主目录编辑代码', 'preview_dirty');
+        conflict('The preview folder has unexpected changes. Sync stopped to preserve them; edit code in the primary folder.', 'preview_dirty');
       await sandbox.fetch(target.path, await oid(target.path, 'HEAD'));
       const patch = await patchBetween(sandbox.path, previous.tree!, tree);
       const command = state.workspaceConfig?.previewSetup;
@@ -355,7 +373,7 @@ export class PreviewService {
       retained = true;
       await target.apply(patch, true);
       if ((await snapshotWorktree(target.path, snapshotStore(this.store.file))) !== tree)
-        conflict('同步期间预览目录发生变化，已停止继续同步，请检查文件', 'preview_interrupted');
+        conflict('The preview folder changed during sync. Sync stopped; inspect the files.', 'preview_interrupted');
       await target.write(['update-ref', 'HEAD', snapshot]);
       await this.store.update((s) => {
         s.connectionPreview = { ...response, directory: target.path, tree, snapshot };

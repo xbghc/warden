@@ -23,7 +23,7 @@ export class HistoryService {
   async get(): Promise<HistoryResponse> {
     const state = await this.store.load();
     const branch = state.workflow?.developmentBranch;
-    if (!branch) throw badRequest('请先选择主开发分支');
+    if (!branch) throw badRequest('Select a base branch first.');
     const head = await oid(this.repo.commonRoot, `refs/heads/${branch}`);
     const log = await runGit(['log', '-100', '--format=%H%x00%P%x00%B%x00%an%x00%aI%x00', head, '--'], { cwd: this.repo.commonRoot });
     const fields = log.stdout.split('\0');
@@ -55,19 +55,19 @@ export class HistoryService {
       request.commits.length > 100 ||
       request.commits.some((c) => !gitOid(c?.sha) || typeof c.message !== 'string' || !c.message.trim() || c.message.length > 10000)
     )
-      throw badRequest('提交编排格式错误');
+      throw badRequest('Invalid commit arrangement.');
     return this.store.withRepositoryLock(async () => {
       await this.recover();
       const history = await this.get();
-      if (history.head !== request.head) fail('主开发分支已有新提交，请刷新历史');
+      if (history.head !== request.head) fail('The base branch has new commits. Refresh the history.');
       const first = history.commits.findIndex((c) => c.sha === request.start);
-      if (first < 0) throw badRequest('请选择最近 100 个提交中的起点');
+      if (first < 0) throw badRequest('Select a starting point within the most recent 100 commits.');
       const range = history.commits.slice(first);
       if (range.some((c) => c.parents.length !== 1) || range.some((c, i) => i > 0 && c.parents[0] !== range[i - 1]!.sha))
-        throw badRequest('当前仅支持连续线性提交，不支持根提交或 merge 提交', 'history_not_linear');
+        throw badRequest('Only consecutive linear commits are supported; root and merge commits are not supported.', 'history_not_linear');
       const selected = new Set(request.commits.map((c) => c.sha));
       if (request.commits.length !== range.length || selected.size !== range.length || range.some((c) => !selected.has(c.sha)))
-        throw badRequest('草稿必须完整包含起点到最新提交，每项恰好一次');
+        throw badRequest('The draft must include every commit from the starting point to HEAD exactly once.');
       const previous = (await this.store.load()).historyDraft;
       await this.store.update((s) => {
         delete s.historyDraft;
@@ -86,18 +86,18 @@ export class HistoryService {
             result.commits.push({ source: entry.sha, sha: await oid(sandbox.path, 'HEAD'), message: entry.message.trim() });
           } catch (error) {
             result.conflicts = await sandbox.conflicts();
-            result.message = `编排无法应用，请调整顺序后重新预览：${gitMessage(error)}`;
+            result.message = `Unable to apply this arrangement. Adjust the order and preview again: ${gitMessage(error)}`;
             return result;
           }
         }
         result.newHead = await oid(sandbox.path, 'HEAD');
         result.contentChanged = (await oid(sandbox.path, 'HEAD^{tree}')) !== (await oid(sandbox.path, `${history.head}^{tree}`));
         if (result.contentChanged) {
-          result.message = '编排改变了最终文件内容，请调整顺序；当前只支持保持最终内容的历史整理。';
+          result.message = 'This arrangement changes the final file contents. Adjust the order; history edits must preserve the final contents.';
           return result;
         }
         if ((await oid(this.repo.commonRoot, `refs/heads/${history.branch}`)) !== history.head) {
-          result.message = '预览期间主开发分支已变化，请刷新重试';
+          result.message = 'The base branch changed during preview. Refresh and retry.';
           return result;
         }
         result.id = randomUUID();
@@ -114,24 +114,27 @@ export class HistoryService {
   }
 
   apply(request: { id: string; head: string }) {
-    if (typeof request?.id !== 'string' || !gitOid(request?.head)) throw badRequest('提交编排请求格式错误');
+    if (typeof request?.id !== 'string' || !gitOid(request?.head)) throw badRequest('Invalid commit arrangement request.');
     return this.store.withRepositoryLock(async () => {
       if (await this.recover()) return this.get();
       const state = await this.store.load();
       const draft = state.historyDraft;
-      if (!draft?.canApply || !draft.newHead || draft.id !== request.id || draft.head !== request.head) fail('草稿预览已失效，请重新预览');
+      if (!draft?.canApply || !draft.newHead || draft.id !== request.id || draft.head !== request.head)
+        fail('The draft preview is out of date. Preview it again.');
       if (state.workflow?.developmentBranch !== draft.branch || state.workflow.changes.some((c) => c.status === 'integrating'))
-        fail('请先完成主目录提交，再整理历史', 'development_in_use');
-      if ((await oid(this.repo.commonRoot, `refs/heads/${draft.branch}`)) !== draft.head) fail('主开发分支已有新提交，请重新编排');
+        fail('Finish the commit in the primary folder before editing history.', 'development_in_use');
+      if ((await oid(this.repo.commonRoot, `refs/heads/${draft.branch}`)) !== draft.head) fail('The base branch has new commits. Recreate the arrangement.');
       const preview = new PreviewService(this.repo, this.store);
       await preview.suspend();
       try {
         const primary = await primaryCheckout(this.repo, draft.branch);
-        if (await dirtyCount(primary.path)) fail('主目录有其他改动，请自行处理后重试', 'development_dirty');
+        if (await dirtyCount(primary.path)) fail('The primary folder has other changes. Handle them before retrying.', 'development_dirty');
         const sandbox = GitSandbox.open(this.store, draft.sandbox);
-        if ((await oid(sandbox.path, `${draft.newHead}^{tree}`)) !== (await oid(primary.path, 'HEAD^{tree}'))) fail('预览结果与当前内容不一致，请重新编排');
+        if ((await oid(sandbox.path, `${draft.newHead}^{tree}`)) !== (await oid(primary.path, 'HEAD^{tree}')))
+          fail('The preview does not match the current contents. Recreate the arrangement.');
         const backup = await createSafetyBackup(this.store, primary.path, 'history');
-        if ((await oid(primary.path, 'HEAD')) !== draft.head || (await dirtyCount(primary.path))) fail('备份期间主目录已变化，请重新编排');
+        if ((await oid(primary.path, 'HEAD')) !== draft.head || (await dirtyCount(primary.path)))
+          fail('The primary folder changed during backup. Recreate the arrangement.');
         await assertSafetyBackupCurrent(backup);
         await this.store.update((s) => {
           s.historyDraft!.backups = [...(s.historyDraft!.backups ?? []), backup];
@@ -156,7 +159,7 @@ export class HistoryService {
     if (!draft?.applying || !draft.newHead) return false;
     const actual = await oid(this.repo.commonRoot, `refs/heads/${draft.branch}`);
     if (actual === draft.head && actual !== draft.newHead) return false;
-    if (actual !== draft.newHead) fail('历史发布被中断后又发生变化，请检查当前提交历史');
+    if (actual !== draft.newHead) fail('History changed after an interrupted update. Inspect the current commit history.');
     const mapping = new Map(draft.commits.map((c) => [c.source, c]));
     const ancestry = await runGit(['rev-list', '--parents', `--max-count=${draft.commits.length}`, draft.newHead], { cwd: this.repo.commonRoot });
     const parents = new Map(
@@ -180,7 +183,7 @@ export class HistoryService {
           }
         }
         if (c.developmentBranch === draft.branch && c.status !== 'accepted')
-          c.sync = { status: 'pending', target: draft.newHead!, message: '提交历史已更新，可主动同步工作区' };
+          c.sync = { status: 'pending', target: draft.newHead!, message: 'Commit history has changed. Rebase workspaces when ready.' };
       }
     });
     await retireWorkflowRefs(this.repo.commonRoot);

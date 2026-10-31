@@ -7,19 +7,19 @@ import { gitEnvironment } from './git.js';
 
 /** Configuration is saved explicitly by the user, never loaded from a task branch. */
 export function workspaceConfig(value: unknown): WorkspaceConfig {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw badRequest('工作区配置必须是对象');
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw badRequest('Workspace configuration must be an object.');
   const row = value as WorkspaceConfig;
-  if (!row.hooks || typeof row.hooks !== 'object' || Array.isArray(row.hooks)) throw badRequest('请提供 hooks 对象');
+  if (!row.hooks || typeof row.hooks !== 'object' || Array.isArray(row.hooks)) throw badRequest('Provide a hooks object.');
   const hooks: WorkspaceConfig['hooks'] = {};
   for (const event of ['create', 'reuse'] as const) {
     const command = row.hooks[event];
     if (command !== undefined && (typeof command !== 'string' || command.length > 20000 || command.includes('\0')))
-      throw badRequest('hook 应是 shell 命令字符串');
+      throw badRequest('A hook must be a shell command string.');
     if (command?.trim()) hooks[event] = command;
   }
   const previewSetup = row.previewSetup;
   if (previewSetup !== undefined && (typeof previewSetup !== 'string' || previewSetup.length > 20000 || previewSetup.includes('\0')))
-    throw badRequest('setup 应是 shell 命令字符串');
+    throw badRequest('The preview setup script must be a shell command string.');
   return { hooks, ...(previewSetup?.trim() ? { previewSetup } : {}) };
 }
 
@@ -56,7 +56,7 @@ export async function workspaceShell(root: string, platform = process.platform):
         return shell;
     }
   }
-  throw new Error('无法运行工作区 hook：未找到 Git for Windows 自带的 sh.exe，请安装 Git for Windows 并将 git 加入 PATH。');
+  throw new Error('Cannot run the workspace setup script: sh.exe from Git for Windows was not found. Install Git for Windows and add git to PATH.');
 }
 
 /** A thin shell-command hook: cwd and environment in, output and exit status out. */
@@ -113,7 +113,11 @@ export async function runSetupCommand(
         resolve({
           status: error ? 'failed' : 'succeeded',
           exitCode: error ? (typeof error.code === 'number' ? error.code : null) : 0,
-          output: [stdout, stderr, error?.code === 'ENOENT' ? `无法运行工作区 hook：找不到 shell（${shell}）。${error.message}` : error?.message]
+          output: [
+            stdout,
+            stderr,
+            error?.code === 'ENOENT' ? `Cannot run the workspace setup script: shell not found (${shell}). ${error.message}` : error?.message,
+          ]
             .filter(Boolean)
             .join('\n')
             .slice(-16000),

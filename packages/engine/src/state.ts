@@ -148,7 +148,7 @@ function errorCode(error: unknown): string | undefined {
 function unknownLockFormat(lock: string): WardenError {
   return new WardenError(
     409,
-    `Warden 锁目录格式需要检查：${lock}。请关闭使用该仓库的旧版 Warden，检查旧锁后再重试；不要删除正在使用的锁目录。`,
+    `Inspect the Warden lock directory format: ${lock}. Close older Warden instances using this repository and inspect the old lock before retrying. Do not remove an active lock directory.`,
     'legacy_lock_requires_cleanup',
   );
 }
@@ -226,7 +226,11 @@ async function reclaimLock(lock: string): Promise<boolean> {
     // Earlier versions published a flat file. There is no atomic conditional unlink for its
     // token: a delayed reclaimer could delete a new flat lock acquired by an older binary.
     if (!info.isFile() || Date.now() - info.mtimeMs <= LOCK_STALE_MS || !lockOwnerHasExited(await readFile(lock, 'utf8'))) return false;
-    throw new WardenError(409, `旧版 Warden 锁需要检查：${lock}。请关闭使用该仓库的旧版 Warden 后，检查并移除此文件，再重试。`, 'legacy_lock_requires_cleanup');
+    throw new WardenError(
+      409,
+      `Inspect the legacy Warden lock: ${lock}. Close older Warden instances using this repository, inspect and remove this file, then retry.`,
+      'legacy_lock_requires_cleanup',
+    );
   } catch (error) {
     if (['ENOENT', 'ENOTDIR', 'EISDIR'].includes(errorCode(error) ?? '')) return true;
     throw error;
@@ -260,7 +264,7 @@ export class StateStore {
       // Another window may change requirements while this request waits for the lock.
       const expected = this.expectedBranch.getStore();
       if (expected && ((await this.load()).workflow?.developmentBranch ?? null) !== expected.branch)
-        throw new WardenError(409, '主开发分支已切换，请使用当前界面重试', 'requirement_changed');
+        throw new WardenError(409, 'The base branch changed. Retry from the current view.', 'requirement_changed');
       return await fn();
     } finally {
       await lock.release();
@@ -368,7 +372,7 @@ export class StateStore {
     const started = Date.now();
     let immediateRecovery = false;
     while (!(await prepareLockContainer(container))) {
-      if (Date.now() - started >= waitMs) throw new WardenError(409, '另一个 Warden 操作正在进行，请稍后重试', 'operation_locked');
+      if (Date.now() - started >= waitMs) throw new WardenError(409, 'Another Warden operation is running. Retry shortly.', 'operation_locked');
       await sleep(20);
     }
     await mkdir(candidate, { mode: 0o700 });
@@ -390,7 +394,7 @@ export class StateStore {
           // Repeated disappearance or recovery races must still respect every wait budget.
           if (expired && !(waitMs === 0 && recovered && !immediateRecovery)) {
             if (permissionFailure && recovered) throw error;
-            throw new WardenError(409, '另一个 Warden 操作正在进行，请稍后重试', 'operation_locked');
+            throw new WardenError(409, 'Another Warden operation is running. Retry shortly.', 'operation_locked');
           }
           if (recovered) {
             if (immediateRecovery) await sleep(20);

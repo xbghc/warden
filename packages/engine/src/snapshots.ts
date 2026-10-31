@@ -22,7 +22,8 @@ async function repoObjects(cwd: string): Promise<string> {
 async function repoIndex(cwd: string) {
   const r = await runGit(['rev-parse', '--git-path', 'index', '--show-object-format'], { cwd });
   const [index, format] = r.stdout.trim().split('\n');
-  if (!index || (format !== 'sha1' && format !== 'sha256')) throw new WardenError(409, '无法识别 Git 索引位置或对象格式', 'snapshot_index_invalid');
+  if (!index || (format !== 'sha1' && format !== 'sha256'))
+    throw new WardenError(409, 'Unable to identify the Git index location or object format.', 'snapshot_index_invalid');
   return { path: path.resolve(cwd, index), format, hashBytes: format === 'sha256' ? 32 : 20 };
 }
 
@@ -30,7 +31,7 @@ async function repoIndex(cwd: string) {
  * Asking Git for --shared-index-path would already freshen the source shared index's mtime.
  */
 function sharedIndex(bytes: Buffer, hashBytes: number): string | undefined {
-  const invalid = () => new WardenError(409, 'Git 索引格式无效，无法生成预览快照', 'snapshot_index_invalid');
+  const invalid = () => new WardenError(409, 'Invalid Git index format. Unable to create a preview snapshot.', 'snapshot_index_invalid');
   const end = bytes.length - hashBytes;
   if (end < 12 || bytes.toString('ascii', 0, 4) !== 'DIRC') throw invalid();
   const version = bytes.readUInt32BE(4);
@@ -150,7 +151,7 @@ async function seedIndexedBlobs(cwd: string, snapshot: Required<SnapshotEnv>) {
     const file = path.join(path.dirname(snapshot.index), 'blob');
     await writeFile(file, blob.stdout, { mode: 0o600 });
     const stored = await runGitSnapshot(['hash-object', '-w', '--no-filters', '--', file], { cwd, ...snapshot });
-    if (stored.stdout.trim() !== oid) throw new WardenError(409, 'Git 索引对象不匹配，无法生成预览快照', 'snapshot_object_invalid');
+    if (stored.stdout.trim() !== oid) throw new WardenError(409, 'Git index object mismatch. Unable to create a preview snapshot.', 'snapshot_object_invalid');
   };
   // Missing working-tree attributes still apply through the index, including in sparse checkouts.
   for (const entry of entries) if (entry.file === '.gitattributes' || entry.file.endsWith('/.gitattributes')) await copy(entry.oid);

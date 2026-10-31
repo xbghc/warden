@@ -48,7 +48,7 @@ describe('workspace hook configuration', () => {
   );
 
   it('rejects scripts above the input limit', () => {
-    expect(() => workspaceConfig({ hooks: { create: 'x'.repeat(20001) } })).toThrow('hook 应是 shell 命令字符串');
+    expect(() => workspaceConfig({ hooks: { create: 'x'.repeat(20001) } })).toThrow('A hook must be a shell command string.');
   });
 });
 
@@ -100,7 +100,7 @@ describe('workspace shell selection', () => {
 
   it('reports a missing Git for Windows shell explicitly', async () => {
     vi.mocked(access).mockRejectedValue(Object.assign(new Error('missing'), { code: 'ENOENT' }));
-    await expect(workspaceShell(root, 'win32')).rejects.toThrow('未找到 Git for Windows 自带的 sh.exe');
+    await expect(workspaceShell(root, 'win32')).rejects.toThrow('sh.exe from Git for Windows was not found');
   });
 });
 
@@ -159,7 +159,7 @@ describe('workspace hook process contract', () => {
     expect(await runWorkspaceHook(root, change, 'reuse', 'echo ready')).toMatchObject({
       status: 'failed',
       exitCode: null,
-      output: expect.stringContaining('无法运行工作区 hook：找不到 shell'),
+      output: expect.stringContaining('Cannot run the workspace setup script: shell not found'),
     });
   });
 });

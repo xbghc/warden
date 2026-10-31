@@ -160,7 +160,7 @@ export async function listWorktreesDetailed(ctx: RepoContext): Promise<WorktreeD
       // Once the upstream is gone `git branch -d` checks HEAD instead, and the count follows it there.
       if (upstream) detail.upstreamGone = upstream.name;
       if (w.isMain) return detail;
-      if (!main?.head || !w.head || /^0+$/.test(main.head) || /^0+$/.test(w.head)) return { ...detail, comparisonError: '分支尚无提交' };
+      if (!main?.head || !w.head || /^0+$/.test(main.head) || /^0+$/.test(w.head)) return { ...detail, comparisonError: 'The branch has no commits.' };
       try {
         const result = await runGit(['rev-list', '--left-right', '--count', `${main.head}...${w.head}`, '--'], {
           cwd: w.shared ? w.path : ctx.commonRoot,
@@ -168,7 +168,7 @@ export async function listWorktreesDetailed(ctx: RepoContext): Promise<WorktreeD
         const [behind, ahead] = result.stdout.trim().split(/\s+/).map(Number);
         detail.comparison = { kind: 'base', base: main.branch ?? `HEAD ${main.head.slice(0, 7)}`, ahead: ahead!, behind: behind! };
       } catch {
-        detail.comparisonError = '无法比较提交历史';
+        detail.comparisonError = 'Unable to compare commit history.';
       }
       return detail;
     }),
@@ -201,7 +201,7 @@ async function describeClone(detail: WorktreeDetail, held: Map<string, string>):
     const [behind, ahead] = result.stdout.trim().split(/\s+/).map(Number);
     detail.comparison = { kind: 'trunk', base: trunk, ahead: ahead!, behind: behind! };
   } catch {
-    detail.comparisonError = '无法比较提交历史';
+    detail.comparisonError = 'Unable to compare commit history.';
   }
   return detail;
 }
@@ -518,11 +518,12 @@ async function dropSharedBranch(ctx: RepoContext, branch: string): Promise<void>
   const target =
     upstream && !upstream.gone ? (await runGit(['rev-parse', '--verify', `${upstream.name}^{commit}`], { cwd: repository })).stdout.trim() : primaryHead;
   if ((await runGit(['merge-base', '--is-ancestor', head, target], { cwd: repository, okCodes: [0, 1] })).code !== 0)
-    throw new WardenError(409, `分支 ${branch} 尚未完整合入目标，已保留`, 'branch_not_merged');
+    throw new WardenError(409, `Branch ${branch} is not fully merged into the target and has been preserved.`, 'branch_not_merged');
   // Public inventory excludes internal and manually placed worktrees, but all registered
   // checkouts protect their branch, just as they do for Git's ordinary branch deletion.
   const worktrees = await runGit(['worktree', 'list', '--porcelain', '-z'], { cwd: repository });
-  if (worktrees.stdout.split('\0').includes(`branch ${ref}`)) throw new WardenError(409, `分支 ${branch} 仍在工作区中使用，已保留`, 'branch_in_use');
+  if (worktrees.stdout.split('\0').includes(`branch ${ref}`))
+    throw new WardenError(409, `Branch ${branch} is still checked out in a workspace and has been preserved.`, 'branch_in_use');
   await runGitWrite(['update-ref', '-d', ref, head], { cwd: repository });
 }
 
@@ -552,7 +553,7 @@ export async function releaseWorktree(ctx: RepoContext, req: ReleaseWorktreeRequ
   if (dirty > 0 && !req.force) throw new WardenError(409, `${wt.path} has uncommitted changes`, 'worktree_dirty');
   const backup = await createSafetyBackup(store, wt.path, 'release');
   const current = await checkoutState(ctx, wt);
-  if (current.foreign || current.busy) throw new WardenError(409, '备份后工作区状态已变化，请刷新重试', 'worktree_changed');
+  if (current.foreign || current.busy) throw new WardenError(409, 'Workspace state changed after backup. Refresh and retry.', 'worktree_changed');
   await assertSafetyBackupCurrent(backup);
   if (dirty > 0) {
     // Not `switch --discard-changes`: with no start point it leaves a modified file alone.
@@ -592,7 +593,8 @@ export async function removeWorktree(ctx: RepoContext, req: RemoveWorktreeReques
     if (!req.force && (await dirtyCount(wt.path))) throw new WardenError(409, `${wt.path} has uncommitted changes`, 'worktree_dirty');
   }
   const backup = wt.prunable ? undefined : await createSafetyBackup(store, wt.path, 'remove');
-  if (!wt.prunable && (await checkoutState(ctx, wt)).foreign) throw new WardenError(409, '备份后工作区身份已变化，请刷新重试', 'not_our_checkout');
+  if (!wt.prunable && (await checkoutState(ctx, wt)).foreign)
+    throw new WardenError(409, 'The workspace identity changed after backup. Refresh and retry.', 'not_our_checkout');
   if (backup) await assertSafetyBackupCurrent(backup);
   const args = ['worktree', 'remove'];
   if (req.force) args.push('--force');

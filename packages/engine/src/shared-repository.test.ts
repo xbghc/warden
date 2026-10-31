@@ -88,7 +88,7 @@ describe('external shared task repository', () => {
     const removed = await removeWorktree(ctx, { path: reused.worktree.path, deleteBranch: true }, store);
     expect(removed.backup?.head).toBe(source);
     expect(removed.branchDeleted).toBe(false);
-    expect(removed.branchError).toContain('已保留');
+    expect(removed.branchError).toContain('has been preserved');
     expect(fx.git('-C', sharedRepositoryPath(fx.root), 'rev-parse', 'agent/two').trim()).toBe(source);
     expect(await listWorktreesAll(ctx)).toEqual([expect.objectContaining({ path: fx.root, isMain: true })]);
     expect(fx.git('branch', '--list', 'agent/*')).toBe('');
@@ -118,7 +118,7 @@ describe('external shared task repository', () => {
     const store = new StateStore(path.join(data, 'state.json'), fx.root);
     const result = await releaseWorktree(ctx, { path: created.worktree.path, deleteBranch: true }, store);
     expect(result.branchDeleted).toBe(false);
-    expect(result.branchError).toContain('仍在工作区中使用');
+    expect(result.branchError).toContain('is still checked out in a workspace');
     expect(fx.git('-C', manual, 'symbolic-ref', '--short', 'HEAD').trim()).toBe('agent/one');
     expect(fx.git('-C', manual, 'status', '--porcelain')).toBe('');
   });

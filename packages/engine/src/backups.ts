@@ -41,18 +41,18 @@ async function inventory(root: string, working: boolean, shared = false): Promis
       const rel = relative ? `${relative}/${name}` : name;
       const file = path.join(root, rel);
       const info = await lstat(file);
-      if (working && name === '.git') throw new Error('包含嵌套仓库或子模块，请先单独备份并处理它们');
+      if (working && name === '.git') throw new Error('Nested repositories or submodules found. Back up and handle them separately first.');
       if (!working && (name.endsWith('.lock') || (rel.endsWith('objects/info/alternates') && info.size > 0)))
-        throw new Error('Git 存在锁文件或外部对象库，无法建立独立且一致的备份');
+        throw new Error('Git lock files or an external object store prevent a consistent independent backup.');
       const base = { path: rel, mode: info.mode & 0o777 };
       if (info.isSymbolicLink()) {
-        if (!working) throw new Error('Git 元数据包含外部链接，无法建立独立备份');
+        if (!working) throw new Error('Git metadata contains external links. An independent backup cannot be created.');
         entries.push({ ...base, kind: 'symlink', target: await readlink(file) });
       } else if (info.isDirectory()) {
         entries.push({ ...base, kind: 'directory' });
         await walk(rel);
       } else if (info.isFile()) entries.push({ ...base, kind: 'file', size: info.size, sha256: await digest(file) });
-      else throw new Error(`无法备份特殊文件：${rel}`);
+      else throw new Error(`Cannot back up special file: ${rel}`);
     }
   }
   await walk('');
@@ -74,7 +74,8 @@ async function logBytes(common: string, name: string): Promise<Buffer | undefine
       throw error;
     });
     if (!info) return undefined;
-    if (info.isSymbolicLink() || (!info.isDirectory() && current !== path.join(common, name))) throw new Error('Git 元数据包含外部链接，无法建立独立备份');
+    if (info.isSymbolicLink() || (!info.isDirectory() && current !== path.join(common, name)))
+      throw new Error('Git metadata contains external links. An independent backup cannot be created.');
   }
   return readFile(current);
 }
@@ -88,7 +89,8 @@ async function sharedReferences(cwd: string, common: string) {
   for (const line of refs.split('\n').filter(Boolean)) {
     const [name = '', object = '', target = ''] = line.split('\0');
     const safe = (ref: string) => ref.startsWith('refs/') && ref.split('/').every((part) => part && part !== '.' && part !== '..' && !part.includes('\\'));
-    if (!safe(name) || (target && !safe(target)) || !/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(object)) throw new Error('Git 引用格式无效，无法建立独立备份');
+    if (!safe(name) || (target && !safe(target)) || !/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(object))
+      throw new Error('Invalid Git references. An independent backup cannot be created.');
     files.push({ path: name, bytes: Buffer.from(`${target ? `ref: ${target}` : object}\n`) });
   }
   let reflog: string | undefined;
@@ -155,7 +157,7 @@ export async function createSafetyBackup(store: StateStore, cwd: string, reason:
   try {
     const worktree = await realpath(cwd);
     const directories = (await runGit(['rev-parse', '--git-common-dir', '--absolute-git-dir', '--show-toplevel'], { cwd: worktree })).stdout.trim().split('\n');
-    if ((await realpath(directories[2]!)) !== worktree) throw new Error('工作区路径与 Git 实际工作目录不一致');
+    if ((await realpath(directories[2]!)) !== worktree) throw new Error('The workspace path does not match the Git working directory.');
     const common = await realpath(path.resolve(worktree, directories[0]!));
     const git = await realpath(path.resolve(worktree, directories[1]!));
     const shared = (await sharedRepositoryOwner(worktree)) !== undefined;
@@ -167,10 +169,10 @@ export async function createSafetyBackup(store: StateStore, cwd: string, reason:
     // Resolve the parent first, so even a symlinked data directory cannot recurse into itself.
     await mkdir(path.dirname(store.file), { recursive: true, mode: 0o700 });
     const data = await realpath(path.dirname(store.file));
-    if (definitions.some((source) => within(source.path, data))) throw new Error('备份目录必须位于工作区和 Git 目录之外');
+    if (definitions.some((source) => within(source.path, data))) throw new Error('The backup folder must be outside the workspace and Git directories.');
     const root = path.join(data, 'backups');
     await mkdir(root, { recursive: true, mode: 0o700 });
-    if ((await realpath(root)) !== root) throw new Error('备份目录不能是符号链接');
+    if ((await realpath(root)) !== root) throw new Error('The backup folder cannot be a symbolic link.');
     const id = `${new Date().toISOString().replace(/[:.]/g, '-')}-${randomUUID()}`;
     const destination = path.join(root, id);
     pending = path.join(root, `.pending-${id}`);
@@ -197,7 +199,7 @@ export async function createSafetyBackup(store: StateStore, cwd: string, reason:
           await chmod(dest, 0o600);
           // Fresh copies, never hard links to objects that a later Git operation could prune.
           await syncFile(dest);
-          if ((await digest(dest)) !== entry.sha256) throw new Error('复制期间文件发生变化');
+          if ((await digest(dest)) !== entry.sha256) throw new Error('Files changed while copying.');
         }
         // Symlink targets live in the manifest, so opening a backup cannot follow a live link.
       }
@@ -228,9 +230,9 @@ export async function createSafetyBackup(store: StateStore, cwd: string, reason:
       const current = source.shared
         ? await sharedCurrent(source)
         : JSON.stringify(await inventory(source.path, source.name === 'worktree')) === JSON.stringify(source.entries);
-      if (!current) throw new Error('备份期间工作区发生变化，请停止其他写入后重试');
+      if (!current) throw new Error('The workspace changed during backup. Stop other writes and retry.');
     }
-    if ((await runGit(['rev-parse', '--verify', 'HEAD'], { cwd: worktree })).stdout.trim() !== head) throw new Error('备份期间 HEAD 发生变化');
+    if ((await runGit(['rev-parse', '--verify', 'HEAD'], { cwd: worktree })).stdout.trim() !== head) throw new Error('HEAD changed during backup.');
     const backup: SafetyBackup = { id, path: destination, reason, createdAt: new Date().toISOString(), worktree, head };
     await writeDurable(path.join(pending, 'state.json'), await store.load());
     const manifest: Manifest = { ...backup, version: 1, sources };
@@ -243,14 +245,14 @@ export async function createSafetyBackup(store: StateStore, cwd: string, reason:
   } catch (error) {
     if (pending) await rm(pending, { recursive: true, force: true }).catch(() => undefined);
     const message = error instanceof Error ? error.message : String(error);
-    throw new WardenError(409, `安全备份未完成，操作已停止：${message}`, 'backup_failed');
+    throw new WardenError(409, `Backup incomplete. Operation stopped: ${message}`, 'backup_failed');
   }
 }
 
 /** Revalidate immediately before mutation; copying a large object store can take minutes. */
 export async function assertSafetyBackupCurrent(backup: SafetyBackup): Promise<void> {
   const manifest = JSON.parse(await readFile(path.join(backup.path, 'manifest.json'), 'utf8')) as Manifest;
-  if (manifest.version !== 1 || manifest.id !== backup.id) throw new WardenError(409, '安全备份清单不匹配，操作已停止', 'backup_invalid');
+  if (manifest.version !== 1 || manifest.id !== backup.id) throw new WardenError(409, 'Backup manifest mismatch. Operation stopped.', 'backup_invalid');
   for (const source of [...manifest.sources].reverse()) {
     try {
       if (source.name === 'worktree') {
@@ -276,7 +278,7 @@ export async function assertSafetyBackupCurrent(backup: SafetyBackup): Promise<v
     } catch {
       // Missing files, new locks and inaccessible paths are all changes since the verified copy.
     }
-    throw new WardenError(409, '备份后工作区发生变化，操作已停止；请停止其他写入后重试', 'backup_stale');
+    throw new WardenError(409, 'The workspace changed after backup. Operation stopped; stop other writes and retry.', 'backup_stale');
   }
 }
 
@@ -292,17 +294,18 @@ export async function discardOperationBackup(store: StateStore, backup: SafetyBa
     path.resolve(backup.path) !== path.join(root, backup.id) ||
     (backup.reason !== 'rebase' && backup.reason !== 'history')
   )
-    throw new WardenError(409, '临时备份路径或用途不匹配，已保留备份', 'backup_invalid');
+    throw new WardenError(409, 'Temporary backup path or purpose mismatch. The backup has been preserved.', 'backup_invalid');
   // Recovery can repeat after deletion succeeded but the following state write failed.
   const info = await lstat(backup.path).catch((error: NodeJS.ErrnoException) => {
     if (error.code !== 'ENOENT') throw error;
     return undefined;
   });
   if (!info) return;
-  if (!info.isDirectory() || info.isSymbolicLink()) throw new WardenError(409, '临时备份目录不匹配，已保留备份', 'backup_invalid');
+  if (!info.isDirectory() || info.isSymbolicLink())
+    throw new WardenError(409, 'Temporary backup folder mismatch. The backup has been preserved.', 'backup_invalid');
   const manifest = JSON.parse(await readFile(path.join(backup.path, 'manifest.json'), 'utf8')) as Manifest;
   if (manifest.version !== 1 || manifest.id !== backup.id || manifest.reason !== backup.reason || manifest.head !== backup.head)
-    throw new WardenError(409, '临时备份清单不匹配，已保留备份', 'backup_invalid');
+    throw new WardenError(409, 'Temporary backup manifest mismatch. The backup has been preserved.', 'backup_invalid');
   await rm(backup.path, { recursive: true, force: true });
 }
 
@@ -320,7 +323,8 @@ export async function listSafetyBackups(store: StateStore): Promise<SafetyBackup
     .reverse()) {
     const file = path.join(root, id, 'manifest.json');
     const manifest = JSON.parse(await readFile(file, 'utf8')) as Manifest;
-    if (manifest.version !== 1 || manifest.id !== id) throw new WardenError(409, '安全备份清单损坏，请检查备份目录', 'backup_invalid');
+    if (manifest.version !== 1 || manifest.id !== id)
+      throw new WardenError(409, 'The backup manifest is corrupted. Inspect the backup folder.', 'backup_invalid');
     const { reason, createdAt, worktree, head } = manifest;
     backups.push({ id, path: path.join(root, id), reason, createdAt, worktree, head });
   }

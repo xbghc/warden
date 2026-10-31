@@ -167,7 +167,8 @@ export async function removeClone(
     if (lost.length) throw new WardenError(409, `${dir} has ${lost.join(', ')}, which only it holds`, 'needs_force');
   }
   const backup = await createSafetyBackup(store, dir, 'remove');
-  if (!(await isCloneOf(ctx.commonRoot, dir))) throw new WardenError(409, '备份后工作区身份已变化，请刷新重试', 'not_our_checkout');
+  if (!(await isCloneOf(ctx.commonRoot, dir)))
+    throw new WardenError(409, 'The workspace identity changed after backup. Refresh and retry.', 'not_our_checkout');
   await assertSafetyBackupCurrent(backup);
   await rm(dir, { recursive: true });
   return backup;

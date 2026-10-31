@@ -24,7 +24,8 @@ async function directory(location: string): Promise<boolean> {
     return undefined;
   });
   if (!info) return false;
-  if (!info.isDirectory() || info.isSymbolicLink() || (await realpath(location)) !== location) invalid(`Warden 公共仓库路径不是独立目录：${location}`);
+  if (!info.isDirectory() || info.isSymbolicLink() || (await realpath(location)) !== location)
+    invalid(`The Warden shared repository path is not an independent directory: ${location}`);
   return true;
 }
 
@@ -53,11 +54,11 @@ async function validate(owner: string): Promise<string | undefined> {
       values.get(PRIMARY_MARK.toLowerCase()) !== owner ||
       values.get(VERSION_MARK.toLowerCase()) !== '1'
     )
-      invalid(`Warden 公共仓库归属不匹配：${repository}`);
+      invalid(`Warden shared repository ownership mismatch: ${repository}`);
     return repository;
   } catch (error) {
     if (error instanceof WardenError && error.code === 'shared_repository_invalid') throw error;
-    invalid(`无法验证 Warden 公共仓库：${repository}`);
+    invalid(`Unable to validate the Warden shared repository: ${repository}`);
   }
 }
 
@@ -84,11 +85,11 @@ async function initialize(primary: string): Promise<string> {
     await mkdir(repository, { mode: 0o700 });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-    return (await validate(primary)) ?? invalid('Warden 公共仓库正在初始化，请重试');
+    return (await validate(primary)) ?? invalid('The Warden shared repository is being initialized. Retry shortly.');
   }
   try {
     const format = (await runGit(['rev-parse', '--show-object-format'], { cwd: primary })).stdout.trim();
-    if (format !== 'sha1' && format !== 'sha256') invalid('无法识别主仓库的对象格式');
+    if (format !== 'sha1' && format !== 'sha256') invalid('Unable to identify the primary repository object format.');
     await runGitWrite(['init', '--quiet', '--bare', '--template=', `--object-format=${format}`, repository], { cwd: root });
     for (const field of ['user.name', 'user.email']) {
       const value = await runGit(['config', '--get', field], { cwd: primary, okCodes: [0, 1] });
@@ -132,10 +133,10 @@ export async function ensureSharedRepository(primary: string): Promise<string> {
 
 /** Import one immutable local commit; shared task commits already exist and require no fetch. */
 export async function importSharedCommit(primary: string, source: string, sha: string): Promise<string> {
-  if (!immutableCommit.test(sha)) throw new WardenError(400, '公共仓库只接受完整的提交版本', 'invalid_commit');
+  if (!immutableCommit.test(sha)) throw new WardenError(400, 'The shared repository requires a full commit ID.', 'invalid_commit');
   const from = await realpath(source);
   const sourceCommit = await runGit(['rev-parse', '--verify', `${sha}^{commit}`], { cwd: from });
-  if (sourceCommit.stdout.trim() !== sha) throw new WardenError(409, '源提交版本不匹配', 'invalid_commit');
+  if (sourceCommit.stdout.trim() !== sha) throw new WardenError(409, 'The source commit does not match the requested version.', 'invalid_commit');
   const repository = await ensureSharedRepository(primary);
   const present = await runGit(['rev-parse', '--verify', `${sha}^{commit}`], { cwd: repository, okCodes: [0, 128] });
   if (present.code !== 0)
@@ -180,8 +181,8 @@ export async function sharedRepositoryOwner(cwd: string): Promise<string | undef
   const marker = await runGit(['config', '--get', PRIMARY_MARK], { cwd: repository, okCodes: [0, 1] });
   if (marker.code !== 0 || !marker.stdout.trim()) return undefined;
   const primary = await realpath(marker.stdout.trim()).catch(() => undefined);
-  if (!primary || sharedRepositoryPath(primary) !== repository) invalid('Warden 公共仓库归属路径不匹配');
-  if ((await validatedSharedRepository(primary)) !== repository) invalid('Warden 公共仓库归属不匹配');
-  if (!(await isSharedCheckout(primary, cwd))) invalid('Warden 工作区的 Git 注册路径不匹配');
+  if (!primary || sharedRepositoryPath(primary) !== repository) invalid('Warden shared repository ownership path mismatch.');
+  if ((await validatedSharedRepository(primary)) !== repository) invalid('Warden shared repository ownership mismatch.');
+  if (!(await isSharedCheckout(primary, cwd))) invalid('The registered Git path does not match the Warden workspace.');
   return primary;
 }
