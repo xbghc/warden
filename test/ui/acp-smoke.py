@@ -32,6 +32,9 @@ try:
             page.get_by_role('button', name='More Chat Actions', exact=True).click()
             page.get_by_role('menuitem', name=name, exact=True).click()
 
+        def new_session(page):
+            chat_action(page, 'New Session')
+
         def use_agent(page, profile):
             task = page.evaluate("new URL(location.href).searchParams.get('task') || '0'")
             assert page.request.post(origin + '/default-profile?task=' + task + '&profile=' + profile).ok
@@ -71,13 +74,25 @@ try:
         second.goto(origin + '?task=1')
         expect(first.get_by_role('heading', name='订单筛选参数', exact=True)).to_be_visible()
         expect(second.get_by_role('heading', name='分页默认值', exact=True)).to_be_visible()
+        connected(first)
+        connected(second)
+        expect(first.get_by_role('region', name='Agent Authentication')).to_have_count(0)
+        expect(first.get_by_role('textbox', name='Message', exact=True)).to_have_value('')
+        first.get_by_role('button', name='Use Task Brief', exact=True).click()
+        first.wait_for_function("window.__model.draft.includes('订单筛选参数')")
+        expect(first.get_by_role('textbox', name='Message', exact=True)).to_be_focused()
+        for entry in inspect()['entries']:
+            journal = [json.loads(line) for line in entry['journals'][0].splitlines()]
+            assert sum(row.get('method') == 'session/new' for row in journal) == 1
+            assert not any(row.get('method') == 'session/prompt' for row in journal)
+        expect(first.get_by_role('button', name='Resume Session', exact=True)).to_have_count(0)
+        expect(first.get_by_role('button', name='Connect Agent', exact=True)).to_have_count(0)
         review = first.get_by_role('button', name='View Task Diff', exact=True)
         review.focus()
         expect(first.get_by_role('tooltip', name='View Task Diff', exact=True)).to_be_visible()
         review.press('Escape')
         review.click()
         first.wait_for_function("window.__actions.some(message => message.action?.type === 'review')")
-        assert all(not journal for entry in inspect()['entries'] for journal in entry['journals'])
 
         # Capturing a view flushes a debounced edit before the host changes its routing token.
         composer = first.get_by_role('textbox', name='Message', exact=True)
@@ -127,13 +142,12 @@ try:
         first.set_viewport_size({'width': 1000, 'height': 900})
 
         first.evaluate("async () => { await window.__fixture.pauseModels(); window.__fixture.deliver({ ...window.__model, profiles: [] }); }")
-        expect(first.get_by_role('button', name='Connect Agent', exact=True)).to_be_disabled()
         expect(first.get_by_role('button', name='Send', exact=True)).to_be_disabled()
         expect(first.locator('.acp-setup')).to_have_count(0)
         expect(first.get_by_role('combobox', name='Agent Profile', exact=True)).to_have_count(0)
         expect(first.get_by_role('button', name='Configure Agent', exact=True)).to_have_count(0)
         expect(first.get_by_text('Check the agent connection in the Warden workbench to continue.', exact=True)).to_be_visible()
-        assert all(not journal for entry in inspect()['entries'] for journal in entry['journals'])
+        assert not any(item['role'] == 'user' for entry in inspect()['entries'] for item in entry['model']['record']['messages'])
         first.screenshot(path=str(artifacts / 'acp-unavailable.png'), full_page=True)
         first.evaluate("() => window.__fixture.resumeModels()")
 
@@ -171,7 +185,7 @@ try:
         expect(first.locator('.acp-composer button[type="submit"]')).to_have_count(0)
         first.reload()
         first.wait_for_function("window.__model.sending && window.__model.status === 'running'")
-        expect(composer).to_have_value('held completion')
+        expect(composer).to_have_value('')
         expect(first.locator('.acp-composer button[type="submit"]')).to_have_count(0)
         composer.fill('follow-up during completion')
         saved_draft(first, 'follow-up during completion')
@@ -271,7 +285,7 @@ try:
         previous_record = first.evaluate('window.__model.record.id')
         first.evaluate('window.__fixture.pauseModels()')
         first.evaluate('window.__fixture.holdDrafts()')
-        first.get_by_role('button', name='New Session', exact=True).click()
+        new_session(first)
         wait_host(first, '/model', lambda model: model['record']['id'] != previous_record)
         composer.fill('新会话建立时输入的说明')
         newer_record = first.request.get(origin + '/model?task=0').json()
@@ -309,23 +323,30 @@ try:
 
         send(first, 'permission')
         expect(first.get_by_role('button', name='Allow this write', exact=True)).to_be_visible()
+        expect(first.get_by_text('Outcome Unknown', exact=True)).to_have_count(0)
+        expect(composer).to_have_value('')
         first.screenshot(path=str(artifacts / 'acp-permission.png'), full_page=True)
         first.set_viewport_size({'width': 320, 'height': 740})
         expect(first.get_by_role('button', name='Allow this write', exact=True)).to_be_in_viewport()
         expect(first.get_by_role('button', name='Stop Turn', exact=True)).to_be_in_viewport()
         assert first.evaluate('document.documentElement.scrollWidth <= innerWidth')
         first.screenshot(path=str(artifacts / 'acp-sidebar-permission.png'), full_page=True)
+        first.set_viewport_size({'width': 280, 'height': 520})
+        expect(first.get_by_role('button', name='Allow this write', exact=True)).to_be_in_viewport()
+        expect(first.get_by_role('button', name='Stop Turn', exact=True)).to_be_in_viewport()
+        assert first.evaluate('document.documentElement.scrollWidth <= innerWidth')
+        first.screenshot(path=str(artifacts / 'acp-short-permission.png'), full_page=True)
         first.set_viewport_size({'width': 1000, 'height': 900})
 
         expect(second.get_by_role('button', name='Allow this write', exact=True)).to_have_count(0)
         # Reopening the panel loses local pending-send state, but a completed turn
         # must still clear its submitted draft through the host's acknowledgement.
         first.reload()
-        expect(composer).to_have_value('permission')
+        expect(composer).to_have_value('')
         # Closing and creating a panel also resets its edit revisions and routing ID.
         assert first.request.post(origin + '/reopen?task=0').ok
         first.reload()
-        expect(composer).to_have_value('permission')
+        expect(composer).to_have_value('')
         first.get_by_role('button', name='Allow this write', exact=True).click()
         connected(first)
         assert inspect()['entries'][0]['output'] == 'Permission granted\n'
@@ -339,9 +360,25 @@ try:
         connected(first)
         expect(first.get_by_role('button', name='Allow this write', exact=True)).to_have_count(0)
 
+        send(first, 'permission-long')
+        permissions = first.get_by_role('region', name='Pending Permissions')
+        expect(permissions.get_by_role('button')).to_have_count(3)
+        for width, height in [(320, 740), (280, 520)]:
+            first.set_viewport_size({'width': width, 'height': height})
+            assert permissions.evaluate('(element) => element.scrollWidth <= element.clientWidth'), 'permission choices must not overflow horizontally'
+            for button in permissions.get_by_role('button').all():
+                button.scroll_into_view_if_needed()
+                expect(button).to_be_in_viewport()
+                assert button.evaluate('(element) => element.scrollWidth <= element.clientWidth'), 'complete approval labels must wrap inside their buttons'
+            expect(first.get_by_role('button', name='Stop Turn', exact=True)).to_be_in_viewport()
+            first.screenshot(path=str(artifacts / f'acp-long-permission-{width}.png'), full_page=True)
+        first.get_by_role('button', name='Allow this write', exact=True).click()
+        connected(first)
+        first.set_viewport_size({'width': 1000, 'height': 900})
+
         unsafe = '<img src="https://invalid.example/agent-image" onerror="alert(1)"> [command](command:workbench.action.closeWindow)'
         send(first, unsafe)
-        expect(first.locator('.acp-message-agent').last.locator('.acp-message-text')).to_have_text('Echo: ' + unsafe)
+        expect(first.locator('.acp-message-agent').last.locator('.acp-message-text')).to_contain_text('command')
         assert first.locator('.acp-transcript img, .acp-transcript a').count() == 0
 
         # Switching views restores the reading position instead of jumping to new output.
@@ -365,72 +402,88 @@ try:
         first.wait_for_function("window.__model.status === 'disconnected'")
         history = conversation(inspect()['entries'][0]['model']['record']['messages'])
         first.reload()
-        expect(first.get_by_role('button', name='Resume Session', exact=True)).to_be_enabled()
-        first.get_by_role('button', name='Resume Session', exact=True).click()
         connected(first)
         restored = conversation(inspect()['entries'][0]['model']['record']['messages'])
         assert restored == history, {'before': history, 'after': restored}
 
         send(first, 'crash')
         first.wait_for_function("window.__model.status === 'error'")
+        expect(first.get_by_role('region', name='Agent Authentication')).to_have_count(0)
+        expect(first.get_by_role('button', name='Reconnect', exact=True)).to_be_enabled()
         expect(first.get_by_role('textbox', name='Message', exact=True)).to_have_value('crash')
         expect(first.get_by_text('The previous turn was interrupted', exact=False)).to_be_visible()
-        chat_action(first, 'End Agent Process')
-        first.wait_for_function("window.__model.status === 'disconnected'")
-        first.reload()
+        first.get_by_text('Error Details', exact=True).click()
+        expect(first.get_by_role('button', name='Copy Error', exact=True)).to_be_visible()
+        first.get_by_role('button', name='Reconnect', exact=True).click()
+        connected(first)
         expect(first.get_by_role('textbox', name='Message', exact=True)).to_have_value('crash')
         journal = inspect()['entries'][0]['journals'][0]
         prompts = [json.loads(line) for line in journal.splitlines() if json.loads(line).get('method') == 'session/prompt']
         assert sum(any(part.get('text') == 'crash' for part in item['params']['prompt']) for item in prompts) == 1
 
-        second.get_by_role('button', name='New Session', exact=True).click()
-        second.wait_for_function("window.__model.status === 'disconnected' && !window.__model.record.sessionId")
         use_agent(second, 'no-load')
+        new_session(second)
+        second.wait_for_function("window.__model.status === 'connected' && window.__model.record.profileId === 'no-load'")
         send(second, 'no-load turn')
         expect(second.locator('.acp-message-agent')).to_contain_text('Echo: no-load turn')
         chat_action(second, 'Disconnect')
         second.wait_for_function("window.__model.status === 'disconnected'")
-        expect(second.get_by_role('button', name='Resume Session', exact=True)).to_be_disabled()
+        expect(second.get_by_role('button', name='Reconnect', exact=True)).to_be_disabled()
         expect(second.get_by_text('This agent does not advertise session restoration', exact=False)).to_be_visible()
+        unsupported_session = second.evaluate('window.__model.record.sessionId')
+        second.reload()
+        second.wait_for_function("window.__model.status === 'error'")
+        expect(second.get_by_role('alert')).to_contain_text('cannot resume sessions')
+        assert second.evaluate('window.__model.record.sessionId') == unsupported_session
+        expect(second.locator('.acp-message-agent')).to_contain_text('Echo: no-load turn')
 
+        use_agent(second, 'auth')
         second.request.post(origin + '/reset-release?task=1')
         try:
-            second.get_by_role('button', name='New Session', exact=True).click()
+            new_session(second)
             second.wait_for_function("!window.__model.record.sessionId && window.__model.status === 'resetting'")
             expect(second.get_by_text('Starting New Session', exact=True)).to_be_visible()
-            expect(second.get_by_role('button', name='Connect Agent', exact=True)).to_be_disabled()
+            expect(second.get_by_role('button', name='Reconnect', exact=True)).to_be_disabled()
             expect(second.get_by_role('combobox', name='Agent Profile', exact=True)).to_have_count(0)
             second.screenshot(path=str(artifacts / 'acp-resetting.png'), full_page=True)
         finally:
             second.request.delete(origin + '/reset-release?task=1')
-        second.wait_for_function("window.__model.status === 'disconnected'")
-        use_agent(second, 'auth')
-        second.get_by_role('button', name='Connect Agent', exact=True).click()
         expect(second.get_by_role('button', name='Fixture login', exact=True)).to_be_visible()
         expect(second.get_by_role('button', name='External login', exact=True)).to_have_count(0)
         second.get_by_role('button', name='Fixture login', exact=True).click()
         connected(second)
         expect(second.get_by_role('button', name='Fixture login', exact=True)).to_have_count(0)
 
-        second.get_by_role('button', name='New Session', exact=True).click()
-        second.wait_for_function("!window.__model.record.profileId")
+        use_agent(second, 'auth-external')
+        new_session(second)
+        expect(second.get_by_role('button', name='I Have Signed In — Reconnect', exact=True)).to_be_visible()
+        external_record = second.evaluate('window.__model.record.id')
+        second.get_by_role('textbox', name='Message', exact=True).fill('Keep this draft after external login')
+        saved_draft(second, 'Keep this draft after external login')
+        assert second.request.post(origin + '/external-login?task=1').ok
+        second.get_by_role('button', name='I Have Signed In — Reconnect', exact=True).click()
+        connected(second)
+        assert second.evaluate('window.__model.record.id') == external_record
+        expect(second.get_by_role('textbox', name='Message', exact=True)).to_have_value('Keep this draft after external login')
+        expect(second.get_by_role('region', name='Agent Authentication')).to_have_count(0)
+        external_requests = [json.loads(line) for line in inspect()['entries'][1]['journals'][-1].splitlines()]
+        assert not any(row.get('method') in ['authenticate', 'session/prompt'] for row in external_requests)
+
         use_agent(second, 'incompatible')
-        second.get_by_role('button', name='Connect Agent', exact=True).click()
+        new_session(second)
         second.wait_for_function("window.__model.status === 'error'")
-        expect(second.get_by_role('button', name='New Session', exact=True)).to_be_enabled()
+        second.get_by_role('button', name='More Chat Actions', exact=True).click()
+        expect(second.get_by_role('menuitem', name='New Session', exact=True)).to_be_enabled()
+        second.get_by_role('menuitem', name='New Session', exact=True).press('Escape')
         chat_action(second, 'End Agent Process')
         second.wait_for_function("window.__model.status === 'disconnected'")
         expect(second.get_by_role('combobox', name='Agent Profile', exact=True)).to_have_count(0)
-        second.get_by_role('button', name='New Session', exact=True).click()
-        second.wait_for_function("!window.__model.record.profileId")
         use_agent(second, 'normal')
-        second.get_by_role('button', name='Connect Agent', exact=True).click()
+        new_session(second)
         connected(second)
 
-        first.get_by_role('button', name='New Session', exact=True).click()
-        first.wait_for_function("window.__model.status === 'disconnected' && !window.__model.record.profileId")
         use_agent(first, 'controls')
-        first.get_by_role('button', name='Connect Agent', exact=True).click()
+        new_session(first)
         connected(first)
         model_selector = first.get_by_role('combobox', name='模型', exact=True)
         thinking = first.get_by_role('checkbox', name='显示思考', exact=True)
@@ -470,9 +523,9 @@ try:
         expect(first.get_by_text('Compaction Complete', exact=True)).to_be_visible()
         expect(first.get_by_text('已保留任务目标与关键结论', exact=False)).to_be_visible()
         thought = first.locator('.acp-message-thought')
-        expect(thought.locator('.acp-message-text')).not_to_be_visible()
-        thought.get_by_text('Show Thoughts', exact=True).click()
-        expect(thought.locator('.acp-message-text')).to_have_text('正在检查任务上下文')
+        expect(thought.locator('.acp-markdown')).not_to_be_visible()
+        thought.get_by_text('Thoughts', exact=True).click()
+        expect(thought.locator('.acp-markdown')).to_have_text('正在检查任务上下文')
         first.screenshot(path=str(artifacts / 'acp-session-controls.png'), full_page=True)
 
         send(first, 'hold')
@@ -490,14 +543,12 @@ try:
         expect(first.get_by_label('Session Usage', exact=True)).to_have_count(0)
         expect(first.get_by_text('会话更新提示', exact=True)).to_have_count(0)
         expect(first.get_by_role('button', name='Agent Commands', exact=True)).to_have_count(0)
-        first.get_by_role('button', name='Resume Session', exact=True).click()
+        first.reload()
         connected(first)
         expect(model_selector).to_be_enabled()
 
-        first.get_by_role('button', name='New Session', exact=True).click()
-        first.wait_for_function("window.__model.status === 'disconnected' && !window.__model.record.profileId")
         use_agent(first, 'legacy-modes')
-        first.get_by_role('button', name='Connect Agent', exact=True).click()
+        new_session(first)
         connected(first)
         mode_selector = first.get_by_role('combobox', name='Session Mode', exact=True)
         expect(mode_selector).to_have_value('ask')
@@ -505,6 +556,41 @@ try:
         first.wait_for_function("window.__model.controls.modes.currentModeId === 'code' && !window.__model.controls.configuring")
         expect(mode_selector).to_have_value('code')
         expect(model_selector).to_have_count(0)
+
+        send(first, 'tool-progress')
+        expect(first.locator('.acp-message-agent').last.locator('.acp-message-text')).to_have_text('Tool progress completed')
+        connected(first)
+        activity = first.locator('.acp-message-tool').filter(has_text='Tests completed').last
+        expect(activity.locator('.acp-tool-detail')).not_to_be_visible()
+        activity.locator('summary').click()
+        expect(activity.locator('.acp-tool-detail')).to_contain_text('Final output')
+        activity.locator('summary').click()
+
+        # Read and copy formatted replies, while keeping untrusted content inert.
+        first.context.grant_permissions(['clipboard-read', 'clipboard-write'])
+        remote_images = []
+        first.on('request', lambda request: remote_images.append(request.url) if 'invalid.example' in request.url else None)
+        code = 'const page = input.page ?? 1;'
+        markdown = '\n## Review Summary\n\n- **Compatible** defaults.\n- Add a regression test.\n\n```ts\n' + code + '\n```\n\n| Parameter | Default |\n| --- | --- |\n| page | 1 |\n\n![untrusted image](https://invalid.example/image.png)\n[blocked](command:workbench.action.closeWindow)'
+        send(first, markdown)
+        expect(first.locator('.acp-markdown h2').last).to_have_text('Review Summary')
+        connected(first)
+        expect(first.locator('.acp-markdown table').last).to_contain_text('Parameter')
+        expect(first.locator('.acp-markdown pre').last).to_have_text(code)
+        first.get_by_role('button', name='Copy Code', exact=True).last.click()
+        expect(first.get_by_role('button', name='Copied', exact=True)).to_be_visible()
+        assert first.evaluate('navigator.clipboard.readText()') == code
+        assert first.locator('.acp-transcript img, .acp-transcript a[href^="command:"]').count() == 0
+        assert remote_images == []
+        first.set_viewport_size({'width': 320, 'height': 740})
+        history = first.get_by_role('log', name='Conversation History')
+        history.evaluate('element => { element.scrollTop = 0; element.dispatchEvent(new Event("scroll")); }')
+        expect(first.get_by_role('button', name='Jump to Latest', exact=True)).to_be_visible()
+        first.get_by_role('button', name='Jump to Latest', exact=True).click()
+        first.wait_for_function('document.querySelector(".acp-transcript").scrollHeight - document.querySelector(".acp-transcript").scrollTop - document.querySelector(".acp-transcript").clientHeight < 32')
+        expect(first.get_by_role('button', name='Jump to Latest', exact=True)).to_have_count(0)
+        assert first.evaluate('document.documentElement.scrollWidth <= innerWidth')
+        first.screenshot(path=str(artifacts / 'acp-markdown-sidebar.png'), full_page=True)
 
         first.set_viewport_size({'width': 360, 'height': 900})
         first.evaluate("document.body.className = 'vscode-dark'")

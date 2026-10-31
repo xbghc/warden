@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { mkdtemp, mkdir, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AcpBinding, AcpRecord } from '@warden/shared';
+import { DiagnosticLog } from '@warden/shared';
 import type { AcpProfile, AcpStorage } from '../packages/vscode/src/acp/contracts.js';
 import { AcpSession } from '../packages/vscode/src/acp/session.js';
 import { AcpSessionStorage } from '../packages/vscode/src/acp/storage.js';
@@ -63,14 +64,17 @@ async function fixture(name = 'task', mode = 'normal', timeoutMs = 15_000) {
   const validate = vi.fn(async () => {});
   const changed = vi.fn();
   const connectionFailed = vi.fn();
+  const report = vi.fn();
+  const diagnostics: Array<{ level: string; [key: string]: unknown }> = [];
+  const log = new DiagnosticLog((level, line) => diagnostics.push({ level, ...JSON.parse(line.slice('[diagnostic] '.length)) }));
   const create = (persistence: AcpStorage = storage) => {
-    const session = new AcpSession({ binding, storage: persistence, validate, changed, connectionFailed, timeoutMs });
+    const session = new AcpSession({ binding, storage: persistence, validate, changed, connectionFailed, report, timeoutMs, log });
     sessions.push(session);
     return session;
   };
   const session = create();
   await session.initialize();
-  return { session, create, profile, storage, validate, changed, connectionFailed, workspace, file, binding };
+  return { session, create, profile, storage, validate, changed, connectionFailed, report, diagnostics, workspace, file, binding };
 }
 
 function transcript(session: AcpSession) {
@@ -93,6 +97,42 @@ afterEach(async () => {
 });
 
 describe('ACP subprocess conversations', () => {
+  it('correlates reconnects, turns, streaming and cancellation without logging prompt or tool contents', async () => {
+    const f = await fixture();
+    await f.session.connect(f.profile, { resume: false });
+    await f.session.send('private-prompt-text');
+    const turn = f.session.send('permission');
+    await expect.poll(() => f.session.snapshot().permissions.length).toBe(1);
+    await f.session.cancel();
+    await turn;
+    await f.session.disconnect();
+    await f.session.connect(f.profile, { resume: true });
+    const rows = f.diagnostics;
+    const connections = rows.filter((row) => row.event === 'acp.connect.end');
+    expect(connections.map((row) => row.outcome)).toEqual(['ok', 'ok']);
+    expect(new Set(connections.map((row) => row.connection)).size).toBe(2);
+    expect(rows.filter((row) => row.event === 'acp.turn.end').map((row) => row.outcome)).toEqual(['ok', 'cancelled']);
+    expect(rows).toContainEqual(expect.objectContaining({ event: 'acp.permission.end', outcome: 'cancelled' }));
+    expect(rows).toContainEqual(expect.objectContaining({ event: 'acp.turn.first_update', level: 'debug' }));
+    expect(rows).toContainEqual(expect.objectContaining({ event: 'acp.update', level: 'trace' }));
+    expect(rows).toContainEqual(expect.objectContaining({ event: 'acp.request.end', method: 'session/load', outcome: 'ok' }));
+    for (const request of rows.filter((row) => row.event === 'acp.request.start')) {
+      expect(rows).toContainEqual(expect.objectContaining({ event: 'acp.request.end', operation: request.operation, connection: request.connection }));
+    }
+    for (const value of ['private-prompt-text', 'task context', 'agent-output.txt', f.workspace, f.profile.command])
+      expect(JSON.stringify(rows)).not.toContain(value);
+  });
+
+  it('logs bounded, redacted stderr and provider errors on the failed connection', async () => {
+    const f = await fixture('diagnostics', 'diagnostics-fails');
+    f.profile.env = { WARDEN_FIXTURE_LOG_VALUE: 'private-configured-value' };
+    await expect(f.session.connect(f.profile, { resume: false })).rejects.toThrow('Provider setup failed');
+    const failure = f.diagnostics.find((row) => row.event === 'acp.failure' && row.stage === 'session/new');
+    expect(failure).toMatchObject({ code: -32603, profile: f.profile.id, task: 'diagnostics' });
+    expect(failure?.diagnostic).toContain('Provider diagnostics:');
+    for (const value of ['private-configured-value', 'private-stderr-value', 'private-tool-input', 'private-prompt'])
+      expect(JSON.stringify(f.diagnostics)).not.toContain(value);
+  });
   it('advertises implemented extensions and captures early controls with config options taking precedence over modes', async () => {
     const f = await fixture('task', 'controls-grouped');
     await f.session.connect(f.profile, { resume: false });
@@ -630,6 +670,114 @@ describe('ACP subprocess conversations', () => {
     expect((await journal(f.file)).filter((message) => message.method === 'session/prompt')).toHaveLength(1);
   });
 
+  it('replaces an unpersisted empty remote session while retaining the local conversation', async () => {
+    const f = await fixture('task', 'missing-rollout');
+    await f.session.connect(f.profile, { resume: false });
+    const before = f.session.snapshot().record;
+    await f.session.disconnect();
+    const reopened = f.create();
+    await reopened.initialize();
+    await reopened.connect(f.profile, { resume: true });
+    const after = reopened.snapshot();
+    expect(after.status).toBe('connected');
+    expect(after.record.id).toBe(before.id);
+    expect(after.record.sessionId).not.toBe(before.sessionId);
+    expect(after.record.messages).toEqual([]);
+    expect(f.storage.archived).toEqual([]);
+    expect((await journal(f.file)).filter((row) => row.method === 'session/new')).toHaveLength(2);
+    expect((await journal(f.file)).filter((row) => row.method === 'session/load')).toHaveLength(1);
+    expect((await journal(f.file)).some((row) => row.method === 'session/prompt')).toBe(false);
+  });
+
+  it.each(['history', 'interruption', 'replay'])('does not replace a missing session with %s', async (state) => {
+    const f = await fixture('task', state === 'replay' ? 'missing-rollout-replay' : 'missing-rollout');
+    await f.session.connect(f.profile, { resume: false });
+    if (state === 'history') await f.session.send('Keep this conversation');
+    await f.session.disconnect();
+    if (state === 'interruption') f.storage.record!.interrupted = true;
+    const before = structuredClone(f.storage.record!);
+    await expect(f.session.connect(f.profile, { resume: true })).rejects.toThrow('Internal error');
+    expect(f.session.snapshot().record.id).toBe(before.id);
+    expect(f.session.snapshot().record.sessionId).toBe(before.sessionId);
+    expect(f.session.snapshot().record.messages).toEqual(before.messages);
+    expect((await journal(f.file)).filter((row) => row.method === 'session/new')).toHaveLength(1);
+  });
+
+  it('revalidates the workspace before replacing an unpersisted empty session', async () => {
+    const f = await fixture('task', 'missing-rollout');
+    await f.session.connect(f.profile, { resume: false });
+    const before = f.session.snapshot().record;
+    await f.session.disconnect();
+    f.validate.mockImplementation(async () => {
+      if ((await journal(f.file)).some((row) => row.method === 'session/load')) throw new Error('Workspace allocation changed');
+    });
+    await expect(f.session.connect(f.profile, { resume: true })).rejects.toThrow('Workspace allocation changed');
+    expect(f.session.snapshot().record.sessionId).toBe(before.sessionId);
+    expect((await journal(f.file)).filter((row) => row.method === 'session/new')).toHaveLength(1);
+  });
+
+  it.each(['load-fails', 'missing-rollout-new-fails'])('retains an empty saved session when %s prevents recovery', async (mode) => {
+    const f = await fixture('task', mode);
+    await f.session.connect(f.profile, { resume: false });
+    const before = f.session.snapshot().record;
+    await f.session.disconnect();
+    await expect(f.session.connect(f.profile, { resume: true })).rejects.toThrow();
+    expect(f.session.snapshot().record.id).toBe(before.id);
+    expect(f.session.snapshot().record.sessionId).toBe(before.sessionId);
+    expect(f.session.snapshot().record.messages).toEqual([]);
+    expect((await journal(f.file)).filter((row) => row.method === 'session/new')).toHaveLength(mode === 'load-fails' ? 1 : 2);
+    expect((await journal(f.file)).some((row) => row.method === 'session/prompt')).toBe(false);
+  });
+
+  it('reports the details and stderr behind an internal session error without credentials', async () => {
+    const f = await fixture('task', 'session-internal-fails');
+    await expect(f.session.connect(f.profile, { resume: false })).rejects.toThrow('Internal error');
+    const output = f.report.mock.calls.map(([line]) => line).join('\n');
+    expect(output).toContain('session/new failed');
+    expect(output).toContain('Internal error (-32603)');
+    expect(output).toContain('Unable to open task workspace');
+    expect(output).toContain('Fixture stderr: workspace could not be opened');
+    expect(output).not.toContain('sk-fixture-secret');
+    expect(f.session.snapshot().error).toContain('Unable to open task workspace');
+    expect(f.session.snapshot().authMethods).toEqual([]);
+  });
+
+  it('does not present advertised login methods during connection or after a provider error', async () => {
+    const f = await fixture('task', 'session-new-fails');
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    f.validate.mockImplementation(async () => {
+      if (f.validate.mock.calls.length === 3) await gate;
+    });
+    const opening = expect(f.session.connect(f.profile, { resume: false })).rejects.toThrow('Provider is unavailable');
+    try {
+      await expect.poll(() => f.validate.mock.calls.length).toBe(3);
+      expect(f.session.snapshot().status).toBe('connecting');
+      expect(f.session.snapshot().authMethods).toEqual([]);
+    } finally {
+      release();
+    }
+    await opening;
+    expect(f.session.snapshot().status).toBe('error');
+    expect(f.session.snapshot().authMethods).toEqual([]);
+  });
+
+  it('uses an external login after reconnecting without another authentication request or prompt', async () => {
+    const f = await fixture('task', 'auth-external');
+    await expect(f.session.connect(f.profile, { resume: false })).rejects.toThrow();
+    expect(f.session.snapshot().authMethods.some((method) => method.id === 'login')).toBe(true);
+    const conversationId = f.session.snapshot().record.id;
+    await writeFile(`${f.file}.auth`, 'fixture login');
+    await f.session.disconnect();
+    await f.session.connect(f.profile, { resume: false });
+    expect(f.session.snapshot().status).toBe('connected');
+    expect(f.session.snapshot().record.id).toBe(conversationId);
+    expect(f.session.snapshot().authMethods).toEqual([]);
+    expect((await journal(f.file)).some((entry) => ['authenticate', 'session/prompt'].includes(entry.method ?? ''))).toBe(false);
+  });
+
   it('authenticates only a supported advertised method and starts no prompt during login', async () => {
     const f = await fixture('task', 'auth');
     await expect(f.session.connect(f.profile, { resume: false })).rejects.toThrow();
@@ -639,10 +787,14 @@ describe('ACP subprocess conversations', () => {
     expect((await journal(f.file)).filter((message) => message.method === 'authenticate')).toEqual([]);
     await f.session.authenticate('login');
     expect(f.session.snapshot().status).toBe('connected');
+    expect(f.session.snapshot().authMethods).toEqual([]);
     expect((await journal(f.file)).filter((message) => message.method === 'authenticate').map((message) => message.params)).toEqual([{ methodId: 'login' }]);
     expect((await journal(f.file)).some((message) => message.method === 'session/prompt')).toBe(false);
     await f.session.send('authenticated');
     expect(transcript(f.session).at(-1)).toEqual({ role: 'agent', text: 'Echo: authenticated' });
+    await f.session.send('crash').catch(() => {});
+    expect(f.session.snapshot().status).toBe('error');
+    expect(f.session.snapshot().authMethods).toEqual([]);
   });
 
   it('retries an authenticated load and restores replay before allowing the next prompt', async () => {

@@ -12,6 +12,7 @@ const actions: AcpAction[] = [
   { type: 'review' },
   { type: 'open-sidebar' },
   { type: 'view-ready' },
+  { type: 'insert-brief' },
   { type: 'view-state', scrollTop: 120.5, followOutput: false, profileId: 'agent', requestId: 'capture-1' },
   { type: 'draft', text: '', version: 2, revision: 3 },
   { type: 'permission', requestId: 'request-2', optionId: 'reject-once' },

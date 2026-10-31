@@ -10,6 +10,7 @@ import { parseAcpAction } from '@warden/shared';
 import type { AcpAction, AcpBinding, AcpModel, AcpRecord, AcpViewState } from '@warden/shared';
 import type { AcpProfile } from '../../packages/vscode/src/acp/contracts.js';
 import { AcpDraft } from '../../packages/vscode/src/acp/draft.js';
+import { acpErrorMessage } from '../../packages/vscode/src/acp/diagnostics.js';
 import { AcpSession } from '../../packages/vscode/src/acp/session.js';
 import { AcpSessionStorage } from '../../packages/vscode/src/acp/storage.js';
 import { resolveAcpBinding, validateAcpBinding } from '../../packages/vscode/src/acp/binding.js';
@@ -88,6 +89,8 @@ interface Entry {
   draft: AcpDraft;
   viewState?: AcpViewState;
   sending: boolean;
+  submittedDraft?: AcpModel['submittedDraft'];
+  connecting?: Promise<void>;
   error?: string;
 }
 const entries: Entry[] = [];
@@ -95,7 +98,7 @@ for (const [index, title] of ['订单筛选参数', '分页默认值'].entries()
   const task = await engine.execute('task.create', { title });
   const binding = await resolveAcpBinding(engine, task.id);
   await writeFile(path.join(binding.workspace, 'context.txt'), `task ${index + 1}\n`);
-  const profiles = ['normal', 'no-load', 'auth', 'incompatible', 'controls', 'legacy-modes'].map((mode) => ({
+  const profiles = ['normal', 'no-load', 'auth', 'incompatible', 'controls', 'legacy-modes', 'auth-external'].map((mode) => ({
     id: mode,
     label: {
       normal: '测试 Agent',
@@ -104,6 +107,7 @@ for (const [index, title] of ['订单筛选参数', '分页默认值'].entries()
       incompatible: '不兼容的 Agent',
       controls: '支持会话配置的 Agent',
       'legacy-modes': '支持旧模式的 Agent',
+      'auth-external': '外部登录的 Agent',
     }[mode]!,
     command: process.execPath,
     args: [path.resolve('test/fixtures/acp-agent.mjs'), path.join(data, `${index}-${mode}.jsonl`), mode],
@@ -124,7 +128,7 @@ for (const [index, title] of ['订单筛选参数', '分页默认值'].entries()
     storage,
     profiles,
     defaultProfileId: 'normal',
-    draft: new AcpDraft(`请完成${title}。`),
+    draft: new AcpDraft(''),
     sending: false,
   });
 }
@@ -136,6 +140,7 @@ const model = (entry: Entry): AcpModel => ({
   presentation: 'sidebar',
   viewState: entry.viewState,
   sending: entry.sending,
+  submittedDraft: entry.submittedDraft,
   profiles: entry.profiles.map(({ id, label }) => ({ id, label })),
   defaultProfileId: entry.defaultProfileId,
   ...entry.draft.snapshot(),
@@ -145,6 +150,23 @@ const profile = (entry: Entry, id: string) => {
   if (!found) throw new Error('Unknown fixture profile');
   return found;
 };
+async function connect(entry: Entry, profileId?: string) {
+  if (entry.connecting) return entry.connecting;
+  const snapshot = entry.session.snapshot();
+  if (snapshot.status === 'connected') return;
+  const connecting = (async () => {
+    if (snapshot.status === 'error') await entry.session.disconnect();
+    await entry.session.connect(profile(entry, profileId ?? snapshot.record.profileId ?? entry.defaultProfileId), {
+      resume: !!snapshot.record.sessionId,
+    });
+  })();
+  entry.connecting = connecting;
+  try {
+    await connecting;
+  } finally {
+    entry.connecting = undefined;
+  }
+}
 async function act(entry: Entry, action: AcpAction) {
   if (action.type === 'draft') {
     entry.draft.update(action);
@@ -157,25 +179,26 @@ async function act(entry: Entry, action: AcpAction) {
   if (['view-ready', 'open-sidebar'].includes(action.type)) return;
   entry.error = undefined;
   switch (action.type) {
+    case 'insert-brief':
+      entry.draft.append(`# ${entry.binding.title}`);
+      break;
     case 'send': {
       if (entry.sending) throw new Error('A prompt is already running');
       const submitted = entry.draft.begin(action);
+      entry.submittedDraft = { version: entry.draft.snapshot().draftVersion, revision: action.revision };
       entry.sending = true;
       try {
-        const snapshot = entry.session.snapshot();
-        if (snapshot.status !== 'connected') {
-          if (snapshot.record.sessionId) throw new Error('Restore or create a conversation first');
-          await entry.session.connect(profile(entry, action.profileId), { resume: false });
-        }
+        await connect(entry, action.profileId);
         await entry.session.send(submitted.text);
         if (!entry.session.snapshot().record.interrupted) entry.draft.complete(submitted.mutation);
       } finally {
         entry.sending = false;
+        entry.submittedDraft = undefined;
       }
       break;
     }
     case 'connect':
-      await entry.session.connect(profile(entry, action.profileId), { resume: action.resume });
+      await connect(entry, action.profileId);
       break;
     case 'disconnect':
       await entry.session.disconnect();
@@ -184,7 +207,9 @@ async function act(entry: Entry, action: AcpAction) {
       await entry.session.cancel();
       break;
     case 'new':
+      await entry.session.disconnect();
       await entry.session.newConversation();
+      await connect(entry);
       break;
     case 'permission':
       await entry.session.respondPermission(action.requestId, action.optionId);
@@ -219,6 +244,11 @@ const server = createServer(async (request, response) => {
       response.end('{}');
       return;
     }
+    if (url.pathname === '/external-login' && request.method === 'POST') {
+      await writeFile(`${profile(entry, 'auth-external').args[1]}.auth`, 'fixture login');
+      response.end('{}');
+      return;
+    }
     if (url.pathname === '/completion') {
       if (request.method === 'POST') entry.storage.holdCompletion(entry.session.snapshot().record);
       if (request.method === 'DELETE') entry.storage.releaseCompletion();
@@ -234,7 +264,10 @@ const server = createServer(async (request, response) => {
     }
     if (url.pathname === '/reopen' && request.method === 'POST') {
       entry.panelId = randomUUID();
+      const draft = entry.draft.snapshot();
+      const submitted = entry.submittedDraft?.version === draft.draftVersion && entry.submittedDraft?.revision === draft.draftRevision;
       entry.draft.resetPanel();
+      entry.submittedDraft = submitted ? { version: draft.draftVersion, revision: 0 } : undefined;
       response.end('{}');
       return;
     }
@@ -281,7 +314,7 @@ const server = createServer(async (request, response) => {
       const action = parseAcpAction(message.action);
       // Accept a short action immediately so permission responses and cancellation stay usable.
       void act(entry, action).catch((error) => {
-        entry.error = error instanceof Error ? error.message : String(error);
+        entry.error = entry.session.snapshot().error ?? acpErrorMessage(error);
       });
       response.statusCode = 202;
       response.end('{}');
@@ -291,6 +324,12 @@ const server = createServer(async (request, response) => {
       response.setHeader('Content-Type', url.pathname.endsWith('.js') ? 'text/javascript' : 'text/css');
       response.end(Buffer.from(assets[`extension/dist/webview${url.pathname}`]!));
       return;
+    }
+    if (url.pathname === '/' && ['disconnected', 'error'].includes(entry.session.snapshot().status)) {
+      entry.error = undefined;
+      void connect(entry).catch((error: unknown) => {
+        entry.error = entry.session.snapshot().error ?? acpErrorMessage(error);
+      });
     }
     response.setHeader('Content-Type', 'text/html');
     response.end(`<!doctype html><html lang="en"><head><meta charset="utf-8"><link rel="stylesheet" href="/index.css"></head><body><div id="root"></div><script>

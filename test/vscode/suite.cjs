@@ -386,7 +386,7 @@ exports.run = async () => {
 
     await checkChats(workbench, extension, fixture, eventually);
     console.log(
-      'Packaged extension passed: branch following and restoration, native readonly review, version guards, preview/setup, normal hooks, recovery, multiline delivery, fresh workspaces and task-bound ACP commands, permissions, cancellation and explicit resume',
+      'Packaged extension passed: branch following and restoration, native readonly review, version guards, preview/setup, normal hooks, recovery, multiline delivery, fresh workspaces and task-bound ACP commands, permissions, cancellation and automatic resume',
     );
   } finally {
     await workbench.close();

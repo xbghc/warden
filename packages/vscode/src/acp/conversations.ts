@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { Engine } from '@warden/engine';
-import { parseAcpAction } from '@warden/shared';
+import { DiagnosticLog, diagnosticError, parseAcpAction } from '@warden/shared';
 import type { AcpAction, AcpBinding, AcpConfiguration, AcpModel, AcpViewState, WorkflowTask } from '@warden/shared';
 import type { AcpProfile } from './contracts.js';
 import { resolveAcpBinding, validateAcpBinding } from './binding.js';
@@ -10,6 +10,7 @@ import { readAcpProfiles } from './setup.js';
 import { AcpSession } from './session.js';
 import { AcpSessionStorage } from './storage.js';
 import { AcpDraft } from './draft.js';
+import { acpErrorMessage } from './diagnostics.js';
 
 interface ChatSurface {
   webview: vscode.Webview;
@@ -29,7 +30,9 @@ interface Conversation {
   draft: AcpDraft;
   draftKey: string;
   draftSave: Promise<void>;
+  connecting?: Promise<void>;
   sending: boolean;
+  submittedDraft?: AcpModel['submittedDraft'];
   error?: string;
   renderTimer?: ReturnType<typeof setTimeout>;
 }
@@ -54,6 +57,7 @@ export class AcpConversations {
     private readonly configureAgents: () => Promise<void>,
     private readonly connectionFailed: (profile: AcpProfile, message: string) => void,
     private readonly defaultProfileId: () => string | undefined,
+    private readonly log = new DiagnosticLog(),
   ) {
     this.subscriptions.push(
       vscode.window.registerWebviewViewProvider(
@@ -101,7 +105,7 @@ export class AcpConversations {
   private engine(repository: string) {
     let opening = this.engines.get(repository);
     if (!opening) {
-      opening = Engine.open(repository).then(async (engine) => {
+      opening = Engine.open(repository, undefined, this.log).then(async (engine) => {
         if (this.closed) {
           await engine.close();
           throw new Error('The Warden session is closed.');
@@ -119,9 +123,8 @@ export class AcpConversations {
       `# ${task.title}`,
       task.body,
       task.acceptance && `Acceptance criteria: ${task.acceptance}`,
-      `Task workspace: ${task.worktree}`,
       `Base branch: ${task.developmentBranch}`,
-      'Edit and commit code in this task workspace. The user edits the primary folder; Warden generates the separate preview folder. The user reviews the full changes before committing them to the base branch.',
+      'The user edits the primary folder; Warden generates the separate preview folder. The user reviews the full changes before committing them to the base branch.',
     ]
       .filter(Boolean)
       .join('\n\n');
@@ -155,17 +158,16 @@ export class AcpConversations {
         this.scheduleRender(entry);
       },
       connectionFailed: this.connectionFailed,
+      log: this.log,
+      report: (diagnostic) => console.error(diagnostic),
     });
     await entry.session.initialize();
     if (this.closed) {
       await entry.session.close();
       throw new Error('The Warden session is closed.');
     }
-    if (!entry.draft.text && !entry.session.snapshot().record.messages.length) {
-      const task = (await engine.execute('workflow.get', undefined)).workflow?.changes.find((row) => row.id === taskId);
-      if (task) entry.draft = new AcpDraft(this.brief(task));
-    }
     this.entries.set(this.key(repository, taskId), entry);
+    this.log.write('debug', 'acp.conversation.opened', { task: taskId });
     return entry;
   }
 
@@ -219,6 +221,7 @@ export class AcpConversations {
         if (location === 'sidebar') this.sidebar?.show(false);
         else entry.panel?.reveal(vscode.ViewColumn.Beside);
         this.render(entry);
+        this.start(entry);
         return;
       }
       if (location === 'sidebar') {
@@ -238,18 +241,68 @@ export class AcpConversations {
         });
         entry.panel = panel;
         const surface = this.mount(entry, panel.webview, location);
+        let visible = panel.visible;
+        const visibility = panel.onDidChangeViewState(() => {
+          const opened = panel.visible && !visible;
+          visible = panel.visible;
+          if (opened && entry.surface === surface && !surface.capture) this.start(entry);
+        });
         const listener = panel.webview.onDidReceiveMessage((message: unknown) => void this.receive(entry, surface, message));
         const disposal = panel.onDidDispose(() => {
           if (entry.panel === panel) this.detach(entry);
+          visibility.dispose();
           listener.dispose();
           disposal.dispose();
         });
         this.initializeWebview(panel.webview);
       }
       void vscode.commands.executeCommand('setContext', 'warden.chatInSidebar', !!this.sidebarEntry);
+      this.start(entry);
     });
     this.transition = opening.catch(() => {});
     return opening;
+  }
+
+  private async connect(entry: Conversation, requestedId?: string) {
+    const snapshot = entry.session.snapshot();
+    const profileId = requestedId ?? snapshot.record.profileId ?? this.defaultProfileId();
+    if (!profileId) throw new Error('Connect an agent in Warden Settings first.');
+    const profile = this.conversationProfile(entry, profileId);
+    if (entry.connecting) {
+      this.log.write('debug', 'acp.connection.reused', { task: entry.binding.taskId, pending: true });
+      await entry.connecting;
+      this.conversationProfile(entry, profileId);
+      return;
+    }
+    if (snapshot.status === 'connected') {
+      this.log.write('debug', 'acp.connection.reused', { task: entry.binding.taskId, pending: false });
+      return;
+    }
+    const connecting = (async () => {
+      if (snapshot.status === 'error') await entry.session.disconnect();
+      await entry.session.connect(profile, { resume: !!snapshot.record.sessionId });
+    })();
+    entry.connecting = connecting;
+    try {
+      await connecting;
+    } finally {
+      if (entry.connecting === connecting) entry.connecting = undefined;
+    }
+  }
+
+  private start(entry: Conversation) {
+    if (this.closed || entry.connecting || !['disconnected', 'error'].includes(entry.session.snapshot().status)) return;
+    entry.error = undefined;
+    // Opening a chat prepares its session without blocking navigation or sending the draft.
+    void this.connect(entry)
+      .catch((error: unknown) => {
+        this.log.write('error', 'acp.conversation.prepare.failed', { task: entry.binding.taskId, ...diagnosticError(error) });
+        entry.error = acpErrorMessage(error);
+      })
+      .finally(() => {
+        this.changed();
+        this.render(entry);
+      });
   }
 
   async expand() {
@@ -283,11 +336,16 @@ export class AcpConversations {
       if (entry?.surface) void this.receive(entry, entry.surface, message);
       else this.renderEmpty();
     });
+    const visibility = view.onDidChangeVisibility(() => {
+      const entry = this.sidebarEntry;
+      if (view.visible && entry && !entry.surface?.capture) this.start(entry);
+    });
     const disposal = view.onDidDispose(() => {
       if (this.sidebar === view) {
         if (this.sidebarEntry) this.detach(this.sidebarEntry);
         this.sidebar = undefined;
       }
+      visibility.dispose();
       listener.dispose();
       disposal.dispose();
     });
@@ -304,15 +362,22 @@ export class AcpConversations {
   }
 
   private mount(entry: Conversation, webview: vscode.Webview, location: ChatSurface['location']) {
+    this.log.write('debug', 'acp.view.mounted', { task: entry.binding.taskId, location });
     entry.panelId = randomUUID();
+    const draft = entry.draft.snapshot();
+    const submitted = entry.submittedDraft?.version === draft.draftVersion && entry.submittedDraft?.revision === draft.draftRevision;
     entry.draft.resetPanel();
+    entry.submittedDraft = submitted ? { version: draft.draftVersion, revision: 0 } : undefined;
     entry.surface = { webview, location, ready: false };
     this.render(entry);
     return entry.surface;
   }
 
   private async receive(entry: Conversation, surface: ChatSurface, message: unknown) {
-    if (entry.surface !== surface || this.closed) return;
+    if (entry.surface !== surface || this.closed) {
+      this.log.write('trace', 'acp.view.message.ignored', { reason: 'inactive_surface', task: entry.binding.taskId });
+      return;
+    }
     try {
       if (!message || typeof message !== 'object' || Array.isArray(message)) throw new Error('Invalid conversation view message.');
       const envelope = message as Record<string, unknown>;
@@ -323,10 +388,13 @@ export class AcpConversations {
       // A switched-out view can still deliver queued messages. Never route them to its replacement.
       if (envelope.type !== 'acp-action' || envelope.panelId !== entry.panelId) return;
       const action = parseAcpAction(envelope.action);
+      if (!['draft', 'view-state', 'view-ready'].includes(action.type))
+        this.log.write('debug', 'acp.view.action', { task: entry.binding.taskId, action: action.type });
       if (surface.capture && !['draft', 'view-state', 'view-ready'].includes(action.type)) return;
       await this.handle(entry, action);
     } catch (error) {
-      entry.error = error instanceof Error ? error.message : String(error);
+      this.log.write('error', 'acp.view.action.failed', { task: entry.binding.taskId, ...diagnosticError(error) });
+      entry.error = acpErrorMessage(error);
       surface.capture?.finish(new Error(entry.error));
       this.changed();
       this.render(entry);
@@ -337,8 +405,6 @@ export class AcpConversations {
     const surface = entry.surface;
     if (!surface) return;
     if (surface.ready) {
-      if (surface.location === 'sidebar' && !this.sidebar?.visible) this.sidebar?.show(true);
-      else if (entry.panel && !entry.panel.visible) entry.panel.reveal(entry.panel.viewColumn, true);
       // Wait for local edits and reading position before invalidating this view's routing token.
       await new Promise<void>((resolve, reject) => {
         const id = randomUUID();
@@ -355,6 +421,8 @@ export class AcpConversations {
           } else resolve();
         };
         surface.capture = { id, finish };
+        if (surface.location === 'sidebar' && !this.sidebar?.visible) this.sidebar?.show(true);
+        else if (entry.panel && !entry.panel.visible) entry.panel.reveal(entry.panel.viewColumn, true);
         void surface.webview.postMessage({ type: 'acp-capture', panelId: entry.panelId, requestId: id }).then(
           (delivered) => {
             if (!delivered) finish(new Error('Task Chat is not ready. Reopen it before switching.'));
@@ -407,6 +475,7 @@ export class AcpConversations {
       profiles,
       defaultProfileId: this.defaultProfileId(),
       sending: entry.sending,
+      submittedDraft: entry.submittedDraft,
       ...entry.draft.snapshot(),
       presentation: entry.surface.location,
       viewState: entry.viewState,
@@ -451,28 +520,34 @@ export class AcpConversations {
     this.changed();
     const session = entry.session;
     switch (action.type) {
+      case 'insert-brief': {
+        await validateAcpBinding(entry.engine, entry.binding);
+        const task = (await entry.engine.execute('workflow.get', undefined)).workflow?.changes.find((row) => row.id === entry.binding.taskId);
+        if (!task) throw new Error('This task is no longer available.');
+        entry.draft.append(this.brief(task));
+        this.saveDraft(entry);
+        break;
+      }
       case 'send': {
         if (entry.sending || !action.text.trim()) throw new Error('Wait for the current response or stop this turn first.');
         const submission = entry.draft.begin(action);
+        entry.submittedDraft = { version: entry.draft.snapshot().draftVersion, revision: action.revision };
         entry.sending = true;
         this.saveDraft(entry);
         this.render(entry);
         try {
-          const current = session.snapshot();
-          if (current.status !== 'connected') {
-            if (current.record.sessionId) throw new Error('Resume the original session or explicitly start a new session first.');
-            await session.connect(this.conversationProfile(entry, action.profileId), { resume: false });
-          } else if (current.record.profileId !== action.profileId) throw new Error('Disconnect and start a new session before changing agents.');
+          await this.connect(entry, action.profileId);
           await session.send(submission.text);
           const record = session.snapshot().record;
           if (!record.interrupted && entry.draft.complete(submission.mutation)) this.saveDraft(entry);
         } finally {
           entry.sending = false;
+          entry.submittedDraft = undefined;
         }
         break;
       }
       case 'connect':
-        await session.connect(this.conversationProfile(entry, action.profileId), { resume: action.resume });
+        await this.connect(entry, action.profileId);
         break;
       case 'cancel':
         await session.cancel();
@@ -485,6 +560,7 @@ export class AcpConversations {
           throw new Error('Stop and disconnect the current session first.');
         await session.disconnect();
         await session.newConversation();
+        await this.connect(entry);
         break;
       case 'permission':
         await validateAcpBinding(entry.engine, entry.binding);

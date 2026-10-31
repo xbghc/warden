@@ -17,8 +17,11 @@ import {
   type ToolCallUpdate,
 } from '@agentclientprotocol/sdk';
 import type { AcpControls, AcpMessage, AcpPermission, AcpRecord, AcpSnapshot, AcpStatus } from '@warden/shared';
+import { DiagnosticLog, diagnosticError, diagnosticOutcome } from '@warden/shared';
+import type { DiagnosticOutcome } from '@warden/shared';
 import type { AcpProfile, AcpSessionOptions } from './contracts.js';
 import { availableCommands, configOptions, emptyControls, sessionModes } from './session-controls.js';
+import { AcpStderr, acpDiagnosticSecrets, acpErrorMessage, acpFailureLog } from './diagnostics.js';
 
 declare const __WARDEN_VERSION__: string;
 const CLIENT_VERSION = typeof __WARDEN_VERSION__ === 'undefined' ? 'development' : __WARDEN_VERSION__;
@@ -32,8 +35,13 @@ const TRUNCATION = '\n[Content truncated]';
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const text = (value: string, limit = MAX_TEXT) =>
   value.length > limit ? value.slice(0, Math.max(0, limit - TRUNCATION.length)) + TRUNCATION.slice(0, limit) : value;
-const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
+const message = acpErrorMessage;
 const authRequired = (error: unknown) => !!error && typeof error === 'object' && 'code' in error && error.code === -32000;
+const missingRollout = (error: unknown, sessionId: string) => {
+  if (!object(error) || error.code !== -32603) return false;
+  const details = typeof error.data === 'string' ? error.data : object(error.data) ? error.data.details : undefined;
+  return typeof details === 'string' && details.includes(`no rollout found for thread id ${sessionId}`);
+};
 
 type Permission = {
   view: AcpPermission;
@@ -42,6 +50,7 @@ type Permission = {
 };
 type History = { messages: AcpMessage[]; lastChunk?: { key: string; id: string } };
 type Runtime = {
+  log: DiagnosticLog;
   profile: AcpProfile;
   generation: number;
   child: ChildProcessWithoutNullStreams;
@@ -54,6 +63,7 @@ type Runtime = {
   stopping: boolean;
   initialized: boolean;
   established: boolean;
+  authenticationRequired?: boolean;
   resume: boolean;
   sessionId?: string;
   replay?: History;
@@ -63,12 +73,14 @@ type Runtime = {
   configRevision?: number;
   modeRevision?: number;
   modeUpdate?: string;
-  stderr: string;
+  stderr: AcpStderr;
 };
-type Turn = { runtime: Runtime; record: AcpRecord; promise: Promise<void>; cancelling: boolean; sent: boolean; user?: AcpMessage };
+type Turn = { id: string; updates: number; runtime: Runtime; record: AcpRecord; promise: Promise<void>; cancelling: boolean; sent: boolean; user?: AcpMessage };
 
 /** A task-bound protocol client. Files, commands and any agent-owned background work remain the agent's responsibility. */
 export class AcpSession {
+  private readonly log: DiagnosticLog;
+  private loggedStatus: AcpStatus = 'disconnected';
   private record: AcpRecord;
   private status: AcpStatus = 'disconnected';
   private error?: string;
@@ -92,6 +104,7 @@ export class AcpSession {
   private ownsClaim = false;
 
   constructor(private readonly options: AcpSessionOptions) {
+    this.log = (options.log ?? new DiagnosticLog()).child({ component: 'acp.task', task: options.binding.taskId, conversation: randomUUID() });
     this.record = this.emptyRecord();
     this.history = { messages: this.record.messages };
   }
@@ -108,12 +121,15 @@ export class AcpSession {
   }
 
   snapshot(): AcpSnapshot {
+    const runtime = this.runtime;
+    // Advertising a login method does not mean the agent needs authentication.
+    const needsAuthentication = this.status === 'error' && runtime?.authenticationRequired && runtime.initialized && !runtime.exited && this.current(runtime);
     return structuredClone({
       record: this.record,
       status: this.resetting ? 'resetting' : this.status,
       ...(this.error ? { error: this.error } : {}),
       permissions: [...this.permissions.values()].map((permission) => permission.view),
-      authMethods: this.authMethods
+      authMethods: (needsAuthentication ? this.authMethods : [])
         .filter((method) => !('type' in method && method.type === 'terminal'))
         .map((method) => ({
           id: method.id,
@@ -142,6 +158,7 @@ export class AcpSession {
         this.history = { messages: this.record.messages };
         this.boundHistory(this.history);
       }
+      this.log.write('debug', 'acp.history.loaded', { saved: !!saved, messageCount: this.record.messages.length, resumable: !!this.record.sessionId });
       this.options.changed();
     })();
     return this.initialized;
@@ -150,7 +167,7 @@ export class AcpSession {
   private timeout<T>(operation: Promise<T>, description: string): Promise<T> {
     let timer: ReturnType<typeof setTimeout>;
     const deadline = new Promise<never>((_resolve, reject) => {
-      timer = setTimeout(() => reject(new Error(description)), this.options.timeoutMs ?? 15_000);
+      timer = setTimeout(() => reject(Object.assign(new Error(description), { name: 'TimeoutError' })), this.options.timeoutMs ?? 15_000);
     });
     return Promise.race([operation, deadline]).finally(() => clearTimeout(timer));
   }
@@ -160,7 +177,38 @@ export class AcpSession {
   }
 
   private notify() {
+    if (this.status !== this.loggedStatus) {
+      (this.runtime?.log ?? this.log).write('debug', 'acp.session.state', { previous: this.loggedStatus, status: this.status });
+      this.loggedStatus = this.status;
+    }
     this.options.changed();
+  }
+
+  private reportFailure(stage: string, error: unknown, runtime = this.runtime, log = runtime?.log ?? this.log) {
+    try {
+      const diagnostic = acpFailureLog(stage, error, {
+        taskId: this.options.binding.taskId,
+        profileId: runtime?.profile.id ?? this.record.profileId,
+        stderr: runtime?.stderr.text,
+        secrets: [...acpDiagnosticSecrets(runtime?.profile), ...(this.turn?.user ? [this.turn.user.text] : [])],
+      });
+      log.write(authRequired(error) ? 'warn' : 'error', 'acp.failure', { stage, ...diagnosticError(error), diagnostic });
+      this.options.report?.(diagnostic);
+    } catch {
+      // Diagnostics must never replace the original connection failure.
+    }
+  }
+
+  private async request<T>(runtime: Runtime, method: string, operation: () => Promise<T>, description?: string): Promise<T> {
+    const span = runtime.log.start('acp.request', { method, turn: this.turn?.runtime === runtime ? this.turn.id : undefined });
+    try {
+      const result = await (description ? this.timeout(operation(), description) : operation());
+      span.end(runtime.generation === this.generation ? 'ok' : 'cancelled');
+      return result;
+    } catch (error) {
+      span.end(runtime.generation === this.generation ? diagnosticOutcome(error) : 'cancelled', diagnosticError(error));
+      throw error;
+    }
   }
 
   private boundHistory(history: History) {
@@ -201,7 +249,9 @@ export class AcpSession {
     this.boundHistory(this.history);
     this.record.updatedAt = new Date().toISOString();
     const copy = structuredClone(this.record);
-    const save = this.saves.catch(() => undefined).then(() => this.options.storage.save(copy));
+    const save = this.saves
+      .catch(() => undefined)
+      .then(() => this.log.measure('acp.storage.save', () => this.options.storage.save(copy), { messageCount: copy.messages.length }, 'trace'));
     this.saves = save;
     return save;
   }
@@ -247,9 +297,13 @@ export class AcpSession {
       throw new Error('The agent is already connected or a connection attempt is still running.');
     this.validateProfile(profile);
     this.connecting = true;
+    const log = this.log.child({ connection: randomUUID(), profile: profile.id }, acpDiagnosticSecrets(profile));
+    const span = log.start('acp.connect', { resume: options.resume }, 'info');
+    let outcome: DiagnosticOutcome = 'error';
     const generation = ++this.generation;
     let release: (() => Promise<void>) | undefined;
     let runtime: Runtime | undefined;
+    let stage = 'validate';
     try {
       await this.initialize();
       await this.options.validate();
@@ -265,7 +319,8 @@ export class AcpSession {
       this.error = undefined;
       this.controls = emptyControls();
       this.notify();
-      release = await this.options.storage.claim();
+      stage = 'claim';
+      release = await log.measure('acp.storage.claim', () => this.options.storage.claim());
       if (generation !== this.generation || this.disposed) throw new Error('Connection cancelled.');
       // Another window may have advanced the saved conversation while this panel was open.
       // Claim first, then reload, so connecting can never overwrite its more recent history.
@@ -292,22 +347,27 @@ export class AcpSession {
       this.record.profileId = profile.id;
       this.record.profileSignature = signature;
       this.ownsClaim = true;
-      runtime = this.spawn(profile, generation, release, options.resume);
+      stage = 'spawn';
+      runtime = this.spawn(profile, generation, release, options.resume, log);
       release = undefined;
       this.runtime = runtime;
       // Missing executables must fail before the protocol writes to their closed pipes.
-      await this.timeout(runtime.started, 'Starting the agent timed out.');
+      await log.measure('acp.spawn', () => this.timeout(runtime!.started, 'Starting the agent timed out.'));
       if (!this.current(runtime) || runtime.exited) throw new Error('Connection closed.');
-      const initialized = await this.timeout(
-        runtime.connection.agent.request('initialize', {
-          protocolVersion: PROTOCOL_VERSION,
-          clientInfo: { name: 'warden', title: 'Warden', version: CLIENT_VERSION },
-          clientCapabilities: {
-            fs: { readTextFile: false, writeTextFile: false },
-            terminal: false,
-            session: { configOptions: { boolean: {} }, notices: {}, compaction: {} },
-          },
-        }),
+      stage = 'initialize';
+      const initialized = await this.request(
+        runtime,
+        'initialize',
+        () =>
+          runtime!.connection.agent.request('initialize', {
+            protocolVersion: PROTOCOL_VERSION,
+            clientInfo: { name: 'warden', title: 'Warden', version: CLIENT_VERSION },
+            clientCapabilities: {
+              fs: { readTextFile: false, writeTextFile: false },
+              terminal: false,
+              session: { configOptions: { boolean: {} }, notices: {}, compaction: {} },
+            },
+          }),
         'Agent initialization timed out. Check that the command supports ACP, then reconnect.',
       );
       if (!this.current(runtime)) throw new Error('Connection closed.');
@@ -333,9 +393,20 @@ export class AcpSession {
       this.record.agentName =
         typeof info?.title === 'string' ? text(info.title, 1_000) : typeof info?.name === 'string' ? text(info.name, 1_000) : profile.label;
       this.record.canLoad = initialized.agentCapabilities?.loadSession === true;
+      log.write('debug', 'acp.negotiated', {
+        protocolVersion: initialized.protocolVersion,
+        loadSession: this.record.canLoad,
+        authMethods: this.authMethods.length,
+        agentVersion: initialized.agentInfo?.version,
+      });
+      stage = options.resume ? 'session/load' : 'session/new';
       await this.openSession(runtime);
+      outcome = 'ok';
     } catch (error) {
+      outcome = generation !== this.generation ? 'cancelled' : diagnosticOutcome(error);
       if (generation === this.generation) {
+        this.reportFailure(stage, error, runtime, log);
+        if (runtime) runtime.authenticationRequired = authRequired(error);
         this.status = 'error';
         this.error = authRequired(error)
           ? 'The agent requires authentication. Choose a supported method, or log in externally and reconnect.'
@@ -351,10 +422,11 @@ export class AcpSession {
       throw error;
     } finally {
       this.connecting = false;
+      span.end(outcome, { stage });
     }
   }
 
-  private spawn(profile: AcpProfile, generation: number, release: () => Promise<void>, resume: boolean): Runtime {
+  private spawn(profile: AcpProfile, generation: number, release: () => Promise<void>, resume: boolean, log: DiagnosticLog): Runtime {
     const child = spawn(profile.command, profile.args, {
       cwd: this.options.binding.workspace,
       env: { ...process.env, ...profile.env },
@@ -367,6 +439,7 @@ export class AcpSession {
       exited = resolve;
     });
     const runtime = {
+      log,
       profile,
       generation,
       child,
@@ -378,7 +451,7 @@ export class AcpSession {
       initialized: false,
       established: false,
       resume,
-      stderr: '',
+      stderr: new AcpStderr(),
     } as Runtime;
     const app = client({ name: 'Warden' })
       .onNotification('session/update', ({ params }) => this.update(runtime, params))
@@ -386,13 +459,15 @@ export class AcpSession {
     runtime.connection = app.connect(ndJsonStream(Writable.toWeb(child.stdin), Readable.toWeb(child.stdout), { maxMessageBytes: 2 * 1024 * 1024 }));
     child.stderr.setEncoding('utf8');
     child.stderr.on('data', (chunk: string) => {
-      runtime.stderr = (runtime.stderr + chunk).slice(-8_192);
+      runtime.stderr.append(chunk);
     });
+    child.once('spawn', () => log.write('debug', 'acp.process.started', { pid: child.pid }));
     const ended = (reason: string) => {
       if (runtime.exited) return;
       runtime.exited = true;
       exited();
       if (this.current(runtime)) {
+        this.reportFailure('process', new Error(reason), runtime);
         this.error = reason;
         this.options.connectionFailed?.(profile, reason);
         this.status = 'error';
@@ -403,19 +478,22 @@ export class AcpSession {
       }
       runtime.connection.close();
       void this.releaseRuntime(runtime).catch((error) => {
+        this.reportFailure('ownership/release', error, runtime);
         if (generation === this.generation) {
           this.error = `The agent exited, but its session ownership could not be released: ${message(error)}`;
           this.notify();
         }
       });
     };
-    child.once('exit', (code, signal) =>
-      ended(`The agent process exited (${signal ?? code ?? 'unknown status'}). Check the profile or explicitly resume the session.`),
-    );
+    child.once('exit', (code, signal) => {
+      log.write(runtime.stopping ? 'debug' : 'warn', 'acp.process.exited', { pid: child.pid, exitCode: code, signal, expected: runtime.stopping });
+      ended(`The agent process exited (${signal ?? code ?? 'unknown status'}). Check the profile or explicitly resume the session.`);
+    });
     child.once('error', (error) => {
       if (!child.pid) ended(`Unable to start the agent: ${message(error)}. Check the executable path on the current workspace host.`);
     });
     void runtime.connection.closed.then(() => {
+      log.write('debug', 'acp.transport.closed', { expected: runtime.stopping || runtime.exited });
       if (this.current(runtime) && !runtime.exited) {
         this.status = 'error';
         this.error = 'The ACP connection closed. This turn may be incomplete; inspect the code before reconnecting.';
@@ -442,8 +520,10 @@ export class AcpSession {
       runtime.sessionId = sessionId;
       runtime.replay = { messages: [] };
       try {
-        const session = await this.timeout(
-          runtime.connection.agent.request('session/load', { sessionId, cwd: this.options.binding.workspace, mcpServers: [] }),
+        const session = await this.request(
+          runtime,
+          'session/load',
+          () => runtime.connection.agent.request('session/load', { sessionId, cwd: this.options.binding.workspace, mcpServers: [] }),
           'Resuming the session timed out. Reconnect; Warden will not resend messages automatically.',
         ).catch((error) => {
           if (authRequired(error)) this.options.connectionFailed?.(runtime.profile, message(error));
@@ -454,16 +534,36 @@ export class AcpSession {
         const uncertain = this.record.messages.filter((item) => item.role === 'user' && item.uncertain);
         this.record.messages = [...runtime.replay.messages, ...uncertain];
         this.history = { messages: this.record.messages };
+      } catch (error) {
+        if (
+          !this.current(runtime) ||
+          !missingRollout(error, sessionId) ||
+          this.record.messages.length ||
+          this.record.interrupted ||
+          runtime.replay.messages.length
+        )
+          throw error;
+        // Codex persists a rollout only after the first prompt. A never-used session can
+        // disappear with its process; retain the local conversation and draft when replacing it.
+        await this.options.validate();
+        if (!this.current(runtime)) throw new Error('Connection closed.');
+        runtime.log.write('info', 'acp.session.recreate_empty', { reason: 'missing_rollout' });
+        runtime.resume = false;
+        runtime.sessionId = undefined;
+        this.controls = emptyControls();
       } finally {
         runtime.replay = undefined;
       }
-    } else {
+    }
+    if (!runtime.resume) {
       // Agents can advertise session controls in the same stream batch as the new-session
       // response. Buffer that bounded setup window until its session ID is known.
       runtime.pendingUpdates = [];
       runtime.pendingBytes = 0;
-      const session = await this.timeout(
-        runtime.connection.agent.request('session/new', { cwd: this.options.binding.workspace, mcpServers: [] }),
+      const session = await this.request(
+        runtime,
+        'session/new',
+        () => runtime.connection.agent.request('session/new', { cwd: this.options.binding.workspace, mcpServers: [] }),
         'Creating the agent session timed out. Check the agent and reconnect.',
       ).catch((error) => {
         this.options.connectionFailed?.(runtime.profile, message(error));
@@ -486,8 +586,10 @@ export class AcpSession {
     await this.persist();
     if (!this.current(runtime)) throw new Error('Connection closed.');
     runtime.established = true;
+    runtime.authenticationRequired = false;
     this.status = 'connected';
     this.error = undefined;
+    runtime.log.write('info', 'acp.session.ready', { resumed: runtime.resume, messageCount: this.record.messages.length });
     this.notify();
   }
 
@@ -498,7 +600,7 @@ export class AcpSession {
       return Promise.reject(new Error('Connect to an agent session first.'));
     if (this.turn || this.connecting || this.authenticating || this.configuration)
       return Promise.reject(new Error('A request is already running in this session. Wait or stop this turn.'));
-    const turn: Turn = { runtime, record: this.record, promise: Promise.resolve(), cancelling: false, sent: false };
+    const turn: Turn = { id: randomUUID(), updates: 0, runtime, record: this.record, promise: Promise.resolve(), cancelling: false, sent: false };
     this.turn = turn;
     turn.promise = this.runPrompt(turn, value);
     return turn.promise;
@@ -506,6 +608,8 @@ export class AcpSession {
 
   private async runPrompt(turn: Turn, value: string) {
     const runtime = turn.runtime;
+    const span = runtime.log.start('acp.turn', { turn: turn.id, characters: value.length }, 'info');
+    let outcome: DiagnosticOutcome = 'error';
     let completed = false;
     try {
       await this.options.validate();
@@ -526,7 +630,9 @@ export class AcpSession {
         return;
       }
       turn.sent = true;
-      const result = await runtime.connection.agent.request('session/prompt', { sessionId: runtime.sessionId!, prompt: [{ type: 'text', text: value }] });
+      const result = await this.request(runtime, 'session/prompt', () =>
+        runtime.connection.agent.request('session/prompt', { sessionId: runtime.sessionId!, prompt: [{ type: 'text', text: value }] }),
+      );
       if (this.record !== turn.record) return;
       if (!object(result) || typeof result.stopReason !== 'string' || !STOP_REASONS.has(result.stopReason))
         throw new Error('The agent returned an invalid turn result. Completion could not be confirmed.');
@@ -534,9 +640,14 @@ export class AcpSession {
       turn.user.status = result.stopReason === 'cancelled' ? 'Turn cancelled' : `Responded · ${result.stopReason}`;
       this.record.interrupted = false;
       completed = true;
+      outcome = result.stopReason === 'cancelled' ? 'cancelled' : 'ok';
+      runtime.log.write('debug', 'acp.turn.response', { turn: turn.id, stopReason: result.stopReason });
     } catch (error) {
+      outcome = diagnosticOutcome(error);
       if (this.record === turn.record && turn.sent) this.record.interrupted = true;
       if (this.current(runtime)) {
+        this.reportFailure('session/prompt', error, runtime);
+        runtime.authenticationRequired = authRequired(error);
         this.status = 'error';
         this.error = `The turn request did not finish: ${message(error)}. Inspect existing changes; Warden will not resend automatically.`;
         if (turn.sent && !turn.cancelling) this.options.connectionFailed?.(runtime.profile, this.error);
@@ -548,6 +659,7 @@ export class AcpSession {
       try {
         if (this.record === turn.record)
           await this.persist().catch((error) => {
+            outcome = 'error';
             if (this.current(runtime)) {
               this.status = 'error';
               this.error = `Unable to save the session: ${message(error)}. Check the session record before reconnecting.`;
@@ -561,6 +673,7 @@ export class AcpSession {
           this.error = undefined;
         }
       } finally {
+        span.end(turn.cancelling || runtime.generation !== this.generation ? 'cancelled' : outcome, { sent: turn.sent, updates: turn.updates });
         if (this.turn === turn) this.turn = undefined;
         this.notify();
       }
@@ -571,13 +684,16 @@ export class AcpSession {
     const turn = this.turn;
     if (!turn) return;
     turn.cancelling = true;
+    turn.runtime.log.write('info', 'acp.cancel.requested', { turn: turn.id, sent: turn.sent });
     this.status = 'cancelling';
     this.cancelPermissions(turn.runtime);
     this.notify();
     try {
       if (turn.sent)
-        await this.timeout(
-          turn.runtime.connection.agent.notify('session/cancel', { sessionId: turn.runtime.sessionId! }),
+        await this.request(
+          turn.runtime,
+          'session/cancel',
+          () => turn.runtime.connection.agent.notify('session/cancel', { sessionId: turn.runtime.sessionId! }),
           'The cancellation request could not be delivered. Disconnect the agent.',
         );
       await this.timeout(
@@ -586,6 +702,7 @@ export class AcpSession {
       );
     } catch (error) {
       if (this.turn === turn) {
+        this.reportFailure('session/cancel', error, turn.runtime);
         this.status = 'error';
         this.error = message(error);
         this.notify();
@@ -603,10 +720,16 @@ export class AcpSession {
     if ('type' in method && method.type === 'terminal')
       throw new Error("This authentication method requires the agent's own terminal. Log in externally and reconnect.");
     this.authenticating = true;
+    runtime.authenticationRequired = false;
+    this.status = 'connecting';
+    this.error = undefined;
+    this.notify();
     try {
       await this.options.validate();
-      await this.timeout(
-        runtime.connection.agent.request('authenticate', { methodId }),
+      await this.request(
+        runtime,
+        'authenticate',
+        () => runtime.connection.agent.request('authenticate', { methodId }),
         'Agent authentication timed out. Check the external login state and reconnect.',
       );
       if (!this.current(runtime)) throw new Error('Connection closed.');
@@ -618,6 +741,8 @@ export class AcpSession {
       }
     } catch (error) {
       if (this.current(runtime)) {
+        this.reportFailure('authenticate', error, runtime);
+        runtime.authenticationRequired = authRequired(error);
         this.status = 'error';
         this.error = `Agent authentication failed: ${message(error)}`;
         this.options.connectionFailed?.(runtime.profile, this.error);
@@ -651,7 +776,7 @@ export class AcpSession {
     const option = this.controls.configOptions?.find((item) => item.id === configId);
     if (!option || (option.type === 'boolean' ? typeof value !== 'boolean' : typeof value !== 'string' || !option.options.some((item) => item.value === value)))
       return Promise.reject(new Error('Select a configuration value currently offered by the agent.'));
-    return this.configure((runtime) => {
+    return this.configure('session/set_config_option', (runtime) => {
       const current = this.controls.configOptions?.find((item) => item.id === configId);
       if (!current || (current.type === 'boolean' ? typeof value !== 'boolean' : !current.options.some((item) => item.value === value)))
         throw new Error("The agent's configuration options changed. Select again.");
@@ -677,7 +802,7 @@ export class AcpSession {
   setMode(modeId: string): Promise<void> {
     if (this.controls.configOptions !== undefined || !this.controls.modes?.availableModes.some((mode) => mode.id === modeId))
       return Promise.reject(new Error('Select a session mode currently offered by the agent.'));
-    return this.configure((runtime) => {
+    return this.configure('session/set_mode', (runtime) => {
       if (this.controls.configOptions !== undefined || !this.controls.modes?.availableModes.some((mode) => mode.id === modeId))
         throw new Error("The agent's session modes changed. Select again.");
       return runtime.connection.agent.request('session/set_mode', { sessionId: runtime.sessionId!, modeId }).then(() => {
@@ -689,7 +814,7 @@ export class AcpSession {
     });
   }
 
-  private async configure(request: (runtime: Runtime) => Promise<() => void>): Promise<void> {
+  private async configure(method: string, request: (runtime: Runtime) => Promise<() => void>): Promise<void> {
     const runtime = this.runtime;
     if (!runtime || !this.current(runtime) || !runtime.established || this.status !== 'connected')
       throw new Error('Connect to an agent session and wait for the current request to finish.');
@@ -705,17 +830,21 @@ export class AcpSession {
       await this.options.validate();
       if (!this.current(runtime)) throw new Error('Connection closed.');
       sent = true;
-      const apply = await this.timeout(request(runtime), "Session configuration timed out. Reconnect to confirm the agent's current configuration.").catch(
-        (error) => {
-          timedOut = error instanceof Error && error.message.startsWith('Session configuration timed out.');
-          throw error;
-        },
-      );
+      const apply = await this.request(
+        runtime,
+        method,
+        () => request(runtime),
+        "Session configuration timed out. Reconnect to confirm the agent's current configuration.",
+      ).catch((error) => {
+        timedOut = error instanceof Error && error.message.startsWith('Session configuration timed out.');
+        throw error;
+      });
       if (!this.current(runtime)) throw new Error('Connection closed.');
       apply();
       this.error = undefined;
     } catch (error) {
       if (this.current(runtime)) {
+        this.reportFailure('session/configure', error, runtime);
         this.error = `Unable to change session configuration: ${message(error)}`;
         // A timed-out RPC may still change the agent later. Retire its connection before
         // accepting another prompt or configuration request with an uncertain value.
@@ -736,17 +865,28 @@ export class AcpSession {
   }
 
   private update(runtime: Runtime, notification: SessionNotification) {
-    if (!this.current(runtime)) return;
+    if (!this.current(runtime)) {
+      runtime.log.write('trace', 'acp.update.ignored', { reason: 'stale_connection' });
+      return;
+    }
     if (!runtime.sessionId && runtime.pendingUpdates) {
       const bytes = Buffer.byteLength(JSON.stringify(notification), 'utf8');
       if (runtime.pendingUpdates.length < 100 && (runtime.pendingBytes ?? 0) + bytes <= 2 * 1024 * 1024) {
         runtime.pendingUpdates.push(notification);
         runtime.pendingBytes = (runtime.pendingBytes ?? 0) + bytes;
-      }
+      } else runtime.log.write('warn', 'acp.update.dropped', { reason: 'startup_buffer_limit' });
       return;
     }
-    if (notification.sessionId !== runtime.sessionId) return;
+    if (notification.sessionId !== runtime.sessionId) {
+      runtime.log.write('trace', 'acp.update.ignored', { reason: 'foreign_session' });
+      return;
+    }
     const update = notification.update;
+    const turn = this.turn?.runtime === runtime ? this.turn : undefined;
+    if (turn && ++turn.updates === 1) runtime.log.write('debug', 'acp.turn.first_update', { turn: turn.id, type: update.sessionUpdate });
+    runtime.log.write('trace', 'acp.update', { turn: turn?.id, type: update.sessionUpdate, replay: !!runtime.replay });
+    if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update')
+      runtime.log.write('debug', 'acp.tool', { turn: turn?.id, type: update.sessionUpdate, status: update.status, kind: update.kind });
     if (update.sessionUpdate === 'config_option_update') {
       runtime.configUpdated = true;
       runtime.configRevision = (runtime.configRevision ?? 0) + 1;
@@ -885,9 +1025,12 @@ export class AcpSession {
       this.turn.cancelling ||
       signal.aborted ||
       this.permissions.size >= MAX_PERMISSION
-    )
+    ) {
+      runtime.log.write('debug', 'acp.permission.cancelled', { reason: 'inactive_or_full', pending: this.permissions.size });
       return Promise.resolve({ outcome: { outcome: 'cancelled' } });
+    }
     const id = randomUUID();
+    const span = runtime.log.start('acp.permission', { permission: id, turn: this.turn.id, options: request.options.length }, 'info');
     const view: AcpPermission = {
       id,
       title: text(request.toolCall.title ?? 'Agent Permission Request', 1_000),
@@ -898,6 +1041,10 @@ export class AcpSession {
       const cancelled = () => finish({ outcome: { outcome: 'cancelled' } });
       const finish = (response: RequestPermissionResponse) => {
         if (!this.permissions.delete(id)) return;
+        const answer = response.outcome;
+        span.end(answer.outcome === 'cancelled' ? 'cancelled' : 'ok', {
+          choice: answer.outcome === 'selected' ? view.options.find((option) => option.id === answer.optionId)?.kind : undefined,
+        });
         signal.removeEventListener('abort', cancelled);
         if (this.current(runtime) && this.turn?.runtime === runtime && !this.turn.cancelling)
           this.status = this.permissions.size ? 'waiting_permission' : 'running';
@@ -941,6 +1088,7 @@ export class AcpSession {
       if (turn) await turn.promise.catch(() => undefined);
       await this.persist();
       await runtime.release();
+      runtime.log.write('debug', 'acp.storage.released');
       this.ownsClaim = false;
       if (this.runtime === runtime) this.runtime = undefined;
     })();
@@ -954,26 +1102,41 @@ export class AcpSession {
   }
 
   private async stopRuntime(runtime: Runtime) {
-    runtime.stopping = true;
-    this.cancelPermissions(runtime);
-    runtime.connection.close();
-    runtime.child.stdin.destroy();
-    if (!runtime.exited) {
-      runtime.child.kill('SIGTERM');
-      try {
-        await this.timeout(runtime.exit, 'The agent has not exited.');
-      } catch {
-        if (!runtime.exited) runtime.child.kill('SIGKILL');
-        await this.timeout(runtime.exit, 'Unable to confirm agent process exit. Ownership has been retained; inspect the process before disconnecting again.');
+    const span = runtime.log.start('acp.process.stop', { pid: runtime.child.pid });
+    try {
+      runtime.stopping = true;
+      this.cancelPermissions(runtime);
+      runtime.connection.close();
+      runtime.child.stdin.destroy();
+      if (!runtime.exited) {
+        runtime.log.write('debug', 'acp.process.signal', { signal: 'SIGTERM' });
+        runtime.child.kill('SIGTERM');
+        try {
+          await this.timeout(runtime.exit, 'The agent has not exited.');
+        } catch {
+          if (!runtime.exited) {
+            runtime.log.write('warn', 'acp.process.signal', { signal: 'SIGKILL' });
+            runtime.child.kill('SIGKILL');
+          }
+          await this.timeout(
+            runtime.exit,
+            'Unable to confirm agent process exit. Ownership has been retained; inspect the process before disconnecting again.',
+          );
+        }
       }
+      runtime.child.stdout.destroy();
+      runtime.child.stderr.destroy();
+      await this.releaseRuntime(runtime);
+      span.end();
+    } catch (error) {
+      span.end(diagnosticOutcome(error), diagnosticError(error));
+      throw error;
     }
-    runtime.child.stdout.destroy();
-    runtime.child.stderr.destroy();
-    await this.releaseRuntime(runtime);
   }
 
   disconnect(): Promise<void> {
     if (this.disconnecting) return this.disconnecting;
+    (this.runtime?.log ?? this.log).write('info', 'acp.disconnect.requested', { connected: !!this.runtime });
     const operation = (async () => {
       ++this.generation;
       const runtime = this.runtime;
@@ -1015,6 +1178,7 @@ export class AcpSession {
         await this.options.validate();
         const latest = await this.options.storage.load();
         if (latest && (latest.messages.length || latest.sessionId)) await this.options.storage.archive(latest);
+        this.log.write('info', 'acp.conversation.reset', { archived: !!latest && !!(latest.messages.length || latest.sessionId) });
         this.record = this.emptyRecord();
         this.history = { messages: this.record.messages };
         await this.persist();

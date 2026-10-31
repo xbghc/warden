@@ -131,6 +131,7 @@ export class Workbench {
         const readiness = this.agentSetup.readiness.snapshot();
         return readiness.status === 'ready' ? readiness.profile?.id : undefined;
       },
+      this.log.child({ component: 'acp.task' }),
     );
     this.views = new Views(
       context,

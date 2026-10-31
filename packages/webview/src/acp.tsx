@@ -1,5 +1,23 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
-import { ArrowUp, FileDiff, Info, MessageSquarePlus, MoreHorizontal, PanelRight, SlidersHorizontal, Slash, Square, Unplug } from 'lucide-react';
+import { memo, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import {
+  ArrowDown,
+  ArrowUp,
+  Check,
+  ChevronRight,
+  FileDiff,
+  FileText,
+  Info,
+  LoaderCircle,
+  MessageSquare,
+  MessageSquarePlus,
+  MoreHorizontal,
+  PanelRight,
+  ShieldQuestion,
+  SlidersHorizontal,
+  Slash,
+  Square,
+  Unplug,
+} from 'lucide-react';
 import type { AcpAction, AcpConfigOption, AcpMessage, AcpModel, AcpPermission, AcpStatus } from '@warden/shared';
 import { Button } from './components/ui/button';
 import { Checkbox } from './components/ui/checkbox';
@@ -9,6 +27,7 @@ import { IconButton } from './components/ui/icon-button';
 import { StatusBadge } from './components/ui/status-badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './components/ui/dropdown-menu';
 import { Popover, PopoverContent, PopoverTrigger } from './components/ui/popover';
+import { ChatMarkdown, CopyText } from './chat-markdown';
 
 type Props = { model: AcpModel; send(action: AcpAction): void };
 const statusLabels: Record<AcpStatus, string> = {
@@ -40,6 +59,7 @@ export function AcpApp({ model, send: dispatch }: Props) {
   const profileId = record.profileId ?? model.defaultProfileId ?? '';
   const [showInfo, setShowInfo] = useState(false);
   const [switching, setSwitching] = useState(false);
+  const [showLatest, setShowLatest] = useState(false);
   const switchingRef = useRef(false);
   const send = (action: AcpAction) => {
     if (!switchingRef.current) dispatch(action);
@@ -57,6 +77,7 @@ export function AcpApp({ model, send: dispatch }: Props) {
   const profileRef = useRef(profileId);
   const timer = useRef<ReturnType<typeof setTimeout>>();
   const transcript = useRef<HTMLDivElement>(null);
+  const transcriptContent = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
   const followOutput = useRef(model.viewState?.followOutput ?? true);
   sendRef.current = dispatch;
@@ -82,8 +103,13 @@ export function AcpApp({ model, send: dispatch }: Props) {
     status === 'resetting';
   const availableProfile = model.profiles.some((profile) => profile.id === profileId);
   const needsRestore = !!record.sessionId && status === 'disconnected';
-  const canSend = !!draft.trim() && availableProfile && !busy && !sending && !pending && !needsRestore && status !== 'error';
+  const canSend = !!draft.trim() && availableProfile && !busy && !sending && !pending && !(needsRestore && !record.canLoad) && status !== 'error';
   const canStop = status === 'running' || status === 'waiting_permission' || status === 'cancelling';
+  const lastUser = record.messages.filter((message) => message.role === 'user').at(-1);
+  const submitted =
+    model.sending && canStop && model.submittedDraft?.version === draftVersion.current && model.submittedDraft?.revision === draftRevision.current;
+  const composerText = submitted ? '' : draft;
+  const working = status === 'connecting' || status === 'running' || status === 'cancelling' || status === 'resetting';
   const lastMessage = record.messages.at(-1);
 
   const flushDraft = () => {
@@ -103,6 +129,20 @@ export function AcpApp({ model, send: dispatch }: Props) {
 
   useLayoutEffect(() => {
     if (transcript.current && !followOutput.current) transcript.current.scrollTop = model.viewState?.scrollTop ?? 0;
+    composer.current?.focus({ preventScroll: true });
+  }, []);
+
+  useEffect(() => {
+    const update = () => {
+      const element = transcript.current;
+      if (!element) return;
+      if (followOutput.current) element.scrollTop = element.scrollHeight;
+      setShowLatest(!followOutput.current && element.scrollHeight > element.clientHeight + 32);
+    };
+    const observer = new ResizeObserver(update);
+    if (transcript.current) observer.observe(transcript.current);
+    if (transcriptContent.current) observer.observe(transcriptContent.current);
+    return () => observer.disconnect();
   }, []);
 
   useEffect(() => {
@@ -177,7 +217,7 @@ export function AcpApp({ model, send: dispatch }: Props) {
     if (!input) return;
     input.style.height = '0px';
     input.style.height = `${input.scrollHeight}px`;
-  }, [draft]);
+  }, [composerText]);
 
   useEffect(() => {
     if (transcript.current && followOutput.current) transcript.current.scrollTop = transcript.current.scrollHeight;
@@ -203,7 +243,10 @@ export function AcpApp({ model, send: dispatch }: Props) {
       updatedAt: record.updatedAt,
     });
     setSending(true);
+    followOutput.current = true;
+    setShowLatest(false);
     send({ type: 'send', text: draftRef.current, profileId, version: draftVersion.current, revision: draftRevision.current });
+    composer.current?.focus({ preventScroll: true });
   };
 
   return (
@@ -212,14 +255,13 @@ export function AcpApp({ model, send: dispatch }: Props) {
         <header className="acp-header">
           <div className="acp-heading">
             <h1 title={binding.title}>{binding.title}</h1>
+            <span className="acp-connection-status" role="status" aria-live="polite">
+              {working && <LoaderCircle className="acp-spinner" aria-hidden="true" />}
+              <StatusBadge status={status}>{statusLabels[status]}</StatusBadge>
+            </span>
             <IconButton label="View Task Diff" size="icon-sm" disabled={switching} onClick={() => send({ type: 'review' })}>
               <FileDiff aria-hidden="true" />
             </IconButton>
-            {(record.profileId || record.sessionId || record.messages.length > 0) && (
-              <IconButton label="New Session" size="icon-sm" disabled={busy || sending} onClick={() => send({ type: 'new' })}>
-                <MessageSquarePlus aria-hidden="true" />
-              </IconButton>
-            )}
             {model.presentation === 'editor' && (
               <IconButton label="Move Chat to Side Bar" size="icon-sm" disabled={switching} onClick={() => send({ type: 'open-sidebar' })}>
                 <PanelRight aria-hidden="true" />
@@ -232,10 +274,20 @@ export function AcpApp({ model, send: dispatch }: Props) {
                 </IconButton>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
+                <DropdownMenuItem disabled={switching} onSelect={() => send({ type: 'insert-brief' })}>
+                  <FileText aria-hidden="true" />
+                  Insert Task Brief
+                </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => setShowInfo(!showInfo)}>
                   <Info aria-hidden="true" />
                   {showInfo ? 'Hide Task and Session Info' : 'Task and Session Info'}
                 </DropdownMenuItem>
+                {(record.profileId || record.sessionId || record.messages.length > 0) && (
+                  <DropdownMenuItem disabled={busy || sending} onSelect={() => send({ type: 'new' })}>
+                    <MessageSquarePlus aria-hidden="true" />
+                    New Session
+                  </DropdownMenuItem>
+                )}
                 {hasConnection && (
                   <DropdownMenuItem onSelect={() => send({ type: 'disconnect' })}>
                     <Unplug aria-hidden="true" />
@@ -245,9 +297,7 @@ export function AcpApp({ model, send: dispatch }: Props) {
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
-          <span className="acp-connection-status" role="status" aria-live="polite">
-            <StatusBadge status={status}>{statusLabels[status]}</StatusBadge>
-          </span>
+
           {showInfo && (
             <section className="acp-context" aria-label="Task and Session Info">
               <p className="path">Workspace: {binding.workspace}</p>
@@ -270,7 +320,7 @@ export function AcpApp({ model, send: dispatch }: Props) {
         {needsRestore && (
           <p className="notice">
             {record.canLoad
-              ? 'A previous session is disconnected. Resume it or start a new session.'
+              ? 'The session is disconnected. Sending a message or reopening this chat reconnects it.'
               : 'This agent does not advertise session restoration. View the saved history or start a new session.'}
           </p>
         )}
@@ -289,9 +339,18 @@ export function AcpApp({ model, send: dispatch }: Props) {
             ))}
           </section>
         )}
-        {!!model.authMethods.length && (status === 'error' || !record.sessionId) && (
+        {!!model.authMethods.length && status === 'error' && (
           <section className="notice acp-auth" aria-label="Agent Authentication">
             <h2>Authenticate Agent</h2>
+            <p>Already signed in on this host? Reconnect to use the saved login.</p>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={!availableProfile || busy || sending}
+              onClick={() => send({ type: 'connect', profileId, resume: !!record.sessionId })}
+            >
+              I Have Signed In — Reconnect
+            </Button>
             {model.authMethods.map((method) => (
               <div key={method.id}>
                 {method.description && <p className="acp-message-text">{method.description}</p>}
@@ -305,29 +364,67 @@ export function AcpApp({ model, send: dispatch }: Props) {
       </div>
 
       {model.error && (
-        <div className="error" role="alert">
-          {model.error}
-        </div>
+        <ChatError
+          error={model.error}
+          canRetry={availableProfile && (status === 'error' || status === 'disconnected') && !busy && !sending && !model.authMethods.length}
+          retry={() => send({ type: 'connect', profileId, resume: !!record.sessionId })}
+        />
       )}
 
-      <div
-        className="acp-transcript"
-        ref={transcript}
-        role="log"
-        aria-label="Conversation History"
-        aria-live="polite"
-        aria-relevant="additions"
-        onScroll={() => {
-          const element = transcript.current;
-          if (element) followOutput.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80;
-        }}
-      >
-        {record.messages.length ? (
-          record.messages.map((message) => <Message key={message.id} message={message} />)
-        ) : (
-          <div className="acp-empty muted">
-            <p>What would you like to work on?</p>
+      <div className="acp-history">
+        <div
+          className="acp-transcript"
+          ref={transcript}
+          role="log"
+          aria-label="Conversation History"
+          aria-live="polite"
+          aria-relevant="additions"
+          onScroll={() => {
+            const element = transcript.current;
+            if (element) {
+              followOutput.current = element.scrollHeight - element.scrollTop - element.clientHeight < 32;
+              setShowLatest(!followOutput.current);
+            }
+          }}
+        >
+          <div className="acp-transcript-content" ref={transcriptContent}>
+            {record.messages.length ? (
+              record.messages.map((message) => <Message key={message.id} message={message} active={model.sending && message.id === lastUser?.id} />)
+            ) : (
+              <div className="acp-empty muted">
+                <MessageSquare aria-hidden="true" />
+                <h2>Work on this task</h2>
+                <p>Describe the next step, or use the saved task brief.</p>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={switching}
+                  onClick={() => {
+                    send({ type: 'insert-brief' });
+                    composer.current?.focus();
+                  }}
+                >
+                  <FileText aria-hidden="true" />
+                  Use Task Brief
+                </Button>
+              </div>
+            )}
           </div>
+        </div>
+        {showLatest && (
+          <Button
+            className="acp-jump"
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              followOutput.current = true;
+              setShowLatest(false);
+              if (transcript.current) transcript.current.scrollTop = transcript.current.scrollHeight;
+            }}
+          >
+            <ArrowDown aria-hidden="true" />
+            Jump to Latest
+          </Button>
         )}
       </div>
 
@@ -350,11 +447,11 @@ export function AcpApp({ model, send: dispatch }: Props) {
           <Textarea
             aria-label="Message"
             ref={composer}
-            value={draft}
+            value={composerText}
             maxLength={100_000}
             rows={3}
             disabled={switching}
-            placeholder="Describe what to work on…"
+            placeholder={canStop ? 'Write a follow-up while the agent works…' : 'Describe what to work on…'}
             onChange={(event) => updateDraft(event.target.value)}
             onBlur={flushDraft}
             onKeyDown={(event) => {
@@ -373,9 +470,9 @@ export function AcpApp({ model, send: dispatch }: Props) {
                   size="sm"
                   className="acp-connect"
                   disabled={!availableProfile || busy || sending || (needsRestore && !record.canLoad)}
-                  onClick={() => send({ type: 'connect', profileId, resume: needsRestore })}
+                  onClick={() => send({ type: 'connect', profileId, resume: !!record.sessionId })}
                 >
-                  {needsRestore ? 'Resume Session' : 'Connect Agent'}
+                  Reconnect
                 </Button>
               )}
               {controls?.configOptions !== undefined
@@ -475,6 +572,11 @@ export function AcpApp({ model, send: dispatch }: Props) {
             Applying configuration…
           </p>
         )}
+        {!controls?.configuring && (
+          <p className="acp-composer-hint muted">
+            {canStop ? 'You can keep writing. Send when this turn finishes.' : 'Enter to send · Shift+Enter for a new line'}
+          </p>
+        )}
       </form>
     </main>
   );
@@ -542,29 +644,103 @@ function ConfigValues({ options }: { options: Extract<AcpConfigOption, { type: '
   });
 }
 
-function Message({ message }: { message: AcpMessage }) {
-  const role = { user: 'You', agent: 'Agent', thought: 'Agent Thoughts', tool: 'Activity', notice: 'Session Notice' }[message.role];
-  const labels: Record<string, string> = message.compactionId
-    ? { in_progress: 'Compacting', completed: 'Compaction Complete', failed: 'Compaction Failed', cancelled: 'Compaction Cancelled' }
-    : toolLabels;
+function ChatError({ error, canRetry, retry }: { error: string; canRetry: boolean; retry(): void }) {
+  const summary = error.split('\n')[0]!.slice(0, 220);
   return (
-    <article className={`acp-message acp-message-${message.role}`}>
-      <div className="acp-message-heading">
-        <strong>{role}</strong>
-        {message.status && <span className="muted">{labels[message.status] ?? message.status}</span>}
-        {message.uncertain && <StatusBadge status="uncertain">Outcome Unknown</StatusBadge>}
+    <section className="acp-error" role="alert">
+      <div className="acp-error-summary">
+        <p>{summary}</p>
+        {canRetry && (
+          <Button variant="secondary" size="sm" onClick={retry}>
+            Reconnect
+          </Button>
+        )}
       </div>
-      {message.role === 'thought' ? (
-        <details className="acp-thought">
-          <summary>Show Thoughts</summary>
-          <div className="acp-message-text">{message.text}</div>
-        </details>
-      ) : (
-        <div className="acp-message-text">{message.text}</div>
-      )}
-    </article>
+      <details>
+        <summary>Error Details</summary>
+        <pre>{error}</pre>
+        <CopyText text={error} label="Copy Error" />
+      </details>
+    </section>
   );
 }
+
+const Message = memo(
+  function Message({ message, active }: { message: AcpMessage; active: boolean }) {
+    const [expanded, setExpanded] = useState(false);
+    const role = { user: 'You', agent: 'Agent', thought: 'Agent Thoughts', tool: 'Activity', notice: 'Session Notice' }[message.role];
+    const labels: Record<string, string> = message.compactionId
+      ? { in_progress: 'Compacting', completed: 'Compaction Complete', failed: 'Compaction Failed', cancelled: 'Compaction Cancelled' }
+      : toolLabels;
+    if (message.role === 'tool') {
+      const [title, ...body] = message.text.split('\n');
+      return (
+        <article className="acp-message acp-message-tool">
+          <details>
+            <summary>
+              <ChevronRight className="acp-disclosure" aria-hidden="true" />
+              {message.status === 'in_progress' ? (
+                <LoaderCircle className="acp-spinner" aria-hidden="true" />
+              ) : message.status === 'completed' ? (
+                <Check aria-hidden="true" />
+              ) : null}
+              <span className="acp-tool-title">{title || 'Agent activity'}</span>
+              <span className="muted">{labels[message.status ?? ''] ?? message.status}</span>
+            </summary>
+            <div className="acp-tool-detail">
+              <pre className="acp-message-text">{body.join('\n') || title}</pre>
+              <CopyText text={message.text} label="Copy Activity" />
+            </div>
+          </details>
+        </article>
+      );
+    }
+    if (message.role === 'thought') {
+      return (
+        <article className="acp-message acp-message-thought">
+          <details className="acp-thought">
+            <summary>
+              <ChevronRight className="acp-disclosure" aria-hidden="true" />
+              Thoughts
+            </summary>
+            <ChatMarkdown text={message.text} />
+          </details>
+        </article>
+      );
+    }
+    const longPrompt = message.role === 'user' && (message.text.length > 500 || message.text.split('\n').length > 8);
+    return (
+      <article className={`acp-message acp-message-${message.role}`}>
+        <div className="acp-message-heading">
+          <strong>{role}</strong>
+          {active ? (
+            <span className="muted">In progress</span>
+          ) : message.uncertain ? (
+            <StatusBadge status="uncertain">Outcome Unknown</StatusBadge>
+          ) : (
+            message.status && !message.status.startsWith('Responded') && <span className="muted">{labels[message.status] ?? message.status}</span>
+          )}
+          <CopyText text={message.text} />
+        </div>
+        <div className={`acp-message-text${longPrompt && !expanded ? ' acp-prompt-collapsed' : ''}`}>
+          {message.role === 'agent' ? <ChatMarkdown text={message.text} /> : message.text}
+        </div>
+        {longPrompt && (
+          <button className="acp-text-action" type="button" onClick={() => setExpanded(!expanded)}>
+            {expanded ? 'Show Less' : 'Show Full Message'}
+          </button>
+        )}
+      </article>
+    );
+  },
+  (previous, next) =>
+    previous.active === next.active &&
+    previous.message.text === next.message.text &&
+    previous.message.role === next.message.role &&
+    previous.message.status === next.message.status &&
+    previous.message.uncertain === next.message.uncertain &&
+    previous.message.compactionId === next.message.compactionId,
+);
 
 function Permission({
   permission,
@@ -580,13 +756,18 @@ function Permission({
   send: Props['send'];
 }) {
   return (
-    <div className="notice acp-permission">
-      <h2>Permission Required · {permission.title}</h2>
-      <div className="acp-permission-details">
+    <div className="acp-permission">
+      <h2>
+        <ShieldQuestion aria-hidden="true" />
+        {permission.title}
+      </h2>
+      <div className="acp-permission-preview acp-message-text">{permission.detail}</div>
+      <details className="acp-permission-details">
+        <summary>Details and Workspace</summary>
         <p>Task: {task}</p>
         <p className="path">Workspace: {workspace}</p>
-        <div className="acp-message-text">{permission.detail}</div>
-      </div>
+        <pre className="acp-message-text">{permission.detail}</pre>
+      </details>
       <div className="actions">
         {permission.options.map((option) => (
           <Button

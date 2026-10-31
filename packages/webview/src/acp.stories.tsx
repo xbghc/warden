@@ -39,7 +39,22 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-export const NewConversation: Story = {};
+export const NewConversation: Story = { args: { model: { ...model, status: 'connecting' } } };
+export const Resuming: Story = {
+  args: {
+    model: {
+      ...model,
+      status: 'connecting',
+      record: {
+        ...model.record,
+        profileId: 'configured-agent',
+        sessionId: 'agent-session',
+        canLoad: true,
+        messages: [{ id: 'previous-reply', role: 'agent', text: '已找到需要调整的参数入口。' }],
+      },
+    },
+  },
+};
 export const NoProfiles: Story = { args: { model: { ...model, profiles: [] } } };
 export const WaitingForPermission: Story = {
   args: {
@@ -91,6 +106,19 @@ export const Interrupted: Story = {
 };
 export const UnsupportedRestore: Story = {
   args: { model: { ...model, record: { ...model.record, profileId: 'configured-agent', sessionId: 'agent-session' } } },
+};
+export const AuthenticationRequired: Story = {
+  args: {
+    model: {
+      ...model,
+      status: 'error',
+      error: 'The agent requires authentication. Choose a supported method, or log in externally and reconnect.',
+      authMethods: [{ id: 'chat-gpt', name: 'ChatGPT', description: 'Sign in with ChatGPT' }],
+    },
+  },
+};
+export const ConnectionFailed: Story = {
+  args: { model: { ...model, status: 'error', error: 'Opening the agent session timed out. Reconnect to try again.' } },
 };
 
 export const SessionControls: Story = {
@@ -164,7 +192,7 @@ export const LegacyModes: Story = {
 };
 
 export const Sidebar: Story = {
-  args: { model: { ...model, presentation: 'sidebar' } },
+  args: { model: { ...model, status: 'connected', draft: '', presentation: 'sidebar' } },
   decorators: [
     (Story) => (
       <div style={{ width: 320 }}>
@@ -177,6 +205,31 @@ export const Sidebar: Story = {
 export const SidebarPermission: Story = {
   ...Sidebar,
   args: { model: { ...WaitingForPermission.args!.model!, presentation: 'sidebar' } },
+};
+
+export const SidebarLongPermission: Story = {
+  ...SidebarPermission,
+  args: {
+    model: {
+      ...SidebarPermission.args!.model!,
+      permissions: [
+        {
+          id: 'long-permission',
+          title: 'Run command',
+          detail: 'Write the acceptance marker in /tmp/warden-acceptance/permission-approved.txt.',
+          options: [
+            { id: 'once', kind: 'allow_once', label: 'Yes, proceed' },
+            {
+              id: 'always',
+              kind: 'allow_always',
+              label: `Yes, and don't ask again for commands that start with \`printf approved > /tmp/${'acceptance-'.repeat(12)}marker.txt\``,
+            },
+            { id: 'reject', kind: 'reject_once', label: 'No, and tell the agent what to do differently' },
+          ],
+        },
+      ],
+    },
+  },
 };
 
 export const SidebarComposer: Story = {
@@ -232,6 +285,52 @@ export const SidebarLongHistory: Story = {
               ? 'The filter now preserves the existing pagination behavior. Review src/orders.ts before running the preview tests.'
               : 'Keep the existing pagination defaults when no filter is supplied.',
         })),
+      },
+    },
+  },
+};
+
+export const FormattedReply: Story = {
+  ...Sidebar,
+  args: {
+    model: {
+      ...SessionControls.args!.model!,
+      presentation: 'sidebar',
+      draft: '',
+      record: {
+        ...SessionControls.args!.model!.record,
+        messages: [
+          { id: 'request', role: 'user', text: '检查分页默认值，并解释修改。' },
+          { id: 'read', role: 'tool', text: 'Read src/orders.ts\nExisting pagination defaults are page=1 and limit=20.', status: 'completed' },
+          {
+            id: 'answer',
+            role: 'agent',
+            text: '## 保留现有默认值\n\n未传筛选条件时，旧调用方式保持兼容。\n\n- `page` 默认是 **1**。\n- `limit` 默认是 **20**。\n\n```ts\nconst page = input.page ?? 1;\nconst limit = input.limit ?? 20;\n```\n\n| 参数 | 默认值 |\n| --- | --- |\n| page | 1 |\n| limit | 20 |\n\n可以先查看任务 Diff，再运行预览测试。',
+          },
+        ],
+      },
+    },
+  },
+};
+
+export const WritingFollowUp: Story = {
+  ...Sidebar,
+  args: {
+    model: {
+      ...SessionControls.args!.model!,
+      presentation: 'sidebar',
+      status: 'running',
+      sending: true,
+      draft: '接下来补充一个回归测试。',
+      draftRevision: 1,
+      submittedDraft: { version: 0, revision: 0 },
+      record: {
+        ...SessionControls.args!.model!.record,
+        messages: [
+          { id: 'request', role: 'user', text: '检查分页默认值。', uncertain: true, status: 'Sending' },
+          { id: 'progress', role: 'agent', text: '正在检查现有调用，保留未传参数时的行为。' },
+          { id: 'read', role: 'tool', text: 'Read src/orders.ts\nInspecting pagination defaults.', status: 'in_progress' },
+        ],
       },
     },
   },

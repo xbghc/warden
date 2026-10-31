@@ -73,6 +73,7 @@ export interface AcpSnapshot {
   status: AcpStatus;
   error?: string;
   permissions: AcpPermission[];
+  /** Offered recovery methods, exposed only after the agent requests authentication. */
   authMethods: AcpAuthMethod[];
   controls?: AcpControls;
 }
@@ -97,6 +98,8 @@ export interface AcpModel extends AcpSnapshot {
   defaultProfileId?: string;
   /** A send remains active until the completed transcript and draft acknowledgement are settled. */
   sending: boolean;
+  /** The accepted draft remains durable while the composer is available for a follow-up. */
+  submittedDraft?: { version: number; revision: number };
   draft: string;
   draftVersion: number;
   draftRevision: number;
@@ -107,7 +110,7 @@ export interface AcpModel extends AcpSnapshot {
 export type AcpAction =
   | ({ type: 'send'; profileId: string } & AcpDraftEdit)
   | { type: 'connect'; profileId: string; resume: boolean }
-  | { type: 'cancel' | 'disconnect' | 'new' | 'configure' | 'review' | 'open-sidebar' | 'view-ready' }
+  | { type: 'cancel' | 'disconnect' | 'new' | 'configure' | 'review' | 'open-sidebar' | 'view-ready' | 'insert-brief' }
   | ({ type: 'view-state'; requestId?: string } & AcpViewState)
   | ({ type: 'draft' } & AcpDraftEdit)
   | { type: 'permission'; requestId: string; optionId: string }
@@ -147,6 +150,7 @@ export function parseAcpAction(value: unknown): AcpAction {
     case 'review':
     case 'open-sidebar':
     case 'view-ready':
+    case 'insert-brief':
       return { type: action.type };
     case 'view-state':
       if (

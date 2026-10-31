@@ -10,7 +10,7 @@ const pending = new Map();
 let sequence = 0;
 let sessionId;
 let turn;
-let authenticated = false;
+let authenticated = mode === 'auth-external' && existsSync(`${journal}.auth`);
 let delayedLoad;
 let delayedConfig;
 let model = 'fast';
@@ -50,7 +50,7 @@ const configOptions = () => [
   },
   { id: 'thinking', name: '显示思考', type: 'boolean', currentValue: thinking },
 ];
-const requiresAuth = mode === 'auth' || mode === 'auth-delayed-load';
+const requiresAuth = mode === 'auth' || mode === 'auth-delayed-load' || mode === 'auth-external';
 const write = (message) => process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`);
 const batch = (...messages) => process.stdout.write(messages.map((message) => JSON.stringify({ jsonrpc: '2.0', ...message })).join('\n') + '\n');
 const result = (id, value) => write({ id, result: value });
@@ -88,12 +88,10 @@ async function handle(message) {
   const { id, method, params = {} } = message;
   if (method === 'initialize') {
     if (mode === 'initialize-hangs') return;
-    const authMethods = requiresAuth
-      ? [
-          { id: 'login', name: 'Fixture login' },
-          { type: 'terminal', id: 'terminal-login', name: 'External login', args: ['login'] },
-        ]
-      : [];
+    const authMethods = [
+      { id: 'login', name: 'Fixture login' },
+      { type: 'terminal', id: 'terminal-login', name: 'External login', args: ['login'] },
+    ];
     result(id, {
       protocolVersion: mode === 'incompatible' ? 999 : 1,
       agentCapabilities: { loadSession: mode !== 'no-load' },
@@ -119,6 +117,11 @@ async function handle(message) {
       await new Promise((resolve) => setTimeout(resolve, 20));
       return error(id, -32603, 'Provider setup failed', { details: `Failed with ${secret}`, rawInput: 'private-tool-input', prompt: 'private-prompt' });
     }
+    if (mode === 'session-internal-fails') {
+      process.stderr.write('Fixture stderr: workspace could not be opened\n');
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      return error(id, -32603, 'Internal error', { details: 'Unable to open task workspace', api_key: 'sk-fixture-secret' });
+    }
     if (mode === 'setup-permission')
       await request('session/request_permission', {
         sessionId: 'check-session',
@@ -127,6 +130,13 @@ async function handle(message) {
       });
     if (method === 'session/load' && mode === 'no-load') return error(id, -32601, 'Loading is unsupported');
     if (method === 'session/load' && mode === 'load-fails') return error(id, -32001, 'Saved session is unavailable');
+    if (method === 'session/load' && mode.startsWith('missing-rollout')) {
+      if (mode === 'missing-rollout-replay') update('agent', 'A previous reply', params.sessionId);
+      writeFileSync(`${journal}.missing-rollout`, 'missing');
+      return error(id, -32603, 'Internal error', { details: `no rollout found for thread id ${params.sessionId}` });
+    }
+    if (method === 'session/new' && mode === 'missing-rollout-new-fails' && existsSync(`${journal}.missing-rollout`))
+      return error(id, -32603, 'Provider is unavailable');
     sessionId = method === 'session/load' ? params.sessionId : `fixture-${process.pid}-${++sequence}`;
     if (method === 'session/new') writeFileSync(historyFile, '');
     if (method === 'session/load' && mode === 'auth-delayed-load' && !existsSync(`${journal}.delayed-load`)) {
@@ -355,12 +365,21 @@ async function handle(message) {
     answer(id, `Edited ${process.cwd()}`);
     return;
   }
-  if (text === 'permission' || text === 'foreign-permission') {
+  if (text === 'permission' || text === 'permission-long' || text === 'foreign-permission') {
     const permission = await request('session/request_permission', {
       sessionId: text === 'foreign-permission' ? `${sessionId}-foreign` : sessionId,
       toolCall: { toolCallId: 'write-output', title: 'Write agent-output.txt', kind: 'edit', status: 'pending', rawInput: { path: 'agent-output.txt' } },
       options: [
         { optionId: 'allow-once', name: 'Allow this write', kind: 'allow_once' },
+        ...(text === 'permission-long'
+          ? [
+              {
+                optionId: 'allow-always',
+                name: `Yes, and don't ask again for commands that start with \`printf approved > /tmp/${'acceptance-'.repeat(12)}marker.txt\``,
+                kind: 'allow_always',
+              },
+            ]
+          : []),
         { optionId: 'reject-once', name: 'Reject this write', kind: 'reject_once' },
       ],
     });

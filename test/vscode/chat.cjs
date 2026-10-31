@@ -22,36 +22,45 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   const chatTask = (await workbench.getChildren()).find((row) => row.task.id === newTask.id);
   await vscode.commands.executeCommand('warden.chat', chatTask);
   const conversations = workbench.conversations;
+  const reported = [];
+  const report = workbench.output.error;
+  assert.equal(typeof workbench.output.logLevel, 'number', 'Warden uses the native log channel with level controls');
+  workbench.output.error = (error) => {
+    reported.push(String(error));
+    report.call(workbench.output, error);
+  };
+  await Promise.all([conversations.show(fixture.root, newTask.id), conversations.show(fixture.root, newTask.id)]);
   const chat = [...conversations.entries.values()].find((entry) => entry.binding.taskId === newTask.id);
+  const journal = () => fs.readFile(fixture.journal, 'utf8').then((text) => text.trim().split('\n').map(JSON.parse));
   assert.equal(chat?.surface?.location, 'sidebar', 'task command opens the sidebar conversation');
   assert(conversations.sidebar.visible, 'task chat is visible without opening an editor');
   assert.equal(chat.panel, undefined);
+  assert.equal(chat.draft.text, '', 'new task chats start with an empty composer');
+  await conversations.handle(chat, { type: 'insert-brief' });
+  assert.match(chat.draft.text, /# Task chat/);
+  assert(!chat.draft.text.includes(chat.binding.workspace), 'task context omits the workspace path already bound to the session');
   await eventually(() => chat.surface.ready);
-  workbench.views.panels.get('settings')?.dispose();
-  await eventually(() => !workbench.views.panels.has('settings'));
   const settingsOpening = conversations.handle(chat, { type: 'configure' });
-  await eventually(() => workbench.views.panels.has('settings') || !!workbench.agentSetup.picker);
-  const directPicker = workbench.agentSetup.picker;
-  directPicker?.hide();
   await settingsOpening;
-  assert.equal(directPicker, undefined, 'chat settings opens the shared Settings panel before choosing a preset');
-  assert(workbench.views.panels.get('settings')?.visible, 'chat and sidebar use the same Warden Settings panel');
-  workbench.views.panels.get('settings').dispose();
+  await eventually(() => workbench.settings.view.visible);
+  assert.equal(workbench.agentSetup.picker, undefined, 'chat configuration reveals Settings before choosing a preset');
+  assert.equal(workbench.views.panels.has('settings'), false, 'chat and sidebar use the native Settings view');
   assert(extension.packageJSON.contributes.viewsContainers.secondarySidebar.some((item) => item.id === 'warden-chat'));
   const edit = (text) => {
     const current = chat.draft.snapshot();
     return { text, version: current.draftVersion, revision: current.draftRevision + 1 };
   };
-  assert.equal(chat.session.snapshot().status, 'disconnected');
+  await eventually(() => chat.session.snapshot().status === 'connected');
   assert.equal(conversations.defaultProfileId(), 'fixture', 'new chats use the verified agent, not settings order');
+  assert.equal(chat.session.snapshot().record.profileId, 'fixture');
   await assert.rejects(conversations.handle(chat, { type: 'connect', profileId: 'other', resume: false }), /The agent changed/);
-  await assert.rejects(fs.access(fixture.journal), 'opening a panel does not launch the agent');
+  assert.equal((await journal()).filter((row) => row.method === 'session/new').length, 1, 'repeated opens create only one session');
+  assert.equal((await journal()).filter((row) => row.method === 'session/prompt').length, 0, 'opening a panel never sends its draft');
   await fs.writeFile(path.join(chat.binding.workspace, 'context.txt'), 'Task context\n');
   await conversations.handle(chat, { type: 'send', profileId: 'fixture', ...edit('own-edit') });
   assert.match(await fs.readFile(path.join(chat.binding.workspace, 'agent-output.txt'), 'utf8'), /^Task context edited by /);
   await assert.rejects(fs.access(path.join(fixture.root, 'agent-output.txt')));
   await assert.rejects(fs.access(path.join(preview.worktree, 'agent-output.txt')));
-  const journal = () => fs.readFile(fixture.journal, 'utf8').then((text) => text.trim().split('\n').map(JSON.parse));
   const initialized = (await journal()).find((row) => row.method === 'initialize');
   assert.deepEqual(initialized.params.clientCapabilities, {
     fs: { readTextFile: false, writeTextFile: false },
@@ -98,10 +107,17 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   });
   assert.equal(chat.session.snapshot().permissions.length, 1, 'a stale view cannot answer a permission after switching');
   assert.equal(chat.draft.text, 'Keep this task draft', 'queued messages cannot overwrite the old task draft');
-  assert.equal(otherChat.session.snapshot().status, 'disconnected');
+  await eventually(() => otherChat.session.snapshot().status === 'connected');
   await eventually(() => otherChat.surface.ready);
   await conversations.expand();
   assert(otherChat.panel);
+  const editorSession = otherChat.session.snapshot().record.sessionId;
+  await vscode.window.showTextDocument(vscode.Uri.file(path.join(fixture.root, 'README.md')), { viewColumn: otherChat.panel.viewColumn });
+  await eventually(() => !otherChat.panel.visible);
+  await conversations.handle(otherChat, { type: 'disconnect' });
+  otherChat.panel.reveal(otherChat.panel.viewColumn);
+  await eventually(() => otherChat.session.snapshot().status === 'connected');
+  assert.equal(otherChat.session.snapshot().record.sessionId, editorSession, 'revealing the existing editor resumes its session');
   await conversations.show(fixture.root, newTask.id);
   assert.equal(chat.draft.text, 'Keep this task draft');
   await eventually(() => chat.surface.ready);
@@ -147,10 +163,17 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   assert.equal(chat.draft.text, 'hold', 'cancelling preserves a new draft even when its text is identical to the submitted prompt');
   const savedSession = chat.session.snapshot().record.sessionId;
   await conversations.handle(chat, { type: 'disconnect' });
-  await conversations.handle(chat, { type: 'connect', profileId: 'fixture', resume: true });
+  await vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
+  await eventually(() => !conversations.sidebar.visible);
+  await vscode.commands.executeCommand('warden.taskChat.focus');
+  await eventually(() => chat.session.snapshot().status === 'connected');
   assert.equal(chat.session.snapshot().record.sessionId, savedSession);
+  assert.equal(chat.draft.text, 'hold', 'automatic resume preserves the unsent draft');
+  assert.equal((await journal()).filter((row) => row.method === 'session/load' && row.cwd === chat.binding.workspace).length, 1);
   assert.equal((await journal()).filter((row) => row.method === 'session/prompt').length, 3, 'resume never resends a prompt');
+  await conversations.handle(chat, { type: 'disconnect' });
   await conversations.handle(chat, { type: 'send', profileId: 'fixture', ...edit('session-updates') });
+  assert.equal(chat.session.snapshot().record.sessionId, savedSession, 'sending after disconnect resumes the original session');
   assert.equal(chat.session.snapshot().controls.title, '测试会话标题');
   assert.equal(chat.session.snapshot().controls.usage.used, 1200);
   assert(
@@ -160,7 +183,22 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   await workbench.open(fixture.root);
   assert.equal(chat.binding.taskId, newTask.id, 'workbench navigation does not retarget the conversation');
   assert.equal(chat.session.snapshot().status, 'connected');
+  await conversations.handle(chat, { type: 'new' });
+  assert.equal(chat.session.snapshot().status, 'connected', 'an explicit new conversation also connects automatically');
+  assert.notEqual(chat.session.snapshot().record.sessionId, savedSession);
   await conversations.show(fixture.root, otherTask.id);
+  const otherSession = otherChat.session.snapshot().record.sessionId;
+  await conversations.handle(otherChat, { type: 'draft', text: 'Saved across reopening', version: 0, revision: 1 });
+  await conversations.release(otherChat);
+  await otherChat.session.close();
+  await otherChat.draftSave;
+  conversations.entries.delete(conversations.key(fixture.root, otherTask.id));
+  await conversations.show(fixture.root, otherTask.id);
+  const restoredChat = conversations.sidebarEntry;
+  await eventually(() => restoredChat.session.snapshot().status === 'connected');
+  assert.notEqual(restoredChat, otherChat, 'reopening reads a fresh conversation object from saved state');
+  assert.equal(restoredChat.session.snapshot().record.sessionId, otherSession, 'saved sessions restore automatically');
+  assert.equal(restoredChat.draft.text, 'Saved across reopening');
   const gitFile = path.join(chat.binding.workspace, '.git');
   await fs.copyFile(gitFile, `${gitFile}.replacement`);
   await fs.rename(`${gitFile}.replacement`, gitFile);
@@ -172,12 +210,90 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   await conversations.show(fixture.root, newTask.id);
   const replacement = [...conversations.entries.values()].find((entry) => entry.binding.taskId === newTask.id);
   assert.notEqual(replacement, chat, 'reopening a disconnected replaced allocation creates a fresh binding');
-  assert.equal(replacement.session.snapshot().record.sessionId, undefined);
+  await eventually(() => replacement.session.snapshot().status === 'connected');
+  assert.notEqual(replacement.session.snapshot().record.sessionId, chat.session.snapshot().record.sessionId);
+  const interruptedSession = replacement.session.snapshot().record.sessionId;
+  const replacementDraft = replacement.draft.snapshot();
+  await conversations
+    .handle(replacement, {
+      type: 'send',
+      profileId: 'fixture',
+      text: 'crash',
+      version: replacementDraft.draftVersion,
+      revision: replacementDraft.draftRevision + 1,
+    })
+    .catch(() => {});
+  await eventually(() => replacement.session.snapshot().status === 'error');
+  await conversations.show(fixture.root, newTask.id);
+  await eventually(() => replacement.session.snapshot().status === 'connected');
+  assert.equal(replacement.session.snapshot().record.sessionId, interruptedSession, 'reopening a failed session resumes without a manual disconnect');
+  assert.equal(replacement.draft.text, 'crash');
+  assert(
+    reported.some((entry) => entry.includes(`[ACP Task Chat]`) && entry.includes(`task=${newTask.id}`) && /(?:process|session\/prompt) failed/.test(entry)),
+    'task connection failures reach the native Warden log channel',
+  );
+  const logFile = path.join(workbench.context.logUri.fsPath, 'Warden.log');
+  await eventually(async () => {
+    const output = await fs.readFile(logFile, 'utf8');
+    return output.includes('"event":"acp.failure"') && output.includes(`"task":"${newTask.id}"`);
+  });
+  const logs = await fs.readFile(logFile, 'utf8');
+  assert(logs.includes('"event":"acp.turn.end"'), 'the native channel persists successful and failed turn outcomes');
+  if (workbench.output.logLevel === vscode.LogLevel.Info)
+    assert(!logs.includes('"event":"acp.update"'), 'streaming trace metadata does not flood the default log level');
+  assert.equal(
+    (await journal()).filter((row) => row.method === 'session/prompt' && row.params.prompt[0].text === 'crash').length,
+    1,
+    'automatic recovery never replays the interrupted prompt',
+  );
   assert.equal(
     (await workbench.backend.execute('workflow.get', undefined)).workflow.changes.find((task) => task.id === newTask.id).deliveries?.length ?? 0,
     0,
     'ACP responses never deliver code',
   );
+
+  const externalJournal = `${fixture.journal}.external`;
+  const externalAgent = { ...selectedAgent, id: 'external', args: [fixture.agent, externalJournal, 'auth-external'] };
+  await fs.writeFile(`${externalJournal}.auth`, 'fixture login');
+  await configuration.update('acpAgents', [otherAgent, selectedAgent, externalAgent], vscode.ConfigurationTarget.Global);
+  await workbench.agentSetup.check(externalAgent.id);
+  assert.equal(workbench.agentSetup.readiness.snapshot().status, 'ready');
+  await fs.rm(`${externalJournal}.auth`);
+  const externalTask = await workbench.backend.execute('task.create', { title: 'External login' });
+  await conversations.show(fixture.root, externalTask.id);
+  const externalChat = conversations.sidebarEntry;
+  await eventually(() => externalChat.session.snapshot().status === 'error');
+  assert.equal(externalChat.session.snapshot().authMethods[0].id, 'login');
+  const externalRecord = externalChat.session.snapshot().record.id;
+  const externalDraft = externalChat.draft.text;
+  await fs.writeFile(`${externalJournal}.auth`, 'fixture login');
+  await conversations.handle(externalChat, { type: 'connect', profileId: externalAgent.id, resume: false });
+  assert.equal(externalChat.session.snapshot().status, 'connected');
+  assert.equal(externalChat.session.snapshot().record.id, externalRecord);
+  assert.equal(externalChat.draft.text, externalDraft);
+  assert.deepEqual(externalChat.session.snapshot().authMethods, []);
+  const externalRequests = (await fs.readFile(externalJournal, 'utf8')).trim().split('\n').map(JSON.parse);
+  assert(!externalRequests.some((row) => ['authenticate', 'session/prompt'].includes(row.method)), 'external login reconnect starts no login flow or prompt');
+  const missingJournal = `${fixture.journal}.missing`;
+  const missingAgent = { ...selectedAgent, id: 'missing', args: [fixture.agent, missingJournal, 'missing-rollout'] };
+  await configuration.update('acpAgents', [selectedAgent, missingAgent], vscode.ConfigurationTarget.Global);
+  await workbench.agentSetup.check(missingAgent.id);
+  const emptyTask = await workbench.backend.execute('task.create', { title: 'Unpersisted empty session' });
+  await conversations.show(fixture.root, emptyTask.id);
+  const emptyChat = conversations.sidebarEntry;
+  await eventually(() => emptyChat.session.snapshot().status === 'connected');
+  const emptyRecord = emptyChat.session.snapshot().record;
+  const emptyDraft = emptyChat.draft.text;
+  await conversations.handle(emptyChat, { type: 'disconnect' });
+  await conversations.show(fixture.root, emptyTask.id);
+  await eventually(() => emptyChat.session.snapshot().status === 'connected');
+  assert.equal(emptyChat.session.snapshot().record.id, emptyRecord.id);
+  assert.notEqual(emptyChat.session.snapshot().record.sessionId, emptyRecord.sessionId);
+  assert.equal(emptyChat.draft.text, emptyDraft, 'recreating an unpersisted empty session retains the task draft');
+  assert.deepEqual(emptyChat.session.snapshot().authMethods, []);
+  const emptyRequests = (await fs.readFile(missingJournal, 'utf8')).trim().split('\n').map(JSON.parse);
+  assert(!emptyRequests.some((row) => ['authenticate', 'session/prompt'].includes(row.method)), 'empty-session recovery starts no login flow or prompt');
+  workbench.output.error = report;
 };
 exports.checkChats = checkChats;
 
