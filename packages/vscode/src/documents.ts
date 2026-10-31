@@ -16,7 +16,7 @@ export class Documents implements vscode.TextDocumentContentProvider {
   }
   private key(uri: vscode.Uri) {
     const key = uri.path.split('/')[1];
-    if (uri.scheme !== 'warden-review' || !key || !/^[a-f0-9-]{36}$/.test(key)) throw new Error('无效的审阅快照');
+    if (uri.scheme !== 'warden-review' || !key || !/^[a-f0-9-]{36}$/.test(key)) throw new Error('Invalid review snapshot.');
     return key;
   }
   async snapshot(uri: vscode.Uri): Promise<Snapshot> {
@@ -31,7 +31,7 @@ export class Documents implements vscode.TextDocumentContentProvider {
       this.contents.set(key, data);
       return data;
     } catch {
-      throw new Error('此审阅快照已不可用，请重新打开任务差异');
+      throw new Error('This review snapshot is no longer available. Reopen the task diff.');
     }
   }
   async provideTextDocumentContent(uri: vscode.Uri) {

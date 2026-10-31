@@ -112,11 +112,11 @@ describe('shared workflow reads', () => {
     expect(create).toHaveBeenCalledTimes(3);
 
     fx.git('-C', change.worktree, 'switch', '-qc', 'different-branch');
-    expect(await check(change)).toMatchObject({ status: 'blocked', message: expect.stringContaining('切换分支') });
+    expect(await check(change)).toMatchObject({ status: 'blocked', message: expect.stringContaining('switched branches') });
     fx.git('-C', change.worktree, 'switch', '-q', change.branch);
     const mergeHead = path.resolve(change.worktree, fx.git('-C', change.worktree, 'rev-parse', '--git-path', 'MERGE_HEAD').trim());
     await writeFile(mergeHead, `${originalHead}\n`);
-    expect(await check(change)).toMatchObject({ status: 'blocked', message: expect.stringContaining('未完成的 merge') });
+    expect(await check(change)).toMatchObject({ status: 'blocked', message: expect.stringContaining('unfinished merge') });
     await rm(mergeHead);
     expect((await check(change)).status).toBe('ready');
     expect(create).toHaveBeenCalledTimes(3);

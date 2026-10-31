@@ -275,7 +275,7 @@ describe('continuous workspace delivery and passive synchronization', () => {
       if (action.type !== 'rebase.run') throw new Error('Expected rebase action');
       const response = await workflow.rebaseBatch(action);
       expect(response.results).toEqual([
-        { changeId: unavailable.id, status: 'failed', message: expect.stringContaining('任务工位已不存在') },
+        { changeId: unavailable.id, status: 'failed', message: expect.stringContaining('The task workspace no longer exists') },
         { changeId: available.id, status: 'updated' },
       ]);
       expect(fx.git('-C', available.worktree, 'rev-parse', 'HEAD^').trim()).toBe(target);
@@ -286,7 +286,7 @@ describe('continuous workspace delivery and passive synchronization', () => {
     }
 
     expect((await workflow.rebaseBatch({ items: [unavailableItem] })).results).toEqual([
-      { changeId: unavailable.id, status: 'failed', message: expect.stringContaining('重新检查') },
+      { changeId: unavailable.id, status: 'failed', message: expect.stringContaining('Run the check again.') },
     ]);
     expect(sourceHead(unavailable)).toBe(before);
     expect(fx.git('-C', unavailable.worktree, 'status', '--porcelain')).toBe('');

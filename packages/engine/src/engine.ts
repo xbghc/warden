@@ -31,10 +31,10 @@ type NewWorkspace = Pick<StartChangeRequest, 'agent'> & { kind?: 'shared' | 'clo
 type NewTask = Pick<CreateChangeRequest, 'title' | 'body'>;
 
 function record(value: unknown): asserts value is Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw badRequest('操作参数格式错误', 'invalid_request');
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw badRequest('Invalid operation parameters.', 'invalid_request');
 }
 function id(value: unknown): asserts value is string {
-  if (typeof value !== 'string' || !value || value.length > 300) throw badRequest('任务标识无效', 'invalid_request');
+  if (typeof value !== 'string' || !value || value.length > 300) throw badRequest('Invalid task ID.', 'invalid_request');
 }
 
 function commands(repo: RepoContext, store: StateStore) {
@@ -42,7 +42,7 @@ function commands(repo: RepoContext, store: StateStore) {
   const preview = new PreviewService(repo, store);
   const history = new HistoryService(repo, store);
   const target = async (key: string) => {
-    if (typeof key !== 'string' || !key || key.length > 16000) throw badRequest('审阅目标无效', 'invalid_request');
+    if (typeof key !== 'string' || !key || key.length > 16000) throw badRequest('Invalid review target.', 'invalid_request');
     return resolveTargetContext(repo, await listWorktreesAll(repo), key);
   };
   return {
@@ -53,7 +53,7 @@ function commands(repo: RepoContext, store: StateStore) {
       'workflow.configure': ({ branch }: { branch: string }) => workflow.configure(branch),
       'task.create': (request: NewTask) => {
         record(request);
-        if ('worktree' in request) throw badRequest('创建任务不能接管旧工作区', 'invalid_request');
+        if ('worktree' in request) throw badRequest('A new task cannot adopt an existing workspace.', 'invalid_request');
         return workflow.create({ title: request.title, body: request.body });
       },
       'task.update': ({ taskId, ...request }: UpdateChangeRequest & { taskId: string }) => {
@@ -63,7 +63,7 @@ function commands(repo: RepoContext, store: StateStore) {
       'task.start': ({ taskId, ...request }: NewWorkspace & { taskId: string }) => {
         id(taskId);
         if ('worktree' in request || (request.kind !== undefined && request.kind !== 'shared' && request.kind !== 'clone'))
-          throw badRequest('请创建新工作区，目录分配由 Warden 管理', 'invalid_request');
+          throw badRequest('Warden allocates workspaces automatically.', 'invalid_request');
         return workflow.start(taskId, { kind: request.kind, agent: request.agent });
       },
       'task.move': ({ taskId, before }: { taskId: string; before: string | null }) => {
@@ -126,7 +126,7 @@ function commands(repo: RepoContext, store: StateStore) {
         return { targetKey: key, root: context.cwd, files: (await listTargetDiffs(context)).map(toSummary) };
       },
       'review.file': async ({ key, file, side }: { key: string; file: string; side: 'old' | 'new' }): Promise<FullFileResponse> => {
-        if (typeof file !== 'string' || (side !== 'old' && side !== 'new')) throw badRequest('文件参数无效', 'invalid_request');
+        if (typeof file !== 'string' || (side !== 'old' && side !== 'new')) throw badRequest('Invalid file parameters.', 'invalid_request');
         return { path: file, side, content: await getFullFile(await target(key), file, side) };
       },
     },
@@ -183,12 +183,12 @@ export class Engine {
     return new Engine(repo, new StateStore(file ?? stateFilePath(repo.commonRoot), repo.commonRoot));
   }
   execute<K extends EngineCommand>(command: K, request: EngineInput<K>, context?: { developmentBranch: string | null }): Promise<EngineOutput<K>> {
-    if (this.stopped) return Promise.reject(new WardenError(409, '仓库会话已关闭', 'session_closed'));
+    if (this.stopped) return Promise.reject(new WardenError(409, 'The repository session is closed.', 'session_closed'));
     const write = !reads.has(command);
     if (write) ++this.writers;
     const operation = Promise.resolve().then(async () => {
       const handler = this.handlers[command];
-      if (!Object.hasOwn(this.handlers, command)) throw badRequest('未知操作', 'unknown_command');
+      if (!Object.hasOwn(this.handlers, command)) throw badRequest('Unknown operation.', 'unknown_command');
       // Our own preview can legitimately outlast the cross-window lock timeout.
       // Finish it before a requested write starts competing for repository ownership.
       if (write) await this.ticking;
