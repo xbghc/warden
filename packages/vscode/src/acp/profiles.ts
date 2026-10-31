@@ -1,5 +1,34 @@
 import type { AcpProfile } from './contracts.js';
 
+export const acpPresets = [
+  { id: 'codex', label: 'Codex', command: 'codex-acp', args: [], detail: 'Requires the codex-acp adapter. Install it on the workspace host first.' },
+  {
+    id: 'opencode',
+    label: 'OpenCode',
+    command: 'opencode',
+    args: ['acp'],
+    detail: "Uses OpenCode's built-in ACP support. Install OpenCode on the workspace host first.",
+  },
+] as const;
+
+export function presetCommandError(command: string, platform = process.platform): string | undefined {
+  if (!command.trim() || command.length > 4000 || command.includes('\0')) return 'Enter a valid executable name or absolute path.';
+  if (platform === 'win32' && /\.(cmd|bat)$/i.test(command))
+    return 'Choose a native executable (.exe). Batch wrappers require a custom command in Agent settings.';
+  return undefined;
+}
+
+export function addAcpPreset(value: unknown, presetId: string, command: string): unknown[] {
+  const preset = acpPresets.find((preset) => preset.id === presetId);
+  if (!preset) throw new Error('Unknown ACP preset.');
+  const current = parseAcpProfiles(value);
+  if (current.some((profile) => profile.id === preset.id)) return value as unknown[];
+  // Preserve the user's original objects, including omitted defaults and custom fields.
+  const next = [...((value as unknown[] | undefined) ?? []), { id: preset.id, label: preset.label, command, args: [...preset.args] }];
+  parseAcpProfiles(next);
+  return next;
+}
+
 /** Executable profiles come only from user settings, never from conversation content. */
 export function parseAcpProfiles(value: unknown): AcpProfile[] {
   if (value === undefined) return [];

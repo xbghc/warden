@@ -122,6 +122,8 @@ try:
         expect(setup_guide.locator('pre')).not_to_be_visible()
         setup_guide.get_by_text('ACP Setup Guide and Example', exact=True).click()
         expect(setup_guide.locator('pre')).to_contain_text('warden.acpAgents')
+        expect(setup_guide.get_by_role('link', name='codex-acp adapter', exact=True)).to_be_visible()
+        expect(setup_guide.get_by_role('link', name='OpenCode', exact=True)).to_be_visible()
         first.get_by_role('button', name='Configure Agent', exact=True).click()
         first.wait_for_function("window.__actions.some(message => message.action?.type === 'configure')")
         assert all(not journal for entry in inspect()['entries'] for journal in entry['journals'])

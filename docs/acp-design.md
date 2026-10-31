@@ -30,6 +30,20 @@ and folder settings cannot supply executable profiles. The command must be avail
 workspace extension host. An executable and argument array are launched directly; task text and
 agent replies never become executable configuration.
 
+**Configure Agent** opens a native picker with Codex, OpenCode and **Custom Agent / Edit Settings**.
+Codex uses the `codex-acp` adapter; OpenCode uses `opencode` with `args: ["acp"]`. Choosing a preset
+opens a native executable input; Enter appends it to User or Remote User settings, while Escape
+leaves settings unchanged. The command can be a name on PATH or an absolute path on the workspace
+host. Windows inputs use native executables; batch wrappers require an explicitly configured launcher.
+Re-read profiles when saving to preserve edits made while the input was open. Existing preset IDs
+open settings instead of being replaced or duplicated. Invalid settings go directly to repair and
+are never replaced with defaults. Workbench and Task Chat use the same picker.
+
+These are configuration templates, not bundled agents or verified vendor integrations. They do not
+install software, choose models, change agent permissions, supply credentials or start a process.
+See the upstream [Codex adapter](https://github.com/agentclientprotocol/codex-acp) and
+[OpenCode ACP guide](https://docs.opencode.ai/docs/acp/) for installation and authentication.
+
 Profiles may describe a native ACP agent or an adapter. There is no vendor-specific SDK, bundled
 agent, automatic installation or claim that an arbitrary coding CLI supports ACP. The agent's own
 login and inherited environment remain available; optional profile environment overrides are

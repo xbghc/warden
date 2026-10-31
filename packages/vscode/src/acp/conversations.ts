@@ -3,10 +3,10 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { Engine } from '@warden/engine';
 import { parseAcpAction } from '@warden/shared';
-import type { AcpAction, AcpBinding, AcpModel, AcpViewState, WorkflowTask } from '@warden/shared';
+import type { AcpAction, AcpBinding, AcpConfiguration, AcpModel, AcpViewState, WorkflowTask } from '@warden/shared';
 import type { AcpProfile } from './contracts.js';
 import { resolveAcpBinding, validateAcpBinding } from './binding.js';
-import { parseAcpProfiles } from './profiles.js';
+import { readAcpProfiles } from './setup.js';
 import { AcpSession } from './session.js';
 import { AcpSessionStorage } from './storage.js';
 import { AcpDraft } from './draft.js';
@@ -51,6 +51,7 @@ export class AcpConversations {
     private readonly review: (binding: AcpBinding) => Promise<void>,
     private readonly changed: () => void,
     private readonly report: (error: unknown) => void,
+    private readonly configureAgents: () => Promise<void>,
   ) {
     this.subscriptions.push(
       vscode.window.registerWebviewViewProvider(
@@ -61,7 +62,9 @@ export class AcpConversations {
         { webviewOptions: { retainContextWhenHidden: true } },
       ),
       vscode.workspace.onDidChangeConfiguration((event) => {
-        if (event.affectsConfiguration('warden.acpAgents')) for (const entry of this.entries.values()) this.render(entry);
+        if (!event.affectsConfiguration('warden.acpAgents')) return;
+        for (const entry of this.entries.values()) this.render(entry);
+        this.changed();
       }),
     );
   }
@@ -70,14 +73,20 @@ export class AcpConversations {
     return JSON.stringify([repository, taskId]);
   }
   private profiles(): AcpProfile[] {
-    // Even a hand-edited workspace setting cannot supply an executable command.
-    const inspected = vscode.workspace.getConfiguration('warden').inspect<unknown>('acpAgents');
-    return parseAcpProfiles(inspected?.globalValue ?? inspected?.defaultValue);
+    return readAcpProfiles();
   }
   private profile(id: string) {
     const profile = this.profiles().find((row) => row.id === id);
     if (!profile) throw new Error('This agent profile no longer exists. Configure warden.acpAgents in User settings.');
     return profile;
+  }
+  configuration(): AcpConfiguration {
+    try {
+      const count = this.profiles().length;
+      return count ? { status: 'configured', count } : { status: 'missing' };
+    } catch (error) {
+      return { status: 'invalid', message: error instanceof Error ? error.message : String(error) };
+    }
   }
   private engine(repository: string) {
     let opening = this.engines.get(repository);
@@ -422,7 +431,7 @@ export class AcpConversations {
       return;
     }
     if (action.type === 'configure') {
-      await vscode.commands.executeCommand('workbench.action.openSettings', 'warden.acpAgents');
+      await this.configureAgents();
       return;
     }
     if (!vscode.workspace.isTrusted) throw new Error('Trust this workspace first.');

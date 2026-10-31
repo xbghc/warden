@@ -13,6 +13,8 @@ export interface AcpProfileSummary {
   label: string;
 }
 
+export type AcpConfiguration = { status: 'missing' } | { status: 'invalid'; message: string } | { status: 'configured'; count: number };
+
 export type AcpStatus = 'disconnected' | 'connecting' | 'connected' | 'running' | 'waiting_permission' | 'cancelling' | 'resetting' | 'error';
 export interface AcpMessage {
   id: string;

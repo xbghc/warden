@@ -21,6 +21,7 @@ import type { AcpBinding } from '@warden/shared';
 import { Documents } from './documents.js';
 import { Views } from './views.js';
 import { AcpConversations } from './acp/conversations.js';
+import { AcpAgentSetup } from './acp/setup.js';
 import { BranchViews } from './branch-view.js';
 
 const statusLabels: Record<string, string> = {
@@ -74,6 +75,7 @@ export class Workbench {
   private commitInput?: vscode.InputBox;
   private fileErrors = new Map<string, string>();
   private readonly conversations: AcpConversations;
+  private readonly agentSetup = new AcpAgentSetup();
   private readonly branchViews: BranchViews;
   private branch?: string;
   private branchTransition = false;
@@ -101,6 +103,7 @@ export class Workbench {
       (binding) => this.reviewConversation(binding),
       () => this.views.render(),
       (error) => this.output.appendLine(String(error)),
+      () => this.agentSetup.configure(),
     );
     this.views = new Views(
       context,
@@ -109,6 +112,7 @@ export class Workbench {
       (error, surface) => this.report(error, surface === 'task' ? `task:${this.selected ?? 'new'}` : surface),
     );
     context.subscriptions.push(
+      this.agentSetup,
       this.output,
       this.status,
       vscode.workspace.registerTextDocumentContentProvider('warden-review', this.documents),
@@ -154,7 +158,7 @@ export class Workbench {
       chat: (node) => this.openConversation(node),
       switchChat: () => this.openConversation(),
       expandChat: () => this.conversations.expand(),
-      configureAgents: () => vscode.commands.executeCommand('workbench.action.openSettings', 'warden.acpAgents'),
+      configureAgents: () => this.agentSetup.configure(),
       sendSelectionToAgent: () => this.sendSelectionToAgent(),
     };
     const navigation = new Set([
@@ -949,6 +953,10 @@ export class Workbench {
   }
   private async handleAction(action: WorkbenchAction, session: string) {
     this.assertSession(session);
+    if (action.type === 'settings.agents') {
+      await vscode.commands.executeCommand('warden.configureAgents');
+      return;
+    }
     if (action.type === 'setup.repository' || action.type === 'setup.branch') {
       await this.perform(() => (action.type === 'setup.repository' ? this.selectRepository() : this.configure()), '正在选择…');
       return;
@@ -1128,9 +1136,6 @@ export class Workbench {
             await this.api('config.save', action.config);
             void vscode.window.showInformationMessage('脚本配置已保存');
             break;
-          case 'settings.agents':
-            await vscode.commands.executeCommand('workbench.action.openSettings', 'warden.acpAgents');
-            break;
           case 'rebase.check':
             await this.refreshChecks();
             break;
@@ -1188,6 +1193,7 @@ export class Workbench {
 
   async close() {
     this.closing = true;
+    this.agentSetup.dispose();
     this.commitInput?.hide();
     await this.conversations.close();
     await Promise.allSettled([this.active, ...this.navigation, this.reading]);

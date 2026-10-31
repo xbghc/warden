@@ -5,6 +5,7 @@ const vscode = require('vscode');
 const { execFileSync } = require('node:child_process');
 const { checkBranches } = require('./branches.cjs');
 const { checkChats } = require('./chat.cjs');
+const { checkAgentPresets } = require('./agent-setup.cjs');
 const { checkPreviewLineEndings } = require('./preview.cjs');
 // Git may materialize preview text with CRLF under the user's Windows configuration.
 const textLines = (text) => text.replace(/\r\n/g, '\n');
@@ -32,12 +33,8 @@ exports.run = async () => {
       assert.equal(model.repository, fixture.unconfigured);
       assert.equal(model.workflow.workflow, null, 'directly opened workflow pages receive setup state');
     }
-    await workbench.handleAction({ type: 'settings.agents' }, workbench.session);
-    assert.equal(workbench.errors.has('settings'), false, 'ACP settings remain available before branch configuration');
-    assert(
-      vscode.window.tabGroups.all.some((group) => group.tabs.some((tab) => tab.label === 'Settings')),
-      'ACP configuration opens VS Code settings',
-    );
+    console.log('Checking agent configuration presets');
+    await checkAgentPresets(workbench, fixture, eventually);
     await workbench.views.show('settings');
     await eventually(() => workbench.views.displaysError('settings'));
     assert.equal(workbench.views.displaysError('repository'), true);

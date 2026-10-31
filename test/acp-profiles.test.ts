@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseAcpProfiles } from '../packages/vscode/src/acp/profiles.js';
+import { acpPresets, addAcpPreset, parseAcpProfiles, presetCommandError } from '../packages/vscode/src/acp/profiles.js';
 
 const profile = { id: 'local-agent', label: 'Local agent', command: '/path/to/agent' };
 
@@ -41,5 +41,52 @@ describe('ACP executable profiles', () => {
     ['NUL in environment value', [{ ...profile, env: { AGENT_FLAG: 'a\0b' } }]],
   ])('rejects malformed profiles: %s', (_name, input) => {
     expect(() => parseAcpProfiles(input)).toThrow();
+  });
+});
+
+describe('ACP configuration presets', () => {
+  it('uses an ACP adapter for Codex and the built-in ACP subcommand for OpenCode', () => {
+    expect(acpPresets.map(({ id, command, args }) => ({ id, command, args }))).toEqual([
+      { id: 'codex', command: 'codex-acp', args: [] },
+      { id: 'opencode', command: 'opencode', args: ['acp'] },
+    ]);
+    expect(addAcpPreset(undefined, 'codex', '/agents/codex-acp')).toEqual([{ id: 'codex', label: 'Codex', command: '/agents/codex-acp', args: [] }]);
+  });
+
+  it('appends a preset without normalizing or discarding existing configuration', () => {
+    const existing = [{ ...profile, env: { AGENT_TOKEN: 'fixture-only' }, extensionField: 'preserve' }];
+    const next = addAcpPreset(existing, 'opencode', '/path with spaces/opencode');
+    expect(next).toEqual([...existing, { id: 'opencode', label: 'OpenCode', command: '/path with spaces/opencode', args: ['acp'] }]);
+    expect(next[0]).toBe(existing[0]);
+    expect(existing).toHaveLength(1);
+    expect('args' in existing[0]!).toBe(false);
+  });
+
+  it('never replaces an existing preset ID or changes its settings when selected again', () => {
+    const existing = [{ ...profile, id: 'codex', args: ['--custom'], env: { CODEX_PATH: '/chosen/codex' } }];
+    expect(addAcpPreset(existing, 'codex', '/other/codex-acp')).toBe(existing);
+  });
+
+  it('refuses to overwrite invalid settings or exceed the profile limit', () => {
+    expect(() => addAcpPreset('invalid', 'codex', 'codex-acp')).toThrow();
+    expect(() => addAcpPreset(null, 'codex', 'codex-acp')).toThrow();
+    expect(() => addAcpPreset([{ ...profile, args: '--invalid' }], 'codex', 'codex-acp')).toThrow();
+    expect(() =>
+      addAcpPreset(
+        Array.from({ length: 40 }, (_, i) => ({ ...profile, id: `agent-${i}` })),
+        'codex',
+        'codex-acp',
+      ),
+    ).toThrow('40');
+    expect(() => addAcpPreset([], 'untrusted', 'arbitrary')).toThrow('Unknown ACP preset');
+    expect(() => addAcpPreset([], 'opencode', 'bad\0path')).toThrow();
+  });
+
+  it('validates native executable input without changing literal paths or invoking a shell', () => {
+    expect(presetCommandError('/path with spaces/adapter', 'linux')).toBeUndefined();
+    expect(presetCommandError('C:\\Program Files\\agent.exe', 'win32')).toBeUndefined();
+    expect(presetCommandError('agent.CMD', 'win32')).toMatch(/native executable/);
+    expect(presetCommandError('agent.bat', 'win32')).toMatch(/native executable/);
+    for (const value of ['', ' ', 'bad\0path', 'a'.repeat(4001)]) expect(presetCommandError(value, 'linux')).toBeDefined();
   });
 });

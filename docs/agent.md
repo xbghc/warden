@@ -17,6 +17,12 @@ tools that cannot use linked worktrees.
 
 ## ACP task conversations
 
+**Configure Agent** offers Codex and OpenCode presets. Select one, confirm its executable on the
+workspace host and press Enter to save. Install the `codex-acp` adapter for Codex; OpenCode uses its
+native `acp` subcommand. **Custom Agent / Edit Settings** retains direct configuration for other agents
+and customized arguments or environment variables. Existing profiles are preserved, and choosing an
+already configured preset opens its settings. Cancelling either input changes nothing.
+
 Open the task's **Agent 对话**, choose a configured agent and connect or send a message. Opening a
 panel alone does not launch a process. Each panel stays attached to its original task workspace and
 repository when the selected task or repository changes. Separate tasks can have separate sessions;
