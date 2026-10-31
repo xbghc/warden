@@ -57,7 +57,7 @@ pnpm install
 pnpm build
 ```
 
-Select `调试 Warden` in Run and Debug and press F5. The launch configuration runs
+Select `Debug Warden` in Run and Debug and press F5. The launch configuration runs
 `pnpm build:vscode` before each launch, then loads `packages/vscode` into an Extension Development Host.
 In that new window, open a disposable Git repository to exercise Warden. Keep the source checkout
 open in the original window for breakpoints, variables and the Debug Console.
