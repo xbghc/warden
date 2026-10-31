@@ -10,6 +10,7 @@ await build({
   outDir: 'packages/vscode/dist',
   clean: true,
   bundle: true,
+  sourcemap: true,
   splitting: false,
   external: ['vscode'],
   noExternal: [/^@warden\//],

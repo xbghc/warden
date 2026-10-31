@@ -47,6 +47,30 @@ reclaimer interleavings. Dead locks from the older plain-file format intentional
 [State and security](internals.md#state). Close all older Warden windows and processes before first
 using this lock protocol; an already-running old reclaimer can otherwise move its container.
 
+## Debugging in VS Code
+
+Open the repository root in VS Code, locally or through Remote SSH, WSL or Dev Containers.
+Install dependencies and build the extension in that window's terminal:
+
+```sh
+pnpm install
+pnpm build
+```
+
+Select `调试 Warden` in Run and Debug and press F5. The launch configuration runs
+`pnpm build:vscode` before each launch, then loads `packages/vscode` into an Extension Development Host.
+In that new window, open a disposable Git repository to exercise Warden. Keep the source checkout
+open in the original window for breakpoints, variables and the Debug Console.
+
+The extension bundle includes source maps for TypeScript breakpoints in `packages/vscode/src`,
+`packages/engine/src` and `packages/shared/src`. After changing TypeScript or webview code, stop and
+start debugging again to rebuild and reload.
+
+In Remote windows, builds and the workspace extension host run in the remote environment; the
+development window appears in the local VS Code client. Use a test repository in that same remote
+environment. Source debugging does not require packaging or installing a VSIX. See
+[VS Code's remote extension debugging guide](https://code.visualstudio.com/api/advanced-topics/remote-extensions#debugging-using-ssh).
+
 ## ACP verification
 
 ACP tests use `test/fixtures/acp-agent.mjs`, an SDK-compatible child agent that performs its own file
