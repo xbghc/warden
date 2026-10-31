@@ -3,6 +3,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const vscode = require('vscode');
 const { execFileSync } = require('node:child_process');
+const { checkFileViews } = require('./file-views.cjs');
 
 async function checkQuietRefresh(workbench, workspace) {
   await workbench.refresh(true);
@@ -210,6 +211,7 @@ exports.checkSidebar = async (workbench, extension, repository, eventually) => {
   await workbench.sidebar.view.reveal(workspace, { select: true, expand: true });
   await eventually(() => workbench.expanded[firstId] === true);
   await checkQuietRefresh(workbench, workspace);
+  await checkFileViews(workbench, extension, workspace, eventually);
   if (process.env.WARDEN_VSCODE_SCREENSHOT && process.platform === 'linux') {
     await vscode.commands.executeCommand('workbench.action.closeAllEditors');
     await vscode.commands.executeCommand('workbench.action.closePanel');

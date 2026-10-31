@@ -17,6 +17,14 @@ collapses independently without replacing the native diff or resetting editor sc
 opens a dedicated form; delivery records use native pickers and diffs. Failed scripts expose output
 and retry actions, with output in the Warden channel. Keyboard commands remain available throughout.
 
+Use **View as Tree** or **View as List** in the Workbench title bar or Command Palette to arrange
+each task's changed files. List view is the default, with file names and relative parent paths;
+tree view groups files into expandable directories, with folders before files. The choice is
+remembered for the VS Code workspace. Switching views preserves task expansion and open diffs,
+including their pinned review versions. Both views show the same complete comparison.
+Native tree nodes retain their original repository and base-branch identity while VS Code finishes
+pending renders, so switching context cannot rename nodes from the previous tree.
+
 Choose the commit icon and enter a message in VS Code's native top input box. Enter submits the reviewed
 increment with ordinary Git hooks; Escape cancels without staging and retains the draft. The input keeps
 its original task, repository and pinned review. Any source, delivery-boundary or primary-version change

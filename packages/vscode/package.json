@@ -96,6 +96,20 @@
         "enablement": "warden.agentReady"
       },
       {
+        "command": "warden.viewAsTree",
+        "title": "View as Tree",
+        "category": "Warden",
+        "icon": "$(list-tree)",
+        "enablement": "warden.agentReady"
+      },
+      {
+        "command": "warden.viewAsList",
+        "title": "View as List",
+        "category": "Warden",
+        "icon": "$(list-flat)",
+        "enablement": "warden.agentReady"
+      },
+      {
         "command": "warden.createTask",
         "title": "New Task",
         "category": "Warden",
@@ -381,6 +395,16 @@
           "group": "navigation@2"
         },
         {
+          "command": "warden.viewAsTree",
+          "when": "warden.agentReady && view == warden.task && warden.hasDevelopmentBranch && warden.fileViewMode == list",
+          "group": "navigation@4"
+        },
+        {
+          "command": "warden.viewAsList",
+          "when": "warden.agentReady && view == warden.task && warden.hasDevelopmentBranch && warden.fileViewMode == tree",
+          "group": "navigation@4"
+        },
+        {
           "command": "warden.selectRepository",
           "when": "warden.agentReady && (view == warden.task && (warden.repositoryState == unselected || (warden.repositoryState == ready && warden.multipleRoots)))",
           "group": "4_repository@1"
@@ -482,6 +506,14 @@
         {
           "command": "warden.refresh",
           "when": "warden.agentReady"
+        },
+        {
+          "command": "warden.viewAsTree",
+          "when": "warden.agentReady && warden.hasDevelopmentBranch && warden.fileViewMode == list"
+        },
+        {
+          "command": "warden.viewAsList",
+          "when": "warden.agentReady && warden.hasDevelopmentBranch && warden.fileViewMode == tree"
         },
         {
           "command": "warden.configure",

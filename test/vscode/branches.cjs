@@ -18,6 +18,8 @@ exports.checkBranches = async (workbench, root, eventually) => {
   };
   const head = git('rev-parse', 'HEAD');
   const a = await create('A');
+  const oldSidebarNode = (await workbench.sidebar.getChildren()).find((node) => node.task.id === a.id);
+  const oldSidebarId = workbench.sidebar.getTreeItem(oldSidebarNode).id;
   await workbench.rememberExpansion({ kind: 'task', task: a }, true);
   await workbench.showRebase({ kind: 'task', task: a });
   const sessionA = workbench.session;
@@ -61,6 +63,7 @@ exports.checkBranches = async (workbench, root, eventually) => {
   assert.equal(workbench.rebaseSelection, undefined);
   assert.deepEqual(workbench.checks.checks, []);
   assert.notEqual(workbench.session, sessionA);
+  assert.equal(workbench.sidebar.getTreeItem(oldSidebarNode).id, oldSidebarId, 'retained tree nodes keep their identity across branch switches');
   await assert.rejects(workbench.handleAction({ type: 'task.create', title: 'Stale A action' }, sessionA), /base branch changed/);
 
   const b = await create('B');

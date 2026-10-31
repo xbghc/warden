@@ -1,13 +1,17 @@
 import * as vscode from 'vscode';
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 import type { FileEntry, TaskReview, WorkflowTask, WorkbenchAction, WorkbenchModel } from '@warden/shared';
 import { previewStatusLabels } from '@warden/shared';
 
 type Entry =
   | { kind: 'task'; task: WorkflowTask }
+  | { kind: 'folder'; path: string; task: WorkflowTask }
   | { kind: 'file'; file: FileEntry; target: string; task?: WorkflowTask; review?: TaskReview }
   | { kind: 'notice'; message: string; error: boolean; task: WorkflowTask };
-export type SidebarNode = Entry & { session?: string };
+export type SidebarNode = Entry & { session?: string; scope?: string };
+type FileNode = Extract<SidebarNode, { kind: 'file' }>;
+type FileViewMode = 'list' | 'tree';
 
 const dragType = 'application/vnd.code.tree.warden.task';
 
@@ -21,13 +25,21 @@ export class Sidebar implements vscode.TreeDataProvider<SidebarNode>, vscode.Tre
   private drag?: { session: string; taskId: string; nonce: string };
   private signature?: string;
   private readonly subscriptions: vscode.Disposable[];
+  private readonly files = new Map<string, { session: string; nodes: FileNode[] }>();
+  private mode: FileViewMode;
+
+  get fileViewMode() {
+    return this.mode;
+  }
 
   constructor(
     private readonly model: () => WorkbenchModel,
     private readonly children: (node?: SidebarNode) => Promise<SidebarNode[]>,
     private readonly action: (action: WorkbenchAction, session: string) => Promise<unknown>,
     expansion: (node: SidebarNode, expanded: boolean) => Promise<void>,
+    private readonly state: vscode.Memento,
   ) {
+    this.mode = state.get('warden.fileViewMode') === 'tree' ? 'tree' : 'list';
     this.view = vscode.window.createTreeView('warden.task', { treeDataProvider: this, dragAndDropController: this });
     this.subscriptions = [
       this.view.onDidExpandElement(({ element }) => {
@@ -39,8 +51,18 @@ export class Sidebar implements vscode.TreeDataProvider<SidebarNode>, vscode.Tre
     ];
   }
 
+  async setFileViewMode(mode: FileViewMode) {
+    if (this.mode === mode) return;
+    this.mode = mode;
+    this.refresh();
+    await this.state.update('warden.fileViewMode', mode);
+  }
+
   refresh() {
     const model = this.model();
+    for (const [taskId, files] of this.files) {
+      if (files.session !== model.session || !model.workspaces?.some((row) => row.task.id === taskId)) this.files.delete(taskId);
+    }
     const branch = model.workflow?.workflow?.developmentBranch;
     if (this.view.description !== branch) this.view.description = branch;
     let message: string | undefined;
@@ -70,6 +92,7 @@ export class Sidebar implements vscode.TreeDataProvider<SidebarNode>, vscode.Tre
     // Invalidating an unchanged tree makes VS Code reload expanded files and show progress.
     // Include content hashes and review versions, but leave check timestamps and editor drafts out.
     const signature = JSON.stringify({
+      fileViewMode: this.mode,
       session: model.session,
       repository: model.repository,
       repositoryState: model.repositoryState,
@@ -87,15 +110,46 @@ export class Sidebar implements vscode.TreeDataProvider<SidebarNode>, vscode.Tre
   }
 
   async getChildren(node?: SidebarNode): Promise<SidebarNode[]> {
-    const session = this.model().session;
+    const model = this.model();
+    const session = model.session;
+    const scope = `${model.repository}:${model.workflow?.workflow?.developmentBranch ?? ''}:`;
     if (node?.session && node.session !== session) return [];
+    if (node?.kind === 'folder') {
+      if (this.mode !== 'tree' || model.repositoryState !== 'ready' || model.agentReadiness.status !== 'ready') return [];
+      const files = this.files.get(node.task.id);
+      return files?.session === session ? this.fileChildren(files.nodes, node.task, session, node.scope ?? scope, node.path) : [];
+    }
     const children = await this.children(node);
     if (session !== this.model().session) return [];
+    const current = children.map((child) => ({ ...child, session, scope }));
+    if (node?.kind === 'task') {
+      const files = current.filter((child): child is FileNode & { session: string; scope: string } => child.kind === 'file');
+      this.files.set(node.task.id, { session, nodes: files });
+      if (files.length && this.mode === 'tree') return this.fileChildren(files, node.task, session, scope);
+    }
     if (!children.length && node?.kind === 'task' && node.task.worktree) {
       const error = this.model().workspaces?.find((row) => row.task.id === node.task.id)?.filesError;
-      if (error) return [{ kind: 'notice', task: node.task, session, message: error, error: true }];
+      if (error) return [{ kind: 'notice', task: node.task, session, scope, message: error, error: true }];
     }
-    return children.map((child) => ({ ...child, session }));
+    return current;
+  }
+
+  private fileChildren(files: FileNode[], task: WorkflowTask, session: string, scope: string, directory = ''): SidebarNode[] {
+    const prefix = directory ? `${directory}/` : '';
+    const folders = new Set<string>();
+    const children: FileNode[] = [];
+    for (const file of files) {
+      if (!file.file.path.startsWith(prefix)) continue;
+      const relative = file.file.path.slice(prefix.length);
+      const separator = relative.indexOf('/');
+      if (separator < 0) children.push(file);
+      else folders.add(`${prefix}${relative.slice(0, separator)}`);
+    }
+    const compare = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true });
+    return [
+      ...[...folders].sort(compare).map((path): SidebarNode => ({ kind: 'folder', path, task, session, scope })),
+      ...children.sort((a, b) => compare(a.file.path, b.file.path)),
+    ];
   }
 
   async select(taskId: string) {
@@ -104,13 +158,21 @@ export class Sidebar implements vscode.TreeDataProvider<SidebarNode>, vscode.Tre
   }
 
   getParent(node: SidebarNode): SidebarNode | undefined {
-    if ((node.kind === 'file' || node.kind === 'notice') && node.task) return { kind: 'task', task: node.task, session: node.session };
+    if ((node.kind === 'file' || node.kind === 'folder' || node.kind === 'notice') && node.task) {
+      if (this.mode === 'tree' && node.kind !== 'notice') {
+        const directory = path.posix.dirname(node.kind === 'file' ? node.file.path : node.path);
+        if (directory !== '.') return { kind: 'folder', path: directory, task: node.task, session: node.session, scope: node.scope };
+      }
+      return { kind: 'task', task: node.task, session: node.session, scope: node.scope };
+    }
     return undefined;
   }
 
   getTreeItem(node: SidebarNode): vscode.TreeItem {
     const model = this.model();
-    const prefix = `${model.repository}:${model.workflow?.workflow?.developmentBranch ?? ''}:`;
+    // VS Code can render a retained node after navigation changes the current model.
+    // Its identity must still match the tree that originally published it.
+    const prefix = node.scope ?? `${model.repository}:${model.workflow?.workflow?.developmentBranch ?? ''}:`;
     if (node.kind === 'task') {
       const row = model.workspaces?.find((row) => row.task.id === node.task.id);
       const task = row?.task ?? node.task;
@@ -155,11 +217,22 @@ export class Sidebar implements vscode.TreeDataProvider<SidebarNode>, vscode.Tre
       item.command = { command: 'warden.selectTask', title: 'View Task Changes', arguments: [node] };
       return item;
     }
+    if (node.kind === 'folder') {
+      const item = new vscode.TreeItem(path.posix.basename(node.path), vscode.TreeItemCollapsibleState.Expanded);
+      item.id = `${prefix}folder:${node.task.id}:${node.path}`;
+      item.tooltip = node.path;
+      item.contextValue = 'wardenFolder';
+      item.iconPath = new vscode.ThemeIcon('folder');
+      return item;
+    }
     if (node.kind === 'file') {
       const mode = node.file.oldMode === node.file.newMode ? undefined : `File mode ${node.file.oldMode ?? 'none'} → ${node.file.newMode ?? 'none'}`;
-      const item = new vscode.TreeItem(node.file.path);
+      const directory = path.posix.dirname(node.file.path);
+      const item = new vscode.TreeItem(path.posix.basename(node.file.path));
       item.id = `${prefix}file:${node.task?.id ?? node.target}:${node.file.path}`;
-      item.description = [`+${node.file.additions} −${node.file.deletions}`, mode].filter(Boolean).join(' · ');
+      item.description = [this.mode === 'list' && directory !== '.' ? directory : undefined, `+${node.file.additions} −${node.file.deletions}`, mode]
+        .filter(Boolean)
+        .join(' · ');
       item.tooltip = [node.file.path, mode].filter(Boolean).join('\n');
       item.contextValue = 'wardenFile';
       item.iconPath = new vscode.ThemeIcon('diff');
@@ -185,11 +258,11 @@ export class Sidebar implements vscode.TreeDataProvider<SidebarNode>, vscode.Tre
   async handleDrop(target: SidebarNode | undefined, transfer: vscode.DataTransfer, token: vscode.CancellationToken) {
     const drag = this.drag;
     if (!drag || token.isCancellationRequested || drag.session !== this.model().session || (target?.session && target.session !== drag.session)) return;
-    if (target && !['task', 'file'].includes(target.kind)) return;
+    if (target && !['task', 'file', 'folder'].includes(target.kind)) return;
     if (target?.kind === 'file' && !target.task) return;
     const value = await transfer.get(dragType)?.asString();
     if (token.isCancellationRequested || drag.session !== this.model().session || value !== JSON.stringify(drag) || drag !== this.drag) return;
-    const before = target?.kind === 'task' || target?.kind === 'file' ? (target.task?.id ?? null) : null;
+    const before = target?.kind === 'task' || target?.kind === 'file' || target?.kind === 'folder' ? (target.task?.id ?? null) : null;
     this.drag = undefined;
     await this.action({ type: 'task.move', taskId: drag.taskId, before }, drag.session);
   }

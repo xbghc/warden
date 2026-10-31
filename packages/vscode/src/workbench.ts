@@ -144,6 +144,7 @@ export class Workbench {
       (node) => this.getChildren(node),
       (action, session) => this.handleAction(action, session),
       (node, expanded) => this.rememberExpansion(node, expanded).catch((error) => this.report(error)),
+      context.workspaceState,
     );
     this.settings = new Settings(() => this.model('settings'));
     this.scriptSettings = new ScriptSettings(
@@ -182,6 +183,8 @@ export class Workbench {
     const commands: Record<string, (node?: Node) => unknown> = {
       selectRepository: () => this.selectRepository(),
       refresh: () => this.refresh(),
+      viewAsTree: () => this.sidebar.setFileViewMode('tree'),
+      viewAsList: () => this.sidebar.setFileViewMode('list'),
       configure: () => this.configure(),
       createTask: () => this.createTask(),
       moveTaskUp: (node) => this.moveTaskBy(node, -1),
@@ -229,6 +232,8 @@ export class Workbench {
     };
     const navigation = new Set([
       'refresh',
+      'viewAsTree',
+      'viewAsList',
       'createTask',
       'taskHistory',
       'taskOutput',
@@ -483,6 +488,7 @@ export class Workbench {
       const published = await Promise.allSettled([
         publish('warden.hasRepository', hasRepository),
         publish('warden.hasDevelopmentBranch', hasRepository && !!this.data?.workflow),
+        publish('warden.fileViewMode', this.sidebar.fileViewMode),
         publish('warden.multipleRoots', (vscode.workspace.workspaceFolders?.length ?? 0) > 1),
         publish('warden.hasPreviewCommand', hasRepository && !!this.previewCommand()?.trim()),
         publish('warden.hasPreviewSetup', hasRepository && !!this.data?.workspaceConfig?.previewSetup?.trim()),
@@ -829,7 +835,7 @@ export class Workbench {
   private async pickTask(node?: Node) {
     const session = this.session;
     if (node?.session) this.assertSession(node.session);
-    const task = node?.kind === 'task' ? node.task : node?.kind === 'file' ? node.task : undefined;
+    const task = node?.kind === 'task' || node?.kind === 'file' || node?.kind === 'folder' ? node.task : undefined;
     if (task) return this.tasks().find((c) => c.id === task.id);
     const picked = await vscode.window.showQuickPick(
       this.tasks().map((task) => ({ label: task.title, task })),
@@ -914,7 +920,7 @@ export class Workbench {
   }
   private async moveTaskBy(node: Node | undefined, direction: -1 | 1) {
     const selected = node ?? this.sidebar.view.selection[0];
-    if (!selected || (selected.kind !== 'task' && selected.kind !== 'file')) return;
+    if (!selected || (selected.kind !== 'task' && selected.kind !== 'file' && selected.kind !== 'folder')) return;
     const session = this.session;
     const task = await this.pickTask(selected);
     this.assertSession(session);
