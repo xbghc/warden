@@ -59,6 +59,12 @@ itself queried every checkout. `get()` and `rebaseChecks()` now build one map fo
 look up every task in it. Writes continue to obtain a fresh inventory under the existing repository
 lock; a map from a prior response is never mutation authority.
 
+The typed `repository.get` read combines workflow, preview and workspace responses for a workbench
+refresh, sharing one detailed checkout inventory between workflow and workspace readers. Each call
+owns its inventory, drains all component reads on failure, and discards it on completion. Concurrent
+or later calls do not share completed observations. Standalone queries and mutations keep their fresh
+reads. Background synchronization checks obtain their own inventory and retain their final validation.
+
 Workspace inventories contain checkout identity, dirty state, operation markers and allocation
 safety. They do not calculate upstream graph distances or list branches in free slots for the
 retired workspace management page. Those presentation queries live in `test/compat/worktrees.ts`.

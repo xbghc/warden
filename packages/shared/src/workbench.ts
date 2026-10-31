@@ -35,6 +35,7 @@ export interface WorkbenchModel {
   preview?: PreviewResponse;
   hasPreviewCommand: boolean;
   checks?: RebaseResponse;
+  checkingRebase?: boolean;
   rebaseResult?: RebaseBatchResponse;
   rebaseSelection?: { request: string; taskIds: string[] };
   review?: TaskReview;

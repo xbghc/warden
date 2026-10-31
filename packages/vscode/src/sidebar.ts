@@ -78,6 +78,7 @@ export class Sidebar implements vscode.TreeDataProvider<SidebarNode>, vscode.Tre
       agentReadiness: model.agentReadiness,
       workspaces: model.workspaces,
       checks: model.checks?.checks.map(({ checkedAt: _checkedAt, ...check }) => check),
+      checkingRebase: model.checkingRebase,
       errors: model.errors.filter((error) => error.scope.startsWith('task:')),
     });
     if (signature === this.signature) return;
@@ -141,13 +142,15 @@ export class Sidebar implements vscode.TreeDataProvider<SidebarNode>, vscode.Tre
       item.iconPath = new vscode.ThemeIcon(
         errors.length || task.workspaceError || task.integration?.error || sync?.status === 'conflict'
           ? 'warning'
-          : sync && sync.status !== 'current'
-            ? 'sync'
-            : connected
-              ? 'plug'
-              : task.worktree
-                ? 'git-branch'
-                : 'circle-outline',
+          : model.checkingRebase && sync
+            ? 'sync~spin'
+            : sync && sync.status !== 'current'
+              ? 'sync'
+              : connected
+                ? 'plug'
+                : task.worktree
+                  ? 'git-branch'
+                  : 'circle-outline',
       );
       item.command = { command: 'warden.selectTask', title: 'View Task Changes', arguments: [node] };
       return item;

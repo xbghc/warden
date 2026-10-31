@@ -6,6 +6,7 @@ const { execFileSync } = require('node:child_process');
 
 async function checkQuietRefresh(workbench, workspace) {
   await workbench.refresh(true);
+  while (workbench.checkReading) await workbench.checkReading;
   let updates = 0;
   const subscription = workbench.sidebar.onDidChangeTreeData(() => ++updates);
   const file = path.join(workspace.task.worktree, 'sidebar-refresh.txt');
@@ -36,6 +37,7 @@ async function checkQuietRefresh(workbench, workspace) {
     const row = () => workbench.model('workspaces').workspaces.find((row) => row.task.id === workspace.task.id);
     const first = row().files.find((entry) => entry.path === 'sidebar-refresh.txt');
     assert(first, 'the expanded task includes the new file');
+    while (workbench.checkReading) await workbench.checkReading;
     updates = 0;
     await fs.writeFile(file, 'Other version\n');
     await workbench.refresh(true);

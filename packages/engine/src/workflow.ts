@@ -101,7 +101,7 @@ export class WorkflowService {
     private store: StateStore,
   ) {}
 
-  async get(): Promise<WorkflowResponse> {
+  async get(inventory?: Promise<WorktreeDetail[]>): Promise<WorkflowResponse> {
     const state = await this.store.load();
     const workflow = state.workflow ?? null;
     const legacyTodos = state.todos;
@@ -112,7 +112,7 @@ export class WorkflowService {
       const working = workflow.changes.filter(
         (row): row is DevelopmentChange => !!row.worktree && row.status === 'working' && row.developmentBranch === workflow.developmentBranch,
       );
-      const checkouts = working.length ? this.listCheckouts() : undefined;
+      const checkouts = working.length ? (inventory ? inventory.then((rows) => new Map(rows.map((row) => [row.path, row]))) : this.listCheckouts()) : undefined;
       for (const row of working) {
         try {
           const checkout = await this.checkout(row, checkouts);

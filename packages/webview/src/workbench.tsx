@@ -99,7 +99,7 @@ function Rebase({ model, send }: Props) {
       </div>
       {(checks.length > 0 || retry) && (
         <div className="actions">
-          <IconButton label="Check Again" disabled={!!model.busy} onClick={() => send({ type: 'rebase.check' })}>
+          <IconButton label="Check Again" disabled={!!model.busy || model.checkingRebase} onClick={() => send({ type: 'rebase.check' })}>
             <RefreshCw aria-hidden="true" />
           </IconButton>
           {checks.length > 0 && (
@@ -119,7 +119,8 @@ function Rebase({ model, send }: Props) {
           )}
         </div>
       )}
-      {!model.checks && <p>Not Checked</p>}
+      {model.checkingRebase && <p role="status">Checking synchronization…</p>}
+      {!model.checks && !model.checkingRebase && <p>Not Checked</p>}
       {model.checks && !checks.length && <p>No workspaces</p>}
       {checks.map((check) => (
         <label className="check" key={check.changeId}>
@@ -132,9 +133,11 @@ function Rebase({ model, send }: Props) {
             <strong>{model.workflow?.workflow?.changes.find((task) => task.id === check.changeId)?.title ?? check.changeId}</strong>
             <div className="metadata">
               <StatusBadge status={check.status}>{rebaseCheckLabels[check.status]}</StatusBadge>
-              <time className="muted" dateTime={check.checkedAt} title="Checked at">
-                {new Date(check.checkedAt).toLocaleTimeString('en-US')}
-              </time>
+              {!model.checkingRebase && (
+                <time className="muted" dateTime={check.checkedAt} title="Checked at">
+                  {new Date(check.checkedAt).toLocaleTimeString('en-US')}
+                </time>
+              )}
             </div>
             {check.message && <p className="muted">{check.message}</p>}
             {check.files?.length ? <pre>{check.files.join('\n')}</pre> : null}
@@ -145,7 +148,7 @@ function Rebase({ model, send }: Props) {
         <>
           <div className="actions">
             <Button
-              disabled={!!model.busy || !selectedChecks.length}
+              disabled={!!model.busy || model.checkingRebase || !selectedChecks.length}
               onClick={() =>
                 send({
                   type: 'rebase.run',

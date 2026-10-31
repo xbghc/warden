@@ -99,6 +99,11 @@ flag; requests that would need anything else receive a structured engine error. 
 own arguments. Diff review is read-only: the legacy `POST /api/targets/:key/stage` endpoint and its
 partial index-patch writer have been removed. The `PUT /api/targets/:key/viewed` endpoint is also
 removed and returns 404.
+The read-only `repository.get` command composes existing workflow, preview and workspace readers,
+sharing a detailed checkout inventory only within that observation. It introduces no additional
+Git command shapes or writes. Background rebase checks keep fresh reads; their results are accepted
+only for the current repository, task binding and observed version. Actual mutations never use a
+UI observation as authority and retain their repository locks and fresh validation.
 Formal delivery still prepares the primary index and commits through its validated workflow.
 Review reads `ls-tree -z <revision> -- <literal-path>` to identify submodule gitlinks without loading
 their commits from the parent repository; index comparisons use the existing `ls-files --stage` read.

@@ -14,6 +14,7 @@ import type {
   RebaseBatchRequest,
   StartChangeRequest,
   UpdateChangeRequest,
+  WorktreeDetail,
   WorkspaceConfig,
   WorktreesResponse,
 } from '@warden/shared';
@@ -43,6 +44,10 @@ function commands(repo: RepoContext, store: StateStore) {
   const workflow = new WorkflowService(repo, store);
   const preview = new PreviewService(repo, store);
   const history = new HistoryService(repo, store);
+  const workspaces = async (inventory = listWorktreesDetailed(repo)): Promise<WorktreesResponse> => {
+    const list = await inventory;
+    return { worktrees: list, branches: await listBranches(repo, list) };
+  };
   const target = async (key: string) => {
     if (typeof key !== 'string' || !key || key.length > 16000) throw badRequest('Invalid review target.', 'invalid_request');
     return resolveTargetContext(repo, await listWorktreesAll(repo), key);
@@ -50,6 +55,17 @@ function commands(repo: RepoContext, store: StateStore) {
   return {
     previewService: preview,
     handlers: {
+      'repository.get': async () => {
+        // Share only this observation's inventory. Later reads and every mutation obtain
+        // fresh checkout state, including changes made by tools outside Warden.
+        const inventory: Promise<WorktreeDetail[]> = listWorktreesDetailed(repo);
+        const results = await Promise.allSettled([workflow.get(inventory), preview.get(), workspaces(inventory)]);
+        const [data, previewState, checkouts] = results;
+        if (data.status === 'rejected') throw data.reason;
+        if (previewState.status === 'rejected') throw previewState.reason;
+        if (checkouts.status === 'rejected') throw checkouts.reason;
+        return { workflow: data.value, preview: previewState.value, workspaces: checkouts.value };
+      },
       'workflow.get': () => workflow.get(),
       'workflow.context': async () => ({ developmentBranch: (await store.load()).workflow?.developmentBranch }),
       'workflow.configure': ({ branch }: { branch: string }) => workflow.configure(branch),
@@ -122,10 +138,7 @@ function commands(repo: RepoContext, store: StateStore) {
         );
         return config;
       },
-      'workspaces.list': async (): Promise<WorktreesResponse> => {
-        const list = await listWorktreesDetailed(repo);
-        return { worktrees: list, branches: await listBranches(repo, list) };
-      },
+      'workspaces.list': () => workspaces(),
       'review.files': async ({ key }: { key: string }): Promise<FilesResponse> => {
         const context = await target(key);
         return { targetKey: key, root: context.cwd, files: (await listTargetDiffs(context)).map(toSummary) };
@@ -143,6 +156,7 @@ export type EngineCommand = keyof EngineCommands;
 export type EngineInput<K extends EngineCommand> = Parameters<EngineCommands[K]> extends [] ? undefined : Parameters<EngineCommands[K]>[0];
 export type EngineOutput<K extends EngineCommand> = Awaited<ReturnType<EngineCommands[K]>>;
 const reads = new Set<EngineCommand>([
+  'repository.get',
   'workflow.get',
   'workflow.context',
   'preview.get',
@@ -214,6 +228,7 @@ export class Engine {
         const invoke = () => (handler as (input: never) => Promise<unknown>)(request as never);
         const result = context && !reads.has(command) ? await this.store.withDevelopmentBranch(context.developmentBranch, invoke) : await invoke();
         if (command === 'workspaces.list') this.observe((result as WorktreesResponse).worktrees.map((row) => row.path));
+        if (command === 'repository.get') this.observe((result as EngineOutput<'repository.get'>).workspaces.worktrees.map((row) => row.path));
         if (!reads.has(command)) this.changed();
         return result;
       },

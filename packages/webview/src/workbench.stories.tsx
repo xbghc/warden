@@ -117,3 +117,27 @@ export const SynchronizationChecks: Story = {
     },
   },
 };
+
+export const CheckingSynchronization: Story = {
+  args: {
+    model: {
+      ...base,
+      surface: 'rebase',
+      workflow: { workflow: { developmentBranch: task.developmentBranch, changes: [task] }, developmentHead: 'c42e9100' },
+      checkingRebase: true,
+      rebaseSelection: { request: 'pending', taskIds: [task.id] },
+      checks: {
+        checks: [
+          {
+            changeId: task.id,
+            sourceHead: '',
+            developmentHead: 'c42e9100',
+            checkedAt: '2026-10-31T02:45:08Z',
+            status: 'unknown',
+            message: 'Checking synchronization…',
+          },
+        ],
+      },
+    },
+  },
+};

@@ -45,6 +45,37 @@ describe('desktop engine', () => {
     expect(new Set(rows.map((row) => row.engine)).size).toBe(1);
     for (const value of ['private-script-value', 'private-title', fixture.root]) expect(JSON.stringify(rows)).not.toContain(value);
   });
+  it('shares one workspace inventory per repository read and observes later external edits', async () => {
+    const task = await engine.execute('task.create', { title: 'Observed task' });
+    const inventory = vi.spyOn(worktrees, 'listWorktreesDetailed');
+    const checks = vi.spyOn(WorkflowService.prototype, 'rebaseChecks');
+    const first = await engine.execute('repository.get', undefined);
+    expect(inventory).toHaveBeenCalledTimes(1);
+    expect(checks).not.toHaveBeenCalled();
+    expect(first.workflow.workflow?.changes).toContainEqual(expect.objectContaining({ id: task.id }));
+    expect(first.workspaces.worktrees).toContainEqual(expect.objectContaining({ path: task.worktree, dirty: 0 }));
+    expect(first.preview.status).toBe('disconnected');
+
+    await writeFile(path.join(task.worktree!, 'external.txt'), 'External edit\n');
+    const second = await engine.execute('repository.get', undefined);
+    expect(inventory).toHaveBeenCalledTimes(2);
+    expect(second.workspaces.worktrees).toContainEqual(expect.objectContaining({ path: task.worktree, dirty: 1 }));
+    expect(first.workspaces.worktrees).toContainEqual(expect.objectContaining({ path: task.worktree, dirty: 0 }));
+    expect((await engine.execute('rebase.check', undefined)).checks).toContainEqual(expect.objectContaining({ changeId: task.id, status: 'blocked' }));
+    expect(inventory).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not retain a failed or concurrent repository inventory for another read', async () => {
+    await engine.execute('task.create', { title: 'Retained task' });
+    const inventory = vi.spyOn(worktrees, 'listWorktreesDetailed');
+    inventory.mockRejectedValueOnce(new Error('Inventory unavailable'));
+    await expect(engine.execute('repository.get', undefined)).rejects.toThrow('Inventory unavailable');
+    const [first, second] = await Promise.all([engine.execute('repository.get', undefined), engine.execute('repository.get', undefined)]);
+    expect(inventory).toHaveBeenCalledTimes(3);
+    expect(first.workflow.error).toBeUndefined();
+    expect(second.workflow.workflow?.changes).toHaveLength(1);
+  });
+
   it('reads workspace safety and rebase state without retired management-page graph comparisons', async () => {
     const shared = await engine.execute('task.create', { title: 'Shared task' });
     const workflow = new WorkflowService(engine.repo, engine.store);

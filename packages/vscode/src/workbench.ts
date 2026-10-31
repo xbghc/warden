@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { formatTargetKey, taskReview, sameReview, previewStatusLabels, scriptStatusLabels } from '@warden/shared';
+import { DiagnosticLog, formatTargetKey, taskReview, sameReview, previewStatusLabels, scriptStatusLabels } from '@warden/shared';
 import type {
   FileEntry,
   TaskReview,
@@ -20,7 +20,6 @@ import { Documents } from './documents.js';
 import { Views } from './views.js';
 import { Sidebar } from './sidebar.js';
 import type { SidebarNode } from './sidebar.js';
-
 import { Settings } from './settings.js';
 import type { SettingsNode } from './settings.js';
 import { ScriptSettings, scriptValue } from './script-settings.js';
@@ -28,9 +27,13 @@ import type { ScriptBinding, ScriptKind } from './script-settings.js';
 
 import { AcpConversations } from './acp/conversations.js';
 import { AcpAgentSetup } from './acp/setup.js';
+import { acpDiagnosticSecrets, acpErrorDiagnostic } from './acp/diagnostics.js';
 import { BranchViews } from './branch-view.js';
+import { PerformanceLog } from './performance.js';
+import type { PerformanceOutcome, PerformanceSpan, PerformanceStage } from './performance.js';
 
 type Node = SidebarNode | SettingsNode | { kind: 'commit'; sha: string; message: string; session?: string };
+type CheckRequest = { engine: Engine; session: string; revision: number; head?: string; tasks: string[]; traced: boolean };
 
 const fileModeChange = (file: FileEntry): string | undefined =>
   file.oldMode === file.newMode ? undefined : `File mode ${file.oldMode ?? 'none'} → ${file.newMode ?? 'none'}`;
@@ -46,13 +49,19 @@ export class Workbench {
   private documents: Documents;
   private reviews = new Map<string, TaskReview>();
   private reviewUris = new Map<string, Set<string>>();
-  private output = vscode.window.createOutputChannel('Warden');
+  private output = vscode.window.createOutputChannel('Warden', { log: true });
+  private readonly log = new DiagnosticLog((level, line) => this.output[level](line), { run: randomUUID() }, acpDiagnosticSecrets());
+  private readonly performance: PerformanceLog;
+  private activation?: PerformanceSpan;
   private status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 20);
   private active?: Promise<unknown>;
   private reading?: Promise<void>;
+  private contextUpdate: Promise<void> = Promise.resolve();
+  private readonly contextValues = new Map<string, unknown>();
   private closing = false;
   private initializing = true;
   private switching = false;
+  private repositoryRevision = 0;
   private navigation = new Set<Promise<unknown>>();
 
   private readonly views: Views;
@@ -79,8 +88,24 @@ export class Workbench {
   private rebaseResult?: RebaseBatchResponse;
   private rebaseSelection?: WorkbenchModel['rebaseSelection'];
   private checkSignature?: string;
+  private checkRevision = 0;
+  private checkReading?: Promise<void>;
+  private pendingCheck?: CheckRequest;
+  private checkingRebase = false;
 
-  constructor(private readonly context: vscode.ExtensionContext) {
+  constructor(
+    private readonly context: vscode.ExtensionContext,
+    started = performance.now(),
+  ) {
+    this.log.write('info', 'extension.activate', {
+      version: context.extension.packageJSON.version,
+      vscode: vscode.version,
+      platform: process.platform,
+      remote: vscode.env.remoteName ?? 'local',
+      trusted: vscode.workspace.isTrusted,
+    });
+    this.performance = new PerformanceLog((line) => this.output.appendLine(line), started);
+    this.activation = this.performance.start('activation', undefined, started);
     this.agentSetup = new AcpAgentSetup(
       () => this.backend?.root ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
       () => {
@@ -88,6 +113,8 @@ export class Workbench {
         this.render();
       },
       context.globalState,
+      this.performance,
+      this.log.child({ component: 'acp.workbench' }),
     );
     this.branchViews = new BranchViews(context.workspaceState);
     this.documents = new Documents(context);
@@ -95,7 +122,7 @@ export class Workbench {
       context,
       (binding) => this.reviewConversation(binding),
       () => this.render(),
-      (error) => this.output.appendLine(String(error)),
+      (error) => this.log.write('error', 'conversation.failed', { diagnostic: acpErrorDiagnostic(error) }),
       async () => {
         await vscode.commands.executeCommand('warden.configureAgents');
       },
@@ -332,42 +359,62 @@ export class Workbench {
     const message = error instanceof Error ? error.message : String(error);
     const code = error instanceof WardenError ? error.code : undefined;
     this.errors.set(scope, { scope, message, code });
-    this.output.appendLine(`${code ?? 'error'}: ${message}`);
+    this.log.write('error', 'workbench.action.failed', { scope, code, diagnostic: acpErrorDiagnostic(error) });
     this.render();
     if (!(this.settings?.view.visible && ['settings', 'agent', 'repository'].includes(scope)) && !this.views.displaysError(scope))
       void vscode.window.showErrorMessage(`Warden: ${message}`);
   }
   async initialize() {
-    this.initializing = true;
-    this.render();
+    const span = this.activation ?? this.performance.start('activation');
+    this.activation = undefined;
+    let outcome: PerformanceOutcome = 'error';
     try {
-      await this.updateContext();
-      const folders = vscode.workspace.workspaceFolders;
-      const remembered = this.context.workspaceState.get<string>('warden.repository');
-      const folder = folders?.find((candidate) => candidate.uri.fsPath === remembered) ?? (folders?.length === 1 ? folders[0] : undefined);
-      if (folder) await this.open(folder.uri.fsPath);
-    } catch (error) {
-      this.output.appendLine(String(error));
-    } finally {
-      this.initializing = false;
-      await this.updateContext();
-      this.agentSetup.start();
+      this.initializing = true;
       this.render();
+      let failed = false;
+      try {
+        await this.updateContext(span);
+        const folders = vscode.workspace.workspaceFolders;
+        const remembered = this.context.workspaceState.get<string>('warden.repository');
+        const folder = folders?.find((candidate) => candidate.uri.fsPath === remembered) ?? (folders?.length === 1 ? folders[0] : undefined);
+        if (folder) await this.open(folder.uri.fsPath, span);
+      } catch (error) {
+        failed = true;
+        this.log.write('error', 'extension.initialize.failed', { diagnostic: acpErrorDiagnostic(error) });
+      } finally {
+        this.initializing = false;
+        await this.updateContext(span);
+        this.agentSetup.start();
+        this.render();
+      }
+      outcome = failed ? 'error' : 'ok';
+    } finally {
+      span.end(outcome);
     }
   }
-  private async open(directory: string) {
+  private open(directory: string, parent?: PerformanceSpan) {
+    return this.performance.measure('repository.open', (span) => this.openRepository(directory, span), parent);
+  }
+  private async openRepository(directory: string, span: PerformanceSpan) {
     this.commitInput?.hide();
     this.taskInput?.hide();
     this.switching = true;
+    this.repositoryRevision++;
     this.session = randomUUID();
+    this.invalidateChecks();
     this.status.hide();
     this.render();
     try {
-      await this.updateContext();
-      await Promise.allSettled([...this.navigation]);
-      await this.reading;
-      await this.backend?.close();
-      this.backend = await Engine.open(directory);
+      await this.updateContext(span);
+      await span.measure('repository.wait', async () => {
+        await Promise.allSettled([...this.navigation]);
+        await this.reading;
+        await this.backend?.close();
+      });
+      this.backend = await span.measure('engine.open', () => Engine.open(directory, undefined, this.log));
+      // The primary path is known now; agent readiness does not depend on Git inventories
+      // or advisory synchronization checks. Repository loading still gates navigation.
+      this.agentSetup.start();
       this.selected = undefined;
       this.branch = undefined;
       this.expanded = this.context.workspaceState.get<Record<string, boolean>>(`warden.expanded:${this.backend.root}`, {});
@@ -389,19 +436,21 @@ export class Workbench {
       this.taskTargets.clear();
       this.reviews.clear();
       this.reviewUris.clear();
-      await this.refresh();
+      await span.measure('repository.refresh', (refresh) => this.refresh(false, refresh));
     } catch (error) {
       await this.backend?.close();
       this.backend = undefined;
       throw error;
     } finally {
       this.switching = false;
-      await this.updateContext();
+      await this.updateContext(span);
       if (this.backend)
-        await Promise.all(
-          this.tasks()
-            .filter((task) => task.worktree && this.expanded[task.id])
-            .map((task) => this.getChildren({ kind: 'task', task })),
+        await span.measure('review.restore', () =>
+          Promise.all(
+            this.tasks()
+              .filter((task) => task.worktree && this.expanded[task.id])
+              .map((task) => this.getChildren({ kind: 'task', task })),
+          ),
         );
       this.render();
     }
@@ -414,26 +463,49 @@ export class Workbench {
     if (this.initializing || this.switching) return 'loading';
     return this.backend ? 'ready' : 'unselected';
   }
-  private async updateContext() {
-    const state = this.repositoryState;
-    const hasRepository = state === 'ready';
-    // Hide setup actions before clearing the previous context; expose them only after all
-    // settled flags are published, so async activation and switching cannot flash a picker.
-    if (state === 'loading') await vscode.commands.executeCommand('setContext', 'warden.repositoryState', state);
-    await Promise.all([
-      vscode.commands.executeCommand('setContext', 'warden.hasRepository', hasRepository),
-      vscode.commands.executeCommand('setContext', 'warden.hasDevelopmentBranch', hasRepository && !!this.data?.workflow),
-      vscode.commands.executeCommand('setContext', 'warden.multipleRoots', (vscode.workspace.workspaceFolders?.length ?? 0) > 1),
-      vscode.commands.executeCommand('setContext', 'warden.hasPreviewCommand', this.model('workspaces').hasPreviewCommand),
-      vscode.commands.executeCommand('setContext', 'warden.hasPreviewSetup', !!this.data?.workspaceConfig?.previewSetup?.trim()),
-    ]);
-    if (state !== 'loading' && state === this.repositoryState) await vscode.commands.executeCommand('setContext', 'warden.repositoryState', state);
+  private updateContext(trace?: PerformanceSpan): Promise<void> {
+    const update = async () => {
+      if (this.closing) return;
+      const state = this.repositoryState;
+      const session = this.session;
+      const hasRepository = state === 'ready';
+      const publish = async (key: string, value: unknown) => {
+        if (this.contextValues.has(key) && this.contextValues.get(key) === value) return;
+        await vscode.commands.executeCommand('setContext', key, value);
+        this.contextValues.set(key, value);
+      };
+      // Preserve the loading/ready barrier, while avoiding repeated remote round trips
+      // for flags that have already been acknowledged by the workbench.
+      if (state === 'loading') await publish('warden.repositoryState', state);
+      const published = await Promise.allSettled([
+        publish('warden.hasRepository', hasRepository),
+        publish('warden.hasDevelopmentBranch', hasRepository && !!this.data?.workflow),
+        publish('warden.multipleRoots', (vscode.workspace.workspaceFolders?.length ?? 0) > 1),
+        publish('warden.hasPreviewCommand', hasRepository && !!this.previewCommand()?.trim()),
+        publish('warden.hasPreviewSetup', hasRepository && !!this.data?.workspaceConfig?.previewSetup?.trim()),
+      ]);
+      const failed = published.find((result) => result.status === 'rejected');
+      if (failed?.status === 'rejected') throw failed.reason;
+      if (state !== 'loading' && state === this.repositoryState && session === this.session) await publish('warden.repositoryState', state);
+    };
+    const previous = this.contextUpdate;
+    const publish = () => previous.then(update);
+    const pending = trace ? trace.measure('context.update', publish) : publish();
+    // A failed publication is retried by the next update; it must not poison the queue.
+    this.contextUpdate = pending.catch(() => {});
+    return pending;
+  }
+  private previewCommand() {
+    const resource = this.backend ? vscode.Uri.file(this.backend.root) : null;
+    const value = vscode.workspace.getConfiguration('warden', resource).get<unknown>('previewCommand');
+    return typeof value === 'string' ? value : undefined;
   }
   private async changeBranch(data: WorkflowResponse) {
     this.commitInput?.hide();
     this.taskInput?.hide();
     this.branchTransition = true;
     this.session = randomUUID();
+    this.invalidateChecks();
     this.branch = data.workflow?.developmentBranch;
     this.selected = undefined;
 
@@ -453,19 +525,18 @@ export class Workbench {
       this.branchTransition = false;
     }
   }
-  refresh(afterMutation = false): Promise<void> {
+  refresh(afterMutation = false, trace?: PerformanceSpan): Promise<void> {
     // A read begun before a write cannot acknowledge that write to the next user action.
-    if (this.reading) return afterMutation ? this.reading.catch(() => {}).then(() => this.refresh()) : this.reading;
+    if (this.reading) return afterMutation ? this.reading.catch(() => {}).then(() => this.refresh(true)) : this.reading;
     if (!this.backend || this.closing) return Promise.resolve();
     this.reading = (async () => {
       const engine = this.backend!;
+      const revision = this.repositoryRevision;
+      const currentRepository = () => !this.closing && engine === this.backend && revision === this.repositoryRevision;
+      const measure = <T>(stage: PerformanceStage, operation: () => Promise<T>) => (trace ? trace.measure(stage, operation) : operation());
       for (let attempt = 0; attempt < 3; ++attempt) {
-        let [data, preview, checkouts] = await Promise.all([
-          engine.execute('workflow.get', undefined),
-          engine.execute('preview.get', undefined),
-          engine.execute('workspaces.list', undefined),
-        ]);
-        if (this.closing) return;
+        let { workflow: data, preview, workspaces: checkouts } = await measure('repository.get', () => engine.execute('repository.get', undefined));
+        if (!currentRepository()) return;
         // Migrate the old repository-wide UI state into its original requirement before following Git.
         if (this.branch === undefined && data.workflow) await this.branchViews.load(engine.root, data);
         const primary = checkouts.worktrees.find((row) => row.isMain && !row.shared && !row.clone);
@@ -473,8 +544,8 @@ export class Workbench {
         if (data.workflow && primary?.branch && !primary.detached && !primary.busy && !primary.foreign && primary.branch !== data.workflow.developmentBranch) {
           const previous = data.workflow.developmentBranch;
           try {
-            await engine.execute('workflow.configure', { branch: primary.branch }, { developmentBranch: previous });
-            [data, preview] = await Promise.all([engine.execute('workflow.get', undefined), engine.execute('preview.get', undefined)]);
+            await measure('workflow.configure', () => engine.execute('workflow.configure', { branch: primary.branch! }, { developmentBranch: previous }));
+            ({ workflow: data, preview, workspaces: checkouts } = await measure('repository.get', () => engine.execute('repository.get', undefined)));
           } catch (error) {
             if (error instanceof WardenError && error.code === 'requirement_changed') continue;
             if (!(error instanceof WardenError) || !['development_in_use', 'operation_locked'].includes(error.code ?? '')) throw error;
@@ -494,35 +565,39 @@ export class Workbench {
         const checkSignature = JSON.stringify([
           branch,
           data.developmentHead,
-          checkouts.worktrees.map((row) => [row.path, row.head, row.branch, row.dirty, row.busy]),
-          data.workflow?.changes.map((task) => [task.id, task.base, task.worktree ? task.sourceBase : undefined]),
+          checkouts.worktrees.map((row) => [row.path, row.head, row.branch, row.dirty, row.busy, row.foreign, row.prunable, row.clone, row.shared]),
+          data.workflow?.changes.map((task) => [
+            task.id,
+            task.status,
+            task.developmentBranch,
+            task.worktree,
+            task.branch,
+            task.base,
+            task.worktree ? task.sourceBase : undefined,
+          ]),
         ]);
-        const checks = data.workflow ? (checkSignature !== this.checkSignature ? await engine.execute('rebase.check', undefined) : this.checks) : undefined;
-        const current = await engine.execute('workflow.context', undefined);
-        const taskIds =
-          data.workflow?.changes
-            .filter((task) => task.worktree && task.status !== 'accepted' && task.developmentBranch === branch)
-            .map((task) => task.id)
-            .sort() ?? [];
-        if (
-          current.developmentBranch !== branch ||
-          (checks &&
-            (JSON.stringify(checks.checks.map((check) => check.changeId).sort()) !== JSON.stringify(taskIds) ||
-              checks.checks.some((check) => check.developmentHead !== data.developmentHead)))
-        )
-          continue;
+        const current = await measure('workflow.context', () => engine.execute('workflow.context', undefined));
+        if (!currentRepository()) return;
+        if (current.developmentBranch !== branch) continue;
+        if (this.preview?.status !== preview.status || this.preview?.syncStatus !== preview.syncStatus)
+          this.log.write(preview.syncStatus === 'error' || preview.syncStatus === 'conflict' ? 'warn' : 'info', 'preview.state', {
+            status: preview.status,
+            syncStatus: preview.syncStatus,
+            connections: preview.connectedIds.length,
+          });
         this.data = data;
         this.preview = preview;
         this.checkouts = checkouts;
         if (changedBranch) await this.changeBranch(data);
+        if (!currentRepository()) return;
 
-        this.checks = checks;
-        this.checkSignature = checkSignature;
+        this.scheduleChecks(engine, checkSignature, !!trace);
         if (branchProblem) {
-          if (this.errors.get('branch')?.message !== branchProblem.message) this.output.appendLine(branchProblem.message);
+          if (this.errors.get('branch')?.message !== branchProblem.message)
+            this.log.write('warn', 'repository.branch.blocked', { code: branchProblem.code, diagnostic: branchProblem.message });
           this.errors.set('branch', branchProblem);
         } else this.errors.delete('branch');
-        await this.updateContext();
+        await this.updateContext(trace);
         this.render();
         for (const key of this.files.keys()) {
           try {
@@ -532,22 +607,26 @@ export class Workbench {
             this.files.delete(key);
           }
         }
-        await Promise.all(
-          this.tasks()
-            .filter((task) => task.worktree && this.expanded[task.id])
-            .map((task) => this.getChildren({ kind: 'task', task })),
-        );
+        await measure('review.restore', async () => {
+          await Promise.all(
+            this.tasks()
+              .filter((task) => task.worktree && this.expanded[task.id])
+              .map((task) => this.getChildren({ kind: 'task', task })),
+          );
+        });
         this.render();
         if (data.workflow)
-          await this.backend!.start(
-            () => this.refresh(),
-            (error) => {
-              this.output.appendLine(String(error));
-              if (!(error instanceof WardenError && error.code === 'operation_locked')) {
-                this.errors.set('repository', { scope: 'repository', message: String(error) });
-                this.render();
-              }
-            },
+          await measure('engine.start', () =>
+            this.backend!.start(
+              () => this.refresh(),
+              (error) => {
+                this.log.write('error', 'repository.refresh.failed', { diagnostic: acpErrorDiagnostic(error) });
+                if (!(error instanceof WardenError && error.code === 'operation_locked')) {
+                  this.errors.set('repository', { scope: 'repository', message: String(error) });
+                  this.render();
+                }
+              },
+            ),
           );
         return;
       }
@@ -556,6 +635,93 @@ export class Workbench {
       this.reading = undefined;
     });
     return this.reading;
+  }
+  private invalidateChecks() {
+    this.checkRevision++;
+    this.checkSignature = undefined;
+    this.pendingCheck = undefined;
+    this.checks = undefined;
+    this.checkingRebase = false;
+    this.errors.delete('rebase');
+  }
+  private scheduleChecks(engine: Engine, signature: string, traced: boolean) {
+    if (signature === this.checkSignature) return;
+    this.invalidateChecks();
+    this.checkSignature = signature;
+    if (!this.data?.workflow) return;
+    const tasks = this.tasks().filter((task) => task.worktree && task.status !== 'accepted');
+    this.checks = {
+      checks: tasks.map((task) => ({
+        changeId: task.id,
+        sourceHead: '',
+        developmentHead: this.data?.developmentHead ?? '',
+        status: 'unknown',
+        checkedAt: new Date().toISOString(),
+        message: 'Checking synchronization…',
+      })),
+    };
+    if (!tasks.length) return;
+    this.checkingRebase = true;
+    this.errors.delete('rebase');
+    this.pendingCheck = {
+      engine,
+      session: this.session,
+      revision: this.checkRevision,
+      head: this.data.developmentHead,
+      tasks: tasks.map((task) => task.id).sort(),
+      traced,
+    };
+    // Keep one running check and only the latest queued observation. Frequent file events
+    // must not launch competing replay trials or publish results for a replaced task binding.
+    this.startChecks();
+  }
+  private startChecks() {
+    if (!this.checkReading && this.pendingCheck && !this.closing) {
+      this.checkReading = this.readChecks().finally(() => {
+        this.checkReading = undefined;
+        this.startChecks();
+      });
+    }
+  }
+  private async readChecks() {
+    while (this.pendingCheck && !this.closing) {
+      const request = this.pendingCheck;
+      this.pendingCheck = undefined;
+      const current = () => !this.closing && request.engine === this.backend && request.session === this.session && request.revision === this.checkRevision;
+      try {
+        const read = () => request.engine.execute('rebase.check', undefined);
+        const result = await (request.traced ? this.performance.measure('rebase.check', read) : read());
+        if (!current()) continue;
+        const context = await request.engine.execute('workflow.context', undefined);
+        if (!current()) continue;
+        if (
+          context.developmentBranch !== this.branch ||
+          JSON.stringify(result.checks.map((check) => check.changeId).sort()) !== JSON.stringify(request.tasks) ||
+          result.checks.some((check) => {
+            const task = this.tasks().find((task) => task.id === check.changeId);
+            const source = this.checkouts?.worktrees.find((row) => row.path === task?.worktree);
+            return check.developmentHead !== request.head || (!!check.sourceHead && !!source?.head && check.sourceHead !== source.head);
+          })
+        ) {
+          this.checkSignature = undefined;
+          for (const check of this.checks?.checks ?? []) check.message = 'Code changed during the check. Refresh and retry.';
+        } else {
+          this.checks = result;
+          this.errors.delete('rebase');
+        }
+      } catch (error) {
+        if (current()) {
+          this.checkSignature = undefined;
+          for (const check of this.checks?.checks ?? []) check.message = 'Synchronization check failed. Check again to retry.';
+          this.report(error, 'rebase');
+        }
+      } finally {
+        if (current()) {
+          this.checkingRebase = false;
+          this.render();
+        }
+      }
+    }
   }
   private workspaceRow(task: WorkflowTask): WorkspaceRow {
     const source = this.preview?.sources?.find((row) => row.changeId === task.id);
@@ -624,7 +790,7 @@ export class Workbench {
       return response.files.map((file) => ({ kind: 'file', file, target, ...(node.kind === 'task' ? { task: node.task, review } : {}) }));
     } catch (error) {
       if (session !== this.session) return [];
-      this.output.appendLine(String(error));
+      this.log.write('error', 'review.files.failed', { diagnostic: acpErrorDiagnostic(error) });
       if (node.kind === 'task') this.fileErrors.set(node.task.id, error instanceof Error ? error.message : String(error));
       return [];
     }
@@ -633,7 +799,7 @@ export class Workbench {
     return this.data?.workflow?.changes.filter((c) => c.developmentBranch === this.data?.workflow?.developmentBranch) ?? [];
   }
   private async readReview(changeId: string) {
-    const [data, checkouts] = await Promise.all([this.api('workflow.get', undefined), this.api('workspaces.list', undefined)]);
+    const { workflow: data, workspaces: checkouts } = await this.api('repository.get', undefined);
     if (
       data.workflow?.developmentBranch !== this.branch ||
       !data.workflow?.changes.some((task) => task.id === changeId && task.developmentBranch === this.branch)
@@ -1069,7 +1235,7 @@ export class Workbench {
   private async runPreview() {
     const preview = await this.ensurePreview();
     const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(this.backend!.root));
-    const command = vscode.workspace.getConfiguration('warden', folder).get<string>('previewCommand');
+    const command = this.previewCommand();
     if (!command?.trim()) {
       await this.previewTerminal();
       return;
@@ -1097,8 +1263,9 @@ export class Workbench {
   }
   private async refreshChecks() {
     await this.reading;
-    this.checkSignature = undefined;
+    this.invalidateChecks();
     await this.refresh(true);
+    while (this.checkReading) await this.checkReading;
   }
   private async copyWorkspace(node?: Node) {
     const task = await this.pickTask(node);
@@ -1166,8 +1333,6 @@ ${text}`,
   private model(surface: Surface): WorkbenchModel {
     const task = this.tasks().find((row) => row.id === this.selected);
     const review = task ? this.reviews.get(task.id) : undefined;
-    const folder = this.backend ? vscode.workspace.getWorkspaceFolder(vscode.Uri.file(this.backend.root)) : undefined;
-    const previewCommand = vscode.workspace.getConfiguration('warden', folder).get<unknown>('previewCommand');
     if (!this.agentReady)
       return {
         session: this.session,
@@ -1192,8 +1357,9 @@ ${text}`,
       task,
       workspaces: this.tasks().map((task) => this.workspaceRow(task)),
       preview: this.preview,
-      hasPreviewCommand: typeof previewCommand === 'string' && !!previewCommand.trim(),
+      hasPreviewCommand: !!this.previewCommand()?.trim(),
       checks: this.checks,
+      checkingRebase: this.checkingRebase,
       rebaseResult: this.rebaseResult,
       rebaseSelection: this.rebaseSelection,
       review,
@@ -1289,6 +1455,7 @@ ${text}`,
       'preview.copy',
       'preview.terminal',
       'settings.agents',
+      'rebase.check',
     ];
     return this.perform(
       async () => {
@@ -1433,16 +1600,20 @@ ${text}`,
   }
 
   async close() {
+    this.log.write('info', 'extension.close.start');
     this.closing = true;
+    this.invalidateChecks();
     this.commitInput?.hide();
     this.taskInput?.hide();
     const closed = await Promise.allSettled([this.agentSetup.close(), this.conversations.close()]);
-    for (const result of closed) if (result.status === 'rejected') this.output.appendLine(`Agent cleanup failed: ${String(result.reason)}`);
-    await Promise.allSettled([this.active, ...this.navigation, this.reading]);
+    for (const result of closed)
+      if (result.status === 'rejected') this.log.write('error', 'extension.agent.cleanup.failed', { diagnostic: acpErrorDiagnostic(result.reason) });
+    await Promise.allSettled([this.active, ...this.navigation, this.reading, this.checkReading, this.contextUpdate]);
     try {
       await this.views.flush();
     } finally {
       await this.backend?.close();
+      this.log.write('info', 'extension.close.end');
     }
   }
 }

@@ -305,7 +305,7 @@ exports.run = async () => {
       }
       try {
         const result = await execute.call(engine, command, request);
-        if (command === 'workflow.get' && hold) {
+        if (command === 'repository.get' && hold) {
           hold = false;
           capturedRead();
           await heldRead;
