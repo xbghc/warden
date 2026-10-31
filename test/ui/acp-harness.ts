@@ -7,7 +7,7 @@ import os from 'node:os';
 import { unzipSync } from 'fflate';
 import { Engine } from '@warden/engine';
 import { parseAcpAction } from '@warden/shared';
-import type { AcpAction, AcpBinding, AcpModel, AcpRecord } from '@warden/shared';
+import type { AcpAction, AcpBinding, AcpModel, AcpRecord, AcpViewState } from '@warden/shared';
 import type { AcpProfile } from '../../packages/vscode/src/acp/contracts.js';
 import { AcpDraft } from '../../packages/vscode/src/acp/draft.js';
 import { AcpSession } from '../../packages/vscode/src/acp/session.js';
@@ -85,6 +85,7 @@ interface Entry {
   storage: CompletionStorage;
   profiles: AcpProfile[];
   draft: AcpDraft;
+  viewState?: AcpViewState;
   sending: boolean;
   error?: string;
 }
@@ -123,6 +124,8 @@ const model = (entry: Entry): AcpModel => ({
   ...entry.session.snapshot(),
   error: entry.error ?? entry.session.snapshot().error,
   panelId: entry.panelId,
+  presentation: 'sidebar',
+  viewState: entry.viewState,
   sending: entry.sending,
   profiles: entry.profiles.map(({ id, label }) => ({ id, label })),
   ...entry.draft.snapshot(),
@@ -137,6 +140,11 @@ async function act(entry: Entry, action: AcpAction) {
     entry.draft.update(action);
     return;
   }
+  if (action.type === 'view-state') {
+    entry.viewState = { scrollTop: action.scrollTop, followOutput: action.followOutput, profileId: action.profileId };
+    return;
+  }
+  if (['view-ready', 'open-sidebar'].includes(action.type)) return;
   entry.error = undefined;
   switch (action.type) {
     case 'send': {

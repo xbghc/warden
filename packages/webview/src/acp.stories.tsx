@@ -149,3 +149,40 @@ export const LegacyModes: Story = {
     },
   },
 };
+
+export const Sidebar: Story = {
+  args: { model: { ...model, presentation: 'sidebar' } },
+  decorators: [
+    (Story) => (
+      <div style={{ width: 320 }}>
+        <Story />
+      </div>
+    ),
+  ],
+};
+
+export const SidebarPermission: Story = {
+  ...Sidebar,
+  args: { model: { ...WaitingForPermission.args!.model!, presentation: 'sidebar' } },
+};
+
+export const SidebarLongHistory: Story = {
+  ...Sidebar,
+  args: {
+    model: {
+      ...SessionControls.args!.model!,
+      presentation: 'sidebar',
+      record: {
+        ...SessionControls.args!.model!.record,
+        messages: Array.from({ length: 30 }, (_, index) => ({
+          id: `message-${index}`,
+          role: index % 2 ? 'agent' : 'user',
+          text:
+            index % 2
+              ? 'The filter now preserves the existing pagination behavior. Review src/orders.ts before running the preview tests.'
+              : 'Keep the existing pagination defaults when no filter is supplied.',
+        })),
+      },
+    },
+  },
+};

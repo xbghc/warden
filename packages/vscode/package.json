@@ -10,7 +10,7 @@
     "url": "https://github.com/xbghc/warden.git"
   },
   "engines": {
-    "vscode": "^1.95.0"
+    "vscode": "^1.106.0"
   },
   "categories": [
     "Other"
@@ -40,6 +40,13 @@
           "title": "Warden",
           "icon": "media/warden.svg"
         }
+      ],
+      "secondarySidebar": [
+        {
+          "id": "warden-chat",
+          "title": "Task Chat",
+          "icon": "$(comment-discussion)"
+        }
       ]
     },
     "views": {
@@ -48,6 +55,15 @@
           "id": "warden.task",
           "name": "工作区",
           "type": "webview"
+        }
+      ],
+      "warden-chat": [
+        {
+          "id": "warden.taskChat",
+          "name": "Task Chat",
+          "type": "webview",
+          "when": "workspaceFolderCount > 0",
+          "icon": "$(comment-discussion)"
         }
       ]
     },
@@ -221,6 +237,18 @@
         "title": "同步冲突：查看详情",
         "category": "Warden",
         "icon": "$(warning)"
+      },
+      {
+        "command": "warden.switchChat",
+        "title": "Switch Task Chat",
+        "category": "Warden",
+        "icon": "$(list-selection)"
+      },
+      {
+        "command": "warden.expandChat",
+        "title": "Open Chat in Editor",
+        "category": "Warden",
+        "icon": "$(link-external)"
       }
     ],
     "menus": {
@@ -255,6 +283,16 @@
         {
           "command": "warden.editHistory",
           "when": "view == warden.task && warden.hasDevelopmentBranch"
+        },
+        {
+          "command": "warden.switchChat",
+          "when": "view == warden.taskChat",
+          "group": "navigation@1"
+        },
+        {
+          "command": "warden.expandChat",
+          "when": "view == warden.taskChat && warden.chatInSidebar",
+          "group": "navigation@2"
         }
       ],
       "commandPalette": [

@@ -43,11 +43,18 @@ never triggers an automatic prompt retry.
 
 ## Task-bound conversations
 
-Each panel belongs to one repository, task allocation and workspace identity. It retains the
-original repository Engine; selecting another task or repository does not retarget the panel,
-its draft, permission answers or its review action. An executor label is still only a label.
+Each conversation belongs to one repository, task allocation and workspace identity. It retains the
+original repository Engine; selecting another task or repository does not retarget its draft,
+permission answers or review action. **Chat with Agent** opens the conversation in a shared Task Chat
+view, contributed to the Secondary Side Bar (VS Code 1.106+). Explicit chat selection changes which
+conversation the view presents. **Open Chat in Editor** and **Move Chat to Side Bar** transfer its one
+editable surface without creating a session or process. Multiple tasks can have editor chats open.
+Before switching or moving, the host requests and acknowledges the latest draft and reading position;
+a failed capture leaves the current view available. Each mount receives a fresh routing token, and
+queued messages from an old mount are ignored. Drafts, profile selection and reading position belong
+to the task allocation; changing presentation never transfers them to another task. An executor label is still only a label.
 
-Opening a panel shows saved history without launching an agent. An explicit connect or send starts
+Opening a chat shows saved history without launching an agent. An explicit connect or send starts
 the configured process, negotiates capabilities and creates the session. One executable connection
 is allowed per task; separate tasks can have separate conversations. Each connection accepts one
 prompt at a time while other tasks, diff review and preview remain usable.
@@ -74,7 +81,8 @@ or add a global automatic approval policy. A late click cannot answer a request 
 connection, another panel or another window.
 
 The webview receives a finite, validated action vocabulary. Repository/session identity comes from
-the host-owned panel binding, not arbitrary message fields. Agent content is displayed as text;
+the host-owned view binding, not arbitrary message fields. View-state messages contain only bounded
+reading positions and profile IDs; they cannot change the binding or execute commands. Agent content is displayed as text;
 it cannot invoke a VS Code command or supply executable profile settings.
 
 ## Session controls and updates

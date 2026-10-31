@@ -105,7 +105,7 @@ pnpm test:vscode
 `test/ui/smoke.py` starts and closes `test/ui/harness.ts`, exercises initialization, empty states, task
 menus, inline details, task/commit draft preservation across branch models, optional settings, preview setup, collapsed history
 editing/application and rebase selection, and saves screenshots under
-`WARDEN_UI_ARTIFACTS` (default `/tmp/warden-ui-artifacts`). The harness is test-only and is not shipped.
+`WARDEN_UI_ARTIFACTS` (default `/tmp/warden-ui-artifacts`). The harness is test-only and is not shipped. ACP browser and packaged-host checks cover sidebar/editor transfers, retained drafts and reading positions, and stale view routing.
 Inspect screenshots and console errors. Preserve intentional error cases in native-host tests as well.
 For manual verification, run `node --import tsx test/ui/harness.ts` and open its reported port. `/inspect`
 embeds the task pane at 320 pixels in light, dark and high-contrast themes. `WARDEN_UI_PORT` and
@@ -136,7 +136,7 @@ shell or arbitrary VS Code command bridge.
 
 `pnpm test:vscode` requires an existing VSIX, unpacks it into a temporary directory, and tests those
 packaged bytes. It never silently substitutes a source build. `WARDEN_VSCODE_VERSION` selects the
-host (default `1.95.3`); `VSCODE_EXECUTABLE_PATH` selects an existing executable. Linux CI uses Xvfb.
+host (default `1.106.0`); `VSCODE_EXECUTABLE_PATH` selects an existing executable. Linux CI uses Xvfb.
 In environments requiring an HTTP proxy, configure the test downloader's `npm_config_https_proxy`.
 
 The suite checks native read-only snapshots, stale review rejection, preview isolation/setup/terminal,

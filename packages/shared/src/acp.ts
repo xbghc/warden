@@ -87,6 +87,11 @@ export interface AcpDraftEdit {
   /** Monotonic local edit revision within this panel. */
   revision: number;
 }
+export interface AcpViewState {
+  scrollTop: number;
+  followOutput: boolean;
+  profileId: string;
+}
 export interface AcpModel extends AcpSnapshot {
   /** Panel identity, independent of the currently selected workbench repository. */
   panelId: string;
@@ -97,11 +102,14 @@ export interface AcpModel extends AcpSnapshot {
   draftVersion: number;
   draftRevision: number;
   draftChanges: AcpDraftChange[];
+  presentation?: 'sidebar' | 'editor';
+  viewState?: AcpViewState;
 }
 export type AcpAction =
   | ({ type: 'send'; profileId: string } & AcpDraftEdit)
   | { type: 'connect'; profileId: string; resume: boolean }
-  | { type: 'cancel' | 'disconnect' | 'new' | 'configure' | 'review' }
+  | { type: 'cancel' | 'disconnect' | 'new' | 'configure' | 'review' | 'open-sidebar' | 'view-ready' }
+  | ({ type: 'view-state'; requestId?: string } & AcpViewState)
   | ({ type: 'draft' } & AcpDraftEdit)
   | { type: 'permission'; requestId: string; optionId: string }
   | { type: 'authenticate'; methodId: string }
@@ -138,7 +146,25 @@ export function parseAcpAction(value: unknown): AcpAction {
     case 'new':
     case 'configure':
     case 'review':
+    case 'open-sidebar':
+    case 'view-ready':
       return { type: action.type };
+    case 'view-state':
+      if (
+        typeof action.scrollTop !== 'number' ||
+        !Number.isFinite(action.scrollTop) ||
+        action.scrollTop < 0 ||
+        action.scrollTop > 1e9 ||
+        typeof action.followOutput !== 'boolean'
+      )
+        throw new Error('Invalid conversation view state.');
+      return {
+        type: 'view-state',
+        scrollTop: action.scrollTop,
+        followOutput: action.followOutput,
+        profileId: text('profileId', 500),
+        ...(action.requestId === undefined ? {} : { requestId: id('requestId') }),
+      };
     case 'draft':
       return { type: 'draft', ...draft() };
     case 'permission':

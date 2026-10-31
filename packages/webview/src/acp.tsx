@@ -1,5 +1,5 @@
-import { useEffect, useId, useRef, useState } from 'react';
-import { FileDiff, FolderOpen, MessageSquarePlus, Settings, Square, Unplug } from 'lucide-react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { FileDiff, FolderOpen, MessageSquarePlus, PanelRight, Settings, Square, Unplug } from 'lucide-react';
 import { AcpSetup } from './components/AcpSetup';
 import type { AcpAction, AcpConfigOption, AcpMessage, AcpModel, AcpPermission, AcpStatus } from '@warden/shared';
 import { Button } from './components/ui/button';
@@ -33,10 +33,15 @@ const toolLabels: Record<string, string> = {
   'Responded · refusal': 'Agent declined the request',
 };
 
-export function AcpApp({ model, send }: Props) {
+export function AcpApp({ model, send: dispatch }: Props) {
   const { record, status } = model;
   const binding = record.binding;
-  const [profileId, setProfileId] = useState(record.profileId ?? model.profiles[0]?.id ?? '');
+  const [profileId, setProfileId] = useState(record.profileId ?? model.viewState?.profileId ?? model.profiles[0]?.id ?? '');
+  const [switching, setSwitching] = useState(false);
+  const switchingRef = useRef(false);
+  const send = (action: AcpAction) => {
+    if (!switchingRef.current) dispatch(action);
+  };
   const [draft, setDraft] = useState(model.draft);
   const [sending, setSending] = useState(false);
   const [pending, setPending] = useState<{ text: string; messageIds: Set<string>; status: AcpStatus; updatedAt: string }>();
@@ -46,12 +51,14 @@ export function AcpApp({ model, send }: Props) {
   const acceptedDraftRevision = useRef(model.draftRevision);
   const savedDraft = useRef({ version: model.draftVersion, revision: model.draftRevision });
   const conversation = useRef(record.id);
-  const sendRef = useRef(send);
+  const sendRef = useRef(dispatch);
+  const profileRef = useRef(profileId);
   const timer = useRef<ReturnType<typeof setTimeout>>();
   const transcript = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
-  const followOutput = useRef(true);
-  sendRef.current = send;
+  const followOutput = useRef(model.viewState?.followOutput ?? true);
+  sendRef.current = dispatch;
+  profileRef.current = profileId;
 
   // An error may leave an agent waiting for login or cancellation. Keep disconnect reachable.
   const hasConnection = status !== 'disconnected' && status !== 'resetting';
@@ -63,6 +70,7 @@ export function AcpApp({ model, send }: Props) {
   const primaryIds = new Set(primaryOptions.map((option) => option.id));
   const extraOptions = configOptions.filter((option) => !primaryIds.has(option.id));
   const busy =
+    switching ||
     model.sending ||
     !!controls?.configuring ||
     status === 'connecting' ||
@@ -91,6 +99,35 @@ export function AcpApp({ model, send }: Props) {
     clearTimeout(timer.current);
     timer.current = setTimeout(flushDraft, 300);
   };
+
+  useLayoutEffect(() => {
+    if (transcript.current && !followOutput.current) transcript.current.scrollTop = model.viewState?.scrollTop ?? 0;
+  }, []);
+
+  useEffect(() => {
+    const receive = (event: MessageEvent) => {
+      const message = event.data;
+      if (message?.panelId !== model.panelId) return;
+      if (message.type === 'acp-resume') {
+        switchingRef.current = false;
+        setSwitching(false);
+      } else if (message.type === 'acp-capture' && typeof message.requestId === 'string') {
+        flushDraft();
+        switchingRef.current = true;
+        setSwitching(true);
+        sendRef.current({
+          type: 'view-state',
+          requestId: message.requestId,
+          scrollTop: transcript.current?.scrollTop ?? 0,
+          followOutput: followOutput.current,
+          profileId: profileRef.current,
+        });
+      }
+    };
+    window.addEventListener('message', receive);
+    sendRef.current({ type: 'view-ready' });
+    return () => window.removeEventListener('message', receive);
+  }, []);
 
   useEffect(() => {
     const staleDraft = model.draftVersion < draftVersion.current || model.draftRevision < acceptedDraftRevision.current;
@@ -150,6 +187,7 @@ export function AcpApp({ model, send }: Props) {
   useEffect(() => () => flushDraft(), []);
 
   const updateDraft = (text: string) => {
+    if (switchingRef.current) return;
     ++draftRevision.current;
     draftRef.current = text;
     setDraft(text);
@@ -170,168 +208,176 @@ export function AcpApp({ model, send }: Props) {
   };
 
   return (
-    <main className="acp-app">
-      <header className="acp-header">
-        <div className="acp-heading">
-          <h1>{binding.title}</h1>
-          <span role="status" aria-live="polite">
-            <StatusBadge status={status}>{statusLabels[status]}</StatusBadge>
-          </span>
-        </div>
-        <p className="metadata path" aria-label="Workspace" title="Workspace">
-          <FolderOpen aria-hidden="true" />
-          <span>{binding.workspace}</span>
-        </p>
-        <details className="acp-context">
-          <summary>Task and Session Info</summary>
-          <p className="path">Primary folder: {binding.repository}</p>
-          <p className="path">Task branch: {binding.branch}</p>
-          {record.agentName && <p>Agent: {record.agentName}</p>}
-          {controls?.title && <p className="acp-message-text">Agent session: {controls.title}</p>}
-          {controls?.usage && (
-            <p className="acp-usage" aria-label="Session Usage">
-              Context: {controls.usage.used.toLocaleString('en-US')} / {controls.usage.size.toLocaleString('en-US')} tokens
-              {controls.usage.cost &&
-                ` · Total cost: ${controls.usage.cost.amount.toLocaleString('en-US', { maximumFractionDigits: 6 })} ${controls.usage.cost.currency}`}
-            </p>
-          )}
-        </details>
-        <div className="acp-profile">
-          <div className="field">
-            <NativeSelect aria-label="Agent Profile" value={profileId} disabled={!canChooseProfile} onChange={(event) => setProfileId(event.target.value)}>
-              {!model.profiles.length && <NativeSelectOption value="">No agent profiles configured</NativeSelectOption>}
-              {!!profileId && !availableProfile && <NativeSelectOption value={profileId}>Profile removed: {profileId}</NativeSelectOption>}
-              {model.profiles.map((profile) => (
-                <NativeSelectOption key={profile.id} value={profile.id}>
-                  {profile.label}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-          </div>
-          <IconButton label="Configure Agent" size="icon-sm" onClick={() => send({ type: 'configure' })}>
-            <Settings aria-hidden="true" />
-          </IconButton>
-          <IconButton label="View Task Diff" size="icon-sm" onClick={() => send({ type: 'review' })}>
-            <FileDiff aria-hidden="true" />
-          </IconButton>
-        </div>
-        {controls && (controls.configuring || (controls.configOptions !== undefined ? configOptions.length > 0 : controls.modes)) && (
-          <section className="acp-session-settings" aria-label="Session Configuration" aria-busy={controls.configuring}>
-            {controls.configOptions !== undefined ? (
-              <>
-                {!!primaryOptions.length && (
-                  <div className="acp-config-row">
-                    {primaryOptions.map((option) => (
-                      <ConfigOption key={option.id} option={option} compact disabled={busy || sending || status !== 'connected'} send={send} />
-                    ))}
-                  </div>
-                )}
-                {!!extraOptions.length && (
-                  <details className="acp-extra-options">
-                    <summary>More Session Options · {extraOptions.length}</summary>
-                    <div className="acp-config-row">
-                      {extraOptions.map((option) => (
-                        <ConfigOption key={option.id} option={option} disabled={busy || sending || status !== 'connected'} send={send} />
-                      ))}
-                    </div>
-                  </details>
-                )}
-              </>
-            ) : (
-              controls.modes && (
-                <label className="field">
-                  Session Mode
-                  <NativeSelect
-                    aria-label="Session Mode"
-                    value={controls.modes!.currentModeId}
-                    disabled={busy || sending || status !== 'connected'}
-                    onChange={(event) => send({ type: 'set-mode', modeId: event.target.value })}
-                  >
-                    {controls.modes!.availableModes.map((mode) => (
-                      <NativeSelectOption key={mode.id} value={mode.id} title={mode.description}>
-                        {mode.name}
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelect>
-                </label>
-              )
+    <main className={`acp-app${model.presentation === 'sidebar' ? ' acp-sidebar' : ''}`} aria-busy={switching}>
+      <div className="acp-session">
+        <header className="acp-header">
+          <div className="acp-heading">
+            <h1>{binding.title}</h1>
+            <span role="status" aria-live="polite">
+              <StatusBadge status={status}>{statusLabels[status]}</StatusBadge>
+            </span>
+            {model.presentation === 'editor' && (
+              <IconButton label="Move Chat to Side Bar" size="icon-sm" disabled={switching} onClick={() => send({ type: 'open-sidebar' })}>
+                <PanelRight aria-hidden="true" />
+              </IconButton>
             )}
-            {controls.configuring && (
-              <p className="muted" role="status">
-                Applying configuration…
+          </div>
+          <p className="metadata path" aria-label="Workspace" title={binding.workspace}>
+            <FolderOpen aria-hidden="true" />
+            <span>{binding.workspace}</span>
+          </p>
+          <details className="acp-context">
+            <summary>Task and Session Info</summary>
+            <p className="path">Primary folder: {binding.repository}</p>
+            <p className="path">Task branch: {binding.branch}</p>
+            {record.agentName && <p>Agent: {record.agentName}</p>}
+            {controls?.title && <p className="acp-message-text">Agent session: {controls.title}</p>}
+            {controls?.usage && (
+              <p className="acp-usage" aria-label="Session Usage">
+                Context: {controls.usage.used.toLocaleString('en-US')} / {controls.usage.size.toLocaleString('en-US')} tokens
+                {controls.usage.cost &&
+                  ` · Total cost: ${controls.usage.cost.amount.toLocaleString('en-US', { maximumFractionDigits: 6 })} ${controls.usage.cost.currency}`}
               </p>
             )}
+          </details>
+          <div className="acp-profile">
+            <div className="field">
+              <NativeSelect aria-label="Agent Profile" value={profileId} disabled={!canChooseProfile} onChange={(event) => setProfileId(event.target.value)}>
+                {!model.profiles.length && <NativeSelectOption value="">No agent profiles configured</NativeSelectOption>}
+                {!!profileId && !availableProfile && <NativeSelectOption value={profileId}>Profile removed: {profileId}</NativeSelectOption>}
+                {model.profiles.map((profile) => (
+                  <NativeSelectOption key={profile.id} value={profile.id}>
+                    {profile.label}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            </div>
+            <IconButton label="Configure Agent" size="icon-sm" onClick={() => send({ type: 'configure' })}>
+              <Settings aria-hidden="true" />
+            </IconButton>
+            <IconButton label="View Task Diff" size="icon-sm" onClick={() => send({ type: 'review' })}>
+              <FileDiff aria-hidden="true" />
+            </IconButton>
+          </div>
+          {controls && (controls.configuring || (controls.configOptions !== undefined ? configOptions.length > 0 : controls.modes)) && (
+            <section className="acp-session-settings" aria-label="Session Configuration" aria-busy={controls.configuring}>
+              {controls.configOptions !== undefined ? (
+                <>
+                  {!!primaryOptions.length && (
+                    <div className="acp-config-row">
+                      {primaryOptions.map((option) => (
+                        <ConfigOption key={option.id} option={option} compact disabled={busy || sending || status !== 'connected'} send={send} />
+                      ))}
+                    </div>
+                  )}
+                  {!!extraOptions.length && (
+                    <details className="acp-extra-options">
+                      <summary>More Session Options · {extraOptions.length}</summary>
+                      <div className="acp-config-row">
+                        {extraOptions.map((option) => (
+                          <ConfigOption key={option.id} option={option} disabled={busy || sending || status !== 'connected'} send={send} />
+                        ))}
+                      </div>
+                    </details>
+                  )}
+                </>
+              ) : (
+                controls.modes && (
+                  <label className="field">
+                    Session Mode
+                    <NativeSelect
+                      aria-label="Session Mode"
+                      value={controls.modes!.currentModeId}
+                      disabled={busy || sending || status !== 'connected'}
+                      onChange={(event) => send({ type: 'set-mode', modeId: event.target.value })}
+                    >
+                      {controls.modes!.availableModes.map((mode) => (
+                        <NativeSelectOption key={mode.id} value={mode.id} title={mode.description}>
+                          {mode.name}
+                        </NativeSelectOption>
+                      ))}
+                    </NativeSelect>
+                  </label>
+                )
+              )}
+              {controls.configuring && (
+                <p className="muted" role="status">
+                  Applying configuration…
+                </p>
+              )}
+            </section>
+          )}
+          <div className="actions acp-session-actions">
+            {!hasConnection && (
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={!availableProfile || busy || sending || (needsRestore && !record.canLoad)}
+                onClick={() => send({ type: 'connect', profileId, resume: needsRestore })}
+              >
+                {needsRestore ? 'Resume Session' : 'Connect Agent'}
+              </Button>
+            )}
+            {hasConnection &&
+              (busy || status === 'error' ? (
+                <Button variant="secondary" size="sm" onClick={() => send({ type: 'disconnect' })}>
+                  End Agent Process
+                </Button>
+              ) : (
+                <IconButton label="Disconnect" size="icon-sm" onClick={() => send({ type: 'disconnect' })}>
+                  <Unplug aria-hidden="true" />
+                </IconButton>
+              ))}
+            {(record.profileId || record.sessionId || record.messages.length > 0) && (
+              <IconButton label="New Session" size="icon-sm" disabled={busy || sending} onClick={() => send({ type: 'new' })}>
+                <MessageSquarePlus aria-hidden="true" />
+              </IconButton>
+            )}
+          </div>
+        </header>
+
+        <AcpSetup />
+        {needsRestore && (
+          <p className="notice">
+            {record.canLoad
+              ? 'A previous session is disconnected. Resume it or start a new session.'
+              : 'This agent does not advertise session restoration. View the saved history or start a new session.'}
+          </p>
+        )}
+        {record.interrupted && !busy && (
+          <p className="notice">
+            The previous turn was interrupted. Existing file changes are preserved. Review the conversation and task diff before continuing.
+          </p>
+        )}
+        {!!controls?.notices.length && (
+          <section aria-label="Session Notices" className="acp-notices">
+            {controls.notices.map((notice) => (
+              <div className={notice.severity === 'error' ? 'error' : 'notice'} key={notice.id} role={notice.severity === 'error' ? 'alert' : 'status'}>
+                <strong className="acp-message-text">{notice.title}</strong>
+                {notice.description && <p className="acp-message-text">{notice.description}</p>}
+              </div>
+            ))}
           </section>
         )}
-        <div className="actions acp-session-actions">
-          {!hasConnection && (
-            <Button
-              variant="secondary"
-              size="sm"
-              disabled={!availableProfile || busy || sending || (needsRestore && !record.canLoad)}
-              onClick={() => send({ type: 'connect', profileId, resume: needsRestore })}
-            >
-              {needsRestore ? 'Resume Session' : 'Connect Agent'}
-            </Button>
-          )}
-          {hasConnection &&
-            (busy || status === 'error' ? (
-              <Button variant="secondary" size="sm" onClick={() => send({ type: 'disconnect' })}>
-                End Agent Process
-              </Button>
-            ) : (
-              <IconButton label="Disconnect" size="icon-sm" onClick={() => send({ type: 'disconnect' })}>
-                <Unplug aria-hidden="true" />
-              </IconButton>
+        {!!model.authMethods.length && (status === 'error' || !record.sessionId) && (
+          <section className="notice acp-auth" aria-label="Agent Authentication">
+            <h2>Authenticate Agent</h2>
+            {model.authMethods.map((method) => (
+              <div key={method.id}>
+                {method.description && <p className="acp-message-text">{method.description}</p>}
+                <Button variant="secondary" size="sm" disabled={busy} onClick={() => send({ type: 'authenticate', methodId: method.id })}>
+                  {method.name}
+                </Button>
+              </div>
             ))}
-          {(record.profileId || record.sessionId || record.messages.length > 0) && (
-            <IconButton label="New Session" size="icon-sm" disabled={busy || sending} onClick={() => send({ type: 'new' })}>
-              <MessageSquarePlus aria-hidden="true" />
-            </IconButton>
-          )}
-        </div>
-      </header>
+          </section>
+        )}
+      </div>
 
-      <AcpSetup />
-      {needsRestore && (
-        <p className="notice">
-          {record.canLoad
-            ? 'A previous session is disconnected. Resume it or start a new session.'
-            : 'This agent does not advertise session restoration. View the saved history or start a new session.'}
-        </p>
-      )}
-      {record.interrupted && !busy && (
-        <p className="notice">
-          The previous turn was interrupted. Existing file changes are preserved. Review the conversation and task diff before continuing.
-        </p>
-      )}
       {model.error && (
         <div className="error" role="alert">
           {model.error}
         </div>
-      )}
-      {!!controls?.notices.length && (
-        <section aria-label="Session Notices" className="acp-notices">
-          {controls.notices.map((notice) => (
-            <div className={notice.severity === 'error' ? 'error' : 'notice'} key={notice.id} role={notice.severity === 'error' ? 'alert' : 'status'}>
-              <strong className="acp-message-text">{notice.title}</strong>
-              {notice.description && <p className="acp-message-text">{notice.description}</p>}
-            </div>
-          ))}
-        </section>
-      )}
-      {!!model.authMethods.length && (status === 'error' || !record.sessionId) && (
-        <section className="notice acp-auth" aria-label="Agent Authentication">
-          <h2>Authenticate Agent</h2>
-          {model.authMethods.map((method) => (
-            <div key={method.id}>
-              {method.description && <p className="acp-message-text">{method.description}</p>}
-              <Button variant="secondary" size="sm" disabled={busy} onClick={() => send({ type: 'authenticate', methodId: method.id })}>
-                {method.name}
-              </Button>
-            </div>
-          ))}
-        </section>
       )}
 
       <div
@@ -405,6 +451,7 @@ export function AcpApp({ model, send }: Props) {
             value={draft}
             maxLength={100_000}
             rows={5}
+            disabled={switching}
             placeholder="Describe the task or explain what to change next…"
             onChange={(event) => updateDraft(event.target.value)}
             onBlur={flushDraft}
@@ -538,9 +585,11 @@ function Permission({
   return (
     <div className="notice acp-permission">
       <h2>Permission Required · {permission.title}</h2>
-      <p>Task: {task}</p>
-      <p className="path">Workspace: {workspace}</p>
-      <div className="acp-message-text">{permission.detail}</div>
+      <div className="acp-permission-details">
+        <p>Task: {task}</p>
+        <p className="path">Workspace: {workspace}</p>
+        <div className="acp-message-text">{permission.detail}</div>
+      </div>
       <div className="actions">
         {permission.options.map((option) => (
           <Button

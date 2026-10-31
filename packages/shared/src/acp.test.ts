@@ -10,6 +10,9 @@ const actions: AcpAction[] = [
   { type: 'new' },
   { type: 'configure' },
   { type: 'review' },
+  { type: 'open-sidebar' },
+  { type: 'view-ready' },
+  { type: 'view-state', scrollTop: 120.5, followOutput: false, profileId: 'agent', requestId: 'capture-1' },
   { type: 'draft', text: '', version: 2, revision: 3 },
   { type: 'permission', requestId: 'request-2', optionId: 'reject-once' },
   { type: 'authenticate', methodId: 'agent-login' },
@@ -19,6 +22,9 @@ const actions: AcpAction[] = [
 ];
 
 describe('ACP panel action validation', () => {
+  it.each([undefined, null, -1, Infinity, NaN, 1e10, '120'])('rejects an invalid reading position: %j', (scrollTop) => {
+    expect(() => parseAcpAction({ type: 'view-state', scrollTop, followOutput: false, profileId: 'agent' })).toThrow();
+  });
   it.each([undefined, null, 0, 1, {}, []])('rejects a non-select or non-boolean config value: %j', (value) => {
     expect(() => parseAcpAction({ type: 'set-config', configId: 'model', value })).toThrow();
   });

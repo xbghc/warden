@@ -152,6 +152,8 @@ export class Workbench {
       showPreview: () => this.views.show('preview'),
       copyLocation: () => this.documents.copyLocation(),
       chat: (node) => this.openConversation(node),
+      switchChat: () => this.openConversation(),
+      expandChat: () => this.conversations.expand(),
       configureAgents: () => vscode.commands.executeCommand('workbench.action.openSettings', 'warden.acpAgents'),
       sendSelectionToAgent: () => this.sendSelectionToAgent(),
     };
@@ -169,6 +171,8 @@ export class Workbench {
       'showPreview',
       'copyLocation',
       'chat',
+      'switchChat',
+      'expandChat',
       'configureAgents',
       'sendSelectionToAgent',
     ]);

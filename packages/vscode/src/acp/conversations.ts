@@ -3,7 +3,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { Engine } from '@warden/engine';
 import { parseAcpAction } from '@warden/shared';
-import type { AcpAction, AcpBinding, AcpModel, WorkflowTask } from '@warden/shared';
+import type { AcpAction, AcpBinding, AcpModel, AcpViewState, WorkflowTask } from '@warden/shared';
 import type { AcpProfile } from './contracts.js';
 import { resolveAcpBinding, validateAcpBinding } from './binding.js';
 import { parseAcpProfiles } from './profiles.js';
@@ -11,12 +11,21 @@ import { AcpSession } from './session.js';
 import { AcpSessionStorage } from './storage.js';
 import { AcpDraft } from './draft.js';
 
+interface ChatSurface {
+  webview: vscode.Webview;
+  location: 'sidebar' | 'editor';
+  ready: boolean;
+  capture?: { id: string; finish(error?: Error): void };
+}
+
 interface Conversation {
   binding: AcpBinding;
   engine: Engine;
   session: AcpSession;
   panelId: string;
   panel?: vscode.WebviewPanel;
+  surface?: ChatSurface;
+  viewState?: AcpViewState;
   draft: AcpDraft;
   draftKey: string;
   draftSave: Promise<void>;
@@ -32,6 +41,10 @@ export class AcpConversations {
   private readonly engines = new Map<string, Promise<Engine>>();
   private readonly subscriptions: vscode.Disposable[] = [];
   private closed = false;
+  private sidebar?: vscode.WebviewView;
+  private sidebarWaiter?: { resolve(view: vscode.WebviewView): void; reject(error: Error): void };
+  private sidebarEntry?: Conversation;
+  private transition: Promise<unknown> = Promise.resolve();
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -40,6 +53,13 @@ export class AcpConversations {
     private readonly report: (error: unknown) => void,
   ) {
     this.subscriptions.push(
+      vscode.window.registerWebviewViewProvider(
+        'warden.taskChat',
+        {
+          resolveWebviewView: (view) => this.resolveSidebar(view),
+        },
+        { webviewOptions: { retainContextWhenHidden: true } },
+      ),
       vscode.workspace.onDidChangeConfiguration((event) => {
         if (event.affectsConfiguration('warden.acpAgents')) for (const entry of this.entries.values()) this.render(entry);
       }),
@@ -100,6 +120,7 @@ export class AcpConversations {
       panelId: randomUUID(),
       draft: new AcpDraft(this.context.workspaceState.get<string>(draftKey, '')),
       draftKey,
+      viewState: this.context.workspaceState.get<AcpViewState>(`${draftKey}:view`),
       draftSave: Promise.resolve(),
       sending: false,
     } as Conversation;
@@ -128,7 +149,7 @@ export class AcpConversations {
     return entry;
   }
 
-  async show(repository: string, taskId: string) {
+  private async ensure(repository: string, taskId: string) {
     if (this.closed || !vscode.workspace.isTrusted) throw new Error('Open and trust a workspace first.');
     const key = this.key(repository, taskId);
     let opening = this.opening.get(key);
@@ -150,10 +171,10 @@ export class AcpConversations {
             return previous;
           }
           // Old transcripts remain under their original allocation identity.
+          await this.release(previous);
           await previous.session.close();
           await previous.draftSave;
           clearTimeout(previous.renderTimer);
-          previous.panel?.dispose();
           this.entries.delete(key);
         }
         return this.create(repository, taskId);
@@ -167,48 +188,179 @@ export class AcpConversations {
       if (this.opening.get(key) === opening) this.opening.delete(key);
     }
     if (this.closed) throw new Error('The Warden session is closed.');
-    if (entry.panel) {
-      entry.panel.reveal(vscode.ViewColumn.Beside);
-      this.render(entry);
-      return;
-    }
-    entry.panelId = randomUUID();
-    entry.draft.resetPanel();
-    const panel = vscode.window.createWebviewPanel('warden.agent', `${entry.binding.title} · Agent`, vscode.ViewColumn.Beside, {
-      enableScripts: true,
-      retainContextWhenHidden: true,
-    });
-    entry.panel = panel;
-    const root = vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview');
-    panel.webview.options = { enableScripts: true, localResourceRoots: [root] };
-    const nonce = randomBytes(24).toString('base64');
-    const script = panel.webview.asWebviewUri(vscode.Uri.joinPath(root, 'index.js'));
-    const style = panel.webview.asWebviewUri(vscode.Uri.joinPath(root, 'index.css'));
-    panel.webview.html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${panel.webview.cspSource}; script-src 'nonce-${nonce}';"><link rel="stylesheet" href="${style}"><title>Agent Chat</title></head><body><div id="root"></div><script nonce="${nonce}" src="${script}"></script></body></html>`;
-    const current = entry;
-    const panelId = entry.panelId;
-    const listener = panel.webview.onDidReceiveMessage(async (message: unknown) => {
-      if (current.panel !== panel || current.panelId !== panelId || this.closed) return;
-      try {
-        if (!message || typeof message !== 'object' || Array.isArray(message)) throw new Error('Invalid conversation view message.');
-        const envelope = message as Record<string, unknown>;
-        if (envelope.type === 'ready') {
-          this.render(current);
-          return;
-        }
-        if (envelope.type !== 'acp-action' || envelope.panelId !== panelId) throw new Error('The conversation view changed. Reopen it.');
-        await this.handle(current, parseAcpAction(envelope.action));
-      } catch (error) {
-        current.error = error instanceof Error ? error.message : String(error);
-        this.render(current);
+    return entry;
+  }
+
+  show(repository: string, taskId: string, location: ChatSurface['location'] = 'sidebar') {
+    // Serialize only presentation changes; background turns and permission answers stay independent.
+    const opening = this.transition.then(async () => {
+      const entry = await this.ensure(repository, taskId);
+      if (entry.surface?.location === location) {
+        if (location === 'sidebar') this.sidebar?.show(false);
+        else entry.panel?.reveal(vscode.ViewColumn.Beside);
+        this.render(entry);
+        return;
       }
+      if (location === 'sidebar') {
+        const view = this.sidebar ?? (await this.openSidebar());
+        if (this.sidebarEntry) await this.release(this.sidebarEntry);
+        await this.release(entry);
+        if (this.closed) return;
+        this.sidebarEntry = entry;
+        this.mount(entry, view.webview, location);
+        view.show(false);
+      } else {
+        await this.release(entry);
+        if (this.closed) return;
+        const panel = vscode.window.createWebviewPanel('warden.agent', `${entry.binding.title} · Agent`, vscode.ViewColumn.Beside, {
+          enableScripts: true,
+          retainContextWhenHidden: true,
+        });
+        entry.panel = panel;
+        const surface = this.mount(entry, panel.webview, location);
+        const listener = panel.webview.onDidReceiveMessage((message: unknown) => void this.receive(entry, surface, message));
+        const disposal = panel.onDidDispose(() => {
+          if (entry.panel === panel) this.detach(entry);
+          listener.dispose();
+          disposal.dispose();
+        });
+        this.initializeWebview(panel.webview);
+      }
+      void vscode.commands.executeCommand('setContext', 'warden.chatInSidebar', !!this.sidebarEntry);
     });
-    const disposal = panel.onDidDispose(() => {
-      if (current.panel === panel) current.panel = undefined;
+    this.transition = opening.catch(() => {});
+    return opening;
+  }
+
+  async expand() {
+    const entry = this.sidebarEntry;
+    if (entry) await this.show(entry.binding.repository, entry.binding.taskId, 'editor');
+  }
+
+  private openSidebar() {
+    return new Promise<vscode.WebviewView>((resolve, reject) => {
+      let finished = false;
+      const finish = (error?: Error, view?: vscode.WebviewView) => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timer);
+        this.sidebarWaiter = undefined;
+        if (error) reject(error);
+        else if (view) resolve(view);
+      };
+      const timer = setTimeout(() => finish(new Error('Task Chat is unavailable. Reopen the view and try again.')), 10_000);
+      this.sidebarWaiter = { resolve: (view) => finish(undefined, view), reject: (error) => finish(error) };
+      // The focus command can return before VS Code resolves the contributed webview.
+      void vscode.commands.executeCommand('warden.taskChat.focus').then(undefined, (error: Error) => finish(error));
+    });
+  }
+
+  private resolveSidebar(view: vscode.WebviewView) {
+    this.sidebar = view;
+    this.initializeWebview(view.webview);
+    const listener = view.webview.onDidReceiveMessage((message: unknown) => {
+      const entry = this.sidebarEntry;
+      if (entry?.surface) void this.receive(entry, entry.surface, message);
+      else this.renderEmpty();
+    });
+    const disposal = view.onDidDispose(() => {
+      if (this.sidebar === view) {
+        if (this.sidebarEntry) this.detach(this.sidebarEntry);
+        this.sidebar = undefined;
+      }
       listener.dispose();
       disposal.dispose();
     });
+    this.sidebarWaiter?.resolve(view);
+  }
+
+  private initializeWebview(webview: vscode.Webview) {
+    const root = vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview');
+    webview.options = { enableScripts: true, localResourceRoots: [root] };
+    const nonce = randomBytes(24).toString('base64');
+    const script = webview.asWebviewUri(vscode.Uri.joinPath(root, 'index.js'));
+    const style = webview.asWebviewUri(vscode.Uri.joinPath(root, 'index.css'));
+    webview.html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';"><link rel="stylesheet" href="${style}"><title>Task Chat</title></head><body><div id="root"></div><script nonce="${nonce}" src="${script}"></script></body></html>`;
+  }
+
+  private mount(entry: Conversation, webview: vscode.Webview, location: ChatSurface['location']) {
+    entry.panelId = randomUUID();
+    entry.draft.resetPanel();
+    entry.surface = { webview, location, ready: false };
     this.render(entry);
+    return entry.surface;
+  }
+
+  private async receive(entry: Conversation, surface: ChatSurface, message: unknown) {
+    if (entry.surface !== surface || this.closed) return;
+    try {
+      if (!message || typeof message !== 'object' || Array.isArray(message)) throw new Error('Invalid conversation view message.');
+      const envelope = message as Record<string, unknown>;
+      if (envelope.type === 'ready') {
+        this.render(entry);
+        return;
+      }
+      // A switched-out view can still deliver queued messages. Never route them to its replacement.
+      if (envelope.type !== 'acp-action' || envelope.panelId !== entry.panelId) return;
+      const action = parseAcpAction(envelope.action);
+      if (surface.capture && !['draft', 'view-state', 'view-ready'].includes(action.type)) return;
+      await this.handle(entry, action);
+    } catch (error) {
+      entry.error = error instanceof Error ? error.message : String(error);
+      surface.capture?.finish(new Error(entry.error));
+      this.changed();
+      this.render(entry);
+    }
+  }
+
+  private async release(entry: Conversation) {
+    const surface = entry.surface;
+    if (!surface) return;
+    if (surface.ready) {
+      if (surface.location === 'sidebar' && !this.sidebar?.visible) this.sidebar?.show(true);
+      else if (entry.panel && !entry.panel.visible) entry.panel.reveal(entry.panel.viewColumn, true);
+      // Wait for local edits and reading position before invalidating this view's routing token.
+      await new Promise<void>((resolve, reject) => {
+        const id = randomUUID();
+        let finished = false;
+        const timer = setTimeout(() => finish(new Error('Task Chat did not save its view. Try switching again.')), 3000);
+        const finish = (error?: Error) => {
+          if (finished) return;
+          finished = true;
+          clearTimeout(timer);
+          surface.capture = undefined;
+          if (error) {
+            void surface.webview.postMessage({ type: 'acp-resume', panelId: entry.panelId });
+            reject(error);
+          } else resolve();
+        };
+        surface.capture = { id, finish };
+        void surface.webview.postMessage({ type: 'acp-capture', panelId: entry.panelId, requestId: id }).then(
+          (delivered) => {
+            if (!delivered) finish(new Error('Task Chat is not ready. Reopen it before switching.'));
+          },
+          (error: Error) => finish(error),
+        );
+      });
+    }
+    const panel = entry.panel;
+    this.detach(entry);
+    panel?.dispose();
+  }
+
+  private detach(entry: Conversation) {
+    entry.surface?.capture?.finish();
+    entry.surface = undefined;
+    entry.panel = undefined;
+    if (this.sidebarEntry === entry) {
+      this.sidebarEntry = undefined;
+      this.renderEmpty();
+      void vscode.commands.executeCommand('setContext', 'warden.chatInSidebar', false);
+    }
+  }
+
+  private renderEmpty() {
+    void this.sidebar?.webview.postMessage({ type: 'acp-empty' });
   }
 
   private scheduleRender(entry: Conversation) {
@@ -219,7 +371,7 @@ export class AcpConversations {
     }, 40);
   }
   private render(entry: Conversation) {
-    if (!entry.panel || this.closed) return;
+    if (!entry.surface || this.closed) return;
     const snapshot = entry.session.snapshot();
     let profiles: AcpModel['profiles'] = [];
     let error = entry.error ?? snapshot.error;
@@ -228,8 +380,17 @@ export class AcpConversations {
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     }
-    const model: AcpModel = { ...snapshot, error, panelId: entry.panelId, profiles, sending: entry.sending, ...entry.draft.snapshot() };
-    void entry.panel.webview.postMessage({ type: 'acp-model', model });
+    const model: AcpModel = {
+      ...snapshot,
+      error,
+      panelId: entry.panelId,
+      profiles,
+      sending: entry.sending,
+      ...entry.draft.snapshot(),
+      presentation: entry.surface.location,
+      viewState: entry.viewState,
+    };
+    void entry.surface.webview.postMessage({ type: 'acp-model', model });
   }
   private saveDraft(entry: Conversation) {
     const text = entry.draft.text;
@@ -239,6 +400,21 @@ export class AcpConversations {
 
   private async handle(entry: Conversation, action: AcpAction) {
     if (this.closed) return;
+    if (action.type === 'view-ready') {
+      if (entry.surface) entry.surface.ready = true;
+      return;
+    }
+    if (action.type === 'view-state') {
+      entry.viewState = { scrollTop: action.scrollTop, followOutput: action.followOutput, profileId: action.profileId };
+      entry.draftSave = entry.draftSave.catch(() => {}).then(() => this.context.workspaceState.update(`${entry.draftKey}:view`, entry.viewState));
+      void entry.draftSave.catch(this.report);
+      if (action.requestId === entry.surface?.capture?.id) entry.surface?.capture?.finish();
+      return;
+    }
+    if (action.type === 'open-sidebar') {
+      await this.show(entry.binding.repository, entry.binding.taskId, 'sidebar');
+      return;
+    }
     if (action.type === 'draft') {
       entry.draft.update(action);
       this.saveDraft(entry);
@@ -251,6 +427,7 @@ export class AcpConversations {
     }
     if (!vscode.workspace.isTrusted) throw new Error('Trust this workspace first.');
     entry.error = undefined;
+    this.changed();
     const session = entry.session;
     switch (action.type) {
       case 'send': {
@@ -310,16 +487,19 @@ export class AcpConversations {
   }
 
   activity(repository: string, taskId: string) {
-    const status = this.entries.get(this.key(repository, taskId))?.session.snapshot().status;
+    const entry = this.entries.get(this.key(repository, taskId));
+    const status = entry?.session.snapshot().status;
     return status === 'waiting_permission'
       ? 'Agent: Permission Required'
-      : status === 'running'
-        ? 'Agent: Responding'
-        : status === 'connecting'
-          ? 'Agent: Connecting'
-          : status === 'cancelling'
-            ? 'Agent: Stopping'
-            : undefined;
+      : entry?.error || status === 'error'
+        ? 'Agent: Session Error'
+        : status === 'running'
+          ? 'Agent: Responding'
+          : status === 'connecting'
+            ? 'Agent: Connecting'
+            : status === 'cancelling'
+              ? 'Agent: Stopping'
+              : undefined;
   }
 
   async append(repository: string, taskId: string, excerpt: string) {
@@ -334,11 +514,14 @@ export class AcpConversations {
   async close() {
     if (this.closed) return;
     this.closed = true;
+    this.sidebarWaiter?.reject(new Error('The Warden session is closed.'));
     await Promise.allSettled([...this.opening.values()]);
     await Promise.allSettled(
       [...this.entries.values()].map(async (entry) => {
         clearTimeout(entry.renderTimer);
-        entry.panel?.dispose();
+        const panel = entry.panel;
+        this.detach(entry);
+        panel?.dispose();
         await entry.session.close();
         await entry.draftSave;
       }),

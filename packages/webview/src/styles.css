@@ -349,6 +349,27 @@ summary {
 }
 .acp-app {
   max-width: 900px;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  gap: 10px;
+}
+.acp-sidebar {
+  padding: 10px 12px;
+  background: var(--vscode-sideBar-background, var(--color-background));
+}
+.acp-session {
+  flex: 0 1 auto;
+  max-height: 42%;
+  min-height: 60px;
+  overflow: auto;
+}
+.acp-app > .error {
+  flex: 0 1 auto;
+  max-height: 25%;
+  overflow: auto;
+  margin: 0;
 }
 .acp-heading {
   display: flex;
@@ -358,9 +379,20 @@ summary {
 }
 .acp-heading h1 {
   flex: 1;
-  min-width: 180px;
+  min-width: 100px;
   margin: 0;
+  font-size: 15px;
   overflow-wrap: anywhere;
+}
+.acp-header .metadata {
+  flex-wrap: nowrap;
+}
+.acp-header .metadata span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .acp-context summary {
   padding: 2px 0;
@@ -437,11 +469,10 @@ summary {
 }
 .acp-transcript {
   border-block: 1px solid var(--color-border);
-  min-height: 220px;
-  max-height: 52vh;
+  flex: 1 1 auto;
+  min-height: 70px;
   overflow: auto;
   overflow-anchor: none;
-  margin-top: 20px;
   padding-block: 4px;
 }
 .acp-empty {
@@ -478,21 +509,55 @@ summary {
   color: var(--color-muted-foreground);
 }
 .acp-permission h2 {
+  flex: 0 0 auto;
   overflow-wrap: anywhere;
+  font-size: 13px;
+  margin: 0 0 6px;
 }
-.acp-permission .acp-message-text {
-  max-height: 220px;
+.acp-permissions {
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 auto;
+  max-height: 35%;
   overflow: auto;
+}
+.acp-permission {
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 auto;
+  min-height: 100px;
+  margin: 0;
+  padding: 10px;
+}
+.acp-permission-details {
+  min-height: 0;
+  overflow: auto;
+}
+.acp-permission .actions {
+  flex: 0 0 auto;
+  margin-top: 8px;
 }
 .acp-auth > div + div {
   margin-top: 12px;
 }
 .acp-composer {
-  margin-top: 16px;
+  flex: 0 0 auto;
+  margin-top: 0;
+}
+.acp-composer .field {
+  margin: 0 0 8px;
+}
+.acp-composer .actions {
+  margin: 0;
+}
+.acp-composer .acp-commands[open] {
+  max-height: 20vh;
+  overflow: auto;
 }
 .acp-composer textarea {
   resize: vertical;
-  max-height: 45vh;
+  max-height: 25vh;
+  min-height: 60px;
 }
 @media (max-width: 620px) {
   .history-columns {

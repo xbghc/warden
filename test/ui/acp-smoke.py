@@ -70,6 +70,52 @@ try:
         first.wait_for_function("window.__actions.some(message => message.action?.type === 'review')")
         assert all(not journal for entry in inspect()['entries'] for journal in entry['journals'])
 
+        # Capturing a view flushes a debounced edit before the host changes its routing token.
+        composer = first.get_by_role('textbox', name='Message', exact=True)
+        composer.fill('Draft before moving the chat')
+        first.evaluate("window.dispatchEvent(new MessageEvent('message', {data: {type: 'acp-capture', panelId: window.__model.panelId, requestId: 'move-check'}}))")
+        first.wait_for_function("window.__actions.some(message => message.action?.type === 'view-state' && message.action.requestId === 'move-check')")
+        saved_draft(first, 'Draft before moving the chat')
+        expect(composer).to_be_disabled()
+        assert first.request.post(origin + '/reopen?task=0').ok
+        first.reload()
+        expect(composer).to_have_value('Draft before moving the chat')
+        expect(composer).to_be_enabled()
+        first.evaluate("async () => { await window.__fixture.pauseModels(); window.__fixture.deliver({ ...window.__model, presentation: 'editor' }); }")
+        first.get_by_role('button', name='Move Chat to Side Bar', exact=True).click()
+        first.wait_for_function("window.__actions.some(message => message.action?.type === 'open-sidebar')")
+        first.evaluate('window.__fixture.resumeModels()')
+        first.set_viewport_size({'width': 320, 'height': 740})
+        for theme in ['light', 'dark', 'high-contrast']:
+            first.evaluate("""theme => {
+                document.body.className = 'vscode-' + theme;
+                const dark = theme !== 'light', contrast = theme === 'high-contrast';
+                const colors = {
+                    'sideBar-background': contrast ? '#000' : dark ? '#181818' : '#f3f3f3',
+                    'editor-background': dark ? '#181818' : '#fff',
+                    'editor-foreground': dark ? '#eee' : '#222',
+                    'descriptionForeground': dark ? '#bdbdbd' : '#686868',
+                    'textCodeBlock-background': dark ? '#252525' : '#f4f4f4',
+                    'button-secondaryBackground': dark ? '#333' : '#e9e9e9',
+                    'button-secondaryForeground': dark ? '#eee' : '#333',
+                    'widget-border': contrast ? '#fff' : dark ? '#555' : '#bbb',
+                    'input-border': contrast ? '#fff' : '#888',
+                    'focusBorder': contrast ? '#f38518' : '#007acc',
+                };
+                for (const [key, value] of Object.entries(colors)) document.documentElement.style.setProperty('--vscode-' + key, value);
+            }""", theme)
+            assert first.evaluate('document.documentElement.scrollWidth <= innerWidth'), 'sidebar must not overflow horizontally'
+            rect = composer.bounding_box()
+            assert rect['y'] + rect['height'] <= 740, 'composer stays visible in the sidebar'
+            first.screenshot(path=str(artifacts / ('acp-sidebar-' + theme + '.png')), full_page=True)
+        first.evaluate("async () => { await window.__fixture.pauseModels(); window.__fixture.deliver({ ...window.__model, error: 'Check the agent connection and try again.' }); }")
+        expect(first.get_by_role('alert')).to_be_in_viewport()
+        expect(composer).to_be_in_viewport()
+        first.screenshot(path=str(artifacts / 'acp-sidebar-error.png'), full_page=True)
+        first.evaluate('window.__fixture.resumeModels()')
+        first.evaluate("document.documentElement.removeAttribute('style'); document.body.className = ''")
+        first.set_viewport_size({'width': 1000, 'height': 900})
+
         first.evaluate("async () => { await window.__fixture.pauseModels(); window.__fixture.deliver({ ...window.__model, profiles: [] }); }")
         expect(first.get_by_role('button', name='Connect Agent', exact=True)).to_be_disabled()
         setup_guide = first.locator('.acp-setup')
@@ -242,6 +288,13 @@ try:
         send(first, 'permission')
         expect(first.get_by_role('button', name='Allow this write', exact=True)).to_be_visible()
         first.screenshot(path=str(artifacts / 'acp-permission.png'), full_page=True)
+        first.set_viewport_size({'width': 320, 'height': 740})
+        expect(first.get_by_role('button', name='Allow this write', exact=True)).to_be_in_viewport()
+        expect(first.get_by_role('button', name='Stop Turn', exact=True)).to_be_in_viewport()
+        assert first.evaluate('document.documentElement.scrollWidth <= innerWidth')
+        first.screenshot(path=str(artifacts / 'acp-sidebar-permission.png'), full_page=True)
+        first.set_viewport_size({'width': 1000, 'height': 900})
+
         expect(second.get_by_role('button', name='Allow this write', exact=True)).to_have_count(0)
         # Reopening the panel loses local pending-send state, but a completed turn
         # must still clear its submitted draft through the host's acknowledgement.
@@ -268,6 +321,23 @@ try:
         send(first, unsafe)
         expect(first.locator('.acp-message-agent').last.locator('.acp-message-text')).to_have_text('Echo: ' + unsafe)
         assert first.locator('.acp-transcript img, .acp-transcript a').count() == 0
+
+        # Switching views restores the reading position instead of jumping to new output.
+        first.set_viewport_size({'width': 320, 'height': 740})
+        history = first.get_by_role('log', name='Conversation History')
+        history.evaluate('element => { element.scrollTop = 0; element.dispatchEvent(new Event("scroll")); }')
+        first.evaluate("window.dispatchEvent(new MessageEvent('message', {data: {type: 'acp-capture', panelId: window.__model.panelId, requestId: 'reading-position'}}))")
+        wait_host(first, '/model', lambda model: model.get('viewState', {}).get('followOutput') is False)
+        old_panel = first.evaluate('window.__model.panelId')
+        assert first.request.post(origin + '/reopen?task=0').ok
+        first.reload()
+        expect(composer).to_be_enabled()
+        first.wait_for_function('document.querySelector(".acp-transcript")?.scrollTop === 0')
+        first.evaluate("panelId => window.dispatchEvent(new MessageEvent('message', {data: {type: 'acp-capture', panelId, requestId: 'stale-view'}}))", old_panel)
+        expect(composer).to_be_enabled()
+        first.screenshot(path=str(artifacts / 'acp-sidebar-history.png'), full_page=True)
+        first.set_viewport_size({'width': 1000, 'height': 900})
+
 
         first.get_by_role('button', name='Disconnect', exact=True).click()
         first.wait_for_function("window.__model.status === 'disconnected'")

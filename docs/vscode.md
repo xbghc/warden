@@ -1,7 +1,7 @@
 # VS Code
 
 The Marketplace display name is **Warden Workspace Review**; the extension ID remains `xbghc.warden`.
-The extension is the product entry point. It invokes the typed `@warden/engine` API directly, without
+The extension requires VS Code 1.106 or later and is the product entry point. It invokes the typed `@warden/engine` API directly, without
 HTTP, a listening port, a browser server or an installed Warden CLI.
 
 ## Install from source
@@ -66,7 +66,12 @@ Task review reserves the editor area for native read-only diffs. Preview, histor
 rebase and settings remain editor webviews. History entries expose native file review through a file
 picker. All resources are packaged locally, follow VS Code themes, and send a finite validated action
 vocabulary to the host; no arbitrary commands, paths or Git arguments cross that boundary.
-ACP conversations remain separate task-bound panels and do not follow workspace-list selection.
+ACP conversations retain their original task and do not follow workspace-list selection.
+
+Task conversations open in **Task Chat** in the Secondary Side Bar. **Switch Task Chat** chooses
+the task; **Open Chat in Editor** moves that conversation into an editor panel. **Move to Sidebar**
+moves it back. A task has only one editable chat surface. Moving it preserves its session, draft,
+profile and reading position; other tasks can continue running in the background.
 
 ## ACP agent configuration
 
