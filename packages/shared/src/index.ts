@@ -3,4 +3,5 @@ export * from './target.js';
 export * from './order.js';
 export * from './review.js';
 export * from './workbench.js';
+export * from './agent.js';
 export * from './acp.js';

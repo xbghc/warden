@@ -1,3 +1,5 @@
+import type { AgentAuthMethod, AgentConfiguration, AgentIdentity, AgentReadiness } from './agent.js';
+
 /** ACP UI data contains no executable configuration or provider credentials. */
 export interface AcpBinding {
   repository: string;
@@ -8,12 +10,9 @@ export interface AcpBinding {
   identity: string;
 }
 
-export interface AcpProfileSummary {
-  id: string;
-  label: string;
-}
-
-export type AcpConfiguration = { status: 'missing' } | { status: 'invalid'; message: string } | { status: 'configured'; count: number };
+export type AcpProfileSummary = AgentIdentity;
+export type AcpConfiguration = AgentConfiguration;
+export type AcpReadiness = AgentReadiness;
 
 export type AcpStatus = 'disconnected' | 'connecting' | 'connected' | 'running' | 'waiting_permission' | 'cancelling' | 'resetting' | 'error';
 export interface AcpMessage {
@@ -32,11 +31,7 @@ export interface AcpPermission {
   detail: string;
   options: { id: string; label: string; kind: string }[];
 }
-export interface AcpAuthMethod {
-  id: string;
-  name: string;
-  description?: string;
-}
+export type AcpAuthMethod = AgentAuthMethod;
 export type AcpConfigOption = {
   id: string;
   name: string;

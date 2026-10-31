@@ -1,6 +1,8 @@
 # ACP integration in the VS Code extension
 
-This is the adopted scope for Warden's ACP client. It extends the
+This is the adopted scope for Warden's ACP integration, the currently implemented agent connection.
+It implements the [minimum agent contract](agent.md#minimum-integration-contract); ACP and ownership
+of the agent process are not requirements for other integrations. It extends the
 [workflow contract](workflow.md) with user-operated task conversations. VS Code remains the only
 product entry point; native Git review and delivery keep their existing rules.
 
