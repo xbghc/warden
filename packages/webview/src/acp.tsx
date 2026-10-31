@@ -1,6 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
-import { FileDiff, FolderOpen, MessageSquarePlus, PanelRight, Settings, Square, Unplug } from 'lucide-react';
-import { AcpSetup } from './components/AcpSetup';
+import { ArrowUp, FileDiff, Info, MessageSquarePlus, MoreHorizontal, PanelRight, SlidersHorizontal, Slash, Square, Unplug } from 'lucide-react';
 import type { AcpAction, AcpConfigOption, AcpMessage, AcpModel, AcpPermission, AcpStatus } from '@warden/shared';
 import { Button } from './components/ui/button';
 import { Checkbox } from './components/ui/checkbox';
@@ -8,6 +7,8 @@ import { NativeSelect, NativeSelectOptGroup, NativeSelectOption } from './compon
 import { Textarea } from './components/ui/textarea';
 import { IconButton } from './components/ui/icon-button';
 import { StatusBadge } from './components/ui/status-badge';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './components/ui/dropdown-menu';
+import { Popover, PopoverContent, PopoverTrigger } from './components/ui/popover';
 
 type Props = { model: AcpModel; send(action: AcpAction): void };
 const statusLabels: Record<AcpStatus, string> = {
@@ -36,7 +37,8 @@ const toolLabels: Record<string, string> = {
 export function AcpApp({ model, send: dispatch }: Props) {
   const { record, status } = model;
   const binding = record.binding;
-  const [profileId, setProfileId] = useState(record.profileId ?? model.viewState?.profileId ?? model.profiles[0]?.id ?? '');
+  const profileId = record.profileId ?? model.defaultProfileId ?? '';
+  const [showInfo, setShowInfo] = useState(false);
   const [switching, setSwitching] = useState(false);
   const switchingRef = useRef(false);
   const send = (action: AcpAction) => {
@@ -65,7 +67,7 @@ export function AcpApp({ model, send: dispatch }: Props) {
   const controls = hasConnection ? model.controls : undefined;
   const configOptions = controls?.configOptions ?? [];
   const selectors = configOptions.filter((option) => option.type === 'select');
-  const preferred = selectors.filter((option) => option.category === 'model' || option.category === 'mode');
+  const preferred = [...selectors.filter((option) => option.category === 'mode'), ...selectors.filter((option) => option.category === 'model')];
   const primaryOptions = (preferred.length ? preferred : selectors).slice(0, 2);
   const primaryIds = new Set(primaryOptions.map((option) => option.id));
   const extraOptions = configOptions.filter((option) => !primaryIds.has(option.id));
@@ -78,7 +80,6 @@ export function AcpApp({ model, send: dispatch }: Props) {
     status === 'waiting_permission' ||
     status === 'cancelling' ||
     status === 'resetting';
-  const canChooseProfile = !record.profileId && !record.sessionId && !hasConnection && !busy && !sending;
   const availableProfile = model.profiles.some((profile) => profile.id === profileId);
   const needsRestore = !!record.sessionId && status === 'disconnected';
   const canSend = !!draft.trim() && availableProfile && !busy && !sending && !pending && !needsRestore && status !== 'error';
@@ -135,7 +136,6 @@ export function AcpApp({ model, send: dispatch }: Props) {
       conversation.current = record.id;
       setSending(false);
       setPending(undefined);
-      setProfileId(record.profileId ?? model.profiles[0]?.id ?? '');
       followOutput.current = true;
     }
     // Drafts belong to the task, including edits made while a new conversation is being created.
@@ -172,13 +172,12 @@ export function AcpApp({ model, send: dispatch }: Props) {
     }
   }, [model]);
 
-  useEffect(() => {
-    if (record.profileId) setProfileId(record.profileId);
-  }, [record.profileId]);
-
-  useEffect(() => {
-    if (!profileId && model.profiles.length) setProfileId(model.profiles[0]!.id);
-  }, [profileId, model.profiles]);
+  useLayoutEffect(() => {
+    const input = composer.current;
+    if (!input) return;
+    input.style.height = '0px';
+    input.style.height = `${input.scrollHeight}px`;
+  }, [draft]);
 
   useEffect(() => {
     if (transcript.current && followOutput.current) transcript.current.scrollTop = transcript.current.scrollHeight;
@@ -212,131 +211,62 @@ export function AcpApp({ model, send: dispatch }: Props) {
       <div className="acp-session">
         <header className="acp-header">
           <div className="acp-heading">
-            <h1>{binding.title}</h1>
-            <span role="status" aria-live="polite">
-              <StatusBadge status={status}>{statusLabels[status]}</StatusBadge>
-            </span>
-            {model.presentation === 'editor' && (
-              <IconButton label="Move Chat to Side Bar" size="icon-sm" disabled={switching} onClick={() => send({ type: 'open-sidebar' })}>
-                <PanelRight aria-hidden="true" />
-              </IconButton>
-            )}
-          </div>
-          <p className="metadata path" aria-label="Workspace" title={binding.workspace}>
-            <FolderOpen aria-hidden="true" />
-            <span>{binding.workspace}</span>
-          </p>
-          <details className="acp-context">
-            <summary>Task and Session Info</summary>
-            <p className="path">Primary folder: {binding.repository}</p>
-            <p className="path">Task branch: {binding.branch}</p>
-            {record.agentName && <p>Agent: {record.agentName}</p>}
-            {controls?.title && <p className="acp-message-text">Agent session: {controls.title}</p>}
-            {controls?.usage && (
-              <p className="acp-usage" aria-label="Session Usage">
-                Context: {controls.usage.used.toLocaleString('en-US')} / {controls.usage.size.toLocaleString('en-US')} tokens
-                {controls.usage.cost &&
-                  ` · Total cost: ${controls.usage.cost.amount.toLocaleString('en-US', { maximumFractionDigits: 6 })} ${controls.usage.cost.currency}`}
-              </p>
-            )}
-          </details>
-          <div className="acp-profile">
-            <div className="field">
-              <NativeSelect aria-label="Agent Profile" value={profileId} disabled={!canChooseProfile} onChange={(event) => setProfileId(event.target.value)}>
-                {!model.profiles.length && <NativeSelectOption value="">No agent profiles configured</NativeSelectOption>}
-                {!!profileId && !availableProfile && <NativeSelectOption value={profileId}>Profile removed: {profileId}</NativeSelectOption>}
-                {model.profiles.map((profile) => (
-                  <NativeSelectOption key={profile.id} value={profile.id}>
-                    {profile.label}
-                  </NativeSelectOption>
-                ))}
-              </NativeSelect>
-            </div>
-            <IconButton label="Configure Agent" size="icon-sm" onClick={() => send({ type: 'configure' })}>
-              <Settings aria-hidden="true" />
-            </IconButton>
-            <IconButton label="View Task Diff" size="icon-sm" onClick={() => send({ type: 'review' })}>
+            <h1 title={binding.title}>{binding.title}</h1>
+            <IconButton label="View Task Diff" size="icon-sm" disabled={switching} onClick={() => send({ type: 'review' })}>
               <FileDiff aria-hidden="true" />
             </IconButton>
-          </div>
-          {controls && (controls.configuring || (controls.configOptions !== undefined ? configOptions.length > 0 : controls.modes)) && (
-            <section className="acp-session-settings" aria-label="Session Configuration" aria-busy={controls.configuring}>
-              {controls.configOptions !== undefined ? (
-                <>
-                  {!!primaryOptions.length && (
-                    <div className="acp-config-row">
-                      {primaryOptions.map((option) => (
-                        <ConfigOption key={option.id} option={option} compact disabled={busy || sending || status !== 'connected'} send={send} />
-                      ))}
-                    </div>
-                  )}
-                  {!!extraOptions.length && (
-                    <details className="acp-extra-options">
-                      <summary>More Session Options · {extraOptions.length}</summary>
-                      <div className="acp-config-row">
-                        {extraOptions.map((option) => (
-                          <ConfigOption key={option.id} option={option} disabled={busy || sending || status !== 'connected'} send={send} />
-                        ))}
-                      </div>
-                    </details>
-                  )}
-                </>
-              ) : (
-                controls.modes && (
-                  <label className="field">
-                    Session Mode
-                    <NativeSelect
-                      aria-label="Session Mode"
-                      value={controls.modes!.currentModeId}
-                      disabled={busy || sending || status !== 'connected'}
-                      onChange={(event) => send({ type: 'set-mode', modeId: event.target.value })}
-                    >
-                      {controls.modes!.availableModes.map((mode) => (
-                        <NativeSelectOption key={mode.id} value={mode.id} title={mode.description}>
-                          {mode.name}
-                        </NativeSelectOption>
-                      ))}
-                    </NativeSelect>
-                  </label>
-                )
-              )}
-              {controls.configuring && (
-                <p className="muted" role="status">
-                  Applying configuration…
-                </p>
-              )}
-            </section>
-          )}
-          <div className="actions acp-session-actions">
-            {!hasConnection && (
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={!availableProfile || busy || sending || (needsRestore && !record.canLoad)}
-                onClick={() => send({ type: 'connect', profileId, resume: needsRestore })}
-              >
-                {needsRestore ? 'Resume Session' : 'Connect Agent'}
-              </Button>
-            )}
-            {hasConnection &&
-              (busy || status === 'error' ? (
-                <Button variant="secondary" size="sm" onClick={() => send({ type: 'disconnect' })}>
-                  End Agent Process
-                </Button>
-              ) : (
-                <IconButton label="Disconnect" size="icon-sm" onClick={() => send({ type: 'disconnect' })}>
-                  <Unplug aria-hidden="true" />
-                </IconButton>
-              ))}
             {(record.profileId || record.sessionId || record.messages.length > 0) && (
               <IconButton label="New Session" size="icon-sm" disabled={busy || sending} onClick={() => send({ type: 'new' })}>
                 <MessageSquarePlus aria-hidden="true" />
               </IconButton>
             )}
+            {model.presentation === 'editor' && (
+              <IconButton label="Move Chat to Side Bar" size="icon-sm" disabled={switching} onClick={() => send({ type: 'open-sidebar' })}>
+                <PanelRight aria-hidden="true" />
+              </IconButton>
+            )}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <IconButton label="More Chat Actions" size="icon-sm" disabled={switching}>
+                  <MoreHorizontal aria-hidden="true" />
+                </IconButton>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={() => setShowInfo(!showInfo)}>
+                  <Info aria-hidden="true" />
+                  {showInfo ? 'Hide Task and Session Info' : 'Task and Session Info'}
+                </DropdownMenuItem>
+                {hasConnection && (
+                  <DropdownMenuItem onSelect={() => send({ type: 'disconnect' })}>
+                    <Unplug aria-hidden="true" />
+                    {busy || status === 'error' ? 'End Agent Process' : 'Disconnect'}
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
+          <span className="acp-connection-status" role="status" aria-live="polite">
+            <StatusBadge status={status}>{statusLabels[status]}</StatusBadge>
+          </span>
+          {showInfo && (
+            <section className="acp-context" aria-label="Task and Session Info">
+              <p className="path">Workspace: {binding.workspace}</p>
+              <p className="path">Primary folder: {binding.repository}</p>
+              <p className="path">Task branch: {binding.branch}</p>
+              {(record.agentName || availableProfile) && <p>Agent: {record.agentName ?? model.profiles.find((profile) => profile.id === profileId)?.label}</p>}
+              {controls?.title && <p className="acp-message-text">Agent session: {controls.title}</p>}
+              {controls?.usage && (
+                <p className="acp-usage" aria-label="Session Usage">
+                  Context: {controls.usage.used.toLocaleString('en-US')} / {controls.usage.size.toLocaleString('en-US')} tokens
+                  {controls.usage.cost &&
+                    ` · Total cost: ${controls.usage.cost.amount.toLocaleString('en-US', { maximumFractionDigits: 6 })} ${controls.usage.cost.currency}`}
+                </p>
+              )}
+            </section>
+          )}
         </header>
 
-        <AcpSetup />
+        {!availableProfile && <p className="notice">Check the agent connection in the Warden workbench to continue.</p>}
         {needsRestore && (
           <p className="notice">
             {record.canLoad
@@ -396,7 +326,7 @@ export function AcpApp({ model, send: dispatch }: Props) {
           record.messages.map((message) => <Message key={message.id} message={message} />)
         ) : (
           <div className="acp-empty muted">
-            <p>Send task instructions here. The agent works in the workspace shown above.</p>
+            <p>What would you like to work on?</p>
           </div>
         )}
       </div>
@@ -416,68 +346,135 @@ export function AcpApp({ model, send: dispatch }: Props) {
           submit();
         }}
       >
-        {!!controls?.commands.length && (
-          <details className="acp-commands">
-            <summary>Agent Commands</summary>
-            <p className="muted">Choosing a command adds it to your message draft.</p>
-            <div className="acp-command-list">
-              {controls.commands.map((command) => (
-                <div key={command.name}>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    disabled={busy || sending || commandDraft(command.name, command.inputHint).length > 100_000}
-                    onClick={() => {
-                      updateDraft(commandDraft(command.name, command.inputHint));
-                      composer.current?.focus();
-                    }}
-                  >
-                    /{command.name}
-                  </Button>
-                  <span className="muted acp-message-text">
-                    {command.description}
-                    {command.inputHint ? ` · ${command.inputHint}` : ''}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </details>
-        )}
-        <div className="field">
+        <div className="acp-input-box">
           <Textarea
             aria-label="Message"
             ref={composer}
             value={draft}
             maxLength={100_000}
-            rows={5}
+            rows={3}
             disabled={switching}
-            placeholder="Describe the task or explain what to change next…"
+            placeholder="Describe what to work on…"
             onChange={(event) => updateDraft(event.target.value)}
             onBlur={flushDraft}
             onKeyDown={(event) => {
-              if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !event.nativeEvent.isComposing) {
+              if (event.key === 'Enter' && !event.shiftKey && !event.altKey && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
                 event.preventDefault();
                 submit();
               }
             }}
           />
+          <div className="acp-composer-toolbar">
+            <div className="acp-composer-tools" aria-label="Session Configuration" aria-busy={controls?.configuring}>
+              {!hasConnection && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="acp-connect"
+                  disabled={!availableProfile || busy || sending || (needsRestore && !record.canLoad)}
+                  onClick={() => send({ type: 'connect', profileId, resume: needsRestore })}
+                >
+                  {needsRestore ? 'Resume Session' : 'Connect Agent'}
+                </Button>
+              )}
+              {controls?.configOptions !== undefined
+                ? primaryOptions.map((option) => (
+                    <ConfigOption key={option.id} option={option} compact disabled={busy || sending || status !== 'connected'} send={send} />
+                  ))
+                : controls?.modes && (
+                    <div className="acp-picker">
+                      <NativeSelect
+                        aria-label="Session Mode"
+                        title="Mode"
+                        value={controls.modes.currentModeId}
+                        disabled={busy || sending || status !== 'connected'}
+                        onChange={(event) => send({ type: 'set-mode', modeId: event.target.value })}
+                      >
+                        {controls.modes.availableModes.map((mode) => (
+                          <NativeSelectOption key={mode.id} value={mode.id} title={mode.description}>
+                            {mode.name}
+                          </NativeSelectOption>
+                        ))}
+                      </NativeSelect>
+                    </div>
+                  )}
+              {!!extraOptions.length && (
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <IconButton label="More Session Options" size="icon-sm" disabled={switching}>
+                      <SlidersHorizontal aria-hidden="true" />
+                    </IconButton>
+                  </PopoverTrigger>
+                  <PopoverContent side="top" className="acp-options-popover" aria-label="More Session Options">
+                    {extraOptions.map((option) => (
+                      <ConfigOption key={option.id} option={option} disabled={busy || sending || status !== 'connected'} send={send} />
+                    ))}
+                  </PopoverContent>
+                </Popover>
+              )}
+              {!!controls?.commands.length && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <IconButton label="Agent Commands" size="icon-sm" disabled={busy || sending}>
+                      <Slash aria-hidden="true" />
+                    </IconButton>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    side="top"
+                    align="start"
+                    className="acp-command-menu"
+                    onCloseAutoFocus={(event) => {
+                      event.preventDefault();
+                      composer.current?.focus();
+                    }}
+                  >
+                    {controls.commands.map((command) => (
+                      <DropdownMenuItem
+                        key={command.name}
+                        disabled={commandDraft(command.name, command.inputHint).length > 100_000}
+                        onSelect={() => updateDraft(commandDraft(command.name, command.inputHint))}
+                      >
+                        <span>/{command.name}</span>
+                        <span className="muted acp-control-description">
+                          {command.description}
+                          {command.inputHint ? ` · ${command.inputHint}` : ''}
+                        </span>
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+            </div>
+            {canStop ? (
+              <IconButton
+                label={status === 'cancelling' ? 'Stopping…' : 'Stop Turn'}
+                size="icon-sm"
+                disabled={status === 'cancelling'}
+                onClick={() => send({ type: 'cancel' })}
+              >
+                <Square aria-hidden="true" />
+              </IconButton>
+            ) : (
+              <IconButton
+                label="Send"
+                type="submit"
+                variant="default"
+                size="icon-sm"
+                disabled={!canSend}
+                title="Send (Enter); Shift+Enter for a new line"
+                aria-keyshortcuts="Enter Control+Enter Meta+Enter"
+              >
+                <ArrowUp aria-hidden="true" />
+              </IconButton>
+            )}
+          </div>
         </div>
-        <div className="actions">
-          <Button type="submit" disabled={!canSend} title="Send (Ctrl / ⌘ + Enter)" aria-keyshortcuts="Control+Enter Meta+Enter">
-            {sending ? 'Sending…' : 'Send'}
-          </Button>
-          {canStop && (
-            <IconButton
-              label={status === 'cancelling' ? 'Stopping…' : 'Stop Turn'}
-              size="icon"
-              disabled={status === 'cancelling'}
-              onClick={() => send({ type: 'cancel' })}
-            >
-              <Square aria-hidden="true" />
-            </IconButton>
-          )}
-        </div>
+        {controls?.configuring && (
+          <p className="acp-composer-status muted" role="status">
+            Applying configuration…
+          </p>
+        )}
       </form>
     </main>
   );
@@ -505,12 +502,12 @@ function ConfigOption({ option, compact = false, disabled, send }: { option: Acp
       </span>
     </label>
   ) : (
-    <label className="field">
-      {option.name}
+    <label className={compact ? 'acp-picker' : 'field'}>
+      <span className={compact ? 'sr-only' : undefined}>{option.name}</span>
       <NativeSelect
         aria-label={option.name}
         aria-describedby={option.description ? descriptionId : undefined}
-        title={option.description}
+        title={option.description ? `${option.name}: ${option.description}` : option.name}
         value={option.currentValue}
         disabled={disabled}
         onChange={(event) => send({ type: 'set-config', configId: option.id, value: event.target.value })}

@@ -36,22 +36,53 @@ and other controls depend on the integration; expose only capabilities it actual
 a Warden view must not terminate an externally owned process. A reply ending never initiates Git or
 preview operations.
 
+The workbench prerequisite is a verified integration capable of messaging and workspace binding.
+Its check must use the integration's supported interface, send no work prompt and create no Warden
+task. Installation, a saved profile or opening an application's chat window does not establish those
+capabilities. Actual task-session binding is checked when the task is opened or a message is sent.
+
 ## Current implementation
 
-ACP is the currently implemented integration. This does not yet provide a direct Codex CLI,
-OpenCode HTTP or VS Code Agent Host integration. Existing `warden.acpAgents` settings and saved ACP
-conversations retain their format. Other integrations must satisfy the minimum contract above.
+ACP is the currently implemented integration. Its setup, availability check and task conversation
+are described below. This does not yet provide a direct Codex CLI, OpenCode HTTP or VS Code Agent Host
+integration. Existing `warden.acpAgents` settings and saved ACP conversations retain their format.
+The workbench availability model is protocol-independent; a further integration must satisfy the
+same minimum contract before it can unlock the workbench without ACP.
+
+Users may also use generic [workspace hooks](worktrees.md#workspace-hooks), copy task briefs or open
+the assigned directory in external tools. Those manual actions do not establish an integrated message
+channel and are not evidence that an agent is available.
 
 ## ACP task conversations
 
-**Configure Agent** offers Codex and OpenCode presets. Select one, confirm its executable on the
-workspace host and press Enter to save. Install the `codex-acp` adapter for Codex; OpenCode uses its
-native `acp` subcommand. **Custom Agent / Edit Settings** retains direct configuration for other agents
-and customized arguments or environment variables. Existing profiles are preserved, and choosing an
-already configured preset opens its settings. Cancelling either input changes nothing.
+Configure an ACP profile once. Warden connects automatically at startup and after configuration
+changes, without a separate connection-check page. The last successfully selected profile is reused
+when available; otherwise Warden uses the first configured profile. Saving a new preset selects it.
+Branch, task, workspace and preview controls appear once ACP initialization and an empty session
+succeed. Settings show connection progress, errors, authentication and **Connect ACP** / **Reconnect ACP**.
 
-Open the task's **Chat with Agent** in the Secondary Side Bar, choose a configured agent and connect or
-send a message. Opening a chat alone does not launch a process. **Switch Task Chat** explicitly opens
+The workbench connection stays open. Startup sends no prompt and creates no Warden task. Disconnect,
+failure, configuration replacement and shutdown clean up its owned process. Shutdown also closes
+active task connections and saves their records; it never automatically resends an uncertain prompt.
+An unavailable connection keeps workspaces hidden, while existing chats retain their stop controls.
+
+With no ACP server configured, the sidebar shows only **Configure ACP**. This native button opens
+the shared **Warden · Settings** panel; it does not open a picker, save settings or start an additional connection.
+The panel contains configuration, connection status and recovery, and the setup guide. Other workflow surfaces
+link to the same panel, and Task Chat does not duplicate agent setup.
+
+In Settings, **Choose Agent Preset** offers Codex and OpenCode. Select one, confirm its executable on
+the workspace host and press Enter to save. Install the `codex-acp` adapter for Codex; OpenCode uses its
+native `acp` subcommand. **Custom Agent / Edit Settings** retains direct configuration for other agents
+and customized arguments or environment variables. Each preset has one stable profile ID. Existing
+profiles are preserved, and choosing an already configured preset opens its settings without adding
+another copy. Cancelling either input changes nothing.
+
+Open the task's **Chat with Agent** in the Secondary Side Bar and connect or send a message. New
+conversations use the agent connected by the workbench; existing conversations retain their original
+agent. Agent configuration and the ACP setup guide belong to workbench setup and settings.
+Mode and model selectors sit below the message text, with additional session options and commands
+available on demand. Enter sends; Shift+Enter inserts a new line. Opening a chat alone does not launch a process. **Switch Task Chat** explicitly opens
 another task's conversation, preserving drafts and reading positions. **Open Chat in Editor** expands
 the same chat, and **Move Chat to Side Bar** returns it. Each conversation stays attached to its original
 task workspace and repository when the selected task or repository changes. Separate tasks can have separate sessions;
@@ -80,7 +111,7 @@ commit, deliver or rebase. See the [ACP boundary](acp-design.md) for ownership a
 
 ## Task briefs
 
-Add and order small tasks in the left navigation. Each new task receives a workspace automatically; copy
+Add and order small tasks in the left navigation. Warden automatically assigns each task a workspace; copy
 its task brief and paste it into the task conversation or an external tool. The brief includes the
 task title, goal, acceptance notes, assignment, workspace path, base branch and instructions.
 

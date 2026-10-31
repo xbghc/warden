@@ -52,6 +52,8 @@ export class AcpConversations {
     private readonly changed: () => void,
     private readonly report: (error: unknown) => void,
     private readonly configureAgents: () => Promise<void>,
+    private readonly connectionFailed: (profile: AcpProfile, message: string) => void,
+    private readonly defaultProfileId: () => string | undefined,
   ) {
     this.subscriptions.push(
       vscode.window.registerWebviewViewProvider(
@@ -79,6 +81,14 @@ export class AcpConversations {
     const profile = this.profiles().find((row) => row.id === id);
     if (!profile) throw new Error('This agent profile no longer exists. Configure warden.acpAgents in User settings.');
     return profile;
+  }
+  private conversationProfile(entry: Conversation, requestedId: string) {
+    const id = entry.session.snapshot().record.profileId ?? this.defaultProfileId();
+    if (!id || id !== requestedId) throw new Error('The agent changed. Reconnect in Warden Settings and try again.');
+    return this.profile(id);
+  }
+  refresh() {
+    for (const entry of this.entries.values()) this.render(entry);
   }
   configuration(): AcpConfiguration {
     try {
@@ -144,6 +154,7 @@ export class AcpConversations {
         this.changed();
         this.scheduleRender(entry);
       },
+      connectionFailed: this.connectionFailed,
     });
     await entry.session.initialize();
     if (this.closed) {
@@ -394,6 +405,7 @@ export class AcpConversations {
       error,
       panelId: entry.panelId,
       profiles,
+      defaultProfileId: this.defaultProfileId(),
       sending: entry.sending,
       ...entry.draft.snapshot(),
       presentation: entry.surface.location,
@@ -449,7 +461,7 @@ export class AcpConversations {
           const current = session.snapshot();
           if (current.status !== 'connected') {
             if (current.record.sessionId) throw new Error('Resume the original session or explicitly start a new session first.');
-            await session.connect(this.profile(action.profileId), { resume: false });
+            await session.connect(this.conversationProfile(entry, action.profileId), { resume: false });
           } else if (current.record.profileId !== action.profileId) throw new Error('Disconnect and start a new session before changing agents.');
           await session.send(submission.text);
           const record = session.snapshot().record;
@@ -460,7 +472,7 @@ export class AcpConversations {
         break;
       }
       case 'connect':
-        await session.connect(this.profile(action.profileId), { resume: action.resume });
+        await session.connect(this.conversationProfile(entry, action.profileId), { resume: action.resume });
         break;
       case 'cancel':
         await session.cancel();

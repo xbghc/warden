@@ -13,7 +13,8 @@ export function AcpSetup() {
   return (
     <details className="acp-setup">
       <summary>ACP Setup Guide and Example</summary>
-      <p>Choose Configure Agent, select Codex or OpenCode, then confirm its executable on the workspace host. Warden saves the preset for you.</p>
+      <p>The current integration uses ACP to send messages to an agent in each task workspace.</p>
+      <p>Choose Agent Preset, select Codex or OpenCode, then confirm its executable on the workspace host. Warden saves the preset for you.</p>
       <ul className="list-disc pl-5">
         <li>
           <strong>Codex:</strong> install the{' '}
@@ -30,11 +31,12 @@ export function AcpSetup() {
           , then use <code>opencode</code> with the preset <code>acp</code> argument.
         </li>
       </ul>
-      <p>Install and authenticate on the same host as the workspace. Adding a preset saves settings; it does not install or start the agent.</p>
+      <p>Install and authenticate on the same host as the workspace. Saving a preset connects automatically; it does not install the agent.</p>
       <p>On Windows, choose a native executable (.exe). For a Node.js script or batch wrapper, use Custom Agent / Edit Settings to configure its launcher.</p>
       <p>
         Choose Custom Agent / Edit Settings for other agents, arguments or environment variables. Edit <code>warden.acpAgents</code> in User settings, or Remote
-        User settings for SSH, WSL or containers. Workspace settings are ignored. Existing profiles are kept when adding a preset.
+        User settings for SSH, WSL or containers. Workspace settings are ignored. Each preset has one configuration; selecting it again opens its existing
+        settings. Other profiles are kept when adding a preset.
       </p>
       <pre>
         <code>{example}</code>
@@ -43,7 +45,11 @@ export function AcpSetup() {
         Replace <code>command</code> with the executable path on the workspace host. Set <code>args</code> according to the agent documentation, using one
         string per argument. Optional <code>env</code> entries set environment variables.
       </p>
-      <p>Save the settings, select an agent in the task conversation, then choose Connect Agent.</p>
+      <p>Warden connects automatically at startup and when these settings change. Branch selection and workspaces become available after connecting.</p>
+      <p>
+        The connection stays open until Warden closes, the settings change or you disconnect. Startup creates an empty session without sending a prompt. Sign in
+        here if required, or log in on the workspace host and reconnect.
+      </p>
     </details>
   );
 }

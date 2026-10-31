@@ -1,15 +1,11 @@
-# Warden page design
+# Warden interaction design
 
-The VS Code extension implements the [workflow](workflow.md). See [VS Code](vscode.md) for the workspace sidebar, native review editors and packaged webview forms. Human editing uses
-primary; runtime composition uses the independent preview directory. The new page is implemented.
-Wireframes describe intent rather than exact labels. Updated 2026-10-30.
+The VS Code extension implements the [workflow](workflow.md) using the [canonical terminology](terminology.md).
+See [VS Code](vscode.md) for the workspace sidebar, native review editors and packaged webview forms.
+Human editing uses primary; runtime composition uses the independent preview directory.
+Wireframes describe intent rather than exact labels.
 
-## Design method
-
-An independent agent designed this proposal in a fresh conversation context, using only the agreed
-requirements represented by the [design brief](ui-design-brief.md). It did not read the repository,
-existing UI, screenshots or documentation. A second review of its own proposal clarified uncertain
-delivery ranges, hook feedback and batch-operation behavior.
+## Product principles
 
 Warden is a passive tool. Users operate through it rather than reporting readiness, idleness or
 task completion. It shows Git facts, connections and operation results. One workspace corresponds
@@ -39,6 +35,9 @@ contains editing, opening the assigned workspace, delivery records, synchronizat
 Drag tasks or use Alt+Up/Down to reorder the plan; the Command Palette offers a move picker.
 The view heading places synchronization beside task creation and refresh. Its native **More Actions**
 menu contains **Settings** for workspace initialization, preview setup and Agent configuration.
+Background checks that find no sidebar changes leave the native tree untouched, without starting
+its loading animation. Refresh the tree when task/file content, connection state or error feedback
+changes; keep actual preview synchronization progress visible.
 
 New-task entry and commit-message entry use native input boxes. Escape preserves the input draft
 without changing Git. Commit keeps its original task, repository and review version; changes while
@@ -47,16 +46,22 @@ and native diffs, and initialization output uses the Warden output channel.
 
 Multiline task notes open an explicit editor webview with persistent task-bound drafts. Draft edits are saved to VS Code workspace state under the repository and task identity, so closing the editor preserves unsaved notes. Saving or discarding clears only the matching draft; later typing remains intact. Selecting
 another task leaves that editor bound to its original task; switching repository or branch disables
-saving until it is reopened in the matching context. Preview details, batch
-rebase and script configuration retain dedicated editor panels. The primary sidebar navigation
+saving until it is reopened in the matching context. Batch rebase and script configuration retain
+dedicated editor panels. Preview diagnostics use native output. The primary sidebar navigation
 contains no webview. **Task Chat** is a separate webview in the Secondary Side Bar by default.
 Selecting a task still opens its diff; **Chat with Agent** explicitly switches the displayed chat.
 The view title offers **Switch Task Chat** and **Open Chat in Editor**. An expanded chat offers
 **Move Chat to Side Bar**; each task has one editable chat surface and the same underlying session.
 Different tasks may be expanded side by side. Hiding or switching the view does not disconnect agents.
 
-The task title, profile and connection state stay visible above a scrolling transcript; the composer
-stays at the bottom. Session details scroll separately when narrow or short. Switching captures the
+The task title and connection state stay above a scrolling transcript; the composer stays at the
+bottom. Task paths, agent identity and usage appear on demand under **More Chat Actions**, alongside
+disconnect. New sessions use the agent verified in the workbench; existing sessions retain their
+binding. Task Chat has no agent-profile picker, executable configuration or ACP setup guide.
+The composer follows VS Code Chat: one input surface with compact Mode and Model selectors below the
+text, additional agent options and commands on demand, and a send button that becomes Stop Turn while
+running. Enter sends, Shift+Enter inserts a line, and composition keystrokes never send. Session details
+scroll separately when narrow or short. Switching captures the
 current draft and reading position before replacing the view binding. Background permission requests
 and failures appear on task rows without changing focus. Users can move the view with VS Code's native
 layout controls; Warden does not reset their chosen layout.
@@ -82,8 +87,8 @@ Git rebase replays task commits onto the base branch.
   permission decisions. Menus retain their readable action names.
 - Omit page headings that repeat the native tab title. Show branches, paths, timestamps and
   task associations directly, using icons, monospace and muted text for hierarchy. Preview
-  composition uses task chips; observable sync and connection states use text badges with
-  VS Code theme colors and high-contrast borders. Color never carries state by itself.
+  synchronization uses the native status bar, with composition and timing in its tooltip and output.
+  Observable states use text and VS Code theme colors. Color never carries state by itself.
 - Compact task edits, executor inputs and the conversation composer
   use placeholders and accessible names instead of repeated standalone labels. Preserve visible
   labels for script fields and agent-provided configuration whose values need disambiguation.
@@ -92,14 +97,16 @@ Git rebase replays task commits onto the base branch.
   and tooltips on icon buttons. Errors and recovery actions must remain visible.
 - Task rows show at most two facts, prioritizing permission requests, failures and stale reviews;
   the tooltip retains the complete context. Delivery records retain native commit-file review.
-- Empty preview setup and synchronization controls stay hidden until their configuration or
-  workspaces exist. A failed check still offers retry. A visible form owns its scoped error;
+- Preview run and setup menu entries appear only when their commands are configured. Sync and
+  terminal commands remain available for a selected base branch, including with no task connections.
+  A failed check still offers retry. A visible form owns its scoped error;
   native notifications draw attention to errors whose form is not visible.
 - Task copy actions use the more-actions menu; workspace storage, directory and branch choices
   stay internal. Hiding a task editor preserves its unsaved notes.
-- Empty states give one next step or a short fact, such as **Select a task** or **No changes**. Loading,
-  unavailable data, stale checks and empty results are distinct; do not turn unknown data into
-  a zero count or claim successful synchronization before it runs.
+- Workspaces with no changes have no child rows or placeholder message. Other empty states give
+  one next step or a short fact, such as **Select a task**. Loading, unavailable data, stale checks
+  and empty results are distinct; do not turn unknown data into a zero count or claim successful
+  synchronization before it runs.
 - State operation consequences once, beside the relevant action. Keep normal commit hooks, recovery after failure, rebase semantics
   and no automatic push explicit. Preserve failure reasons, conflicting paths and recovery steps.
   Product philosophy and internal allocation mechanics belong in documentation.
@@ -121,13 +128,14 @@ interaction checks must continue to find controls by their accessible names afte
 
 ## One navigation area, one ordered work plan
 
-The selected base branch is the current context. The only global navigation area
-is on the left, with preview and tasks:
+The selected base branch is the current context. Ordered tasks are top-level items in the native
+sidebar, with no Preview row or Tasks parent. Each task owns its connection controls, commands and
+changed files. An empty workbench offers **New Task**.
 
-- **Preview**: the current combination, last successful sync, sync action and conflict feedback.
-- **Tasks**: an ordered task list with connection switches; each item directly opens its workspace, commands and diff.
-
-**Settings** opens from the view heading's **More Actions** menu.
+**Settings** and preview commands open from the view heading's **More Actions** menu. Preview
+synchronization is visible in the status bar; its tooltip shows the composition, directory and last
+successful sync. Clicking it opens **Show Preview Output**, including conflicts and setup logs.
+Synchronization and setup failures stay visible above the task list without adding navigation rows.
 
 The list itself is the orchestration entry point, not another page to enter before reaching work.
 Adding a task prepares its workspace automatically; commands, review and delivery use the task row.
@@ -135,23 +143,21 @@ There is no separate review mode, allocation dashboard or delivery center.
 
 ```text
 ┌────────────────────────────┬─────────────────────────────────────────────────────┐
-│ Warden                     │ Task diff, preview or task notes                    │
+│ Warden                     │ Task diff or task notes                             │
 │                            │                                                     │
 │ feature/order      ...     │ No second workspace picker or global page tabs      │
 │ /project                   │                                                     │
 │                            │                                                     │
-│ Preview                 2  │                                                     │
+│ 1 Order API                │                                                     │
+│   4 changed files          │                                                     │
+│ 2 Form Validation          │                                                     │
+│   Rebase Available         │                                                     │
+│ 3 Integration              │                                                     │
+│   Not in Preview           │                                                     │
 │                            │                                                     │
-│ Tasks                   +  │                                                     │
-│   1 Order API              │                                                     │
-│     4 changed files        │                                                     │
-│   2 Form Validation        │                                                     │
-│     Rebase Available       │                                                     │
-│   3 Integration            │                                                     │
-│     Not in Preview         │                                                     │
 │                            │                                                     │
-│ Rebase                  2  │                                                     │
 └────────────────────────────┴─────────────────────────────────────────────────────┘
+  Warden: Synced
 ```
 
 `feature/order` is the chosen **Base Branch**, not an alias for the repository default branch. Its
@@ -166,10 +172,30 @@ configuration entry with a collapsed example.
 Assumption: one repository and base branch in the current context. Cross-repository
 and multi-requirement dashboards are outside this design.
 
-Before the branch is selected, show only the next setup action: choose the repository if needed,
-then choose the base branch. Hide task, preview and synchronization surfaces,
-their toolbar actions and preview status until configuration exists. A workflow page opened directly
-uses the same short setup prompt. Keep errors visible and put workflow education in documentation.
+Warden connects to the configured ACP server automatically at startup and after settings changes.
+There is no separate connection-check page. The native sidebar contains only **Configure ACP** while
+ACP is missing, invalid, connecting, disconnected or unavailable; it has no setup text or duplicate
+toolbar entry. The button opens the shared **Warden · Settings** panel, which owns preset selection,
+configuration, connection progress, errors, authentication and reconnect controls. Repeated entry
+actions reveal the same panel. Other workflow panels offer that same link rather than another setup
+or check page. Opening Settings does not create an additional connection.
+
+Keep the connection open after successful initialization. Then show repository selection when needed
+and base-branch selection, or restore the existing workbench. Hide repository/branch controls, tasks,
+workspaces, preview, rebase and script controls while ACP is unavailable; direct commands and old views
+enforce the same rule. Saved tasks and drafts survive failure and recovery. Disconnect and shutdown
+clean up owned connections and processes without initiating task work or Git operations.
+
+The integration must send messages to a session bound to its assigned task workspace. ACP and Warden
+process ownership are implementation choices; an external chat window alone does not establish those
+capabilities. Task conversations remain workspace-bound independently of the startup connection.
+
+In Settings, **Choose Agent Preset** uses a native preset picker. Each preset appears once and has
+one stable profile ID. Codex and OpenCode choices show their actual ACP commands and installation
+requirements. A second native input confirms the executable; Enter saves the profile and Escape
+cancels without a write. Existing preset IDs and **Custom Agent / Edit Settings** open User or Remote
+User settings; invalid profiles go directly there for repair. Adding a preset preserves existing
+configuration and never installs an agent. Saving starts the automatic ACP connection.
 
 ## Add a task
 
@@ -195,7 +221,7 @@ task paths remain stable across deliveries. The task expands into its native cha
 selecting a file opens the read-only diff editor.
 
 Warden creates the workspace and runs its configured initialization hook. The user can then open
-a separate task-bound ACP conversation or use external tools. ACP supplies text prompts, updates,
+a task-bound agent interaction or use external tools. The current ACP integration supplies text prompts, updates,
 permission choices and explicit session controls; agents execute their own file and command tools.
 The conversation stays attached to its original task and repository as navigation changes.
 See the adopted [ACP boundary](acp-design.md); it adds no client filesystem/terminal tools, agent
@@ -208,20 +234,22 @@ same task. Older unallocated plans are prepared automatically on use; archived p
 
 ## Compose the independent preview
 
-The left **Tasks** list is the one place to manage workspace connections. Each allocated task
-has a switch for connecting to the independent preview, available while viewing preview or
-task details. Failed allocations have no connection switch until retried. Selecting a task still opens its review;
+The sidebar's task list is the one place to manage workspace connections. Each allocated task
+has an action for connecting to the independent preview, available while reviewing any task.
+Failed allocations have no connection switch until retried. Selecting a task still opens its review;
 changing its connection does not change the selected task or plan order.
 
-“Preview” shows the current combination, runtime path, last successful sync, sync action
-and errors or conflicting paths. It has no duplicate workspace table or preview-file list; file
-review belongs to the selected workspace.
+There is no Preview page. **Show Preview Output** shows the current combination, runtime path,
+last successful sync, errors, conflicting paths and environment setup output. The status bar
+keeps freshness visible; failure messages also appear above the task list. File review belongs
+to the selected task. Preview commands remain available in the heading menu and Command Palette.
 
 ```text
-Preview                                    /warden-data/preview
+Warden output
+Preview: Synced
 Base branch: feature/order
-
-Preview contents: Order API + Form Validation
+Preview folder: /warden-data/preview
+Preview contents: Saved primary content + Order API + Form Validation
 Last successful sync: 10:42:16
 ```
 
@@ -410,9 +438,9 @@ automatic force-push or general project management.
 
 ## Design review
 
-Connection switches in the navigation stay available from every page. “Preview” explains the
-current combination and runtime path. The plan list opens work directly without planning/allocation/review/delivery
-navigation layers.
+Connection actions on top-level task rows stay available while reviewing work. Preview's status bar
+and output explain the current combination and runtime path. The task list opens work directly
+without planning/allocation/review/delivery navigation layers.
 
 The proposal keeps these operations independent:
 

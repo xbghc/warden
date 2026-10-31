@@ -54,7 +54,7 @@ exports.checkBranches = async (workbench, root, eventually) => {
   }
   assert.deepEqual(await oldFiles, [], 'a file list read begun on the old branch cannot populate the new tree');
   assert.equal(workbench.data.developmentHead, head, 'a branch identity change matters even at the same commit');
-  assert.deepEqual(await workbench.getChildren({ kind: 'tasks' }), []);
+  assert.deepEqual(await workbench.getChildren(), []);
   assert.deepEqual(workbench.model('workspaces').workspaces, []);
   assert.deepEqual(await workbench.getChildren({ kind: 'task', task: a }), [], 'old task nodes cannot reveal the previous branch');
   assert.equal(workbench.model('task').task, undefined);
@@ -93,7 +93,7 @@ exports.checkBranches = async (workbench, root, eventually) => {
       .filter((task) => task.worktree)
       .map((task) => task.id),
   );
-  assert((await workbench.getChildren({ kind: 'tasks' })).every((node) => node.task.developmentBranch === 'main'));
+  assert((await workbench.getChildren()).every((node) => node.task.developmentBranch === 'main'));
 
   for (const [task, label] of [
     [a, 'A'],

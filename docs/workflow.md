@@ -2,7 +2,7 @@
 
 Warden is a passive tool tailored to a developer's workflow. The user acts through it rather than
 maintaining a separate workflow for it. The user plans, decides, reviews and accepts the work.
-Warden supplies workspaces, configurable hooks, task-bound ACP conversations,
+Warden supplies workspaces, configurable hooks, task-bound agent interactions,
 diff review and local squash integration. Keep the current version simple enough to support
 that loop without turning it into an autonomous agent orchestrator or a project approval system.
 
@@ -12,7 +12,7 @@ while their value is assessed against that core loop.
 
 This document records the product contract. [Workspaces and tasks](worktrees.md) describes the
 working copy; [Implementation alignment](#implementation-alignment) identifies first-version
-boundaries. The [interaction design](design.md) records the independently designed page structure.
+boundaries. The [interaction design](design.md) defines the workbench layout and interaction contracts.
 The [terminology contract](terminology.md) defines the names used across documentation and the interface.
 Earlier proposals for enforced dependencies, agent-owned delivery, task completion declarations,
 automatic workspace recycling and automatic rebase are superseded by the decisions below.
@@ -29,20 +29,38 @@ merging that branch into the company's main branch remains outside Warden's core
 |---|---|---|
 | Plan | Decompose the requirement and arrange the work sequence. | Keep one ordered plan of intended commits; TODO and orchestration are the same thing. |
 | Prepare | Configure initialization scripts when needed. | Automatically allocate one fresh workspace from the base branch when a task is added and run its configured initialization script. |
-| Execute | Choose an agent, send prompts and answer its permission requests, or use external tools. | Provide task-bound ACP conversations and stdio connections; agents execute their own tools and commands. |
+| Execute | Choose an agent, send prompts and answer its permission requests, or use external tools. | Bind messages and agent sessions to the assigned task workspace through a supported integration; agents execute their own tools and commands. |
 | Preview and test | Choose connected worktrees and edit primary code and run the development server, lint or tests in the preview directory. | Compose their live changes in a persistent independent preview, preserving primary Git state. |
 | Review | Inspect the worktree's changes and decide whether they are ready to integrate. | Show the complete delivery diff before squash; let the user copy code locations for their own tools. |
 | Integrate | Initiate squash, decide what testing is needed, and commit after validation. | Perform the requested Git operations, preserve normal commit hooks, and report their results. |
 | Continue | Continue the task and choose when to synchronize its workspace. | Keep the workspace available, show synchronization conditions and rebase only when requested. |
 | Accept the requirement | Inspect commit history and decide whether the requirement is complete. | Use VS Code’s native history view; no separate final-approval feature. |
 
-An agent can run through an explicitly configured ACP stdio connection or through external tools.
-Warden uses the generic protocol, without vendor-specific SDKs, structured delivery reports or
-process-state inference. Agents own filesystem access, tools, child commands and execution policies;
-Warden provides no ACP client filesystem or terminal capabilities, agent sandbox or execution guard.
+An agent integration must send messages to an identified session and set or verify that session's
+task workspace. ACP is one implementation, not a product requirement; an external application may own
+the agent process and interaction UI. See the [minimum integration contract](agent.md#minimum-integration-contract).
+The current implementation uses ACP; manually opening an external tool does not establish integration
+availability. Warden requires no structured delivery reports or process-state inference. Agents own
+filesystem access, tools, child commands and execution policies; Warden provides no ACP client
+filesystem or terminal capabilities, agent sandbox or execution guard.
 Every interaction must serve something the user wants to do. Do not ask the user to declare
 readiness, idleness or task completion just to keep Warden's records up to date. Display observable
 Git state, selected connections and operation results instead. A clean worktree is not an idle agent.
+
+An available agent integration is a prerequisite for using the workbench. Warden automatically
+connects to the configured ACP server at startup in a trusted workspace and after profile changes.
+It initializes an empty session, keeps the connection alive and shows branch selection and task
+workspaces once connected. There is no manual connection-check page. While unavailable, the sidebar
+contains just **Configure ACP**, opening the shared Settings panel for presets, connection status,
+authentication and recovery. Installation or configuration alone does not establish availability.
+
+Connection initialization sends no prompt, grants no tool permission and initiates no Git or preview
+operation. Disconnect, replacement, failure and shutdown retire the owned connection process. Task
+agents retain separate workspace-bound connections; shutdown closes them and persists their local
+records, while reopening the workbench does not resume task work or replay prompts automatically.
+Failures do not trigger a restart loop. Existing tasks, drafts and preview connections are retained.
+Other integrations must verify their supported interface without requiring ACP configuration or
+Warden ownership of their agent process.
 
 ## Plan: the commits making up the requirement
 
@@ -83,9 +101,11 @@ A workspace is an execution resource, normally a Git worktree of Warden's extern
 on a task branch based on the base branch. The bare repository lives at
 `<primary>-warden/repo.git`, independently of task, preview and temporary operation directories.
 Task paths remain `<primary>-<n>`. Task creation allocates fresh logical workspaces and runs configured initialization hooks. Reusing a free physical directory is an internal implementation detail; users never select or adopt an old workspace.
-Workspace creation does not launch an agent. A user can explicitly connect a configured ACP agent
-from its task conversation or run external tools. Warden owns only the agent process carrying the
-stdio connection; it does not implement ACP terminal tools or supervise agent-started commands.
+Workspace creation does not launch an agent. A user explicitly connects an agent integration or runs
+external tools in that directory. In the current ACP integration, Warden owns only the agent process
+carrying the stdio connection; it does not implement ACP terminal tools or supervise agent-started
+commands. An integration with an externally managed agent must preserve that application's process
+ownership.
 
 Workspace hooks are a thin interface for user scripts: execute the configured creation/reuse
 command with the workspace directory and context, then expose output and exit status. Scripts
@@ -115,7 +135,7 @@ all agent-started background processes have stopped. Existing Git checks and pin
 necessary; Warden introduces no agent-idle declaration.
 
 Conversation records and session metadata live outside source control. Reload or connection loss
-never automatically relaunches an agent or resends an uncertain prompt. Restoration is explicit and
+never automatically relaunches a task agent or resends an uncertain prompt. Restoration is explicit and
 uses the same agent's supported session-loading capability; otherwise a new session retains the old
 record without claiming to restore model state. Turn completion never automatically connects preview,
 commits, accepts a delivery, rebases or retries an operation.
@@ -281,7 +301,7 @@ The working copy implements the workflow above. It has not been published as a r
 | Delivery | All current undelivered changes from a clean committed source, pinned by reviewed source, delivery boundary and primary HEAD. No file/commit subset picking in this version. |
 | Extension commit | Normal primary-directory Git commit with hooks/signing. Failed hooks retain files/index. No test-passed checkbox or agent handoff. |
 | Rebase | Isolated checks and explicit single/selected/all execution, with per-workspace results and pinned heads. Actual conflicts are left for the user to handle. |
-| Navigation | Single left navigation: runtime preview and ordered plan, with explicit synchronization actions. Settings open from the view heading's More Actions menu. Selecting a task/file directly opens review. |
+| Navigation | Ordered tasks are top-level sidebar items. Preview status uses the status bar; preview actions and Settings open from the view heading's More Actions menu. Selecting a task/file directly opens review. Preview has no editor page. |
 
 `sourceBase` records the last delivered source tip, independently of the squash commit SHA.
 Each delivery has a stable identifier and a source range, primary parent, commit, message and

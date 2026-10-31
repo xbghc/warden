@@ -1,7 +1,8 @@
 import type { PreviewResponse, RebaseBatchResponse, RebaseResponse, WorkflowResponse, WorkflowTask, WorkspaceConfig, FileEntry } from './types.js';
 import type { TaskReview } from './review.js';
+import type { AgentConfiguration, AgentReadiness } from './agent.js';
 
-export type Surface = 'workspaces' | 'task' | 'preview' | 'settings' | 'rebase';
+export type Surface = 'workspaces' | 'task' | 'settings' | 'rebase';
 export interface WorkspaceRow {
   task: WorkflowTask;
   expanded: boolean;
@@ -24,6 +25,8 @@ export interface WorkbenchModel {
   session: string;
   repository: string;
   repositoryState: 'loading' | 'unselected' | 'ready';
+  agentConfiguration: AgentConfiguration;
+  agentReadiness: AgentReadiness;
   surface: Surface;
   workflow?: WorkflowResponse;
   task?: WorkflowTask;
@@ -42,7 +45,7 @@ export interface WorkbenchModel {
 }
 
 export type WorkbenchAction =
-  | { type: 'setup.repository' | 'setup.branch' | 'settings.agents' }
+  | { type: 'setup.repository' | 'setup.branch' | 'setup.agents' | 'setup.checkAgent' | 'setup.cancelAgentCheck' | 'settings.agents' }
   | { type: 'workspaces.create' | 'workspaces.refresh' }
   | { type: 'workspaces.show'; surface: 'preview' | 'settings' | 'rebase' }
   | { type: 'task.create'; title: string; body: string }
@@ -79,6 +82,9 @@ export function parseWorkbenchAction(value: unknown): WorkbenchAction {
   switch (action.type) {
     case 'setup.repository':
     case 'setup.branch':
+    case 'setup.agents':
+    case 'setup.checkAgent':
+    case 'setup.cancelAgentCheck':
     case 'settings.agents':
     case 'workspaces.create':
     case 'workspaces.refresh':

@@ -16,7 +16,7 @@ operation and its scope; they do not introduce additional domain concepts.
 | --- | --- |
 | Base Branch | The explicitly selected local branch for the current work, such as `feature/order`. Task branches start from it, rebase onto it and contribute reviewed commits back to it. This role does not imply the repository's default branch or a permanent parent-child hierarchy. |
 | Task / Tasks | One linear piece of work with a title and notes / the ordered task list. Creating a task automatically allocates its workspace. A task can contribute several commits over time; order does not establish dependencies or automatic scheduling. |
-| Workbench | Warden's native sidebar containing Preview and Tasks; not an execution directory or lifecycle object. |
+| Workbench | Warden's native sidebar containing ordered tasks as top-level items; not an execution directory or lifecycle object. Preview controls use native menus and the status bar. |
 | Primary Folder | The user's checkout of the base branch. Human edits and final commits belong here. Switching its branch changes the work context, not the folder's role. Use “primary directory” in technical prose if needed. |
 | Workspace | A task's execution directory and branch, allocated by Warden and retained across commits. Qualify it as “task workspace” when distinguishing it from a VS Code workspace. |
 | Task Branch | The branch inside a task workspace, holding source commits independently of the base branch. |
@@ -26,9 +26,9 @@ operation and its scope; they do not introduce additional domain concepts.
 | Pending Changes | Task changes not yet committed to the base branch. They may already have source commits in the task workspace, so do not call all of them “uncommitted.” |
 | Baseline | Reference content for an operation. The preview baseline includes saved primary edits, which may be uncommitted. A task's incorporated baseline is an identified commit. |
 | Source Boundary | The source revision separating a previously committed contribution from the next increment. It is distinct from the final squash commit. |
-| Agent | The configured agent or adapter that owns its tools and execution policies. A legacy Executor label is only a label, not evidence of a connection or activity. |
+| Agent | The tool receiving task messages in its assigned workspace. It owns its tools and execution policies; Warden need not own its process or communicate through ACP. A legacy Executor label is only a label, not evidence of a connection or activity. |
 | Task Chat | The persistent conversation bound to one repository, task and workspace. Opening it does not start an agent. |
-| Session | An agent protocol session within a task chat. A new session does not create a task or workspace. |
+| Session | An identified agent interaction bound to a task workspace, managed by Warden's integration or an external application. A new session does not create a task or workspace. |
 
 A requirement remains the user's overall objective in the workflow documentation. It is not an
 additional interface object or an approval/completion state. A successful commit also does not
@@ -46,11 +46,16 @@ complete the task, recycle its workspace or prove that an agent is idle.
 | Connect / Disconnect Preview | Include or remove a workspace's contribution in the preview. |
 | Sync Preview | Synchronize the preview folder with saved primary content and connected task changes by recomposing them. Automatic synchronization uses the same operation. |
 | Run Preview | Run the configured command in the preview folder; separate from synchronizing files. |
+| Show Preview Output | Show the current composition, path, synchronization details and setup output in the Warden output channel. |
 | Rebase | Open Git rebase controls for task branches. Warden supplies the selected workspace paths and base branch. |
 | Check Again | Repeat read-only rebase checks; do not execute a rebase. |
 | Rebase Selected | Run Git rebase in the selected workspaces, targeting the base branch. |
 | Commit to Base Branch | Commit the reviewed increment. When the destination is known, show **Commit to <branch>**, such as **Commit to feature/order**. |
 | Chat with Agent / Connect Agent / Disconnect | Open the task chat / start the agent connection / close it. Outside a task chat, qualify the connection as an agent connection. |
+| Configure ACP | Open the shared Warden Settings panel. This is the only sidebar content while ACP is unavailable. |
+| Choose Agent Preset | Open the preset picker from Settings. A preset has one stable profile ID; selecting an existing one edits its settings instead of adding a duplicate. |
+| Connect ACP / Reconnect ACP / Cancel Connection | Explicitly connect or retry from Settings / replace the connection / stop a pending connection attempt. Startup and profile changes connect automatically. Initialization creates no Warden task or work prompt. |
+| Disconnect ACP | Close the workbench ACP connection and its owned process. Task conversations retain their own connections and stop controls. |
 | Workspace Setup Script | The user script run on task workspace allocation; distinct from Git commit hooks. |
 | Preview Setup Script | The user script preparing the preview environment; distinct from the command running a development server. |
 
@@ -107,6 +112,7 @@ Existing persisted fields, command IDs, error codes and hook environment variabl
 | `warden.deliver`, `task.deliver`, `warden.taskHistory` | Commit to base branch and task commit history |
 | Preview `syncStatus`, `synced`, `sources` | Preview sync status and composed contributions |
 | `preview.refresh`, `warden.refreshPreview` | Sync Preview; existing action and command IDs remain compatible |
+| `warden.showPreview`, `workspaces.show` with `surface: 'preview'` | Show Preview Output; retained entry points open native output instead of an editor page |
 | `rebase.*`, `RebaseCheck`, `RebaseBatchResponse` | Git rebase checks and execution in task workspaces |
 
 Use these concepts for new internal names where compatibility does not constrain them. Update this

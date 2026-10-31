@@ -62,14 +62,15 @@ async function fixture(name = 'task', mode = 'normal', timeoutMs = 15_000) {
   const storage = new MemoryStorage();
   const validate = vi.fn(async () => {});
   const changed = vi.fn();
+  const connectionFailed = vi.fn();
   const create = (persistence: AcpStorage = storage) => {
-    const session = new AcpSession({ binding, storage: persistence, validate, changed, timeoutMs });
+    const session = new AcpSession({ binding, storage: persistence, validate, changed, connectionFailed, timeoutMs });
     sessions.push(session);
     return session;
   };
   const session = create();
   await session.initialize();
-  return { session, create, profile, storage, validate, changed, workspace, file, binding };
+  return { session, create, profile, storage, validate, changed, connectionFailed, workspace, file, binding };
 }
 
 function transcript(session: AcpSession) {
@@ -442,10 +443,21 @@ describe('ACP subprocess conversations', () => {
 
   it('releases ownership when the configured executable cannot start', async () => {
     const f = await fixture();
-    await expect(f.session.connect({ ...f.profile, command: path.join(directory, 'missing-agent') }, { resume: false })).rejects.toThrow();
-    expect(f.session.snapshot().status).toBe('error');
-    expect(f.storage.claimed).toBe(false);
-    expect(await journal(f.file)).toEqual([]);
+    let signals = 0;
+    const signal = () => {
+      signals++;
+    };
+    if (process.platform !== 'win32') process.on('SIGPIPE', signal);
+    try {
+      await expect(f.session.connect({ ...f.profile, command: path.join(directory, 'missing-agent') }, { resume: false })).rejects.toThrow();
+      expect(f.session.snapshot().status).toBe('error');
+      expect(f.storage.claimed).toBe(false);
+      expect(await journal(f.file)).toEqual([]);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(signals).toBe(0);
+    } finally {
+      if (process.platform !== 'win32') process.removeListener('SIGPIPE', signal);
+    }
     await f.session.connect(f.profile, { resume: false });
     expect(f.session.snapshot().status).toBe('connected');
   });
@@ -853,6 +865,7 @@ describe('ACP subprocess conversations', () => {
     const sent = f.session.send(command).catch(() => undefined);
     await expect.poll(() => f.session.snapshot().status, { timeout: 5_000 }).toBe('error');
     await sent;
+    expect(f.connectionFailed).toHaveBeenCalledWith(f.profile, expect.any(String));
     expect(f.session.snapshot().record.messages.some((message) => message.role === 'user' && message.text === command && message.uncertain)).toBe(true);
     await f.session.close();
     const before = await journal(f.file);
@@ -872,6 +885,7 @@ describe('ACP subprocess conversations', () => {
     expect(f.session.snapshot().status).toBe('error');
     await f.session.disconnect();
     await sent;
+    expect(f.connectionFailed).not.toHaveBeenCalled();
     expect(f.session.snapshot().record.messages.some((message) => message.text === 'neverfinish' && message.uncertain)).toBe(true);
     expect((await journal(f.file)).filter((message) => message.method === 'session/prompt')).toHaveLength(1);
   });

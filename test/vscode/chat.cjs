@@ -3,6 +3,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const vscode = require('vscode');
+const { checkAgentPresets, checkAgentSetup } = require('./agent-setup.cjs');
 
 const checkChats = async (workbench, extension, fixture, eventually) => {
   const newTask = await workbench.backend.execute('task.create', { title: 'Task chat' });
@@ -11,12 +12,14 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   console.log('Checking task chats in the sidebar and editors');
   // Exercise the bundled ACP host through its command, configured profile and panel action boundary.
   const configuration = vscode.workspace.getConfiguration('warden');
-  await configuration.update(
-    'acpAgents',
-    [{ id: 'fixture', label: 'Test agent', command: fixture.node, args: [fixture.agent, fixture.journal, 'controls'] }],
-    vscode.ConfigurationTarget.Global,
-  );
-  const chatTask = (await workbench.getChildren({ kind: 'tasks' })).find((row) => row.task.id === newTask.id);
+  const selectedAgent = { id: 'fixture', label: 'Test agent', command: fixture.node, args: [fixture.agent, fixture.journal, 'controls'] };
+  const otherAgent = { ...selectedAgent, id: 'other', label: 'Other agent', args: [fixture.agent, `${fixture.journal}.other`, 'controls'] };
+  await configuration.update('acpAgents', [otherAgent, selectedAgent], vscode.ConfigurationTarget.Global);
+  await workbench.agentSetup.check(selectedAgent.id);
+  assert.equal(workbench.agentSetup.readiness.snapshot().status, 'ready');
+  await fs.rm(fixture.journal, { force: true });
+  await fs.rm(`${fixture.journal}.history`, { force: true });
+  const chatTask = (await workbench.getChildren()).find((row) => row.task.id === newTask.id);
   await vscode.commands.executeCommand('warden.chat', chatTask);
   const conversations = workbench.conversations;
   const chat = [...conversations.entries.values()].find((entry) => entry.binding.taskId === newTask.id);
@@ -24,12 +27,24 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   assert(conversations.sidebar.visible, 'task chat is visible without opening an editor');
   assert.equal(chat.panel, undefined);
   await eventually(() => chat.surface.ready);
+  workbench.views.panels.get('settings')?.dispose();
+  await eventually(() => !workbench.views.panels.has('settings'));
+  const settingsOpening = conversations.handle(chat, { type: 'configure' });
+  await eventually(() => workbench.views.panels.has('settings') || !!workbench.agentSetup.picker);
+  const directPicker = workbench.agentSetup.picker;
+  directPicker?.hide();
+  await settingsOpening;
+  assert.equal(directPicker, undefined, 'chat settings opens the shared Settings panel before choosing a preset');
+  assert(workbench.views.panels.get('settings')?.visible, 'chat and sidebar use the same Warden Settings panel');
+  workbench.views.panels.get('settings').dispose();
   assert(extension.packageJSON.contributes.viewsContainers.secondarySidebar.some((item) => item.id === 'warden-chat'));
   const edit = (text) => {
     const current = chat.draft.snapshot();
     return { text, version: current.draftVersion, revision: current.draftRevision + 1 };
   };
   assert.equal(chat.session.snapshot().status, 'disconnected');
+  assert.equal(conversations.defaultProfileId(), 'fixture', 'new chats use the verified agent, not settings order');
+  await assert.rejects(conversations.handle(chat, { type: 'connect', profileId: 'other', resume: false }), /The agent changed/);
   await assert.rejects(fs.access(fixture.journal), 'opening a panel does not launch the agent');
   await fs.writeFile(path.join(chat.binding.workspace, 'context.txt'), 'Task context\n');
   await conversations.handle(chat, { type: 'send', profileId: 'fixture', ...edit('own-edit') });
@@ -45,6 +60,10 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   });
   assert.equal(initialized.cwd, chat.binding.workspace);
   assert.equal(chat.draft.text, '', 'completed prompt clears the submitted draft');
+  await workbench.agentSetup.check(otherAgent.id);
+  assert.equal(conversations.defaultProfileId(), 'other');
+  assert.equal(conversations.conversationProfile(chat, 'fixture').id, 'fixture', 'existing sessions retain their agent after setup changes');
+  await workbench.agentSetup.check(selectedAgent.id);
   assert.equal(chat.session.snapshot().controls.configOptions.find((option) => option.id === 'model').currentValue, 'fast');
   await conversations.handle(chat, { type: 'set-config', configId: 'model', value: 'deep' });
   await conversations.handle(chat, { type: 'set-config', configId: 'thinking', value: true });
@@ -97,7 +116,7 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   assert.equal(chat.panel, undefined);
   assert.equal(chat.surface.location, 'sidebar');
   assert.equal(chat.session.snapshot().record.sessionId, expandedSession, 'moving a chat does not reconnect');
-  assert.equal((await journal()).filter((row) => row.method === 'initialize').length, 1);
+  assert.equal((await journal()).filter((row) => row.method === 'initialize' && row.cwd === chat.binding.workspace).length, 1);
   if (process.env.WARDEN_VSCODE_SCREENSHOT && process.platform === 'linux') {
     await eventually(() => chat.surface.ready);
     await new Promise((resolve) => setTimeout(resolve, 500));
@@ -162,7 +181,7 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
 };
 exports.checkChats = checkChats;
 
-// A focused packaged-host entry point for conversation changes.
+// A focused packaged-host entry point for agent setup and conversation changes.
 exports.run = async () => {
   const fixture = JSON.parse(await fs.readFile(process.env.WARDEN_VSCODE_FIXTURE, 'utf8'));
   const extension = vscode.extensions.getExtension('xbghc.warden');
@@ -175,9 +194,14 @@ exports.run = async () => {
     }
   };
   try {
+    await workbench.open(fixture.unconfigured);
+    await checkAgentSetup(workbench, extension, fixture, eventually);
+    await checkAgentPresets(workbench, fixture, eventually);
+    await workbench.open(fixture.root);
+    await checkAgentSetup(workbench, extension, fixture, eventually);
     await checkChats(workbench, extension, fixture, eventually);
     console.log(
-      'Packaged task chats passed: sidebar placement, editor transfers, background permissions, stale routing, draft preservation and same-session reuse.',
+      'Packaged agent flows passed: preset configuration, cancellation, profile preservation, sidebar placement, editor transfers, background permissions, stale routing, draft preservation and same-session reuse.',
     );
   } finally {
     await workbench.close();

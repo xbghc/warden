@@ -52,9 +52,9 @@ One whose directory is gone (git lists it as *prunable*) is not offered, and a r
 inside a removed worktree falls back to the working tree on the next load. Reusing a slot for another
 branch clears its historical target metadata.
 
-Navigation stays together in the left sidebar: *Preview*, ordered tasks and the
-synchronization/settings panels. Within a task, its file list selects the diff directly. Connection
-selection is independent and remains available in each workspace action row.
+Ordered tasks are top-level items in the left sidebar. Within a task, its file list selects the diff
+directly. Connection selection is independent and remains available in each task's action row.
+Preview commands and settings use the view heading's menu; preview status remains in the status bar.
 
 Review presents the complete file list for the current comparison. Staging does not establish that
 a file has been reviewed.

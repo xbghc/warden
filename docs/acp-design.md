@@ -19,7 +19,7 @@ ACP client filesystem or terminal capabilities. There are no `fs/read_text_file`
 agent-execution guard. An agent that requires those client capabilities is outside this version's
 scope. Displaying a reported tool call does not execute it in Warden.
 
-The task workspace is the process and session cwd. This supplies project context; it does not
+For task conversations, the task workspace is the process and session cwd. This supplies project context; it does not
 confine a local agent's filesystem or process privileges. Agent permissions and execution policies
 remain the agent's responsibility. Existing workspace initialization hooks and user-run preview
 terminals are separate facilities, not ACP tool implementations.
@@ -31,18 +31,54 @@ User settings, or Remote User settings when the extension runs in SSH, WSL or a 
 and folder settings cannot supply executable profiles. The command must be available on the
 workspace extension host. An executable and argument array are launched directly; task text and
 agent replies never become executable configuration.
+The transport waits for successful process startup before sending its first ACP request. A missing
+executable fails without writing to a pipe with no reader; conversation ownership is still released.
 
-**Configure Agent** opens a native picker with Codex, OpenCode and **Custom Agent / Edit Settings**.
+The workbench automatically connects at startup in a trusted workspace and after User or Remote User
+profile changes. It uses the last successfully selected profile ID when still configured, otherwise
+the first profile. Saving a new preset selects that profile for the automatic connection. Settings
+changes are coalesced, the old connection is retired first, and startup never opens a profile picker.
+
+Initialization launches the profile on the workspace host with the primary folder as cwd (or the first
+workspace folder before repository selection), negotiates ACP and creates an empty `session/new`.
+It advertises no client filesystem or terminal tools, cancels startup permission requests and never
+sends `session/prompt`. No Warden task, workspace allocation or conversation record is created. The
+agent may retain its own empty session metadata. This connection stays alive after initialization;
+branch and workspace controls become available automatically, with no manual check page.
+
+An unexpected connection or process exit makes the workbench unavailable. Authentication-required
+responses retain the connection and expose supported login methods in Settings; authentication remains
+explicit. Errors stay in Settings with reconnect controls and do not trigger an automatic restart or
+prompt retry. A provider may defer authentication or network validation until a prompt, so startup
+cannot guarantee every later turn will succeed. Observed failures of the selected agent close the gate.
+
+Disconnect, configuration changes and extension shutdown cancel pending attempts and retire the owned
+stdio process with bounded termination. Late results cannot mark a replaced connection ready. Task
+conversations keep their own process and session cwd in the assigned task workspace, independently
+of this startup connection. Shutdown also closes those connections, flushes local conversation/draft
+state and releases their claims. It does not supervise agent-owned child commands. Existing task data,
+conversations and drafts remain available for explicit recovery. Availability is held in the current
+window; only the selected profile ID is remembered, not a persistent success flag.
+
+While ACP is unavailable, the native sidebar contains only a **Configure ACP** welcome button,
+with no tree rows, setup text or duplicate toolbar entry. It opens the shared Warden Settings panel.
+Other workflow panels offer the same link; setup guides and preset controls appear only in Settings.
+Opening Settings does not change profiles or start an additional connection.
+
+In Settings, **Choose Agent Preset** opens a native picker with Codex, OpenCode and
+**Custom Agent / Edit Settings**. Each preset has one stable profile ID.
 Codex uses the `codex-acp` adapter; OpenCode uses `opencode` with `args: ["acp"]`. Choosing a preset
 opens a native executable input; Enter appends it to User or Remote User settings, while Escape
 leaves settings unchanged. The command can be a name on PATH or an absolute path on the workspace
 host. Windows inputs use native executables; batch wrappers require an explicitly configured launcher.
 Re-read profiles when saving to preserve edits made while the input was open. Existing preset IDs
 open settings instead of being replaced or duplicated. Invalid settings go directly to repair and
-are never replaced with defaults. Workbench and Task Chat use the same picker.
+are never replaced with defaults. Configuration remains available before repository or branch
+selection. Task Chat does not duplicate the picker or ACP setup guide.
 
 These are configuration templates, not bundled agents or verified vendor integrations. They do not
-install software, choose models, change agent permissions, supply credentials or start a process.
+install software, choose models, change agent permissions or supply credentials. Saving a preset
+starts the normal automatic connection.
 See the upstream [Codex adapter](https://github.com/agentclientprotocol/codex-acp) and
 [OpenCode ACP guide](https://docs.opencode.ai/docs/acp/) for installation and authentication.
 
@@ -67,11 +103,14 @@ conversation the view presents. **Open Chat in Editor** and **Move Chat to Side 
 editable surface without creating a session or process. Multiple tasks can have editor chats open.
 Before switching or moving, the host requests and acknowledges the latest draft and reading position;
 a failed capture leaves the current view available. Each mount receives a fresh routing token, and
-queued messages from an old mount are ignored. Drafts, profile selection and reading position belong
+queued messages from an old mount are ignored. Drafts and reading position belong
 to the task allocation; changing presentation never transfers them to another task. An executor label is still only a label.
 
-Opening a chat shows saved history without launching an agent. An explicit connect or send starts
-the configured process, negotiates capabilities and creates the session. One executable connection
+Opening a chat shows saved history without launching an agent. New conversations use the profile
+verified in workbench setup, independent of settings order or an older saved view selection. Existing
+records retain their original profile, including after the workbench agent changes. The host rejects
+stale profile choices for new conversations. An explicit connect or send starts the configured process,
+negotiates capabilities and creates the session. One executable connection
 is allowed per task; separate tasks can have separate conversations. Each connection accepts one
 prompt at a time while other tasks, diff review and preview remain usable.
 
@@ -111,6 +150,12 @@ Selectors can expose models, modes, reasoning levels or other agent-defined sett
 provider-specific configuration. Only identifiers and values currently offered by the agent are accepted.
 Warden waits for the agent's confirmed state rather than changing selectors optimistically. A
 configuration change and a prompt cannot run concurrently in the same task conversation.
+
+Task Chat places compact mode and model selectors in the composer footer, with extra options in a
+popover. Slash commands open from the same footer and still only prepare a draft. The header menu
+contains task/session details and disconnect; executable profiles and setup instructions are absent.
+Enter sends, Shift+Enter inserts a line, and Ctrl/Command+Enter remains supported. IME composition
+never submits. The send control becomes Stop Turn during an active turn.
 
 `config_option_update` replaces the entire configuration list. Mode, command, usage and session-title
 updates are also accepted between turns. These controls are live connection state: disconnecting
@@ -158,7 +203,7 @@ execution or new prompts. Preserve the prior local record when loading fails. If
 unsupported, offer **New Session** while retaining the previous record; local transcript storage is not
 a promise of restored model state. Changing agents likewise starts an explicit new conversation.
 While the new record is saved and its temporary ownership claim is released, the panel shows
-**Starting New Session** and disables profile selection, connection and sending. It becomes disconnected
+**Starting New Session** and disables connection and sending. It becomes disconnected
 and available only after reset cleanup finishes, so a newly visible record cannot race that cleanup.
 
 ## Git and preview remain user-operated

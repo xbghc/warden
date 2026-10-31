@@ -84,6 +84,7 @@ interface Entry {
   session: AcpSession;
   storage: CompletionStorage;
   profiles: AcpProfile[];
+  defaultProfileId: string;
   draft: AcpDraft;
   viewState?: AcpViewState;
   sending: boolean;
@@ -92,7 +93,6 @@ interface Entry {
 const entries: Entry[] = [];
 for (const [index, title] of ['订单筛选参数', '分页默认值'].entries()) {
   const task = await engine.execute('task.create', { title });
-  await engine.execute('task.start', { taskId: task.id, kind: 'shared' });
   const binding = await resolveAcpBinding(engine, task.id);
   await writeFile(path.join(binding.workspace, 'context.txt'), `task ${index + 1}\n`);
   const profiles = ['normal', 'no-load', 'auth', 'incompatible', 'controls', 'legacy-modes'].map((mode) => ({
@@ -117,7 +117,16 @@ for (const [index, title] of ['订单筛选参数', '分页默认值'].entries()
     timeoutMs: 3000,
   });
   await session.initialize();
-  entries.push({ binding, panelId: `panel-${index}`, session, storage, profiles, draft: new AcpDraft(`请完成${title}。`), sending: false });
+  entries.push({
+    binding,
+    panelId: `panel-${index}`,
+    session,
+    storage,
+    profiles,
+    defaultProfileId: 'normal',
+    draft: new AcpDraft(`请完成${title}。`),
+    sending: false,
+  });
 }
 
 const model = (entry: Entry): AcpModel => ({
@@ -128,6 +137,7 @@ const model = (entry: Entry): AcpModel => ({
   viewState: entry.viewState,
   sending: entry.sending,
   profiles: entry.profiles.map(({ id, label }) => ({ id, label })),
+  defaultProfileId: entry.defaultProfileId,
   ...entry.draft.snapshot(),
 });
 const profile = (entry: Entry, id: string) => {
@@ -202,6 +212,11 @@ const server = createServer(async (request, response) => {
     if (url.pathname === '/model') {
       response.setHeader('Content-Type', 'application/json');
       response.end(JSON.stringify(model(entry)));
+      return;
+    }
+    if (url.pathname === '/default-profile' && request.method === 'POST') {
+      entry.defaultProfileId = profile(entry, url.searchParams.get('profile') ?? '').id;
+      response.end('{}');
       return;
     }
     if (url.pathname === '/completion') {

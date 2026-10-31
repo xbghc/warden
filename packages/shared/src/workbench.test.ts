@@ -8,6 +8,10 @@ describe('webview protocol boundary', () => {
     for (const patch of [{ taskId: '' }, { title: 'x'.repeat(201) }, { body: 'x'.repeat(10001) }, { body: 42 }])
       expect(() => parseWorkbenchAction({ ...draft, ...patch })).toThrow();
   });
+  it('accepts only host-owned agent setup actions without executable configuration', () => {
+    for (const type of ['setup.agents', 'setup.checkAgent', 'setup.cancelAgentCheck'])
+      expect(parseWorkbenchAction({ type, command: 'injected', profileId: 'untrusted' })).toEqual({ type });
+  });
   it('rejects arbitrary commands, adoption and oversized input', () => {
     for (const action of [
       { type: 'executeCommand', command: 'workbench.action.terminal.new' },

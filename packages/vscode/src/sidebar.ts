@@ -4,7 +4,6 @@ import type { FileEntry, TaskReview, WorkflowTask, WorkbenchAction, WorkbenchMod
 import { previewStatusLabels } from '@warden/shared';
 
 type Entry =
-  | { kind: 'preview' | 'tasks' }
   | { kind: 'task'; task: WorkflowTask }
   | { kind: 'file'; file: FileEntry; target: string; task?: WorkflowTask; review?: TaskReview }
   | { kind: 'notice'; message: string; error: boolean; task: WorkflowTask };
@@ -20,6 +19,7 @@ export class Sidebar implements vscode.TreeDataProvider<SidebarNode>, vscode.Tre
   readonly dropMimeTypes = [dragType];
   readonly view: vscode.TreeView<SidebarNode>;
   private drag?: { session: string; taskId: string; nonce: string };
+  private signature?: string;
   private readonly subscriptions: vscode.Disposable[];
 
   constructor(
@@ -41,11 +41,47 @@ export class Sidebar implements vscode.TreeDataProvider<SidebarNode>, vscode.Tre
 
   refresh() {
     const model = this.model();
-    this.view.description = model.workflow?.workflow?.developmentBranch;
-    this.view.message =
-      model.repositoryState === 'loading'
-        ? undefined
-        : [model.busy, ...model.errors.filter((error) => error.scope === 'repository').map((error) => error.message)].filter(Boolean).join('\n') || undefined;
+    const branch = model.workflow?.workflow?.developmentBranch;
+    if (this.view.description !== branch) this.view.description = branch;
+    let message: string | undefined;
+    if (model.agentConfiguration.status !== 'configured' || model.agentReadiness.status !== 'ready') {
+      // Connection progress and recovery belong in Settings, not a separate workbench gate.
+      message = undefined;
+    } else {
+      const preview = model.preview;
+      const status = preview?.syncStatus ?? preview?.status;
+      const previewProblem = status && ['stale', 'conflict', 'error', 'paused'].includes(status);
+      message =
+        model.repositoryState === 'loading'
+          ? undefined
+          : [
+              model.busy,
+              ...model.errors.filter((error) => ['repository', 'preview'].includes(error.scope)).map((error) => error.message),
+              previewProblem
+                ? `${previewStatusLabels[status]}: ${preview?.message ?? 'Preview content is not current. Open Show Preview Output for details.'}`
+                : '',
+              preview?.setup?.status === 'failed' ? 'Preview setup failed. Open Show Preview Output for details, then retry setup.' : '',
+            ]
+              .filter(Boolean)
+              .join('\n') || undefined;
+    }
+    if (this.view.message !== message) this.view.message = message;
+
+    // Invalidating an unchanged tree makes VS Code reload expanded files and show progress.
+    // Include content hashes and review versions, but leave check timestamps and editor drafts out.
+    const signature = JSON.stringify({
+      session: model.session,
+      repository: model.repository,
+      repositoryState: model.repositoryState,
+      branch,
+      agentConfiguration: model.agentConfiguration,
+      agentReadiness: model.agentReadiness,
+      workspaces: model.workspaces,
+      checks: model.checks?.checks.map(({ checkedAt: _checkedAt, ...check }) => check),
+      errors: model.errors.filter((error) => error.scope.startsWith('task:')),
+    });
+    if (signature === this.signature) return;
+    this.signature = signature;
     this.changed.fire(undefined);
   }
 
@@ -56,18 +92,17 @@ export class Sidebar implements vscode.TreeDataProvider<SidebarNode>, vscode.Tre
     if (session !== this.model().session) return [];
     if (!children.length && node?.kind === 'task' && node.task.worktree) {
       const error = this.model().workspaces?.find((row) => row.task.id === node.task.id)?.filesError;
-      return [{ kind: 'notice', task: node.task, session, message: error ?? 'No changes', error: !!error }];
+      if (error) return [{ kind: 'notice', task: node.task, session, message: error, error: true }];
     }
     return children.map((child) => ({ ...child, session }));
   }
 
   async select(taskId: string) {
-    const node = (await this.getChildren({ kind: 'tasks' })).find((node) => node.kind === 'task' && node.task.id === taskId);
+    const node = (await this.getChildren()).find((node) => node.kind === 'task' && node.task.id === taskId);
     if (node) await this.view.reveal(node, { select: true, focus: false, expand: false });
   }
 
   getParent(node: SidebarNode): SidebarNode | undefined {
-    if (node.kind === 'task') return { kind: 'tasks', session: node.session };
     if ((node.kind === 'file' || node.kind === 'notice') && node.task) return { kind: 'task', task: node.task, session: node.session };
     return undefined;
   }
@@ -128,35 +163,11 @@ export class Sidebar implements vscode.TreeDataProvider<SidebarNode>, vscode.Tre
       item.command = { command: 'warden.openDiff', title: 'View Diff', arguments: [node] };
       return item;
     }
-    if (node.kind === 'notice') {
-      const item = new vscode.TreeItem(node.error ? 'Unable to read changes. Refresh to retry.' : node.message);
-      item.id = `${prefix}notice:${node.task.id}`;
-      item.tooltip = node.message;
-      item.iconPath = new vscode.ThemeIcon(node.error ? 'warning' : 'info');
-      if (node.error) item.command = { command: 'warden.refresh', title: 'Refresh', arguments: [node] };
-      return item;
-    }
-    const names = { preview: 'Preview', tasks: 'Tasks' };
-    const item = new vscode.TreeItem(names[node.kind], node.kind === 'tasks' ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.None);
-    item.id = `${prefix}${node.kind}`;
-    item.contextValue = node.kind;
-    if (node.kind === 'tasks') item.description = String(model.workspaces?.length ?? 0);
-    else {
-      item.command = {
-        command: 'warden.showPreview',
-        title: names[node.kind],
-        arguments: [node],
-      };
-      const preview = model.preview;
-      item.description = previewStatusLabels[preview?.syncStatus ?? preview?.status ?? 'disconnected'];
-      item.tooltip = [
-        preview?.worktree ?? 'Preview folder is not initialized',
-        preview?.message,
-        preview?.setup?.status === 'failed' ? 'Preview setup failed' : '',
-      ]
-        .filter(Boolean)
-        .join('\n');
-    }
+    const item = new vscode.TreeItem(node.error ? 'Unable to read changes. Refresh to retry.' : node.message);
+    item.id = `${prefix}notice:${node.task.id}`;
+    item.tooltip = node.message;
+    item.iconPath = new vscode.ThemeIcon(node.error ? 'warning' : 'info');
+    if (node.error) item.command = { command: 'warden.refresh', title: 'Refresh', arguments: [node] };
     return item;
   }
 
@@ -171,7 +182,7 @@ export class Sidebar implements vscode.TreeDataProvider<SidebarNode>, vscode.Tre
   async handleDrop(target: SidebarNode | undefined, transfer: vscode.DataTransfer, token: vscode.CancellationToken) {
     const drag = this.drag;
     if (!drag || token.isCancellationRequested || drag.session !== this.model().session || (target?.session && target.session !== drag.session)) return;
-    if (target && !['task', 'file', 'tasks'].includes(target.kind)) return;
+    if (target && !['task', 'file'].includes(target.kind)) return;
     if (target?.kind === 'file' && !target.task) return;
     const value = await transfer.get(dragType)?.asString();
     if (token.isCancellationRequested || drag.session !== this.model().session || value !== JSON.stringify(drag) || drag !== this.drag) return;

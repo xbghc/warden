@@ -141,7 +141,6 @@ section {
 }
 .metadata,
 .section-heading,
-.surface-toolbar,
 .selection-toggle {
   display: flex;
   align-items: center;
@@ -149,8 +148,7 @@ section {
   min-width: 0;
 }
 .metadata,
-.section-heading,
-.surface-toolbar {
+.section-heading {
   flex-wrap: wrap;
 }
 .metadata > svg {
@@ -168,36 +166,11 @@ section {
 .branch {
   overflow-wrap: anywhere;
 }
-.surface-toolbar {
-  justify-content: space-between;
-  margin-bottom: 12px;
-}
-.surface-toolbar .actions {
-  margin: 0;
-}
 .section-heading h2 {
   margin: 0;
 }
 .section-heading {
   margin-bottom: 8px;
-}
-.path-row {
-  flex-wrap: nowrap;
-}
-.path-row .path {
-  min-width: 0;
-}
-.preview-composition {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin: 16px 0 12px;
-}
-.composition-item {
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-  padding: 3px 8px;
-  overflow-wrap: anywhere;
 }
 .status-badge {
   display: inline-block;
@@ -359,61 +332,35 @@ summary {
 }
 .acp-heading {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 8px 16px;
+  gap: 2px;
 }
 .acp-heading h1 {
   flex: 1;
-  min-width: 100px;
+  min-width: 0;
   margin: 0;
-  font-size: 15px;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.acp-connection-status {
+  display: block;
+  margin-top: 4px;
+}
+.acp-context {
+  margin-top: 10px;
+  color: var(--color-muted-foreground);
   overflow-wrap: anywhere;
 }
-.acp-header .metadata {
-  flex-wrap: nowrap;
-}
-.acp-header .metadata span {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-.acp-context summary {
-  padding: 2px 0;
-  color: var(--color-muted-foreground);
-}
-.acp-profile {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 8px;
-  margin-top: 12px;
-}
-.acp-profile .field {
-  flex: 1;
-  min-width: 180px;
-  max-width: 360px;
+.acp-options-popover .field {
   margin: 0;
 }
-.acp-session-settings {
-  margin-top: 16px;
-}
-.acp-config-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px 16px;
-}
-.acp-extra-options {
-  margin-top: 8px;
-}
-.acp-session-settings label.field {
-  flex: 1;
-  min-width: 160px;
-  max-width: 300px;
-  margin: 0;
+.acp-options-popover {
+  display: grid;
+  gap: 12px;
+  max-height: min(360px, 60vh);
+  overflow: auto;
 }
 .acp-control-description {
   display: block;
@@ -427,34 +374,27 @@ summary {
   overflow-wrap: anywhere;
 }
 .acp-usage,
-.acp-command-list {
+.acp-command-menu {
   overflow-wrap: anywhere;
 }
-.acp-commands {
-  margin-bottom: 16px;
-}
-.acp-commands summary,
 .acp-thought summary {
   cursor: pointer;
   color: var(--color-muted-foreground);
 }
-.acp-command-list > div {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin-top: 8px;
+.acp-command-menu {
+  max-width: min(360px, calc(100vw - 24px));
+  max-height: min(360px, 60vh);
+  overflow: auto;
 }
-.acp-command-list button {
-  max-width: 100%;
-  white-space: normal;
-  overflow-wrap: anywhere;
+.acp-command-menu [role="menuitem"] {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
 }
 .acp-thought .acp-message-text {
   margin-top: 8px;
 }
 .acp-transcript {
-  border-block: 1px solid var(--color-border);
   flex: 1 1 auto;
   min-height: 70px;
   overflow: auto;
@@ -462,17 +402,24 @@ summary {
   padding-block: 4px;
 }
 .acp-empty {
-  padding: 24px 10px;
+  display: grid;
+  height: 100%;
+  place-content: center;
+  padding: 24px 16px;
+  text-align: center;
 }
 .acp-message {
   padding: 14px 10px;
-  border-bottom: 1px solid var(--color-border);
 }
-.acp-message:last-child {
-  border-bottom: none;
+.acp-message-user {
+  margin-block: 8px;
+  border: 1px solid var(--vscode-contrastBorder, transparent);
+  border-radius: 6px;
+  background: var(--color-muted);
 }
-.acp-message-user,
 .acp-message-tool {
+  margin-block: 4px;
+  border-left: 2px solid var(--color-border);
   background: var(--color-muted);
 }
 .acp-message-heading {
@@ -530,20 +477,79 @@ summary {
   flex: 0 0 auto;
   margin-top: 0;
 }
-.acp-composer .field {
-  margin: 0 0 8px;
+.acp-input-box {
+  border: 1px solid var(--vscode-contrastBorder, var(--vscode-input-border, var(--color-border)));
+  border-radius: 8px;
+  background: var(--vscode-input-background, var(--color-background));
 }
-.acp-composer .actions {
-  margin: 0;
+.acp-input-box:focus-within {
+  border-color: var(--color-ring);
+  outline: 1px solid var(--color-ring);
 }
-.acp-composer .acp-commands[open] {
-  max-height: 20vh;
-  overflow: auto;
+.acp-composer-toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  padding: 4px 6px 6px;
+}
+.acp-composer-tools {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+}
+.acp-picker {
+  min-width: 0;
+  max-width: 100%;
+}
+.acp-picker [data-slot="native-select-wrapper"] {
+  max-width: 100%;
+}
+.acp-picker select {
+  field-sizing: content;
+  width: auto;
+  max-width: min(180px, 100%);
+  height: 28px;
+  padding: 3px 22px 3px 6px;
+  border: 0;
+  border-radius: 4px;
+  box-shadow: none;
+  font-size: 12px;
+  color: var(--color-foreground);
+  text-overflow: ellipsis;
+  background: transparent;
+}
+.acp-picker select:hover {
+  background: var(--color-accent);
+}
+.acp-picker [data-slot="native-select-icon"] {
+  right: 4px;
+  width: 12px;
+  opacity: 1;
+}
+.acp-connect {
+  height: 28px;
+  padding-inline: 6px;
+  font-size: 12px;
+}
+.acp-composer-status {
+  margin-top: 4px;
+  font-size: 12px;
 }
 .acp-composer textarea {
-  resize: vertical;
-  max-height: 25vh;
-  min-height: 60px;
+  resize: none;
+  min-height: 64px;
+  max-height: 28vh;
+  padding: 10px 12px 4px;
+  border: 0;
+  border-radius: 8px 8px 0 0;
+  box-shadow: none;
+  outline: none;
+  background: transparent;
+  font-size: 13px;
+  line-height: 1.5;
 }
 @media (max-width: 620px) {
   main {

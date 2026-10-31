@@ -1,12 +1,108 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
+const path = require('node:path');
 const vscode = require('vscode');
 const { execFileSync } = require('node:child_process');
+
+async function checkQuietRefresh(workbench, workspace) {
+  await workbench.refresh(true);
+  let updates = 0;
+  const subscription = workbench.sidebar.onDidChangeTreeData(() => ++updates);
+  const file = path.join(workspace.task.worktree, 'sidebar-refresh.txt');
+  try {
+    await workbench.refresh(true);
+    await workbench.refresh(true);
+    assert.equal(updates, 0, 'unchanged repository reads do not reload the native tree or start its progress animation');
+    assert.equal(workbench.sidebar.view.selection[0]?.task?.id, workspace.task.id, 'quiet refresh preserves the selected task');
+    assert.equal(workbench.expanded[workspace.task.id], true, 'quiet refresh preserves expansion');
+
+    const previewBeforeCheck = workbench.preview;
+    const checks = workbench.checks;
+    try {
+      const checkedAt = new Date().toISOString();
+      workbench.preview = { ...previewBeforeCheck, updatedAt: checkedAt };
+      workbench.checks = { checks: checks.checks.map((check) => ({ ...check, checkedAt })) };
+      workbench.render();
+      assert.equal(updates, 0, 'new check timestamps alone do not reload unchanged sidebar content');
+    } finally {
+      workbench.preview = previewBeforeCheck;
+      workbench.checks = checks;
+      workbench.render();
+    }
+
+    await fs.writeFile(file, 'First version\n');
+    await workbench.refresh(true);
+    assert(updates > 0, 'saved workspace changes refresh the native tree');
+    const row = () => workbench.model('workspaces').workspaces.find((row) => row.task.id === workspace.task.id);
+    const first = row().files.find((entry) => entry.path === 'sidebar-refresh.txt');
+    assert(first, 'the expanded task includes the new file');
+    updates = 0;
+    await fs.writeFile(file, 'Other version\n');
+    await workbench.refresh(true);
+    const second = row().files.find((entry) => entry.path === first.path);
+    assert.equal(second.additions, first.additions);
+    assert.equal(second.deletions, first.deletions);
+    assert.notEqual(second.contentHash, first.contentHash);
+    assert(updates > 0, 'content changes refresh the tree even when paths and line counts stay the same');
+    updates = 0;
+    await workbench.refresh(true);
+    assert.equal(updates, 0, 'unchanged dirty workspaces also stay quiet');
+
+    const preview = workbench.preview;
+    try {
+      for (const [syncStatus, label] of [
+        ['pending', 'Out of Date'],
+        ['updating', 'Syncing'],
+        ['error', 'Sync Failed'],
+        ['synced', 'Synced'],
+      ]) {
+        updates = 0;
+        workbench.preview = { ...preview, syncStatus };
+        workbench.render();
+        assert.equal(updates, 0, 'global preview status does not reload unchanged task rows');
+        assert(workbench.status.text.includes(label), 'preview state stays visible in the status bar');
+        if (syncStatus === 'error') assert.match(workbench.sidebar.view.message, /Sync Failed/);
+      }
+      workbench.preview = {
+        ...preview,
+        syncStatus: 'conflict',
+        conflicts: ['conflicting-file.ts'],
+        message: 'The preview still contains the last successful composition.',
+        setup: { status: 'failed', exitCode: 1, output: 'Fixture setup failure' },
+      };
+      workbench.render();
+      assert.match(workbench.sidebar.view.message, /last successful composition/, 'stale content is visible without opening an editor');
+      assert.match(workbench.sidebar.view.message, /Preview setup failed/);
+      assert.match(workbench.status.tooltip, /conflicting-file.ts/);
+      assert.equal(workbench.status.backgroundColor.id, 'statusBarItem.warningBackground');
+    } finally {
+      workbench.preview = preview;
+      workbench.render();
+    }
+  } finally {
+    subscription.dispose();
+    await fs.rm(file, { force: true });
+    await workbench.refresh(true);
+  }
+}
 
 exports.checkSidebar = async (workbench, extension, repository, eventually) => {
   const contributions = extension.packageJSON.contributes;
   assert.notEqual(contributions.views.warden[0].type, 'webview', 'workspace navigation uses a native tree');
   assert.equal(workbench.sidebar.view.title, 'Workbench');
   assert(contributions.viewsWelcome.some((row) => row.when.includes('!warden.hasDevelopmentBranch')));
+  assert(
+    contributions.viewsWelcome.some((row) => row.contents === '[New Task](command:warden.createTask)' && row.when.includes('warden.hasDevelopmentBranch')),
+  );
+  const previewMenu = contributions.menus['view/title'].filter((item) => item.group?.startsWith('2_preview@'));
+  for (const command of ['refreshPreview', 'previewTerminal', 'runPreview', 'previewPath', 'showPreview', 'setup'])
+    assert(
+      previewMenu.some((item) => item.command === `warden.${command}`),
+      `${command} stays available from the native heading menu`,
+    );
+  assert(previewMenu.find((item) => item.command === 'warden.runPreview').when.includes('warden.hasPreviewCommand'));
+  assert(previewMenu.find((item) => item.command === 'warden.setup').when.includes('warden.hasPreviewSetup'));
+  assert(!contributions.menus['view/item/context'].some((item) => /viewItem == (preview|tasks)/.test(item.when)), 'retired grouping rows have no menu entries');
   assert(contributions.menus['view/item/context'].some((row) => row.command === 'warden.deliver'));
   assert(!contributions.menus['view/item/context'].some((row) => row.command === 'warden.taskOptions'), 'allocation details are not task actions');
   assert(contributions.menus.commandPalette.some((row) => row.command === 'warden.startTask' && row.when === 'false'));
@@ -16,7 +112,7 @@ exports.checkSidebar = async (workbench, extension, repository, eventually) => {
   const root = await workbench.sidebar.getChildren();
   assert.deepEqual(
     root.map((node) => node.kind),
-    ['preview', 'tasks'],
+    workbench.tasks().map(() => 'task'),
   );
   assert.equal((await vscode.commands.getCommands(true)).includes('warden.editHistory'), false, 'history arrangement has no command entry');
   await assert.rejects(workbench.views.show('history'), /Unknown view/, 'retired history views cannot be opened');
@@ -32,7 +128,6 @@ exports.checkSidebar = async (workbench, extension, repository, eventually) => {
     workbench.backend.execute = execute;
   }
   assert(!observed.some((command) => command.startsWith('history.')), 'refresh does not load or rewrite history');
-  const taskRoot = root.find((node) => node.kind === 'tasks');
   const session = workbench.session;
   const count = workbench.tasks().length;
   const cancel = vscode.commands.executeCommand('warden.createTask');
@@ -85,9 +180,10 @@ exports.checkSidebar = async (workbench, extension, repository, eventually) => {
   }
   await workbench.handleAction({ type: 'task.create', title: 'Native second task', body: '' }, session);
   const secondId = workbench.tasks().at(-1).id;
-  let nodes = await workbench.sidebar.getChildren(taskRoot);
+  let nodes = await workbench.sidebar.getChildren();
   const first = nodes.find((node) => node.task.id === firstId);
   const second = nodes.find((node) => node.task.id === secondId);
+  assert.equal(workbench.sidebar.getParent(first), undefined, 'tasks are top-level sidebar items');
   assert.match(workbench.sidebar.getTreeItem(first).contextValue, /^wardenTask:workspace/);
   assert.notEqual(second.task.worktree, firstWorkspace, 'every task gets its own workspace');
   const token = new vscode.CancellationTokenSource();
@@ -110,11 +206,12 @@ exports.checkSidebar = async (workbench, extension, repository, eventually) => {
   assert.equal(workbench.tasks().at(-1).id, secondId, 'dropping at the root moves to the end');
   await vscode.commands.executeCommand('warden.selectTask', first);
   assert.equal(workbench.views.panels.has('task'), false, 'task selection keeps the editor free for review');
-  nodes = await workbench.sidebar.getChildren(taskRoot);
+  nodes = await workbench.sidebar.getChildren();
   const workspace = nodes.find((node) => node.task.id === firstId);
   assert.match(workbench.sidebar.getTreeItem(workspace).contextValue, /^wardenTask:workspace/);
   await workbench.sidebar.view.reveal(workspace, { select: true, expand: true });
   await eventually(() => workbench.expanded[firstId] === true);
+  await checkQuietRefresh(workbench, workspace);
   if (process.env.WARDEN_VSCODE_SCREENSHOT && process.platform === 'linux') {
     await vscode.commands.executeCommand('workbench.action.closeAllEditors');
     await vscode.commands.executeCommand('workbench.action.closePanel');
@@ -137,7 +234,7 @@ exports.checkSidebar = async (workbench, extension, repository, eventually) => {
     });
   });
   await workbench.refresh(true);
-  const legacy = (await workbench.sidebar.getChildren(taskRoot)).find((node) => node.task.id === 'legacy-unallocated');
+  const legacy = (await workbench.sidebar.getChildren()).find((node) => node.task.id === 'legacy-unallocated');
 
   const draft = vscode.commands.executeCommand('warden.createTask');
   await eventually(() => !!workbench.taskInput);
@@ -153,10 +250,10 @@ exports.checkSidebar = async (workbench, extension, repository, eventually) => {
     order,
     'a drag from the previous session cannot reorder tasks',
   );
-  assert.deepEqual(await workbench.sidebar.getChildren(taskRoot), [], 'old nodes do not expose a different session');
+  assert.deepEqual(await workbench.sidebar.getChildren(first), [], 'old nodes do not expose a different session');
   await vscode.commands.executeCommand('warden.startTask', legacy);
   assert.equal(workbench.tasks().find((task) => task.id === legacy.task.id).worktree, undefined, 'a stale menu cannot allocate a workspace');
-  const current = await workbench.sidebar.getChildren({ kind: 'tasks' });
+  const current = await workbench.sidebar.getChildren();
   await vscode.commands.executeCommand(
     'warden.selectTask',
     current.find((node) => node.task.id === legacy.task.id),

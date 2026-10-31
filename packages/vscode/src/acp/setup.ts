@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { acpPresets, addAcpPreset, parseAcpProfiles, presetCommandError } from './profiles.js';
 import type { AcpProfile } from './contracts.js';
+import { AcpReadinessCheck } from './readiness.js';
 
 function profileValue() {
   const inspected = vscode.workspace.getConfiguration('warden').inspect<unknown>('acpAgents');
@@ -20,6 +21,144 @@ export class AcpAgentSetup implements vscode.Disposable {
   private picker?: vscode.QuickPick<Choice>;
   private input?: vscode.InputBox;
   private closed = false;
+  readonly readiness: AcpReadinessCheck;
+  private readonly configurationChanged: vscode.Disposable;
+  private checking?: Promise<void>;
+  private started = false;
+  private revision = 0;
+  private reconnectTimer?: ReturnType<typeof setTimeout>;
+  private selection?: vscode.CancellationTokenSource;
+  private readonly automatic = new Set<Promise<void>>();
+  private preferredId?: string;
+
+  constructor(
+    private readonly directory: () => string | undefined,
+    changed: () => void,
+    private readonly state: vscode.Memento,
+  ) {
+    this.preferredId = state.get<string>('warden.acpProfile');
+    this.readiness = new AcpReadinessCheck(() => {
+      if (!this.closed) changed();
+    });
+    this.configurationChanged = vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration('warden.acpAgents')) this.scheduleConnection();
+    });
+  }
+
+  start() {
+    if (this.started || this.closed) return;
+    this.started = true;
+    this.scheduleConnection();
+  }
+
+  private scheduleConnection(preferredId?: string) {
+    if (this.closed) return;
+    if (preferredId) this.preferredId = preferredId;
+    const revision = ++this.revision;
+    clearTimeout(this.reconnectTimer);
+    this.selection?.cancel();
+    void this.readiness.reset().catch(() => {});
+    if (!this.started) return;
+    // A settings save can emit several changes. Retire the old connection immediately,
+    // then start only the latest valid user configuration without opening a picker.
+    this.reconnectTimer = setTimeout(() => {
+      const pending = this.connectAutomatically(revision);
+      this.automatic.add(pending);
+      void pending.then(
+        () => this.automatic.delete(pending),
+        () => this.automatic.delete(pending),
+      );
+    }, 300);
+  }
+
+  private async connectAutomatically(revision: number) {
+    if (this.closed || revision !== this.revision || !vscode.workspace.isTrusted) return;
+    let profiles: AcpProfile[];
+    try {
+      profiles = readAcpProfiles();
+    } catch {
+      return;
+    }
+    const profile = profiles.find((item) => item.id === this.preferredId) ?? profiles[0];
+    const cwd = this.directory();
+    if (!profile || !cwd) return;
+    await this.readiness.check(profile, cwd);
+    this.rememberConnection(revision);
+  }
+
+  private rememberConnection(revision: number) {
+    const connected = this.readiness.snapshot();
+    if (this.closed || revision !== this.revision || connected.status !== 'ready' || !connected.profile) return;
+    this.preferredId = connected.profile.id;
+    void this.state.update('warden.acpProfile', this.preferredId).then(undefined, () => {});
+  }
+
+  check(profileId?: string): Promise<void> {
+    if (this.closed) return Promise.resolve();
+    if (!this.checking) {
+      clearTimeout(this.reconnectTimer);
+      const revision = ++this.revision;
+      this.selection = new vscode.CancellationTokenSource();
+      this.checking = this.checkAgent(revision, profileId).finally(() => {
+        this.selection?.dispose();
+        this.selection = undefined;
+        this.checking = undefined;
+      });
+    }
+    return this.checking;
+  }
+
+  private async checkAgent(revision: number, profileId?: string) {
+    if (!vscode.workspace.isTrusted) throw new Error('Trust this workspace first.');
+    const profiles = readAcpProfiles();
+    if (!profiles.length) {
+      await this.configure();
+      return;
+    }
+    const cwd = this.directory();
+    if (!cwd) throw new Error('Open a workspace folder before checking the agent.');
+    const state = this.readiness.snapshot();
+    if (!profileId && state.status === 'authentication_required' && state.authMethods?.length) {
+      const choice = await vscode.window.showQuickPick(
+        [
+          ...state.authMethods.map((method) => ({ label: method.name, description: method.description, methodId: method.id })),
+          { label: 'I Have Signed In — Reconnect', description: 'Reconnect after signing in externally.', methodId: undefined },
+        ],
+        { title: 'Authenticate Agent' },
+        this.selection?.token,
+      );
+      if (!choice || this.closed || revision !== this.revision) return;
+      if (choice.methodId) {
+        await this.readiness.authenticate(choice.methodId);
+        this.rememberConnection(revision);
+        return;
+      }
+    }
+    const profile = profileId
+      ? profiles.find((item) => item.id === profileId)
+      : profiles.length === 1
+        ? profiles[0]
+        : (
+            await vscode.window.showQuickPick(
+              profiles.map((profile) => ({ label: profile.label, description: profile.id, profile })),
+              { title: 'Connect ACP' },
+              this.selection?.token,
+            )
+          )?.profile;
+    if (!profile || this.closed || revision !== this.revision) return;
+    // A picker can outlive a settings edit; never check an obsolete executable.
+    const current = readAcpProfiles().find((item) => item.id === profile.id);
+    if (!current || JSON.stringify(current) !== JSON.stringify(profile)) throw new Error('Agent settings changed. Check the current profile again.');
+    await this.readiness.check(current, cwd);
+    this.rememberConnection(revision);
+  }
+
+  disconnect() {
+    ++this.revision;
+    clearTimeout(this.reconnectTimer);
+    this.selection?.cancel();
+    return this.readiness.reset();
+  }
 
   configure(): Promise<void> {
     if (this.closed) return Promise.resolve();
@@ -122,13 +261,31 @@ export class AcpAgentSetup implements vscode.Disposable {
       await this.settings();
       return;
     }
-    await vscode.workspace.getConfiguration('warden').update('acpAgents', next, vscode.ConfigurationTarget.Global);
-    void vscode.window.showInformationMessage(`${preset.label} profile added. Connect from Task Chat when the agent is installed and authenticated.`);
+    const previousId = this.preferredId;
+    this.preferredId = preset.id;
+    try {
+      await vscode.workspace.getConfiguration('warden').update('acpAgents', next, vscode.ConfigurationTarget.Global);
+    } catch (error) {
+      this.preferredId = previousId;
+      throw error;
+    }
+    this.scheduleConnection(preset.id);
   }
 
   dispose() {
     this.closed = true;
+    ++this.revision;
+    clearTimeout(this.reconnectTimer);
+    this.selection?.cancel();
+    this.configurationChanged.dispose();
     this.picker?.hide();
     this.input?.hide();
+    void this.readiness.close().catch(() => {});
+  }
+
+  async close() {
+    this.dispose();
+    await this.readiness.close();
+    await Promise.allSettled([...this.automatic, this.checking, this.active]);
   }
 }

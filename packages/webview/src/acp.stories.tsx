@@ -20,6 +20,7 @@ const model: AcpModel = {
     updatedAt: '2026-10-25T00:00:00Z',
   },
   profiles: [{ id: 'configured-agent', label: '我的 Agent' }],
+  defaultProfileId: 'configured-agent',
   status: 'disconnected',
   sending: false,
   permissions: [],
@@ -33,6 +34,7 @@ const meta = {
   title: 'Workbench/Agent conversation',
   component: AcpApp,
   args: { model, send: () => {} },
+  parameters: { layout: 'fullscreen' },
 } satisfies Meta<typeof AcpApp>;
 export default meta;
 type Story = StoryObj<typeof meta>;
@@ -109,14 +111,25 @@ export const SessionControls: Story = {
         configuring: false,
         configOptions: [
           {
+            id: 'mode',
+            name: 'Mode',
+            type: 'select',
+            currentValue: 'code',
+            category: 'mode',
+            options: [
+              { value: 'ask', name: 'Ask' },
+              { value: 'code', name: 'Code' },
+            ],
+          },
+          {
             id: 'model',
-            name: '模型',
+            name: 'Model',
             type: 'select',
             currentValue: 'fast',
             category: 'model',
             options: [
-              { value: 'fast', name: '快速', group: '常用模型' },
-              { value: 'deep', name: '深入', group: '常用模型' },
+              { value: 'fast', name: 'Fast', group: 'Available models' },
+              { value: 'deep', name: 'Deep', group: 'Available models' },
             ],
           },
           { id: 'thinking', name: '显示思考', type: 'boolean', currentValue: false },
@@ -164,6 +177,43 @@ export const Sidebar: Story = {
 export const SidebarPermission: Story = {
   ...Sidebar,
   args: { model: { ...WaitingForPermission.args!.model!, presentation: 'sidebar' } },
+};
+
+export const SidebarComposer: Story = {
+  ...Sidebar,
+  args: { model: { ...SessionControls.args!.model!, presentation: 'sidebar', draft: '' } },
+};
+
+export const ApplyingConfiguration: Story = {
+  ...Sidebar,
+  args: {
+    model: {
+      ...SidebarComposer.args!.model!,
+      controls: { ...SessionControls.args!.model!.controls!, configuring: true },
+    },
+  },
+};
+
+export const SidebarResponding: Story = {
+  ...SidebarComposer,
+  args: { model: { ...SidebarComposer.args!.model!, status: 'running', sending: true } },
+};
+
+export const SidebarLongSelectors: Story = {
+  ...SidebarComposer,
+  args: {
+    model: {
+      ...SidebarComposer.args!.model!,
+      controls: {
+        ...SessionControls.args!.model!.controls!,
+        configOptions: SessionControls.args!.model!.controls!.configOptions!.map((option) =>
+          option.type === 'select'
+            ? { ...option, options: option.options.map((value) => ({ ...value, name: `${value.name} with a long agent-provided label` })) }
+            : option,
+        ),
+      },
+    },
+  },
 };
 
 export const SidebarLongHistory: Story = {

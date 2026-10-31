@@ -93,9 +93,11 @@ three-way patch application in a temporary worktree of the external shared repos
 composition is published to the independent preview directory, including saved primary content
 as its baseline. Primary files, index and HEAD are unchanged by connections.
 
-*Preview* shows the current combination, runtime path, last sync time and synchronization/error feedback.
-Workspace selection stays in the sidebar, and file review stays in each workspace’s detail; the
-preview page does not repeat either list.
+Preview synchronization stays visible in the status bar. Its tooltip and **Show Preview Output**
+provide the current combination, runtime path and last successful sync; output also includes conflict
+paths and setup logs. Sync, terminal, run, copy-path and setup commands live in the workbench heading's
+**More Actions** menu. Tasks are top-level sidebar items, and each task owns its connection and file review.
+There is no Preview editor page. Synchronization and setup failures remain visible above the task list.
 
 One extension session owns background preview synchronization; it checks content each second and
 debounces saved edits. Other windows observe shared state and can take over when the owner closes. Initial conflicts fail

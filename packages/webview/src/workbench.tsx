@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Copy, GitBranch, FolderOpen, RefreshCw, Terminal } from 'lucide-react';
+import { GitBranch, RefreshCw } from 'lucide-react';
 import type { WorkbenchAction, WorkbenchModel } from '@warden/shared';
-import { previewStatusLabels, rebaseCheckLabels, rebaseResultLabels, scriptStatusLabels } from '@warden/shared';
+import { rebaseCheckLabels, rebaseResultLabels } from '@warden/shared';
 import { Button } from './components/ui/button';
 import { Textarea } from './components/ui/textarea';
 import { AcpSetup } from './components/AcpSetup';
@@ -24,6 +24,19 @@ export function WorkbenchApp({ model, send, state: persisted }: Props) {
       },
     [persisted],
   );
+  if (model.agentConfiguration.status !== 'configured' || model.agentReadiness.status !== 'ready')
+    return (
+      <main className="setup">
+        <AgentConfiguration model={model} send={send} compact={model.surface !== 'settings'} />
+        {model.errors
+          .filter((error) => model.surface === 'settings' && error.scope === 'agent')
+          .map((error) => (
+            <p className="error" role="alert" key={error.message}>
+              {error.message}
+            </p>
+          ))}
+      </main>
+    );
   if (model.repositoryState === 'loading')
     return (
       <main>
@@ -49,17 +62,16 @@ export function WorkbenchApp({ model, send, state: persisted }: Props) {
           </div>
         ))}
       {!model.repository ? (
-        <Setup repository={false} busy={!!model.busy} send={send} />
+        <Setup model={model} send={send} />
       ) : !model.workflow ? (
         <p className="muted" role="status">
           Loading…
         </p>
       ) : !model.workflow.workflow && model.surface !== 'settings' ? (
-        <Setup repository busy={!!model.busy} send={send} />
+        <Setup model={model} send={send} />
       ) : (
         <>
           {model.surface === 'task' && <Task key={taskDraftKey(model)} model={model} send={send} state={state} />}
-          {model.surface === 'preview' && <Preview model={model} send={send} />}
           {model.surface === 'settings' && <Settings model={model} send={send} />}
           {model.surface === 'rebase' && <Rebase model={model} send={send} />}
         </>
@@ -68,106 +80,63 @@ export function WorkbenchApp({ model, send, state: persisted }: Props) {
   );
 }
 
-function Setup({ repository, busy, send }: { repository: boolean; busy: boolean; send: Props['send'] }) {
+function Setup({ model, send }: Props) {
+  const repository = !!model.repository;
   return (
     <div className="setup">
       <p>{repository ? 'Select the base branch for this work.' : 'Select the Git repository containing the primary folder.'}</p>
-      <Button disabled={busy} onClick={() => send({ type: repository ? 'setup.branch' : 'setup.repository' })}>
+      <Button disabled={!!model.busy} onClick={() => send({ type: repository ? 'setup.branch' : 'setup.repository' })}>
         {repository ? 'Select Base Branch' : 'Select Repository'}
       </Button>
     </div>
   );
 }
 
-function Preview({ model, send }: Props) {
-  const preview = model.preview;
-  const hasSetup = !!model.workflow?.workspaceConfig?.previewSetup?.trim();
-  const names = preview?.connectedIds.map((id) => model.workflow?.workflow?.changes.find((task) => task.id === id)?.title ?? id);
+function AgentConfiguration({ model, send, compact = false }: Props & { compact?: boolean }) {
+  const configuration = model.agentConfiguration;
+  const readiness = model.agentReadiness;
+  const invalid = configuration.status === 'invalid';
+  const checking = readiness.status === 'checking';
+  if (compact) return <Button onClick={() => send({ type: 'setup.agents' })}>Configure ACP</Button>;
   return (
-    <div role="region" aria-label="Preview">
-      <div className="surface-toolbar">
-        <span className="metadata branch" title="Base Branch">
-          <GitBranch aria-hidden="true" />
-          <code>{model.workflow?.workflow?.developmentBranch ?? 'Not selected'}</code>
-        </span>
-        <div className="actions" role="group" aria-label="Preview Actions">
-          <IconButton label="Sync Preview" disabled={!!model.busy} onClick={() => send({ type: 'preview.refresh' })}>
-            <RefreshCw aria-hidden="true" />
-          </IconButton>
-          <IconButton label="Open Preview Terminal" onClick={() => send({ type: 'preview.terminal' })}>
-            <Terminal aria-hidden="true" />
-          </IconButton>
-          {model.hasPreviewCommand && (
-            <Button size="sm" onClick={() => send({ type: 'preview.run' })}>
-              Run Preview
-            </Button>
-          )}
-        </div>
-      </div>
-      <div className="metadata path-row" role="group" aria-label="Preview Folder">
-        <FolderOpen aria-hidden="true" />
-        <span className="path">{preview?.worktree ?? 'Preview folder is not initialized'}</span>
-        {preview?.worktree && (
-          <IconButton label="Copy Path" onClick={() => send({ type: 'preview.copy' })}>
-            <Copy aria-hidden="true" />
-          </IconButton>
-        )}
-      </div>
-      <div className="preview-composition" role="group" aria-label="Preview Contents">
-        {names?.length
-          ? names.map((name, index) => (
-              <span className="composition-item" key={preview!.connectedIds[index]}>
-                {name}
-              </span>
-            ))
-          : 'Saved contents of the primary folder'}
-      </div>
-      <div className="metadata">
-        <StatusBadge status={preview?.syncStatus ?? preview?.status}>
-          {preview ? previewStatusLabels[preview.syncStatus ?? preview.status] : 'Loading…'}
-        </StatusBadge>
-        {preview?.updatedAt && (
-          <time
-            className="muted"
-            dateTime={preview.updatedAt}
-            title="Last successful sync"
-            aria-label={`Last successful sync ${new Date(preview.updatedAt).toLocaleString('en-US')}`}
+    <section aria-label="ACP">
+      <h2>ACP</h2>
+      {invalid ? (
+        <p className="error" role="alert">
+          Agent configuration is invalid. {configuration.message}
+        </p>
+      ) : (
+        <p className="muted">
+          {configuration.status === 'configured'
+            ? `${configuration.count} agent profile${configuration.count === 1 ? '' : 's'} configured.`
+            : 'Connect an agent that can receive messages in its assigned task workspace.'}
+        </p>
+      )}
+      {configuration.status === 'configured' && (
+        <>
+          <p
+            role={readiness.status === 'error' || readiness.status === 'authentication_required' ? 'alert' : 'status'}
+            className={readiness.status === 'error' ? 'error' : 'muted'}
           >
-            {new Date(preview.updatedAt).toLocaleString('en-US')}
-          </time>
-        )}
-      </div>
-      {preview?.message && (
-        <div className="error" role="alert">
-          {preview.message}
-        </div>
+            {readiness.profile && <strong>{readiness.profile.label}: </strong>}
+            {readiness.message ?? 'ACP is disconnected.'}
+          </p>
+          <Button size="sm" onClick={() => send({ type: checking ? 'setup.cancelAgentCheck' : 'setup.checkAgent' })}>
+            {checking
+              ? 'Cancel Connection'
+              : readiness.status === 'authentication_required' && readiness.authMethods?.length
+                ? 'Authenticate Agent'
+                : readiness.status === 'ready'
+                  ? 'Reconnect ACP'
+                  : 'Connect ACP'}
+          </Button>{' '}
+        </>
       )}
-      {!!preview?.conflicts?.length && <pre>{preview.conflicts.join('\n')}</pre>}
-      {(hasSetup || preview?.setup) && (
-        <section>
-          <div className="section-heading">
-            <h2>Environment Setup</h2>
-            <StatusBadge status={preview?.setup?.status}>{preview?.setup ? scriptStatusLabels[preview.setup.status] : 'Not Run'}</StatusBadge>
-            {hasSetup && preview?.setup && (
-              <IconButton label="Run Again" disabled={!!model.busy} onClick={() => send({ type: 'preview.setup' })}>
-                <RefreshCw aria-hidden="true" />
-              </IconButton>
-            )}
-          </div>
-          {preview?.setup && (
-            <details open={preview.setup.status === 'failed'}>
-              <summary>Output · Exit code {preview.setup.exitCode ?? '—'}</summary>
-              <pre>{preview.setup.output ?? 'Waiting for output'}</pre>
-            </details>
-          )}
-          {hasSetup && !preview?.setup && (
-            <Button variant="secondary" disabled={!!model.busy} onClick={() => send({ type: 'preview.setup' })}>
-              Run Preview Setup
-            </Button>
-          )}
-        </section>
-      )}
-    </div>
+      <Button variant="secondary" size="sm" onClick={() => send({ type: 'settings.agents' })}>
+        {invalid ? 'Fix Agent Configuration' : 'Choose Agent Preset'}
+      </Button>
+      <AcpSetup />
+    </section>
   );
 }
 
@@ -177,14 +146,7 @@ function Settings({ model, send }: Props) {
   const [setup, setSetup] = useState(config?.previewSetup ?? '');
   return (
     <div role="region" aria-label="Settings">
-      <section aria-label="ACP Agent">
-        <h2>ACP Agent</h2>
-        <p className="muted">Connect to an agent or adapter supporting ACP v1 over stdio.</p>
-        <Button variant="secondary" size="sm" onClick={() => send({ type: 'settings.agents' })}>
-          Configure Agent
-        </Button>
-        <AcpSetup />
-      </section>
+      <AgentConfiguration model={model} send={send} />
       <h2>Scripts</h2>
       <p className="path">{model.repository}</p>
       <form

@@ -4,11 +4,11 @@ const path = require('node:path');
 const vscode = require('vscode');
 const { execFileSync } = require('node:child_process');
 const { checkChats } = require('./chat.cjs');
-const { checkAgentPresets } = require('./agent-setup.cjs');
 const { checkBranches } = require('./branches.cjs');
 const { checkSidebar } = require('./sidebar.cjs');
 const { checkPreviewLineEndings } = require('./preview.cjs');
 const { checkRepositoryLoading } = require('./repository.cjs');
+const { checkAgentSetup, checkAgentPresets, verifyAgent } = require('./agent-setup.cjs');
 // Git may materialize preview text with CRLF under the user's Windows configuration.
 const textLines = (text) => text.replace(/\r\n/g, '\n');
 const eventually = async (condition, timeout = 10_000) => {
@@ -26,36 +26,43 @@ exports.run = async () => {
   const workbench = await extension.activate();
   try {
     assert.equal(workbench.backend?.store.file, fixture.state, 'fixture setup and extension activation must use the same canonical state path');
+    await verifyAgent(workbench, fixture);
     console.log('Checking repository loading');
     await checkRepositoryLoading(workbench, extension, fixture, eventually);
     await workbench.open(fixture.unconfigured);
     assert.equal(workbench.model('task').workflow.workflow, null, 'opening a repository does not choose its requirement branch');
     assert.deepEqual(await workbench.getChildren(), [], 'unconfigured repositories show setup instead of operational navigation');
-    for (const surface of ['workspaces', 'task', 'preview', 'rebase']) {
+    console.log('Checking agent setup before branch selection');
+    await checkAgentSetup(workbench, extension, fixture, eventually);
+    for (const surface of ['workspaces', 'task', 'rebase']) {
       const model = workbench.model(surface);
       assert.equal(model.repository, fixture.unconfigured);
       assert.equal(model.workflow.workflow, null, 'directly opened workflow pages receive setup state');
     }
+    console.log('Checking agent configuration presets');
     await checkAgentPresets(workbench, fixture, eventually);
+    await verifyAgent(workbench, fixture);
     await vscode.commands.executeCommand('warden.configureScripts');
     await eventually(() => workbench.views.displaysError('settings'));
     assert.equal(workbench.views.displaysError('repository'), true);
     assert.equal(workbench.views.displaysError('preview'), false, 'errors for hidden pages still need native notification');
     assert.equal(workbench.views.displaysError('task:another-task'), false);
-    await workbench.views.show('preview');
-    await eventually(() => workbench.views.displaysError('preview') && !workbench.views.displaysError('settings'));
+    await assert.rejects(workbench.views.show('preview'), /Unknown view/, 'Preview has no editor page');
     const settings = vscode.workspace.getConfiguration('warden');
-    assert.equal(workbench.model('preview').hasPreviewCommand, false);
+    assert.equal(workbench.model('workspaces').hasPreviewCommand, false);
     await settings.update('previewCommand', 'echo preview', vscode.ConfigurationTarget.Global);
-    assert.equal(workbench.model('preview').hasPreviewCommand, true);
+    assert.equal(workbench.model('workspaces').hasPreviewCommand, true);
     await settings.update('previewCommand', undefined, vscode.ConfigurationTarget.Global);
-    assert.equal(workbench.model('preview').hasPreviewCommand, false);
+    assert.equal(workbench.model('workspaces').hasPreviewCommand, false);
     await workbench.backend.execute('workflow.configure', { branch: 'main' });
     await workbench.refresh();
     assert.deepEqual(
       (await workbench.getChildren()).map((node) => node.kind),
-      ['preview', 'tasks'],
+      [],
+      'a configured branch without tasks has no navigation groups',
     );
+    console.log('Checking agent setup in the workbench');
+    await checkAgentSetup(workbench, extension, fixture, eventually);
     await checkPreviewLineEndings(workbench, fixture.unconfigured, eventually);
     console.log('Checking branch following');
     await checkBranches(workbench, fixture.unconfigured, eventually);
@@ -63,7 +70,7 @@ exports.run = async () => {
     await checkSidebar(workbench, extension, fixture.unconfigured, eventually);
     await workbench.open(fixture.root);
     assert.equal(workbench.backend.store.file, fixture.state);
-    const tasks = await workbench.getChildren({ kind: 'tasks' });
+    const tasks = await workbench.getChildren();
     assert.equal(tasks.length, 1);
     const attention = workbench.workspaceRow({
       ...tasks[0].task,

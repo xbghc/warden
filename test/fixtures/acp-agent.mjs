@@ -87,6 +87,7 @@ async function handle(message) {
   }
   const { id, method, params = {} } = message;
   if (method === 'initialize') {
+    if (mode === 'initialize-hangs') return;
     const authMethods = requiresAuth
       ? [
           { id: 'login', name: 'Fixture login' },
@@ -109,6 +110,13 @@ async function handle(message) {
   }
   if (method === 'session/new' || method === 'session/load') {
     if (requiresAuth && !authenticated) return error(id, -32000, 'Authentication required');
+    if (mode === 'session-new-fails') return error(id, -32603, 'Provider is unavailable');
+    if (mode === 'setup-permission')
+      await request('session/request_permission', {
+        sessionId: 'check-session',
+        toolCall: { toolCallId: 'setup', title: 'Unexpected startup tool', kind: 'execute' },
+        options: [{ optionId: 'allow', name: 'Allow', kind: 'allow_once' }],
+      });
     if (method === 'session/load' && mode === 'no-load') return error(id, -32601, 'Loading is unsupported');
     if (method === 'session/load' && mode === 'load-fails') return error(id, -32001, 'Saved session is unavailable');
     sessionId = method === 'session/load' ? params.sessionId : `fixture-${process.pid}-${++sequence}`;

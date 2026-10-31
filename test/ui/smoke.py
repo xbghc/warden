@@ -18,32 +18,84 @@ try:
         page = browser.new_page(viewport={'width': 1100, 'height': 900})
         errors = []
         page.on('pageerror', lambda error: errors.append(str(error)))
-        for surface in ['task', 'preview', 'rebase']:
+        for surface in ['task', 'rebase', 'settings']:
             page.goto(origin + '?surface=' + surface)
-            expect(page.get_by_role('button', name='Select Base Branch', exact=True)).to_be_visible()
+            expect(page.get_by_role('button', name='Choose Agent Preset' if surface == 'settings' else 'Configure ACP', exact=True)).to_be_visible()
+            if surface != 'settings':
+                expect(page.locator('main')).to_have_text('Configure ACP')
+                expect(page.locator('.acp-setup')).to_have_count(0)
+            page.evaluate("async () => { await queue; await new Promise(resolve => requestAnimationFrame(resolve)); }")
+            initial = page.request.get(origin + '/model?surface=' + surface).json()
+            def blocked():
+                expect(page.get_by_role('button', name='Select Base Branch', exact=True)).to_have_count(0)
+                expect(page.get_by_role('button', name='Select Repository', exact=True)).to_have_count(0)
+                expect(page.get_by_role('region', name='Preview', exact=True)).to_have_count(0)
+                expect(page.get_by_role('region', name='Edit Notes', exact=True)).to_have_count(0)
+                expect(page.get_by_role('heading', name='Scripts', exact=True)).to_have_count(0)
+            blocked()
             expect(page.get_by_role('button')).to_have_count(1)
-            ready = page.request.get(origin + '/model?surface=' + surface).json()
-            for repository in ['', ready['repository']]:
+            invalid = {**initial, 'agentConfiguration': {'status': 'invalid', 'message': 'Agent profiles require a valid label and command.'}}
+            page.evaluate("model => window.postMessage({type:'model', model}, '*')", invalid)
+            if surface == 'settings':
+                expect(page.get_by_role('alert')).to_contain_text('valid label and command')
+            else:
+                expect(page.locator('main')).to_have_text('Configure ACP')
+            blocked()
+            for readiness in [
+                {'status': 'unchecked'},
+                {'status': 'error', 'message': 'Agent executable not found.'},
+                {'status': 'authentication_required', 'message': 'Sign in to continue.', 'authMethods': [{'id': 'login', 'name': 'Sign In'}]},
+                {'status': 'checking', 'message': 'Connecting to ACP…'},
+            ]:
+                configured = {**initial, 'agentConfiguration': {'status': 'configured', 'count': 1}, 'agentReadiness': readiness}
+                page.evaluate("model => window.postMessage({type:'model', model}, '*')", configured)
+                label = 'Configure ACP' if surface != 'settings' else 'Cancel Connection' if readiness['status'] == 'checking' else 'Authenticate Agent' if readiness['status'] == 'authentication_required' else 'Connect ACP'
+                expect(page.get_by_role('button', name=label, exact=True)).to_be_visible()
+                blocked()
+                if surface != 'settings':
+                    expect(page.locator('main')).to_have_text('Configure ACP')
+                elif readiness['status'] == 'error':
+                    expect(page.get_by_role('alert')).to_contain_text('executable not found')
+                if surface == 'settings' and readiness['status'] in ['error', 'checking']:
+                    page.screenshot(path=str(artifacts / ('connection-' + readiness['status'] + '.png')), full_page=True)
+            ready = {**initial, 'agentConfiguration': {'status': 'configured', 'count': 1}, 'agentReadiness': {'status': 'ready'}}
+            for repository in ['', initial['repository']]:
                 loading = {**ready, 'repository': repository, 'repositoryState': 'loading'}
                 page.evaluate("model => window.postMessage({type:'model', model}, '*')", loading)
                 expect(page.get_by_role('status')).to_have_text('Opening repository…')
                 expect(page.get_by_role('button')).to_have_count(0)
-            if surface == 'preview':
-                page.screenshot(path=str(artifacts / 'repository-loading.png'), full_page=True)
             unselected = {**ready, 'repository': '', 'repositoryState': 'unselected', 'workflow': None}
             page.evaluate("model => window.postMessage({type:'model', model}, '*')", unselected)
             expect(page.get_by_role('button', name='Select Repository', exact=True)).to_be_visible()
-            page.evaluate("model => window.postMessage({type:'model', model}, '*')", ready)
-            expect(page.get_by_role('button', name='Select Base Branch', exact=True)).to_be_visible()
+            page.evaluate("model => window.postMessage({type:'model', model}, '*')", initial)
+            blocked()
+        page.goto(origin + '?surface=task')
+        expect(page.get_by_role('button', name='Configure ACP', exact=True)).to_be_visible()
+        expect(page.get_by_role('button')).to_have_count(1)
+        page.get_by_role('button', name='Configure ACP', exact=True).click()
+        expect(page.get_by_role('heading', name='ACP', exact=True)).to_be_visible()
+        expect(page.get_by_role('button', name='Choose Agent Preset', exact=True)).to_be_visible()
+        expect(page.get_by_role('button', name='Connect ACP', exact=True)).to_have_count(0)
+        expect(page.get_by_role('heading', name='Scripts', exact=True)).to_have_count(0)
+        assert page.request.get(origin + '/model?surface=settings').json()['agentConfiguration']['status'] == 'missing'
+        page.set_viewport_size({'width': 320, 'height': 700})
+        page.get_by_text('ACP Setup Guide and Example', exact=True).click()
+        expect(page.locator('.acp-setup pre')).to_contain_text('warden.acpAgents')
+        expect(page.locator('.acp-setup').get_by_role('link', name='codex-acp adapter', exact=True)).to_be_visible()
+        expect(page.locator('.acp-setup').get_by_role('link', name='OpenCode', exact=True)).to_be_visible()
+        assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
+        page.screenshot(path=str(artifacts / 'agent-setup-gate.png'), full_page=True)
+        page.get_by_text('ACP Setup Guide and Example', exact=True).click()
+        page.set_viewport_size({'width': 1100, 'height': 900})
+        page.get_by_role('button', name='Choose Agent Preset', exact=True).click()
+        expect(page.get_by_role('button', name='Reconnect ACP', exact=True)).to_be_visible()
+        expect(page.get_by_role('button', name='Select Base Branch', exact=True)).to_have_count(0)
+        assert not page.evaluate("window.__actions.some(action => action.type === 'setup.checkAgent')"), 'configuration connects without a manual check'
+        page.goto(origin + '?surface=task')
+        expect(page.get_by_role('button', name='Select Base Branch', exact=True)).to_be_visible()
         page.get_by_role('button', name='Select Base Branch', exact=True).click()
         page.goto(origin + '?surface=rebase')
         expect(page.get_by_text('No workspaces', exact=True)).to_be_visible()
-        page.goto(origin + '?surface=preview')
-        expect(page.get_by_role('button', name='Open Preview Terminal', exact=True)).to_be_visible()
-        expect(page.get_by_role('button', name='Run Preview', exact=True)).to_have_count(0)
-        expect(page.get_by_role('heading', name='Environment Setup', exact=True)).to_have_count(0)
-        page.screenshot(path=str(artifacts / 'preview-without-scripts.png'), full_page=True)
-
         # Native task creation and automatic allocation are covered in the extension host.
         def action(value):
             result = page.request.post(origin + '/action?surface=task', data=value)
@@ -63,6 +115,13 @@ try:
         page.reload()
         expect(notes.get_by_role('textbox', name='Notes', exact=True)).to_have_value('尚未保存的说明草稿')
         assert page.request.get(origin + '/model?surface=task').json()['task']['body'] == '原有说明'
+        branch_a = page.request.get(origin + '/model?surface=task').json()
+        unavailable = {**branch_a, 'agentReadiness': {'status': 'error', 'message': 'The agent connection was lost.'}}
+        page.evaluate("model => window.postMessage({type:'model', model}, '*')", unavailable)
+        expect(page.get_by_role('region', name='Edit Notes', exact=True)).to_have_count(0)
+        expect(page.get_by_role('button', name='Configure ACP', exact=True)).to_be_visible()
+        page.evaluate("model => window.postMessage({type:'model', model}, '*')", branch_a)
+        expect(notes.get_by_role('textbox', name='Notes', exact=True)).to_have_value('尚未保存的说明草稿')
         branch_b = action({'type': 'task.create', 'title': '其他任务', 'body': 'B 原有说明'})
         page.goto(origin + '?surface=task')
         expect(notes.get_by_role('textbox', name='Notes', exact=True)).to_have_value('B 原有说明')
@@ -95,11 +154,11 @@ try:
         page.set_viewport_size({'width': 1100, 'height': 900})
 
         page.goto(origin + '?surface=settings')
-        expect(page.get_by_role('heading', name='ACP Agent', exact=True)).to_be_visible()
+        expect(page.get_by_role('heading', name='ACP', exact=True)).to_be_visible()
         expect(page.locator('.acp-setup pre')).not_to_be_visible()
         page.get_by_text('ACP Setup Guide and Example', exact=True).click()
         expect(page.locator('.acp-setup pre')).to_contain_text('warden.acpAgents')
-        page.get_by_role('button', name='Configure Agent', exact=True).click()
+        page.get_by_role('button', name='Choose Agent Preset', exact=True).click()
         page.wait_for_function("window.__actions.some(action => action.type === 'settings.agents')")
         page.screenshot(path=str(artifacts / 'settings-acp.png'), full_page=True)
         page.get_by_text('ACP Setup Guide and Example', exact=True).click()
@@ -109,22 +168,6 @@ try:
         page.wait_for_function('window.__settingsSaved === true')
         page.reload()
         expect(page.get_by_role('textbox', name='Preview Setup Script', exact=True)).to_have_value('echo preview-ready')
-
-        page.goto(origin + '?surface=preview')
-        sync = page.get_by_role('button', name='Sync Preview', exact=True)
-        sync.focus()
-        expect(page.get_by_role('tooltip', name='Sync Preview', exact=True)).to_be_visible()
-        sync.press('Escape')
-        page.get_by_role('button', name='Copy Path', exact=True).click()
-        page.wait_for_function("window.__actions.some(action => action.type === 'preview.copy')")
-        page.get_by_role('button', name='Open Preview Terminal', exact=True).click()
-        page.wait_for_function("window.__actions.some(action => action.type === 'preview.terminal')")
-        page.get_by_role('button', name='Sync Preview', exact=True).click()
-        expect(page.get_by_text('Succeeded', exact=True)).to_be_visible(timeout=30000)
-        expect(page.get_by_text('Synced', exact=True)).to_be_visible()
-        page.get_by_text('Output · Exit code 0', exact=True).click()
-        expect(page.get_by_text('preview-ready', exact=True)).to_be_visible()
-        page.screenshot(path=str(artifacts / 'preview.png'), full_page=True)
 
         page.goto(origin + '?surface=rebase')
         expect(page.get_by_text('订单接口', exact=True)).to_be_visible(timeout=30000)
@@ -167,7 +210,7 @@ try:
         assert not errors, errors
         assert page.evaluate('window.__hostError') is None
         browser.close()
-    print('Webview browser flows passed: task-note editing and drafts, light/dark/high-contrast layouts, scripts, preview and rebase. Native navigation is verified in the packaged extension host.')
+    print('Webview browser flows passed: agent setup before branch selection, task-note editing and drafts, light/dark/high-contrast layouts, script settings and rebase. Native navigation and preview controls are verified in the packaged extension host.')
 except Exception:
     if 'errors' in globals():
         print('Browser errors:', errors, file=sys.stderr)

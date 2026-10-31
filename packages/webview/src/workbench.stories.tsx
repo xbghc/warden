@@ -6,6 +6,8 @@ const base: WorkbenchModel = {
   session: 'storybook',
   repository: '/projects/orders',
   repositoryState: 'ready',
+  agentConfiguration: { status: 'configured', count: 1 },
+  agentReadiness: { status: 'ready', profile: { id: 'fixture', label: 'Fixture agent' }, message: 'Agent connection verified.' },
   surface: 'task',
   message: '',
   errors: [],
@@ -37,6 +39,40 @@ export const TaskNotes: Story = { args: { model: { ...base, task } } };
 export const OpeningRepository: Story = { args: { model: { ...base, repository: '', repositoryState: 'loading', workflow: undefined } } };
 export const ChooseRepository: Story = { args: { model: { ...base, repository: '', repositoryState: 'unselected', workflow: undefined } } };
 export const ChooseBranch: Story = { args: { model: { ...base, workflow: { workflow: null } } } };
+export const MissingAgent: Story = { args: { model: { ...base, agentConfiguration: { status: 'missing' }, agentReadiness: { status: 'unchecked' } } } };
+export const MissingAgentSettings: Story = {
+  args: { model: { ...base, surface: 'settings', agentConfiguration: { status: 'missing' }, agentReadiness: { status: 'unchecked' } } },
+};
+export const UncheckedAgent: Story = { args: { model: { ...base, agentReadiness: { status: 'unchecked' } } } };
+export const UnavailableAgent: Story = {
+  args: {
+    model: {
+      ...base,
+      surface: 'settings',
+      agentReadiness: { status: 'error', message: 'Unable to start the agent. Check its executable path on the workspace host.' },
+    },
+  },
+};
+export const AgentAuthentication: Story = {
+  args: {
+    model: {
+      ...base,
+      surface: 'settings',
+      agentReadiness: { status: 'authentication_required', message: 'Sign in to continue.', authMethods: [{ id: 'login', name: 'Sign In' }] },
+    },
+  },
+};
+export const ConnectingAgent: Story = {
+  args: { model: { ...base, surface: 'settings', agentReadiness: { status: 'checking', message: 'Connecting to ACP…' } } },
+};
+export const InvalidAgentConfiguration: Story = {
+  args: {
+    model: { ...base, workflow: { workflow: null }, agentConfiguration: { status: 'invalid', message: 'Agent profiles require a valid label and command.' } },
+  },
+};
+export const ChooseBranchWithAgent: Story = {
+  args: { model: { ...base, workflow: { workflow: null }, agentConfiguration: { status: 'configured', count: 1 } } },
+};
 export const Loading: Story = { args: { model: { ...base, workflow: undefined } } };
 export const TaskSaveFailure: Story = {
   args: {
@@ -53,24 +89,10 @@ export const TaskSaveFailure: Story = {
     },
   },
 };
-export const PreviewConflict: Story = {
-  args: {
-    model: {
-      ...base,
-      surface: 'preview',
-      preview: {
-        connectedIds: [],
-        status: 'stale',
-        syncStatus: 'conflict',
-        worktree: '/projects/orders-warden/preview',
-        files: [],
-        conflicts: ['src/orders.ts'],
-        message: 'The connected changes conflict. The preview still contains the last successful composition.',
-      },
-    },
-  },
-};
 export const Settings: Story = { args: { model: { ...base, surface: 'settings' } } };
+export const ConfiguredAgentSettings: Story = {
+  args: { model: { ...base, surface: 'settings', agentConfiguration: { status: 'configured', count: 1 } } },
+};
 
 const synchronizationCases = [
   { id: 'current', title: '订单查询', status: 'current', message: 'Includes the current base branch commit.' },

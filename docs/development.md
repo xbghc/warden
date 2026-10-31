@@ -85,6 +85,18 @@ Keep controls connection-scoped and exercise foreign-session updates and interru
 
 Packaged extension-host and conversation webview tests verify the shipped UI/host bridge alongside
 existing native review and Git flows. Cover sidebar/editor transfers during permission requests,
+missing and invalid agent profiles before and after branch selection, live configuration updates,
+workspace-profile rejection, a single native Configure ACP button for missing profiles, shared Settings
+panel routing without launching the preset picker, preset controls available only in Settings,
+automatic startup/reconfiguration connections, and gated workflow surfaces and actions
+for unchecked, missing-executable, incompatible-protocol, session-setup and authentication failures.
+Verify that successful initialization leaves the connection alive, unexpected exits revoke availability,
+and replacement/shutdown stop owned processes and cancel pending startup. Cover stale results, no work
+prompts and recovery without losing tasks or task-note drafts. Opening Settings alone does not start
+an additional connection; startup and profile saves do. Also cover
+native Codex/OpenCode preset selection, command-input cancellation, existing and concurrently edited
+profile preservation, workbench-selected agents for new Task Chats, composer mode/model controls,
+Enter/Shift+Enter and IME behavior, and the absence of agent setup inside Task Chat,
 per-task draft and reading-position restoration, stale view messages and concurrent background turns. Interrupted prompts must not be resent automatically, and cancel
 must not claim that all agent-owned background commands have stopped. These checks do not validate a
 third-party authenticated agent; record the exact agent/adapter version and supported features before
@@ -105,7 +117,7 @@ pnpm test:vscode
 ```
 
 `test/ui/smoke.py` starts and closes `test/ui/harness.ts`, exercises initialization, empty states,
-multiline task-note drafts after discarding webview-local state, save/discard behavior, optional settings, preview setup and rebase selection, and saves screenshots under
+multiline task-note drafts after discarding webview-local state, save/discard behavior, optional settings and rebase selection, and saves screenshots under
 `WARDEN_UI_ARTIFACTS` (default `/tmp/warden-ui-artifacts`). The harness is test-only and is not shipped.
 Inspect screenshots and console errors. Preserve intentional error cases in native-host tests as well.
 For manual verification, run `node --import tsx test/ui/harness.ts` and open its reported port. `/inspect`
@@ -140,11 +152,12 @@ shell or arbitrary VS Code command bridge.
 `pnpm test:vscode` requires an existing VSIX, unpacks it into a temporary directory, and tests those
 packaged bytes. It never silently substitutes a source build. `WARDEN_VSCODE_VERSION` selects the
 host (default `1.106.0`); `VSCODE_EXECUTABLE_PATH` selects an existing executable. Linux CI uses Xvfb.
-`WARDEN_VSCODE_SUITE=chat pnpm test:vscode` runs just the packaged task-chat flows while iterating.
+`WARDEN_VSCODE_SUITE=chat pnpm test:vscode` runs the packaged agent-setup and task-chat flows while iterating.
 In environments requiring an HTTP proxy, configure the test downloader's `npm_config_https_proxy`.
 
-The suite checks native tree setup, row menus, drag/keyboard ordering, input cancellation, stale-session rejection,
+The suite checks native tree setup with top-level tasks, row menus, drag/keyboard ordering, input cancellation, stale-session rejection,
 independent expansion and native read-only snapshots, stale review rejection, preview isolation/setup/terminal,
+native preview status, persistent failure feedback and diagnostic output without a Preview editor page,
 ordinary commit hooks and retained-stage recovery, native commit-input cancellation and stale-version
 rejection while typing, multiline delivery, fresh workspaces, stale-session
 rejection and preservation of delivery records. History rewriting remains covered by engine tests. CI runs the same VSIX in minimum and

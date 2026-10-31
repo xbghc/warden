@@ -4,7 +4,7 @@ import { parseWorkbenchAction } from '@warden/shared';
 import type { Surface, WorkbenchAction, WorkbenchModel } from '@warden/shared';
 import { TaskNoteDrafts } from './task-note-drafts.js';
 
-const titles: Record<Surface, string> = { workspaces: 'Workbench', task: 'Task', preview: 'Preview', settings: 'Settings', rebase: 'Rebase' };
+const titles: Record<Surface, string> = { workspaces: 'Workbench', task: 'Task', settings: 'Settings', rebase: 'Rebase' };
 
 export class Views implements vscode.Disposable {
   private readonly panels = new Map<Surface, vscode.WebviewPanel>();
@@ -101,6 +101,7 @@ export class Views implements vscode.Disposable {
   }
   private currentModel(surface: Surface): WorkbenchModel {
     const model = this.model(surface);
+    if (model.agentReadiness.status !== 'ready' || model.agentConfiguration.status !== 'configured') return model;
     const pinned = this.taskModel;
     if (surface !== 'task' || !pinned) return model;
     const task = model.workspaces?.find((row) => row.task.id === pinned.task?.id)?.task;

@@ -6,7 +6,7 @@ import os from 'node:os';
 import { unzipSync } from 'fflate';
 import { Engine } from '@warden/engine';
 import { parseWorkbenchAction, taskReview } from '@warden/shared';
-import type { Surface, WorkbenchModel } from '@warden/shared';
+import type { Surface, WorkbenchModel, AcpConfiguration, AcpReadiness } from '@warden/shared';
 import type { Memento } from 'vscode';
 import { TaskNoteDrafts } from '../../packages/vscode/src/task-note-drafts.js';
 import { makeFixtureRepo } from '../fixtures/make-repo.js';
@@ -26,6 +26,8 @@ const notes = new TaskNoteDrafts({
 } as Memento);
 const expanded: Record<string, boolean> = {};
 const session = 'browser-fixture';
+let agentConfiguration: AcpConfiguration = { status: 'missing' };
+let agentReadiness: AcpReadiness = { status: 'unchecked' };
 const manifest = JSON.parse(await readFile('packages/vscode/package.json', 'utf8'));
 const assets = unzipSync(await readFile(`packages/vscode/warden-${manifest.version}.vsix`));
 const model = async (surface: Surface): Promise<WorkbenchModel> => {
@@ -36,6 +38,8 @@ const model = async (surface: Surface): Promise<WorkbenchModel> => {
     session,
     repository: fixture.root,
     repositoryState: 'ready',
+    agentConfiguration,
+    agentReadiness,
     surface,
     workflow,
     task,
@@ -85,6 +89,20 @@ const server = createServer(async (request, response) => {
       }
       const action = parseWorkbenchAction(JSON.parse(text));
       switch (action.type) {
+        case 'setup.agents':
+          break;
+        case 'settings.agents':
+          if (agentConfiguration.status !== 'configured') {
+            agentConfiguration = { status: 'configured', count: 1 };
+            agentReadiness = { status: 'ready', profile: { id: 'fixture', label: 'Fixture agent' }, message: 'ACP connected.' };
+          }
+          break;
+        case 'setup.checkAgent':
+          agentReadiness = { status: 'ready', profile: { id: 'fixture', label: 'Fixture agent' }, message: 'ACP connected.' };
+          break;
+        case 'setup.cancelAgentCheck':
+          agentReadiness = { status: 'unchecked' };
+          break;
         case 'task.select':
         case 'task.file':
         case 'task.review':
@@ -152,7 +170,7 @@ const server = createServer(async (request, response) => {
           break;
       }
       response.setHeader('Content-Type', 'application/json');
-      response.end(JSON.stringify(await model(surface)));
+      response.end(JSON.stringify(await model(action.type === 'setup.agents' ? 'settings' : surface)));
       return;
     }
     if (url.pathname === '/index.js' || url.pathname === '/index.css') {
@@ -166,7 +184,7 @@ const server = createServer(async (request, response) => {
     response.end(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/index.css">
       ${dark ? `<style>:root { --vscode-editor-background:#1f1f1f; --vscode-sideBar-background:#181818; --vscode-editor-foreground:#ddd; --vscode-button-background:#0e639c; --vscode-button-foreground:#fff; --vscode-descriptionForeground:#aaa; --vscode-textCodeBlock-background:#252525; --vscode-list-hoverBackground:#333; --vscode-widget-border:#555; --vscode-input-border:#666; --vscode-focusBorder:#007fd4; ${theme === 'contrast' ? '--vscode-contrastBorder:#fff; --vscode-focusBorder:#f38518; --vscode-widget-border:#fff; --vscode-input-border:#fff;' : ''} }</style>` : ''}
       </head><body class="${dark ? (theme === 'contrast' ? 'vscode-high-contrast' : 'vscode-dark') : 'vscode-light'}"><div id="root"></div><script>
-      const surface = new URL(location.href).searchParams.get('surface') || 'task';
+      let surface = new URL(location.href).searchParams.get('surface') || 'task';
       let saved = JSON.parse(sessionStorage.getItem('warden-state') || '{}');
       let queue = Promise.resolve();
       window.__actions = [];
@@ -176,8 +194,11 @@ const server = createServer(async (request, response) => {
           const response = await fetch((message.type === 'ready' ? '/model' : '/action') + '?surface=' + surface,
             message.type === 'ready' ? {} : { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify(message.action) });
           if (!response.ok) throw new Error(await response.text());
-          const updated = await response.json();
-          if (message.action?.type !== 'task.draft') window.postMessage({ type:'model', model:updated }, '*');
+          const model = await response.json();
+          if (message.action?.type !== 'task.draft') {
+            surface = model.surface;
+            window.postMessage({ type:'model', model }, '*');
+          }
           if (message.action?.type === 'settings.save') window.__settingsSaved = true;
         }).catch(error => { window.__hostError = String(error); console.error(error); });
       }});
@@ -191,10 +212,16 @@ server.listen(Number(process.env.WARDEN_UI_PORT ?? 0), process.env.WARDEN_UI_HOS
   const address = server.address();
   console.log(JSON.stringify({ port: typeof address === 'object' ? address?.port : undefined, root: fixture.root }));
 });
+let closing = false;
 async function close() {
+  if (closing) return;
+  closing = true;
   await new Promise<void>((resolve) => server.close(() => resolve()));
+  const allocated = await engine.execute('workspaces.list', undefined);
   await engine.close();
-  for (const slot of [1, 2]) await rm(`${fixture.root}-${slot}`, { recursive: true, force: true });
+  const prefix = `${fixture.root}-`;
+  for (const workspace of allocated.worktrees)
+    if (workspace.path.startsWith(prefix) && /^\d+$/.test(workspace.path.slice(prefix.length))) await rm(workspace.path, { recursive: true, force: true });
   await fixture.cleanup();
   await rm(data, { recursive: true, force: true });
 }

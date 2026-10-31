@@ -4,11 +4,15 @@ A VS Code workbench for developing one requirement on a **base branch**, with in
 task workspaces, native read-only review and an isolated live preview.
 Development currently prioritizes connecting changes from multiple workspaces and testing them together.
 Warden supplies the workspaces and Git operations; you choose and run your own coding tools.
+Agent integrations need messaging and task-workspace binding; ACP is the current implementation.
 
 ## Install
 
-Install **Warden Workspace Review** (`xbghc.warden`) in VS Code, open the primary directory, and
-choose **Warden: Select Base Branch**. Git must be available in the workspace environment. The extension
+Install **Warden Workspace Review** (`xbghc.warden`) in VS Code and open the primary directory.
+Configure an agent through **Warden: Configure ACP**. Warden connects automatically at startup and
+after configuration changes. Once connected, choose **Warden: Select Base Branch**. Unavailable agents
+keep workspace controls hidden, with configuration and recovery in Settings.
+Git must be available in the workspace environment. The extension
 requires VS Code 1.106 or newer and runs in desktop VS Code, Remote SSH, WSL and Dev Containers. It requires Workspace Trust.
 There is no Warden server, browser application or CLI to start, and no separate Node installation
 is needed to use the extension.
@@ -29,6 +33,7 @@ code --install-extension packages/vscode/warden-0.20.4.vsix
    keeps its workspace across multiple deliveries.
 3. **Connect for preview.** Use each task's connection action. Saved primary content and connected
    task changes appear in a persistent independent preview directory for tests and dev servers.
+   Tasks sit directly in the sidebar; preview commands use its menu, and synchronization stays in the status bar.
 4. **Review and commit.** Open task files in native read-only diffs. Use the workspace commit icon, enter a message in
    VS Code’s top input box and submit the reviewed increment with ordinary Git hooks and signing.
 5. **Synchronize.** Explicitly rebase selected workspaces when needed. Use VS Code’s native
@@ -53,7 +58,7 @@ All normal VS Code diff navigation and accessibility features remain available.
 | [Terminology](docs/terminology.md) | Canonical names, operation directions and status vocabulary |
 | [Interaction design](docs/design.md) | Interaction contract and desktop adaptation |
 | [Reviewing](docs/reviewing.md) | Immutable comparisons and delivery versions |
-| [Working with agents](docs/agent.md) | External tools and script context |
+| [Working with agents](docs/agent.md) | Agent integration contract, ACP setup and external tools |
 | [Workspaces and tasks](docs/worktrees.md) | Storage isolation, delivery and synchronization |
 | [Platform](docs/environment.md) | Local and remote workspace environments |
 | [State and security](docs/internals.md) | Persistence, locks and validated Git operations |

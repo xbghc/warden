@@ -20,5 +20,6 @@ export interface AcpSessionOptions {
   storage: AcpStorage;
   validate(): Promise<void>;
   changed(): void;
+  connectionFailed?(profile: AcpProfile, message: string): void;
   timeoutMs?: number;
 }

@@ -5,9 +5,15 @@ const vscode = require('vscode');
 
 exports.checkRepositoryLoading = async (workbench, extension, fixture, eventually) => {
   const welcome = extension.packageJSON.contributes.viewsWelcome;
-  assert.equal(welcome.find((row) => row.contents.includes('command:warden.selectRepository')).when, 'warden.repositoryState == unselected');
-  assert.equal(welcome.find((row) => row.contents === 'Opening repository…').when, 'warden.repositoryState != ready && warden.repositoryState != unselected');
-  assert(welcome.find((row) => row.contents.includes('command:warden.configure')).when.includes('warden.repositoryState == ready'));
+  assert.equal(
+    welcome.find((row) => row.contents.includes('command:warden.selectRepository')).when,
+    'warden.agentReady && (warden.repositoryState == unselected)',
+  );
+  assert.equal(
+    welcome.find((row) => row.contents === 'Opening repository…').when,
+    'warden.agentReady && (warden.repositoryState != ready && warden.repositoryState != unselected)',
+  );
+  assert(welcome.find((row) => row.contents.includes('command:warden.configure)')).when.includes('warden.repositoryState == ready'));
   const selector = extension.packageJSON.contributes.menus['view/title'].find((item) => item.command === 'warden.selectRepository');
   assert(selector.when.includes('warden.repositoryState == ready && warden.multipleRoots'), 'multi-root repository switching remains available');
 
@@ -27,7 +33,7 @@ exports.checkRepositoryLoading = async (workbench, extension, fixture, eventuall
     const pending = operation === 'initialize' ? workbench.initialize() : workbench.open(fixture.unconfigured);
     try {
       await eventually(() => entered, 30_000);
-      for (const surface of ['workspaces', 'task', 'preview', 'rebase', 'settings']) {
+      for (const surface of ['workspaces', 'task', 'rebase', 'settings']) {
         const model = workbench.model(surface);
         assert.equal(model.repositoryState, 'loading', `${operation} keeps ${surface} in its loading state`);
         assert.equal(model.repository, '');
@@ -47,13 +53,13 @@ exports.checkRepositoryLoading = async (workbench, extension, fixture, eventuall
       release();
       await pending;
     }
-    assert.equal(workbench.model('preview').repositoryState, 'ready');
-    assert.equal(workbench.model('preview').repository, operation === 'initialize' ? fixture.root : fixture.unconfigured);
+    assert.equal(workbench.model('workspaces').repositoryState, 'ready');
+    assert.equal(workbench.model('workspaces').repository, operation === 'initialize' ? fixture.root : fixture.unconfigured);
   }
 
   await assert.rejects(workbench.open(path.join(fixture.root, 'missing-repository')));
-  assert.equal(workbench.model('preview').repositoryState, 'unselected', 'failed opening exits loading and restores the selection action');
+  assert.equal(workbench.model('workspaces').repositoryState, 'unselected', 'failed opening exits loading and restores the selection action');
   assert.deepEqual(await workbench.sidebar.getChildren(), []);
   await workbench.open(fixture.root);
-  assert.equal(workbench.model('preview').repositoryState, 'ready', 'a later successful open recovers normally');
+  assert.equal(workbench.model('workspaces').repositoryState, 'ready', 'a later successful open recovers normally');
 };

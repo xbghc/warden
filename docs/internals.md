@@ -69,6 +69,24 @@ the same workspace. Unrelated historical metadata and internal snapshot objects 
 
 ## Security model
 
+The workbench ACP connection is separate from Engine Git operations. In a trusted workspace, startup
+and changes to User or Remote User profiles automatically launch a validated profile in the primary
+folder (or the first workspace folder before repository selection). The last successfully selected
+profile ID is kept in extension global state; if it is absent, the first configured profile is used.
+No executable or credential is stored there. The client negotiates ACP and requests an empty session,
+with no filesystem or terminal capabilities, no work prompt and cancelled startup permission requests.
+Authentication is explicit and uses only methods advertised by that connection. Startup creates no
+Warden task, workspace or conversation record, and issues no Git or preview command.
+
+The stdio connection remains open after initialization. Disconnect, failure, replacement and shutdown
+close its stream and terminate the owned process, escalating from SIGTERM to SIGKILL after a bounded
+wait. Pending connection attempts and authentication pickers are cancelled; stale results cannot unlock
+the workbench. Settings edits are coalesced and failures do not trigger a restart loop. Task connections
+are separately closed on shutdown, even if cleanup of the workbench connection reports an error.
+Agent-owned tools, login data, empty-session records and child commands remain the agent's responsibility.
+Availability is window-local and is not stored as a persistent readiness flag. Task agents retain their
+own workspace cwd and require an explicit connect or send; startup never replays an uncertain prompt.
+
 Single user, in the VS Code workspace extension host (local, SSH, WSL or container). There is no
 production HTTP listener. The internal engine executes Git with argument arrays,
 through Node's `execFile`, without a shell. General

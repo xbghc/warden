@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { formatTargetKey, taskReview, sameReview, previewStatusLabels } from '@warden/shared';
+import { formatTargetKey, taskReview, sameReview, previewStatusLabels, scriptStatusLabels } from '@warden/shared';
 import type { FileEntry, TaskReview, PreviewResponse, RebaseResponse, WorkflowResponse, WorkflowTask, WorktreesResponse } from '@warden/shared';
 import { Engine, WardenError } from '@warden/engine';
 import type { EngineCommand, EngineInput, EngineOutput } from '@warden/engine';
@@ -47,7 +47,9 @@ export class Workbench {
   private commitInput?: vscode.InputBox;
   private fileErrors = new Map<string, string>();
   private readonly conversations: AcpConversations;
-  private readonly agentSetup = new AcpAgentSetup();
+  private readonly agentSetup: AcpAgentSetup;
+  private agentConfigurationStatus?: WorkbenchModel['agentConfiguration']['status'];
+  private agentReadinessStatus?: WorkbenchModel['agentReadiness']['status'];
   private readonly branchViews: BranchViews;
   private branch?: string;
   private branchTransition = false;
@@ -63,6 +65,14 @@ export class Workbench {
   private checkSignature?: string;
 
   constructor(private readonly context: vscode.ExtensionContext) {
+    this.agentSetup = new AcpAgentSetup(
+      () => this.backend?.root ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+      () => {
+        this.conversations?.refresh();
+        this.render();
+      },
+      context.globalState,
+    );
     this.branchViews = new BranchViews(context.workspaceState);
     this.documents = new Documents(context);
     this.conversations = new AcpConversations(
@@ -70,7 +80,14 @@ export class Workbench {
       (binding) => this.reviewConversation(binding),
       () => this.render(),
       (error) => this.output.appendLine(String(error)),
-      () => this.agentSetup.configure(),
+      async () => {
+        await vscode.commands.executeCommand('warden.configureAgents');
+      },
+      (profile, message) => this.agentSetup.readiness.unavailable(profile, message),
+      () => {
+        const readiness = this.agentSetup.readiness.snapshot();
+        return readiness.status === 'ready' ? readiness.profile?.id : undefined;
+      },
     );
     this.views = new Views(
       context,
@@ -92,7 +109,10 @@ export class Workbench {
       vscode.workspace.registerTextDocumentContentProvider('warden-review', this.documents),
       vscode.workspace.onDidCloseTextDocument((doc) => this.documents.remove(doc.uri)),
       vscode.workspace.onDidChangeConfiguration((event) => {
-        if (event.affectsConfiguration('warden.previewCommand')) this.render();
+        if (event.affectsConfiguration('warden.previewCommand')) {
+          void this.updateContext();
+          this.render();
+        }
       }),
       this.views,
     );
@@ -134,12 +154,14 @@ export class Workbench {
       syncConflict: (node) => this.showRebase(node),
       copyWorkspace: (node) => this.copyWorkspace(node),
       importNotes: () => this.importNotes(),
-      showPreview: () => this.views.show('preview'),
+      showPreview: () => this.showPreviewOutput(),
       copyLocation: () => this.documents.copyLocation(),
       chat: (node) => this.openConversation(node),
       switchChat: () => this.openConversation(),
       expandChat: () => this.conversations.expand(),
-      configureAgents: () => this.agentSetup.configure(),
+      configureAgents: () => this.views.show('settings'),
+      checkAgent: () => (this.conversations.configuration().status === 'configured' ? this.agentSetup.check() : this.views.show('settings')),
+      cancelAgentCheck: () => this.agentSetup.disconnect(),
       sendSelectionToAgent: () => this.sendSelectionToAgent(),
     };
     const navigation = new Set([
@@ -171,20 +193,60 @@ export class Workbench {
     for (const [name, action] of Object.entries(commands))
       context.subscriptions.push(
         vscode.commands.registerCommand(`warden.${name}`, (node?: Node) =>
-          this.perform(
-            () => {
-              if (node?.session) this.assertSession(node.session);
-              return action(node);
-            },
-            navigation.has(name) ? undefined : 'Working…',
-            node?.kind === 'task' ? `task:${node.task.id}` : 'repository',
-          ),
+          ['configureAgents', 'checkAgent', 'cancelAgentCheck'].includes(name)
+            ? this.agentAction(() => action(node))
+            : this.perform(
+                () => {
+                  if (node?.session) this.assertSession(node.session);
+                  return action(node);
+                },
+                navigation.has(name) ? undefined : 'Working…',
+                node?.kind === 'task' ? `task:${node.task.id}` : 'repository',
+              ),
         ),
       );
   }
   private render() {
+    const status = this.conversations.configuration().status;
+    if (status !== this.agentConfigurationStatus) {
+      this.agentConfigurationStatus = status;
+      void vscode.commands.executeCommand('setContext', 'warden.agentConfiguration', status);
+    }
+    const readiness = this.agentSetup.readiness.snapshot().status;
+    if (readiness !== this.agentReadinessStatus) {
+      this.agentReadinessStatus = readiness;
+      void vscode.commands.executeCommand('setContext', 'warden.agentReady', this.agentReady);
+      void vscode.commands.executeCommand('setContext', 'warden.agentReadiness', readiness);
+    }
+    if (!this.agentReady) {
+      this.commitInput?.hide();
+      this.taskInput?.hide();
+    }
+    if (this.agentReady && this.repositoryState === 'ready' && this.data?.workflow) {
+      const preview = this.preview;
+      const sync = preview?.syncStatus ?? preview?.status ?? 'disconnected';
+      const problem = ['stale', 'conflict', 'error', 'paused'].includes(sync) || preview?.setup?.status === 'failed';
+      this.status.text = `$(${problem ? 'warning' : sync === 'updating' ? 'sync~spin' : 'layers'}) Warden: ${previewStatusLabels[sync]}${preview?.setup?.status === 'failed' ? ' · Preview setup failed' : ''}`;
+      this.status.backgroundColor = problem ? new vscode.ThemeColor('statusBarItem.warningBackground') : undefined;
+      this.status.tooltip = `${this.previewSummary()}\nShow Preview Output`;
+      this.status.show();
+    } else this.status.hide();
     this.sidebar?.refresh();
     this.views.render();
+  }
+  private get agentReady() {
+    return this.conversations.configuration().status === 'configured' && this.agentSetup.readiness.snapshot().status === 'ready';
+  }
+  private async agentAction(action: () => unknown | Promise<unknown>) {
+    if (this.closing || !vscode.workspace.isTrusted) return;
+    this.errors.delete('agent');
+    try {
+      return await action();
+    } catch (error) {
+      this.report(error, 'agent');
+    } finally {
+      if (!this.closing) this.render();
+    }
   }
   private api<K extends EngineCommand>(command: K, request: EngineInput<K>): Promise<EngineOutput<K>> {
     if (!this.backend) throw new Error('Run Warden: Select Repository first.');
@@ -196,6 +258,10 @@ export class Workbench {
       return;
     }
     if (this.closing) return;
+    if (!this.agentReady) {
+      await vscode.commands.executeCommand('warden.task.focus');
+      return;
+    }
     if (this.initializing || this.switching || this.branchTransition) {
       this.report(new Error('The repository or base branch is changing. Retry shortly.'), scope);
       return;
@@ -248,6 +314,7 @@ export class Workbench {
     } finally {
       this.initializing = false;
       await this.updateContext();
+      this.agentSetup.start();
       this.render();
     }
   }
@@ -320,6 +387,8 @@ export class Workbench {
       vscode.commands.executeCommand('setContext', 'warden.hasRepository', hasRepository),
       vscode.commands.executeCommand('setContext', 'warden.hasDevelopmentBranch', hasRepository && !!this.data?.workflow),
       vscode.commands.executeCommand('setContext', 'warden.multipleRoots', (vscode.workspace.workspaceFolders?.length ?? 0) > 1),
+      vscode.commands.executeCommand('setContext', 'warden.hasPreviewCommand', this.model('workspaces').hasPreviewCommand),
+      vscode.commands.executeCommand('setContext', 'warden.hasPreviewSetup', !!this.data?.workspaceConfig?.previewSetup?.trim()),
     ]);
     if (state !== 'loading' && state === this.repositoryState) await vscode.commands.executeCommand('setContext', 'warden.repositoryState', state);
   }
@@ -426,10 +495,6 @@ export class Workbench {
             this.files.delete(key);
           }
         }
-        this.status.text = `$(layers) Warden: ${previewStatusLabels[preview.syncStatus ?? preview.status]}${preview.setup?.status === 'failed' ? ' · Preview setup failed' : ''}`;
-        this.status.tooltip = `Preview folder: ${preview.worktree ?? 'Not initialized'}\n${preview.message ?? 'Saving in the primary folder syncs the preview automatically.'}\n${data.error ?? ''}`;
-        if (data.workflow) this.status.show();
-        else this.status.hide();
         await Promise.all(
           this.tasks()
             .filter((task) => task.worktree && this.expanded[task.id])
@@ -497,12 +562,12 @@ export class Workbench {
     };
   }
   async getChildren(node?: Node): Promise<SidebarNode[]> {
+    if (!this.agentReady) return [];
     if (this.repositoryState !== 'ready' || this.branchTransition || !this.data?.workflow) return [];
     const session = this.session;
     if (node?.session && node.session !== session) return [];
     if (node?.kind === 'task' && !this.tasks().some((task) => task.id === node.task.id)) return [];
-    if (!node) return [{ kind: 'preview' }, { kind: 'tasks' }];
-    if (node.kind === 'tasks') return this.tasks().map((task) => ({ kind: 'task', task }));
+    if (!node) return this.tasks().map((task) => ({ kind: 'task', task }));
     let target: string;
     let review: TaskReview | undefined;
     if (node.kind === 'task' && node.task.worktree) {
@@ -926,6 +991,27 @@ export class Workbench {
     const task = await this.pickTask(node);
     if (task) await this.api(operation, { taskId: task.id });
   }
+  private previewSummary(preview = this.preview) {
+    const names = preview?.connectedIds.map((id) => this.tasks().find((task) => task.id === id)?.title ?? id);
+    return [
+      `Preview: ${previewStatusLabels[preview?.syncStatus ?? preview?.status ?? 'disconnected']}`,
+      `Base branch: ${this.branch ?? 'Not selected'}`,
+      `Preview folder: ${preview?.worktree ?? 'Not initialized'}`,
+      `Preview contents: Saved primary content${names?.length ? ` + ${names.join(' + ')}` : ''}`,
+      preview?.updatedAt ? `Last successful sync: ${new Date(preview.updatedAt).toLocaleString('en-US')}` : '',
+      preview?.message,
+      preview?.conflicts?.length ? `Conflicting paths:\n${preview.conflicts.join('\n')}` : '',
+      preview?.setup ? `Preview setup: ${scriptStatusLabels[preview.setup.status]} · Exit code ${preview.setup.exitCode ?? '—'}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+  }
+  private async showPreviewOutput() {
+    const preview = await this.api('preview.get', undefined);
+    this.output.appendLine(this.previewSummary(preview));
+    if (preview.setup?.output) this.output.appendLine(preview.setup.output);
+    this.output.show(true);
+  }
   private async ensurePreview() {
     let preview = await this.api('preview.get', undefined);
     if (!preview.worktree) preview = await this.api('preview.refresh', undefined);
@@ -1045,10 +1131,25 @@ ${text}`,
     const review = task ? this.reviews.get(task.id) : undefined;
     const folder = this.backend ? vscode.workspace.getWorkspaceFolder(vscode.Uri.file(this.backend.root)) : undefined;
     const previewCommand = vscode.workspace.getConfiguration('warden', folder).get<unknown>('previewCommand');
+    if (!this.agentReady)
+      return {
+        session: this.session,
+        repository: '',
+        repositoryState: this.repositoryState,
+        surface,
+        agentConfiguration: this.conversations.configuration(),
+        agentReadiness: this.agentSetup.readiness.snapshot(),
+        hasPreviewCommand: false,
+        reviewCurrent: false,
+        message: '',
+        errors: [...this.errors.values()].filter((error) => error.scope === 'agent'),
+      };
     return {
       session: this.session,
       repository: this.repositoryState === 'ready' ? this.backend!.root : '',
       repositoryState: this.repositoryState,
+      agentConfiguration: this.conversations.configuration(),
+      agentReadiness: this.agentSetup.readiness.snapshot(),
       surface,
       workflow: this.repositoryState !== 'ready' || this.branchTransition ? undefined : this.data,
       task,
@@ -1066,15 +1167,24 @@ ${text}`,
     };
   }
   private assertSession(session: string) {
+    if (!this.agentReady) throw new Error('ACP is unavailable. Open Warden Settings to configure or reconnect the agent.');
     if (session !== this.session || this.initializing || this.switching || this.branchTransition)
       throw new Error('The repository or base branch changed. Retry from the current view.');
   }
   private async handleAction(action: WorkbenchAction, session: string) {
-    this.assertSession(session);
     if (action.type === 'settings.agents') {
+      await this.agentAction(() => this.agentSetup.configure());
+      return;
+    }
+    if (action.type === 'setup.agents') {
       await vscode.commands.executeCommand('warden.configureAgents');
       return;
     }
+    if (action.type === 'setup.checkAgent' || action.type === 'setup.cancelAgentCheck') {
+      await vscode.commands.executeCommand(action.type === 'setup.checkAgent' ? 'warden.checkAgent' : 'warden.cancelAgentCheck');
+      return;
+    }
+    this.assertSession(session);
     if (action.type === 'setup.repository' || action.type === 'setup.branch') {
       await this.perform(() => (action.type === 'setup.repository' ? this.selectRepository() : this.configure()), 'Selecting…');
       return;
@@ -1128,6 +1238,8 @@ ${text}`,
             break;
           case 'workspaces.show':
             if (action.surface === 'rebase') await this.showRebase();
+            // Older clients keep their navigation action, but preview no longer has an editor panel.
+            else if (action.surface === 'preview') await this.showPreviewOutput();
             else await this.views.show(action.surface);
             break;
           case 'task.select':
@@ -1257,10 +1369,10 @@ ${text}`,
 
   async close() {
     this.closing = true;
-    this.agentSetup.dispose();
     this.commitInput?.hide();
     this.taskInput?.hide();
-    await this.conversations.close();
+    const closed = await Promise.allSettled([this.agentSetup.close(), this.conversations.close()]);
+    for (const result of closed) if (result.status === 'rejected') this.output.appendLine(`Agent cleanup failed: ${String(result.reason)}`);
     await Promise.allSettled([this.active, ...this.navigation, this.reading]);
     try {
       await this.views.flush();

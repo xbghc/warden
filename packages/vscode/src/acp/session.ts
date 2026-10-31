@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { once } from 'node:events';
 import { Readable, Writable } from 'node:stream';
 import {
   client,
@@ -41,8 +42,10 @@ type Permission = {
 };
 type History = { messages: AcpMessage[]; lastChunk?: { key: string; id: string } };
 type Runtime = {
+  profile: AcpProfile;
   generation: number;
   child: ChildProcessWithoutNullStreams;
+  started: Promise<void>;
   connection: ClientConnection;
   exit: Promise<void>;
   exited: boolean;
@@ -292,6 +295,9 @@ export class AcpSession {
       runtime = this.spawn(profile, generation, release, options.resume);
       release = undefined;
       this.runtime = runtime;
+      // Missing executables must fail before the protocol writes to their closed pipes.
+      await this.timeout(runtime.started, 'Starting the agent timed out.');
+      if (!this.current(runtime) || runtime.exited) throw new Error('Connection closed.');
       const initialized = await this.timeout(
         runtime.connection.agent.request('initialize', {
           protocolVersion: PROTOCOL_VERSION,
@@ -334,6 +340,7 @@ export class AcpSession {
         this.error = authRequired(error)
           ? 'The agent requires authentication. Choose a supported method, or log in externally and reconnect.'
           : `Unable to connect to the agent: ${message(error)}`;
+        if (runtime && !runtime.initialized) this.options.connectionFailed?.(profile, this.error);
         this.notify();
       }
       if (runtime && !(runtime.initialized && authRequired(error))) await this.stopRuntime(runtime).catch(() => undefined);
@@ -359,7 +366,20 @@ export class AcpSession {
     const exit = new Promise<void>((resolve) => {
       exited = resolve;
     });
-    const runtime = { generation, child, exit, release, exited: false, stopping: false, initialized: false, established: false, resume, stderr: '' } as Runtime;
+    const runtime = {
+      profile,
+      generation,
+      child,
+      started: once(child, 'spawn').then(() => undefined),
+      exit,
+      release,
+      exited: false,
+      stopping: false,
+      initialized: false,
+      established: false,
+      resume,
+      stderr: '',
+    } as Runtime;
     const app = client({ name: 'Warden' })
       .onNotification('session/update', ({ params }) => this.update(runtime, params))
       .onRequest('session/request_permission', ({ params, signal }) => this.permission(runtime, params, signal));
@@ -374,6 +394,7 @@ export class AcpSession {
       exited();
       if (this.current(runtime)) {
         this.error = reason;
+        this.options.connectionFailed?.(profile, reason);
         this.status = 'error';
         this.controls = emptyControls();
         if (this.turn?.runtime === runtime) this.record.interrupted = true;
@@ -398,6 +419,7 @@ export class AcpSession {
       if (this.current(runtime) && !runtime.exited) {
         this.status = 'error';
         this.error = 'The ACP connection closed. This turn may be incomplete; inspect the code before reconnecting.';
+        this.options.connectionFailed?.(profile, this.error);
         this.controls = emptyControls();
         if (this.turn?.runtime === runtime) this.record.interrupted = true;
         this.cancelPermissions(runtime);
@@ -423,7 +445,10 @@ export class AcpSession {
         const session = await this.timeout(
           runtime.connection.agent.request('session/load', { sessionId, cwd: this.options.binding.workspace, mcpServers: [] }),
           'Resuming the session timed out. Reconnect; Warden will not resend messages automatically.',
-        );
+        ).catch((error) => {
+          if (authRequired(error)) this.options.connectionFailed?.(runtime.profile, message(error));
+          throw error;
+        });
         if (!this.current(runtime)) throw new Error('Connection closed.');
         this.initialControls(runtime, session);
         const uncertain = this.record.messages.filter((item) => item.role === 'user' && item.uncertain);
@@ -440,10 +465,16 @@ export class AcpSession {
       const session = await this.timeout(
         runtime.connection.agent.request('session/new', { cwd: this.options.binding.workspace, mcpServers: [] }),
         'Creating the agent session timed out. Check the agent and reconnect.',
-      );
+      ).catch((error) => {
+        this.options.connectionFailed?.(runtime.profile, message(error));
+        throw error;
+      });
       if (!this.current(runtime)) throw new Error('Connection closed.');
-      if (!object(session) || typeof session.sessionId !== 'string' || !session.sessionId || session.sessionId.length > 500)
-        throw new Error('The agent returned an invalid session ID. Check ACP compatibility.');
+      if (!object(session) || typeof session.sessionId !== 'string' || !session.sessionId || session.sessionId.length > 500) {
+        const error = new Error('The agent returned an invalid session ID. Check ACP compatibility.');
+        this.options.connectionFailed?.(runtime.profile, error.message);
+        throw error;
+      }
       runtime.sessionId = session.sessionId;
       this.record.sessionId = session.sessionId;
       this.initialControls(runtime, session);
@@ -508,6 +539,7 @@ export class AcpSession {
       if (this.current(runtime)) {
         this.status = 'error';
         this.error = `The turn request did not finish: ${message(error)}. Inspect existing changes; Warden will not resend automatically.`;
+        if (turn.sent && !turn.cancelling) this.options.connectionFailed?.(runtime.profile, this.error);
       }
       throw error;
     } finally {
@@ -588,6 +620,7 @@ export class AcpSession {
       if (this.current(runtime)) {
         this.status = 'error';
         this.error = `Agent authentication failed: ${message(error)}`;
+        this.options.connectionFailed?.(runtime.profile, this.error);
         this.notify();
       }
       // A timeout does not cancel the old RPC. Retire this connection before another login or
