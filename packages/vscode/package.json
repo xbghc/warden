@@ -811,12 +811,12 @@
       {
         "view": "warden.task",
         "contents": "[Configure ACP](command:warden.configureAgents)",
-        "when": "!warden.agentReady"
+        "when": "warden.agentSetupRequired"
       },
       {
         "view": "warden.task",
         "contents": "Opening repository\u2026",
-        "when": "warden.agentReady && (warden.repositoryState != ready && warden.repositoryState != unselected)"
+        "when": "warden.repositoryState != ready && warden.repositoryState != unselected"
       },
       {
         "view": "warden.task",

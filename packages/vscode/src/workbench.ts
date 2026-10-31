@@ -75,6 +75,7 @@ export class Workbench {
   private readonly agentSetup: AcpAgentSetup;
   private agentConfigurationStatus?: WorkbenchModel['agentConfiguration']['status'];
   private agentReadinessStatus?: WorkbenchModel['agentReadiness']['status'];
+  private agentSetupRequired?: boolean;
   private readonly branchViews: BranchViews;
   private branch?: string;
   private branchTransition = false;
@@ -285,6 +286,11 @@ export class Workbench {
       this.agentReadinessStatus = readiness;
       void vscode.commands.executeCommand('setContext', 'warden.agentReady', this.agentReady);
       void vscode.commands.executeCommand('setContext', 'warden.agentReadiness', readiness);
+    }
+    const setupRequired = this.repositoryState !== 'loading' && !this.agentReady && (status !== 'configured' || !this.agentSetup.connecting);
+    if (setupRequired !== this.agentSetupRequired) {
+      this.agentSetupRequired = setupRequired;
+      void vscode.commands.executeCommand('setContext', 'warden.agentSetupRequired', setupRequired);
     }
     if (!this.agentReady) {
       this.commitInput?.hide();

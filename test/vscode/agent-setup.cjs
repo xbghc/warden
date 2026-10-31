@@ -63,10 +63,16 @@ exports.checkAgentSetup = async (workbench, extension, fixture, eventually) => {
     const setupWelcome = welcome.filter((item) => item.contents.includes('command:warden.configureAgents'));
     assert.equal(setupWelcome.length, 1, 'there is one native ACP configuration button');
     assert.equal(setupWelcome[0].contents, '[Configure ACP](command:warden.configureAgents)');
-    assert.equal(setupWelcome[0].when, '!warden.agentReady');
-    for (const item of welcome.filter((item) => !setupWelcome.includes(item))) assert(item.when.includes('warden.agentReady'));
+    assert.equal(setupWelcome[0].when, 'warden.agentSetupRequired', 'setup is hidden until the host explicitly requests it');
+    for (const item of welcome.filter((item) => !setupWelcome.includes(item) && item.contents !== 'Opening repository…'))
+      assert(item.when.includes('warden.agentReady'));
     const configureMenu = extension.packageJSON.contributes.menus['view/title'].find((item) => item.command === 'warden.configureAgents');
-    assert.equal(configureMenu.when, 'view == warden.task && warden.agentReady');
+    assert.equal(configureMenu, undefined, 'Configure ACP does not duplicate Settings in More Actions');
+    assert.equal(
+      extension.packageJSON.contributes.menus['view/title'].find((item) => item.command === 'warden.configureScripts').when,
+      'view == warden.task && warden.agentReady',
+      'Settings remains available after connecting, including before branch selection',
+    );
     for (const command of ['warden.configure', 'warden.createTask', 'warden.showPreview']) {
       assert.equal(extension.packageJSON.contributes.commands.find((item) => item.command === command).enablement, 'warden.agentReady');
     }
@@ -79,6 +85,7 @@ exports.checkAgentSetup = async (workbench, extension, fixture, eventually) => {
       'script controls remain hidden until connected',
     );
     assert.equal(workbench.sidebar.view.message, undefined, 'missing ACP shows only the native button');
+    assert.equal(workbench.agentSetupRequired, true, 'missing configuration offers setup after loading');
     await screenshot(hasBranch ? 'missing-with-saved-work' : 'missing-before-branch');
     await vscode.commands.executeCommand('warden.configureAgents');
     const settings = workbench.settings.view;
@@ -98,12 +105,14 @@ exports.checkAgentSetup = async (workbench, extension, fixture, eventually) => {
       'script controls remain hidden until connected',
     );
     assert.equal(workbench.model('settings').agentConfiguration.status, 'invalid');
+    assert.equal(workbench.agentSetupRequired, true, 'invalid configuration offers repair');
     assert(workbench.settings.view.message, 'invalid configuration is readable in the native view');
     await screenshot('invalid-profile');
 
     await configuration.update('acpAgents', [healthyProfile(fixture, 'initialize-hangs')], vscode.ConfigurationTarget.Global);
     assert.equal(workbench.model('settings').agentConfiguration.status, 'configured');
     await eventually(() => workbench.model('settings').agentReadiness.status === 'checking');
+    assert.equal(workbench.agentSetupRequired, false, 'connecting does not ask the user to configure again');
     await gate([]);
     assert.deepEqual(
       workbench.settings.getChildren().map((node) => node.id),
@@ -115,9 +124,11 @@ exports.checkAgentSetup = async (workbench, extension, fixture, eventually) => {
     await screenshot('connecting');
     await vscode.commands.executeCommand('warden.cancelAgentCheck');
     assert.equal(workbench.model('settings').agentReadiness.status, 'unchecked');
+    assert.equal(workbench.agentSetupRequired, true, 'cancelling still leaves a way to reconnect');
 
     await configuration.update('acpAgents', [{ ...healthyProfile(fixture), command: `${fixture.node}-missing-agent` }], vscode.ConfigurationTarget.Global);
     await eventually(() => workbench.model('settings').agentReadiness.status === 'error');
+    await eventually(() => workbench.agentSetupRequired);
     await gate([]);
     assert.deepEqual(
       workbench.settings.getChildren().map((node) => node.id),
@@ -139,6 +150,7 @@ exports.checkAgentSetup = async (workbench, extension, fixture, eventually) => {
 
     await configuration.update('acpAgents', [healthyProfile(fixture, 'auth')], vscode.ConfigurationTarget.Global);
     await eventually(() => workbench.model('settings').agentReadiness.status === 'authentication_required');
+    await eventually(() => workbench.agentSetupRequired);
     await gate([]);
     assert.deepEqual(
       workbench.settings.getChildren().map((node) => node.id),
@@ -193,6 +205,7 @@ exports.checkAgentSetup = async (workbench, extension, fixture, eventually) => {
     let startupPid;
     try {
       startup.start();
+      assert.equal(startup.connecting, true, 'the debounce before automatic startup counts as connecting');
       await eventually(() => startup.readiness.snapshot().status === 'ready');
       startupPid = (await events()).filter((row) => row.method === 'initialize').at(-1).pid;
       assert.doesNotThrow(() => process.kill(startupPid, 0), 'a new window connects from saved configuration without a manual check');

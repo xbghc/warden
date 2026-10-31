@@ -27,6 +27,7 @@ exports.checkStartup = async (workbench, fixture, eventually) => {
   });
   try {
     await eventually(() => entered, 30_000);
+    assert.equal(workbench.agentSetupRequired, false, 'automatic startup never exposes setup during repository loading');
     await eventually(() => workbench.agentSetup.readiness.snapshot().status === 'ready', 30_000);
     assert.equal(finished, false, 'ACP becomes ready while repository observation is still blocked');
     assert.equal(workbench.model('workspaces').repositoryState, 'loading');
@@ -81,6 +82,80 @@ exports.checkStartup = async (workbench, fixture, eventually) => {
     releaseCheck();
     await loading;
     while (workbench.checkReading) await workbench.checkReading;
+    await workbench.open(fixture.root);
+  }
+
+  while (workbench.checkReading) await workbench.checkReading;
+  let calls = 0;
+  let waiting = false;
+  let releaseOld;
+  const oldCheck = new Promise((resolve) => {
+    releaseOld = resolve;
+  });
+  prototype.execute = async function (command, ...args) {
+    const result = await execute.call(this, command, ...args);
+    if (command === 'rebase.check' && ++calls === 1) {
+      waiting = true;
+      await oldCheck;
+      return { checks: result.checks.map((check) => ({ ...check, status: 'conflict', message: 'Obsolete check' })) };
+    }
+    return result;
+  };
+  let initialCheck;
+  let rechecking;
+  try {
+    initialCheck = workbench.refreshChecks();
+    await eventually(() => waiting);
+    rechecking = workbench.refreshChecks();
+    await eventually(() => !!workbench.pendingCheck);
+    assert.equal(calls, 1, 'a replacement check queues behind the running check');
+    releaseOld();
+    await rechecking;
+    assert.equal(calls, 2, 'an explicit check gets a fresh observation after the old one');
+    assert.equal(workbench.checkingRebase, false);
+    assert(
+      workbench.checks.checks.every((check) => check.message !== 'Obsolete check'),
+      'old results cannot satisfy a newer check request',
+    );
+  } finally {
+    prototype.execute = execute;
+    releaseOld();
+    await initialCheck;
+    await rechecking;
+    while (workbench.checkReading) await workbench.checkReading;
+  }
+
+  const oldEngine = workbench.backend;
+  let observed = false;
+  let obsoleteChecks = 0;
+  let releaseRead;
+  const readGate = new Promise((resolve) => {
+    releaseRead = resolve;
+  });
+  oldEngine.execute = async function (command, ...args) {
+    const result = await execute.call(this, command, ...args);
+    if (command === 'repository.get') {
+      observed = true;
+      await readGate;
+    }
+    if (command === 'rebase.check') obsoleteChecks++;
+    return result;
+  };
+  const reading = workbench.refresh();
+  let switching;
+  try {
+    await eventually(() => observed);
+    switching = workbench.open(fixture.unconfigured);
+    await eventually(() => workbench.switching);
+    releaseRead();
+    await switching;
+    assert.equal(obsoleteChecks, 0, 'a refresh superseded by repository switching cannot schedule old checks');
+    assert.equal(workbench.checks, undefined);
+  } finally {
+    oldEngine.execute = execute;
+    releaseRead();
+    await reading;
+    await switching;
     await workbench.open(fixture.root);
   }
 };

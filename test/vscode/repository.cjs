@@ -5,6 +5,9 @@ const vscode = require('vscode');
 const { checkStartup } = require('./startup.cjs');
 
 exports.checkRepositoryLoading = async (workbench, extension, fixture, eventually) => {
+  // Initial background checks may outlive activate(); capture only complete later spans.
+  while (workbench.checkReading) await workbench.checkReading;
+  await Promise.allSettled([...workbench.agentSetup.automatic]);
   const timings = [];
   const appendLine = workbench.output.appendLine;
   workbench.output.appendLine = function (line) {
@@ -25,10 +28,7 @@ async function checkRepositoryLoading(workbench, extension, fixture, eventually,
     welcome.find((row) => row.contents.includes('command:warden.selectRepository')).when,
     'warden.agentReady && (warden.repositoryState == unselected)',
   );
-  assert.equal(
-    welcome.find((row) => row.contents === 'Opening repository…').when,
-    'warden.agentReady && (warden.repositoryState != ready && warden.repositoryState != unselected)',
-  );
+  assert.equal(welcome.find((row) => row.contents === 'Opening repository…').when, 'warden.repositoryState != ready && warden.repositoryState != unselected');
   assert(welcome.find((row) => row.contents.includes('command:warden.configure)')).when.includes('warden.repositoryState == ready'));
   const selector = extension.packageJSON.contributes.menus['view/title'].find((item) => item.command === 'warden.selectRepository');
   assert(selector.when.includes('warden.repositoryState == ready && warden.multipleRoots'), 'multi-root repository switching remains available');
@@ -60,6 +60,7 @@ async function checkRepositoryLoading(workbench, extension, fixture, eventually,
         assert.equal(model.workflow, undefined, 'previous repository setup state must not leak into loading views');
       }
       assert.deepEqual(await workbench.sidebar.getChildren(), [], 'loading never exposes previous task navigation');
+      assert.equal(workbench.agentSetupRequired, false, 'loading does not offer Configure ACP');
       assert.equal(workbench.sidebar.view.message, undefined, 'native welcome content owns loading feedback');
       await assert.rejects(workbench.handleAction({ type: 'setup.repository' }, workbench.session), /changed/, 'loading cannot open another picker');
       await vscode.commands.executeCommand('warden.task.focus');
