@@ -191,11 +191,11 @@ Workflow reads share one checkout inventory per request instead of rebuilding ev
 inventory for each task. The extension follows observed primary checkout branch changes through
 `workflow.configure`, retaining its existing integration and connection guards. Branch changes rotate
 the webview session and invalidate review authorization and history/rebase results. Checkout
-observations include operation markers for primary and non-slot development checkouts, so unfinished
+observations include operation markers for primary and non-slot primary checkouts, so unfinished
 merges and cherry-picks suppress branch following until the user finishes or aborts them. History and check
 refreshes include the branch identity; the state-only `workflow.context` read rejects mixed snapshots
 when another window switches requirements during a refresh. Scoped engine writes verify the expected
-development branch after acquiring the repository lock, so a request queued by an old page cannot
+base branch after acquiring the repository lock, so a request queued by an old page cannot
 mutate a newly selected requirement. ACP conversations keep their task-bound engine context.
 
 Synchronization checks may reuse up to 64 isolated replay verdicts,
@@ -292,7 +292,8 @@ from writing concurrently.
 User-configured workspace hooks are the deliberate shell interface (`/bin/sh -c`, or Git for
 Windows' bundled `sh.exe -c`, with cwd/env and bounded output/timeout). They use the same Git
 environment isolation as engine Git calls. Warden records hook output and exit status without
-interpreting the script as an agent lifecycle. Planning a task does not execute hooks.
+interpreting the script as an agent lifecycle. Adding a task runs its configured initialization
+hook after assignment is saved; editing notes and ordering do not execute hooks.
 Windows shell discovery uses a fixed `git --exec-path` invocation with a five-second timeout and
 removes inherited `GIT_EXEC_PATH`; this installation lookup does not read or change the repository.
 
@@ -309,10 +310,10 @@ content fingerprints and periodic reads cover missed events. Closing a session d
 operations and releases watchers and leases before another repository is opened.
 
 Native read-only review documents are immutable snapshots stored under VS Code extension storage.
-Their random URI identities survive editor reloads without re-reading mutable source content. Message
-and history drafts use repository-keyed workspace state; Git operation journals stay in the existing
+Their random URI identities survive editor reloads without re-reading mutable source content. Commit-message drafts, task-note drafts and branch-scoped task selections use VS Code workspace state. Note drafts contain only bounded title and body text, keyed by the host-owned repository and task binding. Their writes are serialized; a completed save clears only its matching draft. Context changes block task updates but still preserve the pinned editor’s local draft. Earlier
+history drafts remain untouched; Git operation journals stay in the existing
 Warden state location. Old HTTP host/origin checks remain only in `test/compat`, which is not bundled.
 
 Updates are managed by VS Code and the Marketplace. There is no npm update request or CLI launcher.
 Workspace allocation and preview composition use local Git operations. Legacy clone-fetch code is
-retained for regression coverage and is not exposed in the extension's new-workspace form.
+retained for regression coverage and is not exposed in the task-creation flow.

@@ -319,7 +319,7 @@ describe('requirement development workflow', () => {
     expect((await send('POST', `/changes/${plan.id}/start`, null)).status).toBe(400);
   });
 
-  it('squashes multiple commits into the selected development branch and preserves the checkout', async () => {
+  it('squashes multiple commits into the selected requirement branch and preserves the checkout', async () => {
     const main = fx.git('rev-parse', 'main').trim();
     const change = await task('Add order validation');
     await commit(change);
@@ -617,7 +617,7 @@ describe('requirement development workflow', () => {
     expect((await prepare(ready)).status).toBe('integrating');
   });
 
-  it('requires a checked-out development branch and preserves unrelated current files', async () => {
+  it('requires a checked-out requirement branch and preserves unrelated current files', async () => {
     fx.git('switch', 'main');
     await fx.write('local.txt', 'unrelated work');
     const main = fx.git('rev-parse', 'HEAD').trim();
@@ -724,7 +724,7 @@ describe('requirement development workflow', () => {
   });
 
   it('tests and commits in a linked development checkout without touching the main checkout', async () => {
-    const change = await task('Linked development branch');
+    const change = await task('Linked requirement branch');
     await commit(change);
     const ready = await workflow.ready(change.id);
     fx.git('switch', 'main');

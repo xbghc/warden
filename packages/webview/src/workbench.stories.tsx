@@ -5,8 +5,8 @@ import { WorkbenchApp } from './workbench';
 const base: WorkbenchModel = {
   session: 'storybook',
   repository: '/projects/orders',
-  surface: 'workspaces',
-  creating: true,
+  repositoryState: 'ready',
+  surface: 'task',
   message: '',
   errors: [],
   reviewCurrent: false,
@@ -33,43 +33,23 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-export const NewWorkspace: Story = {};
-export const ChooseRepository: Story = { args: { model: { ...base, repository: '', workflow: undefined, creating: false } } };
-export const ChooseBranch: Story = { args: { model: { ...base, workflow: { workflow: null }, creating: false } } };
-export const Loading: Story = { args: { model: { ...base, workflow: undefined, creating: false } } };
-export const HookFailure: Story = {
+export const TaskNotes: Story = { args: { model: { ...base, task } } };
+export const OpeningRepository: Story = { args: { model: { ...base, repository: '', repositoryState: 'loading', workflow: undefined } } };
+export const ChooseRepository: Story = { args: { model: { ...base, repository: '', repositoryState: 'unselected', workflow: undefined } } };
+export const ChooseBranch: Story = { args: { model: { ...base, workflow: { workflow: null } } } };
+export const Loading: Story = { args: { model: { ...base, workflow: undefined } } };
+export const TaskSaveFailure: Story = {
   args: {
     model: {
       ...base,
-      creating: false,
       task,
-      workspaces: [{ task, expanded: false, description: '初始化失败', tooltip: task.body }],
-      errors: [{ scope: 'task:orders', code: 'commit_failed', message: '提交 hook 失败；已保留主目录中准备好的内容。处理后重新打开差异审阅。' }],
-    },
-  },
-};
-export const HistoryDraft: Story = {
-  args: {
-    model: {
-      ...base,
-      creating: false,
-      surface: 'history',
-      history: {
-        branch: 'feature/orders',
-        head: 'bc2345',
-        commits: [
-          { sha: 'abc123', parents: ['def456'], message: '增加订单查询', author: '开发者', date: '2026-10-24' },
-          { sha: 'bc2345', parents: ['abc123'], message: '补充分页参数', author: '开发者', date: '2026-10-24' },
-        ],
-      },
-      historyDraft: {
-        head: 'bc2345',
-        start: 'abc123',
-        commits: [
-          { sha: 'abc123', message: '增加订单查询\n\n保留旧调用方式。' },
-          { sha: 'bc2345', message: '补充分页参数' },
-        ],
-      },
+      errors: [
+        {
+          scope: 'task:orders',
+          code: 'operation_locked',
+          message: 'Unable to save while another window updates the repository. The draft has been preserved; retry shortly.',
+        },
+      ],
     },
   },
 };
@@ -77,7 +57,6 @@ export const PreviewConflict: Story = {
   args: {
     model: {
       ...base,
-      creating: false,
       surface: 'preview',
       preview: {
         connectedIds: [],
@@ -86,9 +65,43 @@ export const PreviewConflict: Story = {
         worktree: '/projects/orders-warden/preview',
         files: [],
         conflicts: ['src/orders.ts'],
-        message: '连接内容存在冲突。预览仍保留上一次成功同步的内容。',
+        message: 'The connected changes conflict. The preview still contains the last successful composition.',
       },
     },
   },
 };
 export const Settings: Story = { args: { model: { ...base, surface: 'settings' } } };
+
+const synchronizationCases = [
+  { id: 'current', title: '订单查询', status: 'current', message: 'Includes the current base branch commit.' },
+  { id: 'ready', title: '订单筛选', status: 'ready', message: 'The check found no rebase conflicts.' },
+  { id: 'conflict', title: '表单校验', status: 'conflict', message: 'Conflicts expected in src/orders.ts. Rebase has not run.' },
+  { id: 'blocked', title: '错误提示', status: 'blocked', message: 'The workspace has uncommitted changes.' },
+  { id: 'unknown', title: '接口联调', status: 'unknown', message: 'Unable to read Git status.' },
+] as const;
+
+export const SynchronizationChecks: Story = {
+  args: {
+    model: {
+      ...base,
+      surface: 'rebase',
+      workflow: {
+        workflow: {
+          developmentBranch: task.developmentBranch,
+          changes: synchronizationCases.map(({ id, title }) => ({ ...task, id, title })),
+        },
+        developmentHead: 'c42e9100',
+      },
+      checks: {
+        checks: synchronizationCases.map(({ id, status, message }) => ({
+          changeId: id,
+          sourceHead: 'abc12300',
+          developmentHead: 'c42e9100',
+          checkedAt: '2026-10-31T02:45:08Z',
+          status,
+          message,
+        })),
+      },
+    },
+  },
+};

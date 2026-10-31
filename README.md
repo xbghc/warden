@@ -1,14 +1,15 @@
 # Warden
 
-A VS Code workbench for developing one requirement with independent task workspaces, native
-read-only review, an isolated live preview, and clear commits on your **primary development branch**.
+A VS Code workbench for developing one requirement on a **base branch**, with independent
+task workspaces, native read-only review and an isolated live preview.
+Development currently prioritizes connecting changes from multiple workspaces and testing them together.
 Warden supplies the workspaces and Git operations; you choose and run your own coding tools.
 
 ## Install
 
 Install **Warden Workspace Review** (`xbghc.warden`) in VS Code, open the primary directory, and
-choose **Warden: 选择主开发分支**. Git must be available in the workspace environment. The extension
-runs in desktop VS Code, Remote SSH, WSL and Dev Containers. It requires Workspace Trust.
+choose **Warden: Select Base Branch**. Git must be available in the workspace environment. The extension
+requires VS Code 1.106 or newer and runs in desktop VS Code, Remote SSH, WSL and Dev Containers. It requires Workspace Trust.
 There is no Warden server, browser application or CLI to start, and no separate Node installation
 is needed to use the extension.
 
@@ -22,16 +23,16 @@ code --install-extension packages/vscode/warden-0.20.4.vsix
 
 ## Development workflow
 
-1. **Plan.** Add a task title; Warden automatically allocates its workspace and branch. Edit multiline
-   notes and drag tasks to arrange plan order.
-2. **Develop.** Configure an optional initialization script and run agents with your own tools.
-   Warden manages physical directory allocation and preserves each workspace across deliveries.
+1. **Add a task.** Enter a title; Warden automatically assigns its workspace and branch and runs any
+   configured initialization script. Add multiline notes as needed. Dragging tasks changes plan order only.
+2. **Develop.** Open Task Chat in the auxiliary sidebar, expand it into an editor when needed, or use external tools in its workspace. The same task
+   keeps its workspace across multiple deliveries.
 3. **Connect for preview.** Use each task's connection action. Saved primary content and connected
    task changes appear in a persistent independent preview directory for tests and dev servers.
 4. **Review and commit.** Open task files in native read-only diffs. Use the workspace commit icon, enter a message in
    VS Code’s top input box and submit the reviewed increment with ordinary Git hooks and signing.
-5. **Synchronize or arrange history.** Explicitly rebase selected workspaces, or edit a history
-   draft, preview it in isolation, then apply. Warden does not push rewritten history.
+5. **Synchronize.** Explicitly rebase selected workspaces when needed. Use VS Code’s native
+   Source Control Graph to inspect base-branch commit history.
 
 Edit human code in primary and agent code in task workspaces. Preview is generated runtime input.
 A failed connection preserves the previous preview; a failed commit preserves recoverable content.
@@ -49,10 +50,11 @@ All normal VS Code diff navigation and accessibility features remain available.
 | --- | --- |
 | [VS Code](docs/vscode.md) | Native navigation, forms, preview runtime, scripts and migration |
 | [Workflow](docs/workflow.md) | Product responsibilities and Git operation semantics |
+| [Terminology](docs/terminology.md) | Canonical names, operation directions and status vocabulary |
 | [Interaction design](docs/design.md) | Interaction contract and desktop adaptation |
 | [Reviewing](docs/reviewing.md) | Immutable comparisons and delivery versions |
 | [Working with agents](docs/agent.md) | External tools and script context |
-| [Worktrees and tasks](docs/worktrees.md) | Storage isolation, delivery and synchronization |
+| [Workspaces and tasks](docs/worktrees.md) | Storage isolation, delivery and synchronization |
 | [Platform](docs/environment.md) | Local and remote workspace environments |
 | [State and security](docs/internals.md) | Persistence, locks and validated Git operations |
 | [Development](docs/development.md) | Build, test and release the extension |

@@ -1,20 +1,21 @@
-# Worktrees and tasks
+# Workspaces and tasks
 
-Warden follows the [workflow contract](workflow.md). Choose an explicit local **primary development
-branch** (主开发分支), such as `feature/order`, for one requirement. Human edits belong in primary and agent edits in task
+Warden follows the [workflow contract](workflow.md) and [terminology](terminology.md).
+Choose an explicit local **base branch**, such as `feature/order`, for one requirement.
+Human edits belong in primary and agent edits in task
 workspaces. Dependencies, development servers and user-run validation belong in the independent preview directory.
 Workspace creation does not install dependencies or launch an agent.
 
 ## Development workflow
 
-The left navigation’s *工作区* list holds the ordered work plan. Adding a task automatically allocates
+The left navigation’s *Tasks* list holds the ordered work plan. Adding a task automatically allocates
 its own workspace and branch from the current requirement baseline, then runs the configured
 initialization script. The user enters a title and can edit notes or reorder tasks afterward.
 Directory, branch and storage choices stay internal. Warden may reuse a clean, unassigned physical
 directory without adopting its old logical workspace.
 
 Allocation failure preserves the task and its error for retry. Repeated requests reuse its assigned
-workspace. Legacy plans receive a workspace through explicit allocation; archived plans require restoration first.
+workspace. Legacy plans receive a workspace when used; archived plans require restoration first.
 Read-only refresh never allocates workspaces. Script failure retains the assigned workspace and
 script output, with a separate script retry action.
 The default is a worktree of Warden's external shared repository. Agent development objects stay
@@ -29,7 +30,7 @@ historical metadata is retained; old checked items migrate as archived notes, no
 
 After initial configuration, switching the primary checkout branch in Git or VS Code makes Warden
 show that branch's tasks and workspaces automatically. Switching back restores the previously selected
-task and history draft. Branch names define the context even if their commits are identical. Tasks
+task. Branch names define the context even if their commits are identical. Tasks
 remain associated with their original branch; following the primary checkout never rebases, replaces
 or recycles their workspaces, and it does not redirect existing ACP conversations.
 
@@ -38,7 +39,7 @@ external checkout changes while either is active, Warden retains the previous co
 the mismatch. Switch back to resolve the outstanding operation first. Detached HEAD and unfinished
 Git operations do not select another requirement. The independent preview directory and its ignored
 dependencies persist across switches; its synchronization status becomes pending until refreshed for
-the new branch, and the configured setup script receives the new development branch.
+the new branch, and the configured setup script receives the new base branch.
 
 ## Shared repository
 
@@ -86,20 +87,20 @@ command in it operates on the assigned workspace. Normal identity and configurat
 
 ## Connected previews
 
-Use the connection switches in the left *工作区* list to select one or more task workspaces. Warden snapshots their live committed and
+Use the connection switches in the left *Tasks* list to select one or more task workspaces. Warden snapshots their live committed and
 uncommitted changes relative to each workspace's undelivered baseline. It composes them with
 three-way patch application in a temporary worktree of the external shared repository. Only a complete, successful
 composition is published to the independent preview directory, including saved primary content
 as its baseline. Primary files, index and HEAD are unchanged by connections.
 
-*预览* shows the current combination, runtime path, update time and refresh/error feedback.
+*Preview* shows the current combination, runtime path, last sync time and synchronization/error feedback.
 Workspace selection stays in the sidebar, and file review stays in each workspace’s detail; the
 preview page does not repeat either list.
 
 One extension session owns background preview synchronization; it checks content each second and
 debounces saved edits. Other windows observe shared state and can take over when the owner closes. Initial conflicts fail
 the connection attempt and preserve the previous set and files. A later conflict preserves the last
-coherent preview and marks it stale. Adjust the source edits or selection, then refresh. Disconnecting
+coherent preview and marks it stale. Adjust the source edits or selection, then choose *Sync Preview*. Disconnecting
 recomposes the remaining contributions; it does not discard unexpected user or tool edits.
 
 Before replacing preview files, Warden verifies its saved ownership tree. Unexpected preview edits
@@ -107,9 +108,9 @@ block synchronization and remain available for manual repair. Edit human code in
 code in task workspaces. Ignored dependencies and caches persist in preview. Saved primary edits
 are observed by content and debounced into preview; they are not unexpected edits to discard.
 
-## Squash acceptance
+## Squash delivery
 
-Select a task and file to review directly. *提交到主开发分支…* accepts all current undelivered changes from
+Select a task and file to review directly. *Commit to Base Branch…* accepts all current undelivered changes from
 a **clean committed source**, pinned to the reviewed source, delivery boundary and primary HEAD. Source commits may
 continue from the previous delivery without first rebasing. `sourceBase` records that previous
 source tip so A1 is excluded when delivering A2. After a manual rebase incorporates the current
@@ -117,13 +118,13 @@ primary HEAD, both refreshed review and delivery use that HEAD as the effective 
 with the previous boundary requires a new review.
 
 Preparation first composes the delivery in an isolated worktree. It leaves the independent preview running and stages only that delivery in the checked-out
-primary branch. Existing primary user edits must be handled first.
+base branch. Existing primary user edits must be handled first.
 Only one preparation uses that directory at a time. Other connected workspaces cannot enter the
 resulting commit. Review takes place before preparation; normal delivery prepares and commits
 in one operation. The staged diff is shown for recovery after an interrupted operation.
 
 Run tests in the preview directory when needed, review the complete delivery, enter a message,
-and choose *提交到主开发分支*. Editing a message does not stage anything.
+and choose *Commit to Base Branch*. Editing a message does not stage anything.
 There is no test-passed checkbox. Warden runs ordinary `git commit -m` with the checkout's identity,
 signing, `core.hooksPath`, `pre-commit`, `prepare-commit-msg`, `commit-msg` and `post-commit` behavior.
 It never uses `--no-verify` or `commit-tree` for delivery. The engine checks the current HEAD and
@@ -143,12 +144,12 @@ separately from the successful commit. New plans do not inherit the occupied wor
 
 ## Synchronization
 
-Warden checks workspaces in isolated repositories and shows **已是最新**, **预计可直接 rebase**,
-**预计有冲突**, **存在阻碍**, or **尚不能判断**. Checking does not modify an agent's files, index or refs.
+Warden checks workspaces in isolated repositories and shows **Up to Date**, **Can Rebase**,
+**Conflicts Expected**, **Blocked**, or **Unknown**. Checking does not modify an agent's files, index or refs.
 Dirty/busy workspaces are blocked; a changed revision invalidates a check. Git state is not proof
 that an agent has stopped.
 
-Open *同步工作区* and select one, several or all workspaces. The engine rechecks both observed heads
+Open *Rebase* and select one, several or all workspaces. The engine rechecks both observed heads
 and actual checkout conditions for every selected workspace. An unavailable workspace reports a
 failed result without preventing other selected workspaces from running. If it becomes available
 again, a new check must observe its source HEAD before it can run. Explicit execution
@@ -159,17 +160,9 @@ Manual synchronization that incorporates the current primary HEAD is recognized 
 
 ## History arrangement
 
-*提交历史* shows the most recent 100 primary commits, oldest first. Select a start, then reorder or
-edit messages from that commit through HEAD. The draft does not change Git. Preview cherry-picks
-in an isolated temporary worktree with hooks and signing disabled for those commands. Current delivery commits
-still use their ordinary hooks; history preview is not another validation run.
-
-The first version accepts only consecutive linear commits with one parent and the same final tree
-as the original tip. Conflicts or different final content require changing the draft. Apply checks
-that the original HEAD still matches, journals an external temporary backup, imports the candidate and updates the
-primary ref with an expected-old-value check. The final files/index stay identical. Delivery IDs
-remain associated with the rewritten commits, and workspaces remain unchanged until explicit rebase.
-There is no history undo/restore UI, automatic remote push or merge-commit arrangement.
+Inspect commit history through VS Code's native Source Control Graph. History arrangement is
+deferred in the product. The existing engine implementation, delivery associations and recovery
+journals remain covered by compatibility tests; see [State and security](internals.md).
 
 ## Slots
 
@@ -185,8 +178,7 @@ A reusable slot is detached, clean, valid, unassigned and not inside a Git opera
 fact, not an agent-idle status. Normal delivery never releases or deletes a branch.
 
 Legacy checkout/release/remove and ready/resume HTTP adapters exist only in regression tests.
-They still refuse to release or reuse an assigned task's slot. The extension offers fresh workspace
-allocation and recovery actions; it exposes no readiness protocol.
+They still refuse to release or reuse an assigned task's slot. The extension allocates workspaces with task creation and offers recovery actions; it exposes no readiness protocol.
 
 ## Clone slots
 

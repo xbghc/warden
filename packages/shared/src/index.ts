@@ -5,3 +5,4 @@ export * from './review.js';
 export * from './workbench.js';
 export * from './agent.js';
 export * from './acp.js';
+export * from './labels.js';

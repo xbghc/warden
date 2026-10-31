@@ -6,7 +6,6 @@ const vscode = require('vscode');
 
 const checkChats = async (workbench, extension, fixture, eventually) => {
   const newTask = await workbench.backend.execute('task.create', { title: 'Task chat' });
-  await workbench.backend.execute('task.start', { taskId: newTask.id });
   await workbench.refresh(true);
   const preview = await workbench.backend.execute('preview.refresh', undefined);
   console.log('Checking task chats in the sidebar and editors');
@@ -58,7 +57,6 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   const previousPanel = chat.panelId;
   const previousSurface = chat.surface;
   const otherTask = await workbench.backend.execute('task.create', { title: 'Concurrent chat' });
-  await workbench.backend.execute('task.start', { taskId: otherTask.id });
   const savedDraft = edit('Keep this task draft');
   await conversations.handle(chat, { type: 'draft', ...savedDraft });
   await vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');

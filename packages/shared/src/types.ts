@@ -101,7 +101,7 @@ export interface ReviewState {
   targets: Record<TargetKey, Record<string, unknown>>;
   todos: Todo[];
   prefs: Prefs;
-  /** A requirement branch and the small changes that are integrated into it. */
+  /** A base branch and the small changes that are integrated into it. */
   workflow?: DevelopmentWorkflow;
   workspaceConfig?: WorkspaceConfig;
   /** Durable ownership record for the independent preview and an interrupted publication. */
@@ -171,7 +171,7 @@ export type WorkflowTask = PlannedChange | DevelopmentChange;
 export interface DevelopmentChange extends ChangePlan {
   branch: string;
   worktree: string;
-  /** The exact development commit this task last incorporated. */
+  /** The exact base-branch commit this task last incorporated. */
   base: string;
   /** Source tip of the last delivery; excludes already delivered commits until the next rebase. */
   sourceBase?: string;
@@ -183,7 +183,7 @@ export interface DevelopmentChange extends ChangePlan {
   sync?: { status: 'pending' | 'conflict' | 'error'; message: string; target: string };
   /** Kept through interrupted synchronization; removed after successful bookkeeping. */
   rebaseBackups?: SafetyBackup[];
-  /** Recorded before staging on the development checkout. A commit exists only after validation. */
+  /** Recorded before staging in the primary directory. A commit exists only after validation. */
   integration?: {
     id?: string;
     source: string;
@@ -295,7 +295,7 @@ export interface WorkflowResponse {
   legacyTodos?: Todo[];
 }
 
-/** Live, read-only inspection of the one task being validated on the development branch. */
+/** Live, read-only inspection of the one task being validated on the base branch. */
 export interface DevelopmentPreparation {
   changeId: string;
   worktree?: string;
@@ -411,7 +411,7 @@ export interface WorktreeDetail extends WorktreeInfo {
   /** The upstream the branch is set to track when that ref no longer exists, as in `[origin/topic: gone]`. */
   upstreamGone?: string;
   comparisonError?: string;
-  /** A free clone/shared slot's local branches, separate from primary development-branch choices. */
+  /** A free clone/shared slot's local branches, separate from base branch choices. */
   branches?: BranchInfo[];
 }
 

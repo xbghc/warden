@@ -12,17 +12,16 @@ there is no separate review-mode switch. The baseline is the last delivered sour
 primary baseline already incorporated by the workspace. Live uncommitted edits remain visible;
 formal delivery in this version requires a clean committed source.
 
-Each workspace has an icon action row directly below its title. Its file list collapses independently
-without hiding actions, replacing the native diff or resetting editor scroll. Notes and delivery records
-open inline; script failures expose their output and retry actions in context. There is no task-details
-or workspace-script menu entry, and no permanent commit form. Icons retain accessible names and
-hover/focus tooltips.
+The native task tree provides inline actions and a context menu on each task. Its file list
+collapses independently without replacing the native diff or resetting editor scroll. Editing notes
+opens a dedicated form; delivery records use native pickers and diffs. Failed scripts expose output
+and retry actions, with output in the Warden channel. Keyboard commands remain available throughout.
 
 Choose the commit icon and enter a message in VS Code's native top input box. Enter submits the reviewed
 increment with ordinary Git hooks; Escape cancels without staging and retains the draft. The input keeps
 its original task, repository and pinned review. Any source, delivery-boundary or primary-version change
 while typing requires renewed review. Recovery remains explicit after interrupted preparation or failed
-hooks. Successful delivery preserves the workspace. See [Squash acceptance](worktrees.md#squash-acceptance).
+hooks. Successful delivery preserves the workspace. See [Squash delivery](worktrees.md#squash-delivery).
 
 The read-only target APIs below underpin diff rendering.
 Task review pins the source commit, delivery boundary and primary HEAD. Background refresh does
@@ -47,13 +46,13 @@ These checks bind content versions; they do not count viewed files or certify a 
 
 Refs accept anything git can resolve (`main`, `v1.2`, `HEAD~3`, a sha). `@` is `HEAD`.
 Worktrees are discovered with `git worktree list`, and clone slots beside the main worktree (see
-[Clone slots](worktrees.md#clone-slots)); both are made in *任务编排* and share the review
+[Clone slots](worktrees.md#clone-slots)); new tasks receive a shared workspace automatically; existing clone tasks share the review
 state of the main repository.
 One whose directory is gone (git lists it as *prunable*) is not offered, and a remembered target
 inside a removed worktree falls back to the working tree on the next load. Reusing a slot for another
 branch clears its historical target metadata.
 
-Navigation stays together in the left sidebar: *预览*, *提交历史*, ordered tasks and the
+Navigation stays together in the left sidebar: *Preview*, ordered tasks and the
 synchronization/settings panels. Within a task, its file list selects the diff directly. Connection
 selection is independent and remains available in each workspace action row.
 
@@ -70,7 +69,7 @@ provide the old browser branch-comparison form or a public HTTP target API.
 ## Read-only review
 
 Diffs use immutable `warden-review:` documents and cannot modify source files or the real index.
-Select a line or range and run **Warden: 复制审阅位置** (`Ctrl+Alt+C`, macOS `Cmd+Alt+C`) to copy
+Select a line or range and run **Warden: Copy Review Location** (`Ctrl+Alt+C`, macOS `Cmd+Alt+C`) to copy
 `path:start-end`. Native diff navigation, folding and search remain available.
 
 File-list tooltips and the native diff title display Git file-mode changes, including executable-bit and

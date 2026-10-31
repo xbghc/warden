@@ -29,8 +29,8 @@ try {
   backend = await Engine.open(root, state);
   await backend.execute('workflow.configure', { branch: 'main' });
   await backend.execute('config.save', { hooks: {}, previewSetup: 'mkdir -p node_modules; echo setup > node_modules/ready' });
-  const plan = await backend.execute('task.create', { title: 'Agent task' });
-  const task = await backend.execute('task.start', { taskId: plan.id });
+  const task = await backend.execute('task.create', { title: 'Agent task' });
+  if (!task.worktree) throw new Error(task.workspaceError?.message ?? 'Task allocation failed');
   await writeFile(path.join(task.worktree, 'agent.txt'), 'Agent addition\n');
   await backend.close();
   backend = undefined;

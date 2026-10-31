@@ -53,8 +53,8 @@
       "warden": [
         {
           "id": "warden.task",
-          "name": "工作区",
-          "type": "webview"
+          "name": "Workbench",
+          "when": "workspaceFolderCount > 0"
         }
       ],
       "warden-chat": [
@@ -70,145 +70,142 @@
     "commands": [
       {
         "command": "warden.selectRepository",
-        "title": "选择仓库",
+        "title": "Select Repository",
         "category": "Warden"
       },
       {
         "command": "warden.refresh",
-        "title": "刷新",
+        "title": "Refresh",
         "category": "Warden",
         "icon": "$(refresh)"
       },
       {
         "command": "warden.configure",
-        "title": "选择主开发分支",
+        "title": "Select Base Branch",
         "category": "Warden"
       },
       {
         "command": "warden.createTask",
-        "title": "新增任务",
+        "title": "New Task",
         "category": "Warden",
         "icon": "$(add)"
       },
       {
         "command": "warden.taskActions",
-        "title": "任务操作",
+        "title": "Task Actions",
         "category": "Warden",
         "icon": "$(ellipsis)"
       },
       {
         "command": "warden.startTask",
-        "title": "创建工作区",
+        "title": "Retry Workspace Allocation",
         "category": "Warden",
-        "icon": "$(add)"
+        "icon": "$(refresh)"
       },
       {
         "command": "warden.editTask",
-        "title": "编辑任务",
+        "title": "Edit Task",
         "category": "Warden",
         "icon": "$(edit)"
       },
       {
         "command": "warden.moveTask",
-        "title": "调整计划顺序",
+        "title": "Reorder Tasks",
         "category": "Warden"
       },
       {
         "command": "warden.connect",
-        "title": "连接／断开预览",
+        "title": "Connect / Disconnect Preview",
         "category": "Warden",
         "icon": "$(plug)"
       },
       {
         "command": "warden.openDiff",
-        "title": "打开原生差异",
+        "title": "View Diff",
         "category": "Warden"
       },
       {
         "command": "warden.deliver",
-        "title": "交付提交",
-        "category": "Warden"
+        "title": "Commit to Base Branch",
+        "category": "Warden",
+        "icon": "$(check)"
       },
       {
         "command": "warden.retryHook",
-        "title": "重试工作区脚本",
+        "title": "Retry Workspace Setup",
         "category": "Warden"
       },
       {
         "command": "warden.resumeTask",
-        "title": "结束已恢复的提交准备",
+        "title": "Finish Recovered Commit Preparation",
         "category": "Warden"
       },
       {
         "command": "warden.previewTerminal",
-        "title": "打开预览终端",
+        "title": "Open Preview Terminal",
         "category": "Warden"
       },
       {
         "command": "warden.runPreview",
-        "title": "运行预览",
+        "title": "Run Preview",
         "category": "Warden"
       },
       {
         "command": "warden.previewPath",
-        "title": "复制预览路径",
+        "title": "Copy Preview Path",
         "category": "Warden"
       },
       {
         "command": "warden.refreshPreview",
-        "title": "立即同步预览",
+        "title": "Sync Preview",
         "category": "Warden"
       },
       {
         "command": "warden.setup",
-        "title": "重跑预览 setup",
+        "title": "Rerun Preview Setup",
         "category": "Warden"
       },
       {
         "command": "warden.configureScripts",
-        "title": "编辑脚本配置",
+        "title": "Settings",
         "category": "Warden"
       },
       {
         "command": "warden.rebase",
-        "title": "同步工作区",
+        "title": "Rebase",
         "category": "Warden",
         "icon": "$(sync)"
       },
       {
-        "command": "warden.editHistory",
-        "title": "编辑提交历史",
-        "category": "Warden"
-      },
-      {
         "command": "warden.copyWorkspace",
-        "title": "复制工作区路径",
+        "title": "Copy Workspace Path",
         "category": "Warden"
       },
       {
         "command": "warden.importNotes",
-        "title": "导入旧笔记",
+        "title": "Import Legacy Notes",
         "category": "Warden"
       },
       {
         "command": "warden.selectTask",
-        "title": "查看任务变更",
+        "title": "View Task Changes",
         "category": "Warden"
       },
       {
         "command": "warden.showPreview",
-        "title": "查看预览",
+        "title": "Show Preview",
         "category": "Warden"
       },
       {
         "command": "warden.copyLocation",
-        "title": "复制审阅位置",
+        "title": "Copy Review Location",
         "category": "Warden"
       },
       {
         "command": "warden.chat",
         "title": "Chat with Agent",
-        "category": "Warden"
+        "category": "Warden",
+        "icon": "$(comment-discussion)"
       },
       {
         "command": "warden.configureAgents",
@@ -222,21 +219,75 @@
       },
       {
         "command": "warden.openWorkspace",
-        "title": "打开工作区",
+        "title": "Open Workspace",
         "category": "Warden",
         "icon": "$(folder-opened)"
       },
       {
         "command": "warden.syncTask",
-        "title": "需要同步",
+        "title": "Rebase Available",
         "category": "Warden",
         "icon": "$(sync)"
       },
       {
         "command": "warden.syncConflict",
-        "title": "同步冲突：查看详情",
+        "title": "Rebase Conflicts Expected: View Details",
         "category": "Warden",
         "icon": "$(warning)"
+      },
+      {
+        "command": "warden.moveTaskUp",
+        "title": "Move Task Up",
+        "category": "Warden",
+        "icon": "$(arrow-up)"
+      },
+      {
+        "command": "warden.moveTaskDown",
+        "title": "Move Task Down",
+        "category": "Warden",
+        "icon": "$(arrow-down)"
+      },
+      {
+        "command": "warden.taskHistory",
+        "title": "Commits",
+        "category": "Warden",
+        "icon": "$(history)"
+      },
+      {
+        "command": "warden.taskOutput",
+        "title": "Show Setup Script Output",
+        "category": "Warden",
+        "icon": "$(output)"
+      },
+      {
+        "command": "warden.copyBrief",
+        "title": "Copy Task Notes",
+        "category": "Warden",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "warden.restoreTask",
+        "title": "Restore Archived Task",
+        "category": "Warden",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "warden.recoverDelivery",
+        "title": "Recover Commit Preparation",
+        "category": "Warden",
+        "icon": "$(debug-restart)"
+      },
+      {
+        "command": "warden.recordDelivery",
+        "title": "Record Reviewed Commit",
+        "category": "Warden",
+        "icon": "$(check)"
+      },
+      {
+        "command": "warden.reviewTask",
+        "title": "Review Current Changes",
+        "category": "Warden",
+        "icon": "$(diff)"
       },
       {
         "command": "warden.switchChat",
@@ -269,7 +320,7 @@
         },
         {
           "command": "warden.selectRepository",
-          "when": "view == warden.task && (warden.multipleRoots || !warden.hasRepository)"
+          "when": "view == warden.task && (warden.repositoryState == unselected || (warden.repositoryState == ready && warden.multipleRoots))"
         },
         {
           "command": "warden.configureScripts",
@@ -279,10 +330,6 @@
           "command": "warden.rebase",
           "when": "view == warden.task && warden.hasDevelopmentBranch",
           "group": "navigation@3"
-        },
-        {
-          "command": "warden.editHistory",
-          "when": "view == warden.task && warden.hasDevelopmentBranch"
         },
         {
           "command": "warden.switchChat",
@@ -307,6 +354,38 @@
         {
           "command": "warden.syncConflict",
           "when": "false"
+        },
+        {
+          "command": "warden.moveTaskUp",
+          "when": "false"
+        },
+        {
+          "command": "warden.moveTaskDown",
+          "when": "false"
+        },
+        {
+          "command": "warden.taskOutput",
+          "when": "false"
+        },
+        {
+          "command": "warden.restoreTask",
+          "when": "false"
+        },
+        {
+          "command": "warden.recoverDelivery",
+          "when": "false"
+        },
+        {
+          "command": "warden.recordDelivery",
+          "when": "false"
+        },
+        {
+          "command": "warden.reviewTask",
+          "when": "false"
+        },
+        {
+          "command": "warden.startTask",
+          "when": "false"
         }
       ],
       "editor/context": [
@@ -320,6 +399,113 @@
           "when": "editorHasSelection",
           "group": "navigation"
         }
+      ],
+      "view/item/context": [
+        {
+          "command": "warden.startTask",
+          "when": "view == warden.task && viewItem =~ /^wardenTask:plan:allocationFailed/",
+          "group": "inline@1"
+        },
+        {
+          "command": "warden.chat",
+          "when": "view == warden.task && viewItem =~ /^wardenTask:(workspace|plan)/",
+          "group": "inline@1"
+        },
+        {
+          "command": "warden.connect",
+          "when": "view == warden.task && viewItem =~ /^wardenTask:workspace/",
+          "group": "inline@2"
+        },
+        {
+          "command": "warden.deliver",
+          "when": "view == warden.task && viewItem =~ /^wardenTask:workspace/ && !(viewItem =~ /prepareRecovery|recordDelivery/)",
+          "group": "inline@3"
+        },
+        {
+          "command": "warden.openWorkspace",
+          "when": "view == warden.task && viewItem =~ /^wardenTask:(workspace|plan)/",
+          "group": "1_workspace@1"
+        },
+        {
+          "command": "warden.editTask",
+          "when": "view == warden.task && viewItem =~ /^wardenTask:/",
+          "group": "2_task@1"
+        },
+        {
+          "command": "warden.moveTask",
+          "when": "view == warden.task && viewItem =~ /^wardenTask:/",
+          "group": "2_task@2"
+        },
+        {
+          "command": "warden.restoreTask",
+          "when": "view == warden.task && viewItem == wardenTask:archived",
+          "group": "2_task@3"
+        },
+        {
+          "command": "warden.taskHistory",
+          "when": "view == warden.task && viewItem =~ /^wardenTask:workspace/",
+          "group": "3_review@1"
+        },
+        {
+          "command": "warden.rebase",
+          "when": "view == warden.task && viewItem =~ /^wardenTask:workspace/",
+          "group": "3_review@2"
+        },
+        {
+          "command": "warden.resumeTask",
+          "when": "view == warden.task && viewItem =~ /^wardenTask:.*recovery/",
+          "group": "3_review@3"
+        },
+        {
+          "command": "warden.taskOutput",
+          "when": "view == warden.task && viewItem =~ /^wardenTask:.*hookFailed/",
+          "group": "4_recovery@1"
+        },
+        {
+          "command": "warden.retryHook",
+          "when": "view == warden.task && viewItem =~ /^wardenTask:.*hookFailed/",
+          "group": "4_recovery@2"
+        },
+        {
+          "command": "warden.copyWorkspace",
+          "when": "view == warden.task && viewItem =~ /^wardenTask:workspace/",
+          "group": "5_copy@1"
+        },
+        {
+          "command": "warden.copyBrief",
+          "when": "view == warden.task && viewItem =~ /^wardenTask:/",
+          "group": "5_copy@2"
+        },
+        {
+          "command": "warden.refreshPreview",
+          "when": "view == warden.task && viewItem == preview",
+          "group": "inline@1"
+        },
+        {
+          "command": "warden.previewTerminal",
+          "when": "view == warden.task && viewItem == preview",
+          "group": "inline@2"
+        },
+        {
+          "command": "warden.createTask",
+          "when": "view == warden.task && viewItem == tasks",
+          "group": "inline@1"
+        },
+        {
+          "command": "warden.recoverDelivery",
+          "when": "view == warden.task && viewItem =~ /prepareRecovery/",
+          "group": "inline@3"
+        },
+        {
+          "command": "warden.recordDelivery",
+          "when": "view == warden.task && viewItem =~ /recordDelivery/",
+          "group": "inline@3"
+        },
+        {
+          "command": "warden.reviewTask",
+          "when": "view == warden.task && viewItem =~ /^wardenTask:workspace/",
+          "group": "3_review@0"
+        }
       ]
     },
     "configuration": {
@@ -329,7 +515,7 @@
           "type": "string",
           "default": "",
           "scope": "resource",
-          "description": "在预览目录运行的命令。也可直接使用 Warden 预览终端。"
+          "description": "Command to run in the preview folder. You can also use the Warden preview terminal directly."
         },
         "warden.acpAgents": {
           "type": "array",
@@ -383,6 +569,33 @@
         "key": "ctrl+alt+c",
         "mac": "cmd+alt+c",
         "when": "editorTextFocus && resourceScheme == warden-review"
+      },
+      {
+        "command": "warden.moveTaskUp",
+        "key": "alt+up",
+        "when": "focusedView == warden.task && listFocus && !inputFocus"
+      },
+      {
+        "command": "warden.moveTaskDown",
+        "key": "alt+down",
+        "when": "focusedView == warden.task && listFocus && !inputFocus"
+      }
+    ],
+    "viewsWelcome": [
+      {
+        "view": "warden.task",
+        "contents": "Opening repository\u2026",
+        "when": "warden.repositoryState != ready && warden.repositoryState != unselected"
+      },
+      {
+        "view": "warden.task",
+        "contents": "[Select Repository](command:warden.selectRepository)",
+        "when": "warden.repositoryState == unselected"
+      },
+      {
+        "view": "warden.task",
+        "contents": "[Select Base Branch](command:warden.configure)",
+        "when": "warden.repositoryState == ready && !warden.hasDevelopmentBranch"
       }
     ]
   }

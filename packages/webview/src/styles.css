@@ -48,8 +48,8 @@ h1 {
 }
 .task-pane {
   padding: 10px 12px;
-  max-width: none;
-  background: var(--vscode-sideBar-background, var(--color-background));
+  max-width: 760px;
+  background: var(--vscode-editor-background, var(--color-background));
   min-height: 100vh;
 }
 .task-heading,
@@ -226,15 +226,6 @@ section {
 .vscode-high-contrast .status-badge-warning {
   color: var(--vscode-editorWarning-foreground, #cca700);
 }
-.history-start {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-.history-start [data-slot="native-select-wrapper"] {
-  flex: 1 1 240px;
-}
 .check-body .metadata {
   margin: 6px 0;
 }
@@ -295,11 +286,6 @@ summary {
   width: 100%;
   max-width: 100%;
   min-width: 0;
-}
-.history-columns {
-  display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(260px, 2fr);
-  gap: 24px;
 }
 .commit {
   border: 1px solid var(--color-border);
@@ -560,133 +546,9 @@ summary {
   min-height: 60px;
 }
 @media (max-width: 620px) {
-  .history-columns {
-    grid-template-columns: 1fr;
-  }
   main {
     padding: 12px;
   }
-}
-.workspace-pane {
-  padding: 4px 8px;
-}
-.workspace-navigation {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 0 8px;
-  border-bottom: 1px solid var(--color-border);
-}
-.workspace-navigation > button:last-child {
-  margin-left: auto;
-}
-.workspace-navigation svg,
-.workspace-file > svg {
-  width: 14px;
-  height: 14px;
-  flex: none;
-}
-.workspace-navigation button:hover,
-.workspace-title:hover,
-.workspace-file:hover {
-  background: var(--color-accent);
-}
-.workspace-navigation button:focus-visible,
-.workspace-title:focus-visible,
-.workspace-file:focus-visible {
-  outline: 1px solid var(--color-ring);
-  outline-offset: -1px;
-}
-.workspace-row {
-  padding: 6px 0;
-  border-bottom: 1px solid var(--color-border);
-  border-left: 2px solid transparent;
-}
-.workspace-row.selected {
-  border-left-color: var(--vscode-list-inactiveSelectionBackground, var(--color-border));
-}
-.workspace-heading {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-  gap: 2px;
-}
-.workspace-title {
-  flex: 1;
-  min-width: 0;
-  text-align: left;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 13px;
-  font-weight: 500;
-  padding: 3px 2px;
-  cursor: grab;
-}
-.workspace-status {
-  max-width: 42%;
-  font-size: 11px;
-  color: var(--color-muted-foreground);
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  padding-right: 4px;
-}
-.workspace-plan-icon {
-  width: 12px;
-  height: 12px;
-  margin: 6px;
-  flex: none;
-}
-.workspace-actions {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  padding: 3px 0 1px 24px;
-  flex-wrap: wrap;
-}
-.workspace-actions [aria-pressed="true"] {
-  color: var(--vscode-textLink-foreground, var(--color-primary));
-  background: var(--vscode-list-activeSelectionBackground, var(--color-accent));
-}
-.workspace-files {
-  margin: 4px 0 0 24px;
-}
-.workspace-files p {
-  margin: 6px;
-  font-size: 12px;
-}
-.workspace-file {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 4px 6px;
-  text-align: left;
-}
-.workspace-file > span {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.workspace-file > small {
-  flex: none;
-  color: var(--color-muted-foreground);
-  font-variant-numeric: tabular-nums;
-}
-.workspace-empty {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 8px;
-}
-.workspace-drop-end {
-  min-height: 10px;
-}
-.workspace-row > .task-inline {
-  margin: 8px 6px 4px 24px;
 }
 .task-inline {
   border: 1px solid var(--color-border);
@@ -695,22 +557,4 @@ summary {
 }
 .task-inline .task-section-heading {
   margin: 0;
-}
-.task-create {
-  margin-bottom: 8px;
-  padding: 4px;
-}
-.task-create form {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-.task-create input {
-  flex: 1;
-  min-width: 0;
-}
-.workspace-row > .error,
-.workspace-row > .notice {
-  margin: 6px 4px 6px 24px;
-  font-size: 12px;
 }

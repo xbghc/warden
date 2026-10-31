@@ -536,7 +536,7 @@ export function createApp(opts: AppOptions): WardenApp {
     const held = (await store.load()).workflow?.changes.find(
       (row) => row.status !== 'accepted' && (row.worktree === worktree || row.integration?.worktree === worktree),
     );
-    if (held) throw new HttpError(409, '该工位有进行中的任务，请通过任务的验证提交流程完成', 'active_change');
+    if (held) throw new HttpError(409, '该工作区有进行中的任务，请通过任务的提交流程交付', 'active_change');
   };
 
   api.get('/worktrees', async (c) => {

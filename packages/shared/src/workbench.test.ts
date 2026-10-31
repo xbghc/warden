@@ -2,6 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { parseWorkbenchAction } from './workbench.js';
 
 describe('webview protocol boundary', () => {
+  it('bounds task-note drafts and strips host-owned storage identifiers', () => {
+    const draft = { type: 'task.draft', taskId: 'task', title: '', body: 'Unsaved\nnotes' };
+    expect(parseWorkbenchAction({ ...draft, repository: '/outside', command: 'injected' })).toEqual(draft);
+    for (const patch of [{ taskId: '' }, { title: 'x'.repeat(201) }, { body: 'x'.repeat(10001) }, { body: 42 }])
+      expect(() => parseWorkbenchAction({ ...draft, ...patch })).toThrow();
+  });
   it('rejects arbitrary commands, adoption and oversized input', () => {
     for (const action of [
       { type: 'executeCommand', command: 'workbench.action.terminal.new' },
@@ -13,11 +19,18 @@ describe('webview protocol boundary', () => {
     ])
       expect(() => parseWorkbenchAction(action)).toThrow();
   });
-  it('keeps exact versions and multiline messages across history and rebase actions', () => {
-    const action = { type: 'history.preview', draft: { head: 'head', start: 'start', commits: [{ sha: 'a', message: 'Title\n\nReason' }] } };
+  it('keeps exact versions and multiline messages across delivery and rebase actions', () => {
+    const action = { type: 'task.deliver', taskId: 'task', message: 'Title\n\nReason' };
     expect(parseWorkbenchAction(action)).toEqual(action);
     const rebase = { type: 'rebase.run', items: [{ changeId: 'task', sourceHead: 'a', developmentHead: 'b' }] };
     expect(parseWorkbenchAction(rebase)).toEqual(rebase);
+  });
+  it('rejects history browsing and rewriting at the webview boundary', () => {
+    for (const type of ['history.review', 'history.draft', 'history.preview', 'history.apply', 'history.discard'])
+      expect(() =>
+        parseWorkbenchAction({ type, sha: 'a', id: 'candidate', head: 'a', draft: { head: 'a', start: 'a', commits: [{ sha: 'a', message: 'Title' }] } }),
+      ).toThrow();
+    expect(() => parseWorkbenchAction({ type: 'workspaces.show', surface: 'history' })).toThrow();
   });
   it('opens only the host-resolved task workspace', () => {
     expect(parseWorkbenchAction({ type: 'task.open', taskId: 'orders', path: '/outside' })).toEqual({ type: 'task.open', taskId: 'orders' });

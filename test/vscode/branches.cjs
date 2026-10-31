@@ -10,22 +10,17 @@ exports.checkBranches = async (workbench, root, eventually) => {
   const follow = (name) => eventually(() => branch() === name && !workbench.branchTransition, 30_000);
   const create = async (label) => {
     await workbench.backend.execute('task.create', { title: `${label} first` });
-    const plan = await workbench.backend.execute('task.create', { title: `${label} selected` });
-    const task = await workbench.backend.execute('task.start', { taskId: plan.id });
+    const task = await workbench.backend.execute('task.create', { title: `${label} selected` });
     await workbench.refresh(true);
-    await workbench.selectTask({ kind: 'task', task }, false);
+    await workbench.selectTask({ kind: 'task', task }, 'select');
     await fs.writeFile(path.join(task.worktree, 'unfinished.txt'), `${label} unsaved delivery\n`);
     return task;
   };
   const head = git('rev-parse', 'HEAD');
-  const draft = (message) => ({ head, start: head, commits: [{ sha: head, message }] });
-  const save = (message) => workbench.handleAction({ type: 'history.draft', draft: draft(message) }, workbench.session);
   const a = await create('A');
   await workbench.rememberExpansion({ kind: 'task', task: a }, true);
-  await save('A history draft');
   await workbench.showRebase({ kind: 'task', task: a });
   const sessionA = workbench.session;
-  workbench.historyPreview = { id: 'old-candidate', canApply: true, head };
 
   let release;
   let ready;
@@ -59,20 +54,16 @@ exports.checkBranches = async (workbench, root, eventually) => {
   }
   assert.deepEqual(await oldFiles, [], 'a file list read begun on the old branch cannot populate the new tree');
   assert.equal(workbench.data.developmentHead, head, 'a branch identity change matters even at the same commit');
-  assert.equal(workbench.history.branch, 'feature/other');
   assert.deepEqual(await workbench.getChildren({ kind: 'tasks' }), []);
   assert.deepEqual(workbench.model('workspaces').workspaces, []);
   assert.deepEqual(await workbench.getChildren({ kind: 'task', task: a }), [], 'old task nodes cannot reveal the previous branch');
   assert.equal(workbench.model('task').task, undefined);
-  assert.equal(workbench.historyDraft, undefined);
-  assert.equal(workbench.historyPreview, undefined);
   assert.equal(workbench.rebaseSelection, undefined);
   assert.deepEqual(workbench.checks.checks, []);
   assert.notEqual(workbench.session, sessionA);
-  await assert.rejects(workbench.handleAction({ type: 'task.create', title: 'Stale A action' }, sessionA), /主开发分支已切换/);
+  await assert.rejects(workbench.handleAction({ type: 'task.create', title: 'Stale A action' }, sessionA), /base branch changed/);
 
   const b = await create('B');
-  await save('B history draft');
   assert.notEqual(a.worktree, b.worktree, 'switching requirements never reallocates another branch workspace');
   const file = (await workbench.getChildren({ kind: 'task', task: b }))[0];
   await workbench.openDiff(file);
@@ -88,7 +79,6 @@ exports.checkBranches = async (workbench, root, eventually) => {
   await pendingCommit;
   assert.equal(workbench.commitInput, undefined, 'a branch switch closes the previous branch commit input without submitting');
   assert.equal(workbench.messages[b.id], 'B commit draft');
-  assert.equal(workbench.history.branch, 'main');
   assert.equal(workbench.model('task').task.id, a.id, 'returning to a branch restores its chosen task');
   await eventually(() =>
     workbench
@@ -96,7 +86,6 @@ exports.checkBranches = async (workbench, root, eventually) => {
       .workspaces.find((row) => row.task.id === a.id)
       ?.files?.some((file) => file.path === 'unfinished.txt'),
   );
-  assert.deepEqual(workbench.historyDraft, draft('A history draft'));
   assert.deepEqual(
     workbench.checks.checks.map((check) => check.changeId),
     workbench
@@ -119,7 +108,6 @@ exports.checkBranches = async (workbench, root, eventually) => {
   }
   await workbench.open(root);
   assert.equal(workbench.model('task').task.id, a.id, 'the branch selection survives reopening the repository');
-  assert.deepEqual(workbench.historyDraft, draft('A history draft'));
 
   await workbench.api('preview.connect', { connectedIds: [a.id] });
   await workbench.refresh(true);
@@ -137,7 +125,6 @@ exports.checkBranches = async (workbench, root, eventually) => {
   git('switch', 'feature/other');
   await follow('feature/other');
   assert.equal(workbench.model('task').task.id, b.id);
-  assert.deepEqual(workbench.historyDraft, draft('B history draft'));
   assert.deepEqual(
     workbench.checks.checks.map((check) => check.changeId),
     workbench

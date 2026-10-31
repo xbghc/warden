@@ -32,31 +32,31 @@ const data = (branch: string): WorkflowResponse => ({
 const draft = (message: string): HistoryPreviewRequest => ({ head: 'same-head', start: 'start', commits: [{ sha: 'same-head', message }] });
 
 describe('branch view persistence', () => {
-  it('restores each branch selection and draft even when both branch tips are identical', async () => {
+  it('restores each branch selection even when both branch tips are identical', async () => {
     const state = memory();
     const views = new BranchViews(state);
     expect((await views.load('/repo', data('a'))).selected).toBe('a1');
     await views.select('/repo', 'a', 'a2');
-    await views.draft('/repo', 'a', draft('A\n\nKeep this draft'));
-    expect(await views.load('/repo', data('b'))).toEqual({ selected: 'b1', historyDraft: undefined });
+    expect(await views.load('/repo', data('b'))).toEqual({ selected: 'b1' });
     await views.select('/repo', 'b', 'b2');
-    await views.draft('/repo', 'b', draft('B'));
     const reopened = new BranchViews(state);
-    expect(await reopened.load('/repo', data('a'))).toEqual({ selected: 'a2', historyDraft: draft('A\n\nKeep this draft') });
-    expect(await reopened.load('/repo', data('b'))).toEqual({ selected: 'b2', historyDraft: draft('B') });
-    expect(await reopened.load('/other', data('a'))).toEqual({ selected: 'a1', historyDraft: undefined });
+    expect(await reopened.load('/repo', data('a'))).toEqual({ selected: 'a2' });
+    expect(await reopened.load('/repo', data('b'))).toEqual({ selected: 'b2' });
+    expect(await reopened.load('/other', data('a'))).toEqual({ selected: 'a1' });
   });
 
-  it('migrates the legacy view once and never imports its draft into another branch', async () => {
+  it('migrates selection once while preserving inactive history drafts', async () => {
     const state = memory();
     await state.update('warden.selected:/repo', 'a2');
     await state.update('warden.history:/repo', draft('Legacy A'));
+    await state.update('warden.branch-view:["/repo","a"]:history', draft('Branch A'));
     const views = new BranchViews(state);
-    expect(await views.load('/repo', data('a'))).toEqual({ selected: 'a2', historyDraft: draft('Legacy A') });
-    expect(await new BranchViews(state).load('/repo', data('b'))).toEqual({ selected: 'b1', historyDraft: undefined });
+    expect(await views.load('/repo', data('a'))).toEqual({ selected: 'a2' });
+    expect(await new BranchViews(state).load('/repo', data('b'))).toEqual({ selected: 'b1' });
     await views.select('/repo', 'b', 'a2');
     expect((await views.load('/repo', data('b'))).selected).toBe('b1');
-    await views.draft('/repo', 'a', undefined);
-    expect((await views.load('/repo', data('a'))).historyDraft).toBeUndefined();
+    expect(await views.load('/repo', data('a'))).toEqual({ selected: 'a2' });
+    expect(state.get('warden.history:/repo')).toEqual(draft('Legacy A'));
+    expect(state.get('warden.branch-view:["/repo","a"]:history')).toEqual(draft('Branch A'));
   });
 });

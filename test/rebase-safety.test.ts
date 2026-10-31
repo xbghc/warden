@@ -47,7 +47,7 @@ async function source(kind: SlotKind = 'worktree') {
 async function advance(file = 'destination.txt', content = 'destination work\n') {
   await fx.write(file, content);
   fx.git('add', '-f', '--', file);
-  fx.git('commit', '-qm', 'Advance primary development branch');
+  fx.git('commit', '-qm', 'Advance requirement branch');
   return head();
 }
 

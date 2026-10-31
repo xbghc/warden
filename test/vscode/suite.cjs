@@ -3,10 +3,12 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const vscode = require('vscode');
 const { execFileSync } = require('node:child_process');
-const { checkBranches } = require('./branches.cjs');
 const { checkChats } = require('./chat.cjs');
 const { checkAgentPresets } = require('./agent-setup.cjs');
+const { checkBranches } = require('./branches.cjs');
+const { checkSidebar } = require('./sidebar.cjs');
 const { checkPreviewLineEndings } = require('./preview.cjs');
+const { checkRepositoryLoading } = require('./repository.cjs');
 // Git may materialize preview text with CRLF under the user's Windows configuration.
 const textLines = (text) => text.replace(/\r\n/g, '\n');
 const eventually = async (condition, timeout = 10_000) => {
@@ -24,18 +26,18 @@ exports.run = async () => {
   const workbench = await extension.activate();
   try {
     assert.equal(workbench.backend?.store.file, fixture.state, 'fixture setup and extension activation must use the same canonical state path');
+    console.log('Checking repository loading');
+    await checkRepositoryLoading(workbench, extension, fixture, eventually);
     await workbench.open(fixture.unconfigured);
-    assert.equal(workbench.model('task').workflow.workflow, null, 'opening a repository does not choose its development branch');
+    assert.equal(workbench.model('task').workflow.workflow, null, 'opening a repository does not choose its requirement branch');
     assert.deepEqual(await workbench.getChildren(), [], 'unconfigured repositories show setup instead of operational navigation');
-    assert.deepEqual(await workbench.getChildren({ kind: 'history' }), [], 'previous repository history is unavailable during setup');
-    for (const surface of ['workspaces', 'task', 'preview', 'history', 'rebase']) {
+    for (const surface of ['workspaces', 'task', 'preview', 'rebase']) {
       const model = workbench.model(surface);
       assert.equal(model.repository, fixture.unconfigured);
       assert.equal(model.workflow.workflow, null, 'directly opened workflow pages receive setup state');
     }
-    console.log('Checking agent configuration presets');
     await checkAgentPresets(workbench, fixture, eventually);
-    await workbench.views.show('settings');
+    await vscode.commands.executeCommand('warden.configureScripts');
     await eventually(() => workbench.views.displaysError('settings'));
     assert.equal(workbench.views.displaysError('repository'), true);
     assert.equal(workbench.views.displaysError('preview'), false, 'errors for hidden pages still need native notification');
@@ -52,10 +54,13 @@ exports.run = async () => {
     await workbench.refresh();
     assert.deepEqual(
       (await workbench.getChildren()).map((node) => node.kind),
-      ['preview', 'history', 'tasks', 'settings'],
+      ['preview', 'tasks'],
     );
     await checkPreviewLineEndings(workbench, fixture.unconfigured, eventually);
+    console.log('Checking branch following');
     await checkBranches(workbench, fixture.unconfigured, eventually);
+    console.log('Checking native task sidebar');
+    await checkSidebar(workbench, extension, fixture.unconfigured, eventually);
     await workbench.open(fixture.root);
     assert.equal(workbench.backend.store.file, fixture.state);
     const tasks = await workbench.getChildren({ kind: 'tasks' });
@@ -67,8 +72,8 @@ exports.run = async () => {
       integration: { error: 'Fixture commit failure' },
       workspaceHook: { status: 'failed' },
     });
-    assert.equal(attention.description, '提交失败 · 初始化失败', 'task rows prioritize problems and show at most two facts');
-    assert(attention.tooltip.includes('待提交') && attention.tooltip.includes('fixture-agent'), 'secondary context remains in the tooltip');
+    assert.equal(attention.description, 'Commit Failed · Setup Failed', 'task rows prioritize problems and show at most two facts');
+    assert(attention.tooltip.includes('Pending Commit') && attention.tooltip.includes('fixture-agent'), 'secondary context remains in the tooltip');
     const checked = workbench.checks;
     for (const status of ['ready', 'conflict']) {
       workbench.checks = { checks: [{ changeId: tasks[0].task.id, status, message: 'Fixture sync check' }] };
@@ -116,10 +121,9 @@ exports.run = async () => {
     );
     assert.equal(workbench.model('task').message, 'Keep this draft');
     assert.equal(workbench.views.panels.has('task'), false, 'task controls stay out of the editor area');
-    await workbench.selectTask(tasks[0], false, 'history');
-    assert.equal(workbench.model('task').taskSection.section, 'history', 'delivery records use the workspace list');
+    await workbench.handleAction({ type: 'task.history', taskId: tasks[0].task.id }, workbench.session);
+    assert.equal(workbench.model('task').task.id, tasks[0].task.id, 'delivery records keep the selected task context');
     assert.equal(workbench.views.panels.has('task'), false);
-    await workbench.selectTask(tasks[0], false, 'commit');
     await vscode.commands.executeCommand('type', { text: 'Forbidden' });
     assert.equal(doc.getText(), originalText, 'native typing cannot edit review content');
     await assert.rejects(vscode.workspace.fs.writeFile(doc.uri, Buffer.from('Forbidden')), 'review documents cannot be saved');
@@ -129,7 +133,7 @@ exports.run = async () => {
     const git = (...args) => execFileSync('git', ['-C', workspace, ...args], { encoding: 'utf8' }).trim();
     git('add', 'agent.txt');
     git('-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-qm', 'Reviewed version');
-    await assert.rejects(workbench.deliver(tasks[0]), /重新打开/, 'committing a live diff requires reopening the committed version');
+    await assert.rejects(workbench.deliver(tasks[0]), /Reopen/, 'committing a live diff requires reopening the committed version');
     await workbench.refresh();
     let currentFiles = await workbench.getChildren(tasks[0]);
     await workbench.openDiff(currentFiles[0]);
@@ -140,7 +144,7 @@ exports.run = async () => {
     assert.equal(textLines(pinnedText), 'Agent addition\n');
     const cancelledInput = workbench.promptDelivery(tasks[0]);
     await eventually(() => !!workbench.commitInput);
-    assert.match(workbench.commitInput.title, /提交到 main/);
+    assert.match(workbench.commitInput.title, /Commit to main/);
     workbench.commitInput.value = 'Cancelled commit draft';
     workbench.commitInput.hide();
     await cancelledInput;
@@ -160,8 +164,8 @@ exports.run = async () => {
       return !workbench.commitInput;
     });
     await staleInput;
-    assert.match(workbench.errors.get(`task:${tasks[0].task.id}`).message, /输入期间审阅版本已变化/);
-    await assert.rejects(workbench.deliver(tasks[0]), /重新打开/, 'background refresh cannot authorize a newer source');
+    assert.match(workbench.errors.get(`task:${tasks[0].task.id}`).message, /The review changed while typing/);
+    await assert.rejects(workbench.deliver(tasks[0]), /Reopen/, 'background refresh cannot authorize a newer source');
     assert.equal((await state()).workflow.changes[0].integration, undefined, 'stale delivery never stages primary');
     currentFiles = await workbench.getChildren(tasks[0]);
     await workbench.openDiff(currentFiles.find((file) => file.file.path === 'later.txt'));
@@ -184,7 +188,7 @@ exports.run = async () => {
       '-qm',
       'Primary advanced',
     ]);
-    await assert.rejects(workbench.deliver(tasks[0]), /重新打开/, 'a changed primary baseline also needs renewed review');
+    await assert.rejects(workbench.deliver(tasks[0]), /Reopen/, 'a changed primary baseline also needs renewed review');
     // A background composition can own the repository lock longer than the command's
     // wait budget. A reported refusal does not mean the requested version was published.
     await workbench.backend.store.withRepositoryLock(async () => {
@@ -198,13 +202,13 @@ exports.run = async () => {
       if (preview) break;
       const error = workbench.errors.get('repository');
       assert.equal(error?.code, 'operation_locked', JSON.stringify(error));
-      assert(Date.now() < refreshDeadline, 'Preview refresh remained blocked by another operation');
+      assert(Date.now() < refreshDeadline, 'Preview sync remained blocked by another operation');
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     assert.equal(preview.syncStatus, 'synced', JSON.stringify(preview));
     assert.equal(textLines(await fs.readFile(path.join(preview.worktree, 'human.txt'), 'utf8')), 'Human code\n');
     await vscode.commands.executeCommand('warden.previewTerminal');
-    const terminal = vscode.window.terminals.find((t) => t.name === 'Warden · 预览');
+    const terminal = vscode.window.terminals.find((t) => t.name === 'Warden · Preview');
     assert(terminal, 'preview terminal exists');
     assert.equal(terminal.creationOptions.cwd, preview.worktree);
     terminal.dispose();
@@ -252,19 +256,20 @@ exports.run = async () => {
     const session = workbench.session;
     const count = (await state()).workflow.changes.length;
     const previousTask = workbench.model('workspaces').task.id;
-    await workbench.handleAction({ type: 'workspaces.create' }, session);
-    assert.equal(workbench.model('workspaces').creating, true);
-    assert.equal(workbench.model('workspaces').task, undefined);
-    await assert.rejects(workbench.handleAction({ type: 'task.cancelCreate' }, 'old-session'), /仓库或主开发分支已切换/);
-    assert.equal(workbench.model('workspaces').creating, true);
-    await workbench.handleAction({ type: 'task.cancelCreate' }, session);
-    assert.equal(workbench.model('workspaces').creating, false);
-    assert.equal(workbench.model('workspaces').createdTaskId, undefined);
+    const createPrompt = workbench.createTask();
+    await eventually(() => !!workbench.taskInput);
+    workbench.taskInput.value = 'Cancelled native draft';
+    await assert.rejects(workbench.handleAction({ type: 'task.cancelCreate' }, 'old-session'), /The repository or base branch changed/);
+    workbench.taskInput.hide();
+    await createPrompt;
+    assert.equal(workbench.taskInput, undefined);
     assert.equal(workbench.model('workspaces').task.id, previousTask, 'cancel preserves the prior task selection');
     assert.equal((await state()).workflow.changes.length, count, 'cancel never creates a task');
-    await assert.rejects(workbench.handleAction({ type: 'task.create', title: 'Wrong repository', body: '' }, 'old-session'), /仓库或主开发分支已切换/);
+    await assert.rejects(
+      workbench.handleAction({ type: 'task.create', title: 'Wrong repository', body: '' }, 'old-session'),
+      /The repository or base branch changed/,
+    );
     assert.equal((await state()).workflow.changes.length, count);
-    await workbench.handleAction({ type: 'workspaces.create' }, session);
     // Hold a real pre-mutation read until creation commits; it must not hide the newly saved task.
     await workbench.reading;
     const engine = workbench.backend;
@@ -283,6 +288,7 @@ exports.run = async () => {
       releaseCreate = resolve;
     });
     let hold = true;
+    let createdTaskId;
     engine.execute = async (command, request) => {
       if (command === 'task.create') {
         creationStarted = true;
@@ -306,10 +312,10 @@ exports.run = async () => {
       const creating = workbench.handleAction({ type: 'task.create', title: 'Fresh workspace', body: 'Line one\nLine two' }, session);
       await eventually(() => creationStarted);
       await workbench.handleAction({ type: 'task.cancelCreate' }, session);
-      assert.equal(workbench.model('workspaces').creating, true, 'an in-flight creation cannot appear cancelled');
+      assert.equal(workbench.model('workspaces').task.id, previousTask, 'pending creation keeps the prior task selection');
       assert(workbench.model('workspaces').busy, 'creation stays visibly in progress');
       releaseCreate();
-      await creating;
+      createdTaskId = await creating;
       await reading;
     } finally {
       releaseCreate();
@@ -317,27 +323,19 @@ exports.run = async () => {
       engine.execute = execute;
     }
     const newTask = (await state()).workflow.changes.at(-1);
-    assert.equal(workbench.model('workspaces').createdTaskId, newTask.id, 'successful creation has an explicit draft-clear receipt');
+    assert.equal(createdTaskId, newTask.id, 'successful creation returns its task directly to the native input');
     assert.equal(newTask.body, 'Line one\nLine two');
     assert(newTask.worktree, 'task creation includes automatic workspace allocation');
     await workbench.handleAction({ type: 'task.brief', taskId: newTask.id }, session);
     assert((await vscode.env.clipboard.readText()).includes(newTask.worktree));
     assert.notEqual((await state()).workflow.changes.at(-1).worktree, workspace);
 
-    const beforeHistory = primaryGit('rev-parse', 'HEAD');
-    const draft = { head: beforeHistory, start: beforeHistory, commits: [{ sha: beforeHistory, message: 'Arrange accepted delivery' }] };
-    await workbench.handleAction({ type: 'history.preview', draft }, session);
-    assert.equal(workbench.historyPreview.canApply, true);
-    await workbench.handleAction({ type: 'history.apply', id: workbench.historyPreview.id, head: beforeHistory }, session);
-    assert.equal(primaryGit('log', '-1', '--format=%B'), 'Arrange accepted delivery');
-    assert.equal((await state()).workflow.changes[0].deliveries[0].id, accepted.id);
-    assert.notEqual((await state()).workflow.changes[0].deliveries[0].commit, accepted.commit);
-    assert.equal(workbench.historyDraft, undefined);
+    assert.equal((await state()).workflow.changes[0].deliveries[0].id, accepted.id, 'existing delivery records remain available');
     workbench.documents.contents.clear();
     assert.equal(await workbench.documents.provideTextDocumentContent(pinnedDoc.uri), pinnedContent, 'saved native snapshots survive memory eviction');
     await workbench.open(fixture.root);
     assert.notEqual(workbench.session, session, 'reopening the repository creates a new session');
-    await assert.rejects(workbench.handleAction({ type: 'task.create', title: 'Stale view', body: '' }, session), /仓库或主开发分支已切换/);
+    await assert.rejects(workbench.handleAction({ type: 'task.create', title: 'Stale view', body: '' }, session), /The repository or base branch changed/);
     assert.equal((await state()).workflow.changes.length, count + 1);
 
     // A pure executable-bit change has identical text on both sides of the native diff.
@@ -379,7 +377,7 @@ exports.run = async () => {
 
     await checkChats(workbench, extension, fixture, eventually);
     console.log(
-      'Packaged extension passed: branch following and restoration, native readonly review, version guards, preview/setup, normal hooks, recovery, multiline delivery, fresh workspaces, history mapping and task-bound ACP commands, permissions, cancellation and explicit resume',
+      'Packaged extension passed: branch following and restoration, native readonly review, version guards, preview/setup, normal hooks, recovery, multiline delivery, fresh workspaces and task-bound ACP commands, permissions, cancellation and explicit resume',
     );
   } finally {
     await workbench.close();

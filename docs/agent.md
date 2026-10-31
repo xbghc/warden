@@ -50,9 +50,11 @@ native `acp` subcommand. **Custom Agent / Edit Settings** retains direct configu
 and customized arguments or environment variables. Existing profiles are preserved, and choosing an
 already configured preset opens its settings. Cancelling either input changes nothing.
 
-Open the task's **Agent 对话**, choose a configured agent and connect or send a message. Opening a
-panel alone does not launch a process. Each panel stays attached to its original task workspace and
-repository when the selected task or repository changes. Separate tasks can have separate sessions;
+Open the task's **Chat with Agent** in the Secondary Side Bar, choose a configured agent and connect or
+send a message. Opening a chat alone does not launch a process. **Switch Task Chat** explicitly opens
+another task's conversation, preserving drafts and reading positions. **Open Chat in Editor** expands
+the same chat, and **Move Chat to Side Bar** returns it. Each conversation stays attached to its original
+task workspace and repository when the selected task or repository changes. Separate tasks can have separate sessions;
 one window owns each task's executable connection.
 
 Configure `warden.acpAgents` in VS Code User settings, or Remote User settings for the workspace host.
@@ -80,11 +82,11 @@ commit, deliver or rebase. See the [ACP boundary](acp-design.md) for ownership a
 
 Add and order small tasks in the left navigation. Each new task receives a workspace automatically; copy
 its task brief and paste it into the task conversation or an external tool. The brief includes the
-task title, goal, acceptance notes, assignment, workspace path, development branch and instructions.
+task title, goal, acceptance notes, assignment, workspace path, base branch and instructions.
 
 Copying a brief only writes text to the clipboard. It does not launch an agent or update review state.
 Review feedback can be sent in the task conversation or through external tools. In a native Warden
-diff, select a line or range and run **Warden: 复制审阅位置** (`Ctrl+Alt+C`, macOS `Cmd+Alt+C`).
+diff, select a line or range and run **Warden: Copy Review Location** (`Ctrl+Alt+C`, macOS `Cmd+Alt+C`).
 
 Inline comments, comment exports and the `warden feedback` / `warden reply` commands have been
 removed. Historical review fields in existing state files are retained as opaque data on unrelated
@@ -92,4 +94,4 @@ writes; they are no longer displayed, reanchored, replied to or copied into brie
 
 Existing TODO text and historical metadata migrate without inventing completed commits. Old
 checked items are archived; notes on unrelated branches remain available for explicit import.
-See [Worktrees and tasks](worktrees.md#development-workflow).
+See [Workspaces and tasks](worktrees.md#development-workflow).

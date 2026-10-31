@@ -6,52 +6,47 @@ import os from 'node:os';
 import { unzipSync } from 'fflate';
 import { Engine } from '@warden/engine';
 import { parseWorkbenchAction, taskReview } from '@warden/shared';
-import type { Surface, WorkbenchModel, HistoryPreviewRequest, HistoryPreviewResponse } from '@warden/shared';
+import type { Surface, WorkbenchModel } from '@warden/shared';
+import type { Memento } from 'vscode';
+import { TaskNoteDrafts } from '../../packages/vscode/src/task-note-drafts.js';
 import { makeFixtureRepo } from '../fixtures/make-repo.js';
 
 const fixture = await makeFixtureRepo('warden-ui-');
-await fixture.write('guide.txt', 'Independent history entry\n');
-fixture.git('add', 'guide.txt');
-fixture.git('commit', '-qm', 'c3: add guide');
 const data = await mkdtemp(path.join(os.tmpdir(), 'warden-ui-data-'));
 const engine = await Engine.open(fixture.root, path.join(data, 'state.json'));
 let selected: string | undefined;
-let creating = true;
-let createdTaskId: string | undefined;
 const messages: Record<string, string> = {};
+const savedNotes = new Map<string, unknown>();
+const notes = new TaskNoteDrafts({
+  keys: () => [...savedNotes.keys()],
+  get: <T>(key: string, fallback?: T) => (savedNotes.has(key) ? (savedNotes.get(key) as T) : fallback),
+  update: async (key: string, value: unknown) => {
+    savedNotes.set(key, value);
+  },
+} as Memento);
 const expanded: Record<string, boolean> = {};
-let taskSection: WorkbenchModel['taskSection'];
-let navigation = 0;
-let draft: HistoryPreviewRequest | undefined;
-let preview: HistoryPreviewResponse | undefined;
 const session = 'browser-fixture';
 const manifest = JSON.parse(await readFile('packages/vscode/package.json', 'utf8'));
 const assets = unzipSync(await readFile(`packages/vscode/warden-${manifest.version}.vsix`));
-const model = async (surface: Surface, edit = false): Promise<WorkbenchModel> => {
+const model = async (surface: Surface): Promise<WorkbenchModel> => {
   const workflow = await engine.execute('workflow.get', undefined);
-  const [composed, history, workspaces] = await Promise.all([
-    engine.execute('preview.get', undefined),
-    workflow.workflow ? engine.execute('history.get', undefined) : undefined,
-    engine.execute('workspaces.list', undefined),
-  ]);
-  const task = creating ? undefined : workflow.workflow?.changes.find((row) => row.id === selected);
-  if (edit) taskSection = { request: 'fixture-edit', section: 'edit' };
+  const [composed, workspaces] = await Promise.all([engine.execute('preview.get', undefined), engine.execute('workspaces.list', undefined)]);
+  const task = workflow.workflow?.changes.find((row) => row.id === selected);
   return {
     session,
     repository: fixture.root,
+    repositoryState: 'ready',
     surface,
     workflow,
     task,
-    creating,
-    createdTaskId,
-    taskSection,
+    taskDraft: task && notes.read(fixture.root, task.id),
     workspaces: await Promise.all(
       (workflow.workflow?.changes ?? []).map(async (row) => {
         const review = row.worktree ? taskReview(workflow, row.id, workspaces.worktrees) : undefined;
         return {
           task: row,
           expanded: !!expanded[row.id],
-          description: row.worktree ? '未连接' : '待分配',
+          description: row.worktree ? 'Not in Preview' : 'Prepared on first use',
           tooltip: [row.title, row.body, row.worktree].filter(Boolean).join('\n'),
           files: expanded[row.id] && review ? (await engine.execute('review.files', { key: review.targetKey })).files : undefined,
         };
@@ -59,9 +54,6 @@ const model = async (surface: Surface, edit = false): Promise<WorkbenchModel> =>
     ),
     preview: composed,
     hasPreviewCommand: false,
-    history,
-    historyDraft: draft,
-    historyPreview: preview,
     review: selected ? taskReview(workflow, selected, workspaces.worktrees) : undefined,
     reviewCurrent: false,
     message: task ? (messages[task.id] ?? task.title) : '',
@@ -72,26 +64,17 @@ const model = async (surface: Surface, edit = false): Promise<WorkbenchModel> =>
 const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url!, 'http://localhost');
-    const surface = (url.searchParams.get('surface') ?? 'workspaces') as Surface;
-    const edit = url.searchParams.get('section') === 'edit';
-    if (url.pathname === '/new-task') {
-      creating = true;
-      createdTaskId = undefined;
-      taskSection = undefined;
-      response.writeHead(302, { Location: '/' });
-      response.end();
-      return;
-    }
+    const surface = (url.searchParams.get('surface') ?? 'task') as Surface;
     if (url.pathname === '/inspect') {
       response.setHeader('Content-Type', 'text/html');
-      response.end(`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>Warden · 侧栏验证</title><body style="background:#eee;font:13px sans-serif;padding:20px;display:flex;gap:24px">
-        ${['light', 'dark', 'contrast'].map((theme) => `<section><h2>${{ light: '浅色', dark: '深色', contrast: '高对比' }[theme]} · 320px</h2><iframe title="${theme}" src="/?surface=workspaces&theme=${theme}" style="width:320px;height:700px;border:1px solid #888"></iframe></section>`).join('')}
+      response.end(`<!doctype html><html lang="en"><meta charset="utf-8"><title>Warden · 表单验证</title><body style="background:#eee;font:13px sans-serif;padding:20px;display:flex;gap:24px">
+        ${['light', 'dark', 'contrast'].map((theme) => `<section><h2>${{ light: '浅色', dark: '深色', contrast: '高对比' }[theme]} · 320px</h2><iframe title="${theme}" src="/?surface=task&theme=${theme}" style="width:320px;height:700px;border:1px solid #888"></iframe></section>`).join('')}
       </body></html>`);
       return;
     }
     if (url.pathname === '/model') {
       response.setHeader('Content-Type', 'application/json');
-      response.end(JSON.stringify(await model(surface, edit)));
+      response.end(JSON.stringify(await model(surface)));
       return;
     }
     if (url.pathname === '/action' && request.method === 'POST') {
@@ -102,37 +85,17 @@ const server = createServer(async (request, response) => {
       }
       const action = parseWorkbenchAction(JSON.parse(text));
       switch (action.type) {
-        case 'workspaces.create':
-          creating = true;
-          createdTaskId = undefined;
-          taskSection = undefined;
-          break;
-        case 'task.cancelCreate':
-          creating = false;
-          createdTaskId = undefined;
-          taskSection = undefined;
-          break;
         case 'task.select':
         case 'task.file':
         case 'task.review':
-          selected = action.taskId;
-          creating = false;
-          break;
-        case 'task.toggle':
-          expanded[action.taskId] = action.expanded;
-          break;
         case 'task.edit':
         case 'task.history':
         case 'task.output':
         case 'task.options':
           selected = action.taskId;
-          creating = false;
-          taskSection = {
-            request: String(++navigation),
-            section: { 'task.edit': 'edit', 'task.history': 'history', 'task.output': 'hook', 'task.options': 'workspace' }[action.type] as NonNullable<
-              WorkbenchModel['taskSection']
-            >['section'],
-          };
+          break;
+        case 'task.toggle':
+          expanded[action.taskId] = action.expanded;
           break;
         case 'task.move':
           await engine.execute('task.move', { taskId: action.taskId, before: action.before });
@@ -153,19 +116,22 @@ const server = createServer(async (request, response) => {
         case 'task.create': {
           const task = await engine.execute('task.create', { title: action.title, body: action.body });
           selected = task.id;
-          creating = false;
-          createdTaskId = task.id;
-          if (task?.worktree) await writeFile(path.join(task.worktree, 'ui-fixture.txt'), 'Workspace file for native diff routing\n');
+          if (task.worktree) await writeFile(path.join(task.worktree, 'ui-fixture.txt'), 'Workspace file for native diff routing\n');
           break;
         }
         case 'task.start': {
           await engine.execute('task.start', { taskId: action.taskId, kind: action.kind, agent: action.agent });
-          const task = (await engine.execute('workflow.get', undefined)).workflow?.changes.find((row) => row.id === action.taskId);
-          if (task?.worktree) await writeFile(path.join(task.worktree, 'ui-fixture.txt'), 'Workspace file for native diff routing\n');
+          break;
+        }
+        case 'task.draft': {
+          const task = (await engine.execute('workflow.get', undefined)).workflow?.changes.find((item) => item.id === action.taskId);
+          if (!task) throw new Error('Unknown draft task');
+          await notes.save(fixture.root, task.id, action, { title: task.title, body: task.body ?? '' });
           break;
         }
         case 'task.update':
           await engine.execute('task.update', { taskId: action.taskId, title: action.title, body: action.body });
+          await notes.saved(fixture.root, action.taskId, { title: action.title.trim(), body: action.body.trim() });
           break;
         case 'task.message':
           messages[action.taskId] = action.message;
@@ -182,28 +148,11 @@ const server = createServer(async (request, response) => {
         case 'preview.setup':
           await engine.execute('preview.setup', undefined);
           break;
-        case 'history.draft':
-          draft = action.draft;
-          preview = undefined;
-          break;
-        case 'history.preview':
-          draft = action.draft;
-          preview = await engine.execute('history.preview', action.draft);
-          break;
-        case 'history.apply':
-          await engine.execute('history.apply', { id: action.id, head: action.head });
-          draft = undefined;
-          preview = undefined;
-          break;
-        case 'history.discard':
-          draft = undefined;
-          preview = undefined;
-          break;
         default:
           break;
       }
       response.setHeader('Content-Type', 'application/json');
-      response.end(JSON.stringify(await model(surface, edit)));
+      response.end(JSON.stringify(await model(surface)));
       return;
     }
     if (url.pathname === '/index.js' || url.pathname === '/index.css') {
@@ -214,21 +163,21 @@ const server = createServer(async (request, response) => {
     response.setHeader('Content-Type', 'text/html');
     const theme = url.searchParams.get('theme');
     const dark = theme === 'dark' || theme === 'contrast';
-    response.end(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/index.css">
+    response.end(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/index.css">
       ${dark ? `<style>:root { --vscode-editor-background:#1f1f1f; --vscode-sideBar-background:#181818; --vscode-editor-foreground:#ddd; --vscode-button-background:#0e639c; --vscode-button-foreground:#fff; --vscode-descriptionForeground:#aaa; --vscode-textCodeBlock-background:#252525; --vscode-list-hoverBackground:#333; --vscode-widget-border:#555; --vscode-input-border:#666; --vscode-focusBorder:#007fd4; ${theme === 'contrast' ? '--vscode-contrastBorder:#fff; --vscode-focusBorder:#f38518; --vscode-widget-border:#fff; --vscode-input-border:#fff;' : ''} }</style>` : ''}
       </head><body class="${dark ? (theme === 'contrast' ? 'vscode-high-contrast' : 'vscode-dark') : 'vscode-light'}"><div id="root"></div><script>
-      const surface = new URL(location.href).searchParams.get('surface') || 'workspaces';
-      const section = new URL(location.href).searchParams.get('section') || '';
+      const surface = new URL(location.href).searchParams.get('surface') || 'task';
       let saved = JSON.parse(sessionStorage.getItem('warden-state') || '{}');
       let queue = Promise.resolve();
       window.__actions = [];
       window.acquireVsCodeApi = () => ({ getState: () => saved, setState: s => { saved=s; sessionStorage.setItem('warden-state', JSON.stringify(s)); }, postMessage: message => {
         if (message.action) window.__actions.push(message.action);
         queue = queue.then(async () => {
-          const response = await fetch((message.type === 'ready' ? '/model' : '/action') + '?surface=' + surface + '&section=' + section,
+          const response = await fetch((message.type === 'ready' ? '/model' : '/action') + '?surface=' + surface,
             message.type === 'ready' ? {} : { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify(message.action) });
           if (!response.ok) throw new Error(await response.text());
-          window.postMessage({ type:'model', model:await response.json() }, '*');
+          const updated = await response.json();
+          if (message.action?.type !== 'task.draft') window.postMessage({ type:'model', model:updated }, '*');
           if (message.action?.type === 'settings.save') window.__settingsSaved = true;
         }).catch(error => { window.__hostError = String(error); console.error(error); });
       }});

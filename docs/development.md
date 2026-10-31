@@ -20,6 +20,7 @@ pnpm test:vscode
 
 `build` and `build:vscode` build the extension and its webviews. `build:webview` refreshes just the
 webview bundle. The VSIX contains bundled JavaScript and uses the workspace's Git CLI.
+The extension requires VS Code 1.106+ for the stable Secondary Side Bar contribution point.
 The extension manifest owns the release version. The repository root is private and ships no npm CLI.
 
 | Directory | Responsibility |
@@ -83,7 +84,8 @@ complete selector replacement, command updates, thought streaming, usage and com
 Keep controls connection-scoped and exercise foreign-session updates and interrupted configuration requests.
 
 Packaged extension-host and conversation webview tests verify the shipped UI/host bridge alongside
-existing native review and Git flows. Interrupted prompts must not be resent automatically, and cancel
+existing native review and Git flows. Cover sidebar/editor transfers during permission requests,
+per-task draft and reading-position restoration, stale view messages and concurrent background turns. Interrupted prompts must not be resent automatically, and cancel
 must not claim that all agent-owned background commands have stopped. These checks do not validate a
 third-party authenticated agent; record the exact agent/adapter version and supported features before
 making a vendor-specific compatibility claim. See [ACP design](acp-design.md).
@@ -102,13 +104,12 @@ python3 test/ui/acp-smoke.py
 pnpm test:vscode
 ```
 
-`test/ui/smoke.py` starts and closes `test/ui/harness.ts`, exercises initialization, empty states, task
-menus, inline details, task/commit draft preservation across branch models, optional settings, preview setup, collapsed history
-editing/application and rebase selection, and saves screenshots under
-`WARDEN_UI_ARTIFACTS` (default `/tmp/warden-ui-artifacts`). The harness is test-only and is not shipped. ACP browser and packaged-host checks cover sidebar/editor transfers, retained drafts and reading positions, and stale view routing.
+`test/ui/smoke.py` starts and closes `test/ui/harness.ts`, exercises initialization, empty states,
+multiline task-note drafts after discarding webview-local state, save/discard behavior, optional settings, preview setup and rebase selection, and saves screenshots under
+`WARDEN_UI_ARTIFACTS` (default `/tmp/warden-ui-artifacts`). The harness is test-only and is not shipped.
 Inspect screenshots and console errors. Preserve intentional error cases in native-host tests as well.
 For manual verification, run `node --import tsx test/ui/harness.ts` and open its reported port. `/inspect`
-embeds the task pane at 320 pixels in light, dark and high-contrast themes. `WARDEN_UI_PORT` and
+embeds the task-note editor at 320 pixels in light, dark and high-contrast themes. `WARDEN_UI_PORT` and
 `WARDEN_UI_HOST` optionally select the local test binding; defaults remain an ephemeral loopback port.
 `test/ui/acp-smoke.py` uses the same packaged assets with real ACP subprocesses to exercise concurrent
 task conversations, permission choices, cancellation, explicit recovery and draft preservation.
@@ -127,6 +128,8 @@ executing repository operations. GitHub Pages receives the Storybook artifact th
 
 ## UI components
 
+Prefer native VS Code TreeView, inputs, pickers, editors and output for ordinary interactions.
+Use Storybook for the explicitly chosen webview forms, not to recreate native controls.
 Reuse the shadcn primitives in `packages/webview/src/components/ui`. Theme values come from VS Code
 variables, with neutral fallbacks for standalone test previews. Keep keyboard alternatives for drag
 operations and accessible names on controls. The webview has a strict CSP and no direct filesystem,
@@ -137,12 +140,14 @@ shell or arbitrary VS Code command bridge.
 `pnpm test:vscode` requires an existing VSIX, unpacks it into a temporary directory, and tests those
 packaged bytes. It never silently substitutes a source build. `WARDEN_VSCODE_VERSION` selects the
 host (default `1.106.0`); `VSCODE_EXECUTABLE_PATH` selects an existing executable. Linux CI uses Xvfb.
+`WARDEN_VSCODE_SUITE=chat pnpm test:vscode` runs just the packaged task-chat flows while iterating.
 In environments requiring an HTTP proxy, configure the test downloader's `npm_config_https_proxy`.
 
-The suite checks native read-only snapshots, stale review rejection, preview isolation/setup/terminal,
+The suite checks native tree setup, row menus, drag/keyboard ordering, input cancellation, stale-session rejection,
+independent expansion and native read-only snapshots, stale review rejection, preview isolation/setup/terminal,
 ordinary commit hooks and retained-stage recovery, native commit-input cancellation and stale-version
 rejection while typing, multiline delivery, fresh workspaces, stale-session
-rejection and stable delivery mapping across history rewrites. CI runs the same VSIX in minimum and
+rejection and preservation of delivery records. History rewriting remains covered by engine tests. CI runs the same VSIX in minimum and
 stable hosts on Windows, Linux and macOS. Branch-following coverage switches the primary checkout
 through Git, including branches at the same commit, verifies per-branch task/draft restoration and
 stale action rejection, and preserves dirty task workspaces and connected-preview switch guards.

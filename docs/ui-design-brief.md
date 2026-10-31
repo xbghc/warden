@@ -14,24 +14,25 @@ of the current implementation. The scope is interaction design using shadcn/ui, 
   inspecting commit history. No dependency enforcement, automatic dispatch or agent-driven planning.
 - Use shadcn/ui components and visual style. Navigation must be coherent and concentrated in one
   area. Opening a worktree file is already review; no extra “enter review” step.
-- Do not preserve the old page's structure as a constraint. Review, orchestration and history are
+- Do not preserve the old page's structure as a constraint. Review and workspace operations are
   capabilities; their names do not dictate a fixed number of navigation modes or columns.
 
 ## Work and workspaces
 
-The requirement has an explicitly chosen **primary development branch** (主开发分支), such as
+The requirement has an explicitly chosen **base branch**, such as
 `feature/order`, distinct from the company's default branch. Its checkout is the **primary
-directory** (主目录), where the user edits human code. Dependencies and user-operated dev servers,
+directory**, where the user edits human code. Dependencies and user-operated dev servers,
 lint and tests use the independent preview directory.
 
 Agent edits happen in task workspaces; human edits happen in primary. A worktree corresponds to one linear task. It can have
-multiple local commits and deliver multiple commits to the primary development branch. Workspaces
+multiple local commits and deliver multiple commits to the base branch. Workspaces
 remain available across deliveries. No automatic recycling, release step or task-end declaration.
 Task branching/splitting into execution paths is outside the current scope.
 
 TODO and orchestration are one ordered plan of changes contributing to the requirement. Ordering
-expresses user intent, not dependencies. Planning does not itself allocate a workspace. Creating
-the workspace is a Warden action; starting an agent and sending prompts belong to external tools.
+expresses user intent, not dependencies. Adding a task automatically allocates its workspace and
+branch. Storage and allocation details are internal; the user does not create a workspace separately.
+Starting an agent and sending prompts remain explicit user actions.
 
 Agent execution and interaction belong to external user tools. Warden creates workspaces and
 provides creation/reuse hooks as a thin script interface: cwd, limited context, output and exit
@@ -69,7 +70,7 @@ whether local source commits are required remain open; Web commit capability is 
 
 ## Rebase
 
-Primary development branch updates trigger indicators and non-mutating checks, **not rebase**.
+Base branch updates trigger indicators and non-mutating checks, **not rebase**.
 Show whether a workspace needs synchronization and whether it appears possible to rebase. A clean
 checkout does not prove replayability or agent idleness. Unknown and stale results must be visible.
 
@@ -80,22 +81,8 @@ being reviewed are different concepts and must be visually distinguishable.
 
 ## Commit history
 
-Users can arrange accepted commits on the primary development branch and edit their messages.
-For example, A1, B1, A2 can become A1, A2, B1. Plan ordering must not rewrite accepted history;
-history ordering must not silently change the plan. Grouping does not mean squashing those commits.
-
-Provide draft, preview and explicit application. Surface conflicts. If the
-branch changed after preview, do not overwrite intervening work. Keep associations despite changed
-SHAs; directory names alone are insufficient identifiers. Backup branch plus temporary branch and
-cherry-pick is the user's candidate approach, not an implementation decision.
-
-Do not provide undo, restore-history actions or an undo timeline. Users change the current order
-or messages again when needed. Discarding an unapplied draft remains available; failed preview
-does not change the original history. Reapplying preview connections after integration is a
-separate behavior, not an undo operation. The candidate backup branch does not require undo UI.
-
-Editable range, already-published history, merge commits and conflict resolution details remain
-open. No automatic force-push, generic repository history editor or separate approval workflow.
+Use VS Code's native Source Control Graph for commit browsing. History arrangement is deferred;
+the current priority is reliable workspace connections and testing in the independent preview.
 
 ## Deliverable and review criteria
 

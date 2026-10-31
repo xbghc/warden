@@ -3,35 +3,38 @@
 Warden is a passive tool tailored to a developer's workflow. The user acts through it rather than
 maintaining a separate workflow for it. The user plans, decides, reviews and accepts the work.
 Warden supplies workspaces, configurable hooks, task-bound ACP conversations,
-diff review, local squash integration and clear commit history. Keep the current version simple enough to support
+diff review and local squash integration. Keep the current version simple enough to support
 that loop without turning it into an autonomous agent orchestrator or a project approval system.
 
-This document records the product contract. [Worktrees and tasks](worktrees.md) describes the
+The current development priority is reliable connections: combine workspace changes in the independent
+preview and run tests there. History arrangement is deferred; other existing operations remain available
+while their value is assessed against that core loop.
+
+This document records the product contract. [Workspaces and tasks](worktrees.md) describes the
 working copy; [Implementation alignment](#implementation-alignment) identifies first-version
 boundaries. The [interaction design](design.md) records the independently designed page structure.
+The [terminology contract](terminology.md) defines the names used across documentation and the interface.
 Earlier proposals for enforced dependencies, agent-owned delivery, task completion declarations,
 automatic workspace recycling and automatic rebase are superseded by the decisions below.
 
 ## Scope and responsibilities
 
-The primary setting is one developer responsible for a company requirement on a **primary development
-branch** (主开发分支), such as `feature/order`. This is not the repository's `main` or default branch.
+The primary setting is one developer responsible for a company requirement on a **base branch**, such as `feature/order`. This role does not imply the repository's `main` or default branch.
 The primary directory is that branch's checkout; temporary task branches live in worktrees.
 The developer decomposes that requirement into small changes, develops them in separate
-worktrees, reviews them and adds them to the development branch as commits. Publishing or
+worktrees, reviews them and adds them to the base branch as commits. Publishing or
 merging that branch into the company's main branch remains outside Warden's core workflow.
 
 | Activity | User responsibility | Warden responsibility |
 |---|---|---|
 | Plan | Decompose the requirement and arrange the work sequence. | Keep one ordered plan of intended commits; TODO and orchestration are the same thing. |
-| Prepare | Add a task and choose how its workspace should be initialized. | Allocate a fresh logical workspace from the development branch when creating the task and support user-defined workspace hooks. |
+| Prepare | Configure initialization scripts when needed. | Automatically allocate one fresh workspace from the base branch when a task is added and run its configured initialization script. |
 | Execute | Choose an agent, send prompts and answer its permission requests, or use external tools. | Provide task-bound ACP conversations and stdio connections; agents execute their own tools and commands. |
 | Preview and test | Choose connected worktrees and edit primary code and run the development server, lint or tests in the preview directory. | Compose their live changes in a persistent independent preview, preserving primary Git state. |
 | Review | Inspect the worktree's changes and decide whether they are ready to integrate. | Show the complete delivery diff before squash; let the user copy code locations for their own tools. |
 | Integrate | Initiate squash, decide what testing is needed, and commit after validation. | Perform the requested Git operations, preserve normal commit hooks, and report their results. |
 | Continue | Continue the task and choose when to synchronize its workspace. | Keep the workspace available, show synchronization conditions and rebase only when requested. |
-| Organize history | Group related commits and edit their messages; adjust again if needed. | Preview and apply local history edits with conflict feedback; no undo/restore-history feature. |
-| Accept the requirement | Inspect commit history and decide whether the requirement is complete. | Provide commit-history review; no separate final-approval feature. |
+| Accept the requirement | Inspect commit history and decide whether the requirement is complete. | Use VS Code’s native history view; no separate final-approval feature. |
 
 An agent can run through an explicitly configured ACP stdio connection or through external tools.
 Warden uses the generic protocol, without vendor-specific SDKs, structured delivery reports or
@@ -77,9 +80,9 @@ acceptance templates or agent-generated reports.
 ## Workspaces and hooks
 
 A workspace is an execution resource, normally a Git worktree of Warden's external shared repository
-on a task branch based on the requirement's development branch. The bare repository lives at
+on a task branch based on the base branch. The bare repository lives at
 `<primary>-warden/repo.git`, independently of task, preview and temporary operation directories.
-Task paths remain `<primary>-<n>`. Warden allocates fresh logical workspaces and exposes initialization hooks. Reusing a free physical directory is an internal implementation detail; users never select or adopt an old workspace.
+Task paths remain `<primary>-<n>`. Task creation allocates fresh logical workspaces and runs configured initialization hooks. Reusing a free physical directory is an internal implementation detail; users never select or adopt an old workspace.
 Workspace creation does not launch an agent. A user can explicitly connect a configured ACP agent
 from its task conversation or run external tools. Warden owns only the agent process carrying the
 stdio connection; it does not implement ACP terminal tools or supervise agent-started commands.
@@ -87,11 +90,16 @@ stdio connection; it does not implement ACP terminal tools or supervise agent-st
 Workspace hooks are a thin interface for user scripts: execute the configured creation/reuse
 command with the workspace directory and context, then expose output and exit status. Scripts
 may prepare local configuration or invoke user tools; their internals have no special meaning to
-Warden. A failed hook leaves the workspace available and can be retried explicitly. Planning a
-task does not run hooks. Creation/reuse hooks do not imply recycling a workspace after delivery.
+Warden. A failed hook leaves the workspace available and can be retried explicitly. Adding a task
+runs its configured hook; editing notes and ordering never run hooks. Creation/reuse hooks do not
+imply recycling a workspace after delivery.
+
+If allocation fails, the saved task retains its title, notes and failure reason. Retry prepares that
+same task. Legacy unallocated plans are prepared automatically when selected, opened or used for
+a conversation; background reads do not allocate them. Archived plans wait for explicit restoration.
 
 Workspace hooks are distinct from the repository's normal Git commit hooks. Actual delivery uses
-ordinary `git commit` in the development checkout, preserving those hooks and signing.
+ordinary `git commit` in the primary checkout, preserving those hooks and signing.
 
 ## ACP connection ownership
 
@@ -140,7 +148,7 @@ It is serialized with publication and receives the primary and preview paths. Sc
 the environment needs updating; Warden does not interpret dependency manifests.
 
 VS Code is the product entry point. It provides native task diffs, task navigation, review, delivery,
-scripts, explicit rebase, history arrangement, preview terminals/tasks and task-bound ACP
+scripts, explicit rebase, preview terminals/tasks and task-bound ACP
 conversations for agents that execute their own tools. A preview-versus-baseline or provenance
 view is deliberately omitted. See [VS Code](vscode.md) for installation and runtime configuration.
 
@@ -156,7 +164,7 @@ explicit comparisons. Formal delivery continues to use the primary checkout's Gi
 
 ```mermaid
 flowchart LR
-  P[User plans and orders commits] --> W[Warden prepares a workspace]
+  P[User adds a task] --> W[Warden automatically prepares its workspace]
   W --> E[User develops through task conversations or external tools]
   E --> V[User connects worktrees and tests in the preview directory]
   E --> R[User reviews worktree changes]
@@ -167,7 +175,7 @@ flowchart LR
   C --> N[Show workspace synchronization conditions]
   N -->|User chooses one, several or all| B[Rebase selected workspaces]
   B --> E
-  C --> H[User inspects commit history]
+  C --> H[User inspects history in VS Code]
 ```
 
 Review takes place against the worktree **before squash**. Selecting its files is already review;
@@ -198,19 +206,19 @@ flow without requiring a terminal.
 ## Continued work and synchronization
 
 Squash preparation alone does not complete a delivery. Its completion event is the commit on the
-primary development branch. Warden retains its task, workspace and review association. The workspace
+base branch. Warden retains its task, workspace and review association. The workspace
 stays available for further commits without a separate “continue” or “finish” declaration. For A2,
 make clear which changes have not yet been delivered; A1 must not silently enter the delivery again.
 
 After initial branch configuration, switching the primary checkout through Git or VS Code also switches
-Warden's requirement context. The workspace list, selected task, history and synchronization checks
+Warden's requirement context. The task list, selected task and synchronization checks
 belong to that branch, even when two branches point to the same commit. Returning to a branch restores
-its selected task and history draft. Task workspaces keep their original branches, baselines and files;
+its selected task. Task workspaces keep their original branches, baselines and files;
 existing ACP conversations keep their original task. A detached HEAD or an unfinished Git operation
 does not select a new requirement. An unfinished delivery preparation or active preview connection
 blocks the context switch with a visible explanation; return to the original branch to resolve it first.
 
-When the primary development branch advances, Warden automatically updates synchronization indicators.
+When the base branch advances, Warden automatically updates synchronization indicators.
 It can check whether a workspace needs rebase and whether replay appears
 possible without conflicts. Those checks must not change files or the index in an active workspace.
 Unknown or stale results remain visibly unknown; a clean checkout alone proves neither replayability
@@ -237,48 +245,15 @@ validation flow. Any broader testing and company review remain the user's existi
 
 ## Organizing accepted commits
 
-Clear history is part of Warden's purpose. Users should be able to edit commit messages and arrange
-accepted commits on the primary development branch through the UI. This is distinct from ordering
-planned work: reordering the plan must not implicitly rewrite Git history.
-
-For example, worktree 1 delivers A1, worktree 2 delivers B1, then worktree 1 delivers A2. History may
-initially be `A1 → B1 → A2`; the user can request `A1 → A2 → B1` to keep related changes together.
-Grouping does not imply merging those commits into one. Worktree paths are reusable, so association
-must use stable task/delivery identities rather than just a directory name or current commit SHA.
-
-Warden does not provide undo or restoration of a previously applied history arrangement. Users
-change the current order or messages again when needed. Discarding an unapplied draft and keeping
-the original history on preview failure do not require a history-undo feature.
-
-The first implementation provides a linear history editor. Its operation must preserve:
-
-1. A bounded editable range for this requirement. Keep the company default branch and earlier
-   unrelated history outside it. Clarify treatment of merge commits and already-published commits.
-2. A preview operation that replays commits in an isolated Git workspace, checks conflicts and
-   compares the resulting tree with the original. Reordering can fail even when grouping is useful;
-   it cannot be reduced to rearranging visual cards.
-3. User-edited messages and an old-to-new commit mapping. Rewording changes a commit's SHA and the
-   SHAs of its descendants; preserve review links and delivery associations through that mapping.
-4. Explicit application against the same original branch tip and accurate operation-result handling.
-   A failed preview must not alter the primary checkout or running worktrees. Do not add undo UI.
-5. Interaction with connected previews, commits in validation and sibling worktrees based on the
-   previous history. These must be coordinated before replacing the branch tip. Never automatically
-   force-push remote history or silently replay already accepted work.
-6. Hook, signing, author and committer semantics for rewritten commits. Retain ordinary commit
-   hooks for new deliveries; do not assume a low-level commit rewrite has the same behavior.
-
-The user's candidate approach is a backup branch plus a temporary branch: replay commits with
-cherry-pick in the requested order, inspect the result and only then update the primary development
-branch. The implementation uses an isolated temporary worktree and a journaled external
-backup for this sequence, removing both after successful application and bookkeeping. The backup
-does not imply a user-facing restoration workflow or a permanent retention ref in the primary repository.
-Existing tools and libraries should inform the design; see [research references](design.md#research-references).
-The implementation is the internal `@warden/engine` package; a separate repository is not needed for this version.
+Use VS Code's native Source Control Graph to inspect base-branch commits and their diffs.
+Warden's history browser and arrangement UI are outside the current scope. The existing engine
+implementation and compatibility tests remain available, and stored drafts, delivery records and
+operation journals are preserved. Task ordering continues to express the work plan only.
 
 ## Current-version boundaries
 
-Keep the product centered on the ordered plan, workspace creation, configurable hooks,
-diff review, squash/commit operations and history. In particular, do not add:
+Prioritize workspace creation, connections, preview setup and testing. The existing ordered plan,
+read-only review and delivery/synchronization operations remain available. In particular, do not add:
 
 - Agent-driven task decomposition or special scope-change approval features.
 - Dependency enforcement, automatic scheduling or automatic concurrency decisions.
@@ -287,7 +262,6 @@ diff review, squash/commit operations and history. In particular, do not add:
 - ACP client file/terminal tools, an agent shell runner, sandbox or execution guard. Agents own their execution; Warden owns the stdio connection process.
 - A custom code editor or preview-versus-baseline diff; native VS Code editing/review is used.
 - A separate requirement approval or final acceptance workflow.
-- Undo/restore-history actions; users adjust the current history themselves.
 - A generic project-management state machine for every pause, interruption or reassignment.
 
 This does not remove the need to retain user data or to report failed Git and command operations.
@@ -299,7 +273,7 @@ The working copy implements the workflow above. It has not been published as a r
 
 | Operation | Current boundary |
 |---|---|
-| Plan and workspace | Ordered task notes, explicit allocation, persistent workspaces and repeated deliveries. No completion declaration or automatic recycling. |
+| Plan and workspace | Ordered task notes, automatic allocation on creation, persistent workspaces and repeated deliveries. No completion declaration or automatic recycling. |
 | Workspace hooks | Generic creation/reuse scripts with cwd, environment, output and status. Allocation does not launch an agent. |
 | ACP conversation | Explicit task-bound text prompts, updates, permissions, authentication, cancel, disconnect and supported session loading. One executable connection per task; agents execute their own tools. |
 | Connection | Live committed/uncommitted changes composed in an isolated worktree of the external shared Git repository, then published only to the persistent preview directory. Failed initial connections preserve the prior set and files. |
@@ -307,13 +281,12 @@ The working copy implements the workflow above. It has not been published as a r
 | Delivery | All current undelivered changes from a clean committed source, pinned by reviewed source, delivery boundary and primary HEAD. No file/commit subset picking in this version. |
 | Extension commit | Normal primary-directory Git commit with hooks/signing. Failed hooks retain files/index. No test-passed checkbox or agent handoff. |
 | Rebase | Isolated checks and explicit single/selected/all execution, with per-workspace results and pinned heads. Actual conflicts are left for the user to handle. |
-| History | Select a start through HEAD within the latest 100 commits. Reorder/reword in an isolated cherry-pick preview; apply only linear ranges with identical final tree. No undo or remote push. |
-| Navigation | Single left navigation: runtime preview, history, ordered plan, synchronization/settings panels. Selecting a task/file directly opens review. |
+| Navigation | Single left navigation: runtime preview and ordered plan, with explicit synchronization actions. Settings open from the view heading's More Actions menu. Selecting a task/file directly opens review. |
 
 `sourceBase` records the last delivered source tip, independently of the squash commit SHA.
 Each delivery has a stable identifier and a source range, primary parent, commit, message and
-review record. History rewriting updates delivery-to-commit associations; it does not complete
-a task or automatically rewrite a source workspace.
+review record. The retained history engine preserves delivery-to-commit associations for compatibility; it is not
+invoked by the extension’s navigation or refresh path.
 
 Independent preview files have a durable ownership record. An unexpected preview file/index change
 blocks replacement rather than being discarded. Interrupted operations recognize only their known
