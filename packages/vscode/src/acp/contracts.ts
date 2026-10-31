@@ -1,4 +1,4 @@
-import type { AcpBinding, AcpRecord } from '@warden/shared';
+import type { AcpBinding, AcpRecord, DiagnosticLog } from '@warden/shared';
 
 export interface AcpProfile {
   id: string;
@@ -20,6 +20,8 @@ export interface AcpSessionOptions {
   storage: AcpStorage;
   validate(): Promise<void>;
   changed(): void;
+  report?(diagnostic: string): void;
+  log?: DiagnosticLog;
   connectionFailed?(profile: AcpProfile, message: string): void;
   timeoutMs?: number;
 }

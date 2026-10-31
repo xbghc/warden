@@ -6,3 +6,4 @@ export * from './workbench.js';
 export * from './agent.js';
 export * from './acp.js';
 export * from './labels.js';
+export * from './logging.js';

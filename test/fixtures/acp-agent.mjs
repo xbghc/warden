@@ -54,7 +54,7 @@ const requiresAuth = mode === 'auth' || mode === 'auth-delayed-load';
 const write = (message) => process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`);
 const batch = (...messages) => process.stdout.write(messages.map((message) => JSON.stringify({ jsonrpc: '2.0', ...message })).join('\n') + '\n');
 const result = (id, value) => write({ id, result: value });
-const error = (id, code, message) => write({ id, error: { code, message } });
+const error = (id, code, message, data) => write({ id, error: { code, message, data } });
 const notify = (update, target = sessionId) => write({ method: 'session/update', params: { sessionId: target, update } });
 const remember = (role, text) => appendFileSync(historyFile, `${JSON.stringify({ role, text })}\n`);
 const update = (role, text, target = sessionId) =>
@@ -111,6 +111,14 @@ async function handle(message) {
   if (method === 'session/new' || method === 'session/load') {
     if (requiresAuth && !authenticated) return error(id, -32000, 'Authentication required');
     if (mode === 'session-new-fails') return error(id, -32603, 'Provider is unavailable');
+    if (mode === 'diagnostics-fails') {
+      const secret = process.env.WARDEN_FIXTURE_LOG_VALUE;
+      process.stderr.write(`Provider diagnostics: ${secret.slice(0, 7)}`);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      process.stderr.write(`${secret.slice(7)}\nAuthorization: Bearer private-stderr-value\n`);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return error(id, -32603, 'Provider setup failed', { details: `Failed with ${secret}`, rawInput: 'private-tool-input', prompt: 'private-prompt' });
+    }
     if (mode === 'setup-permission')
       await request('session/request_permission', {
         sessionId: 'check-session',

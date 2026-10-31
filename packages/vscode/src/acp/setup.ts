@@ -2,6 +2,9 @@ import * as vscode from 'vscode';
 import { acpPresets, addAcpPreset, parseAcpProfiles, presetCommandError } from './profiles.js';
 import type { AcpProfile } from './contracts.js';
 import { AcpReadinessCheck } from './readiness.js';
+import type { PerformanceLog } from '../performance.js';
+import { DiagnosticLog, diagnosticError } from '@warden/shared';
+import { acpErrorDiagnostic } from './diagnostics.js';
 
 function profileValue() {
   const inspected = vscode.workspace.getConfiguration('warden').inspect<unknown>('acpAgents');
@@ -30,16 +33,24 @@ export class AcpAgentSetup implements vscode.Disposable {
   private selection?: vscode.CancellationTokenSource;
   private readonly automatic = new Set<Promise<void>>();
   private preferredId?: string;
+  private connectionPending = false;
 
   constructor(
     private readonly directory: () => string | undefined,
-    changed: () => void,
+    private readonly changed: () => void,
     private readonly state: vscode.Memento,
+    performance?: PerformanceLog,
+    private readonly log = new DiagnosticLog(),
   ) {
     this.preferredId = state.get<string>('warden.acpProfile');
-    this.readiness = new AcpReadinessCheck(() => {
-      if (!this.closed) changed();
-    });
+    this.readiness = new AcpReadinessCheck(
+      () => {
+        if (!this.closed) changed();
+      },
+      undefined,
+      performance,
+      log,
+    );
     this.configurationChanged = vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration('warden.acpAgents')) this.scheduleConnection();
     });
@@ -51,18 +62,29 @@ export class AcpAgentSetup implements vscode.Disposable {
     this.scheduleConnection();
   }
 
+  get connecting() {
+    return this.connectionPending || this.readiness.snapshot().status === 'checking';
+  }
+
   private scheduleConnection(preferredId?: string) {
     if (this.closed) return;
     if (preferredId) this.preferredId = preferredId;
     const revision = ++this.revision;
+    this.log.write('debug', 'acp.connection.scheduled', { revision, started: this.started });
     clearTimeout(this.reconnectTimer);
     this.selection?.cancel();
-    void this.readiness.reset().catch(() => {});
+    // Waiting for the coalesced startup attempt is still loading, not a request for setup.
+    this.connectionPending = this.started;
+    void this.readiness.reset().catch((error) => this.log.write('error', 'acp.reset.failed', diagnosticError(error)));
     if (!this.started) return;
     // A settings save can emit several changes. Retire the old connection immediately,
     // then start only the latest valid user configuration without opening a picker.
     this.reconnectTimer = setTimeout(() => {
-      const pending = this.connectAutomatically(revision);
+      const pending = this.connectAutomatically(revision).finally(() => {
+        if (this.closed || revision !== this.revision) return;
+        this.connectionPending = false;
+        this.changed();
+      });
       this.automatic.add(pending);
       void pending.then(
         () => this.automatic.delete(pending),
@@ -72,16 +94,23 @@ export class AcpAgentSetup implements vscode.Disposable {
   }
 
   private async connectAutomatically(revision: number) {
-    if (this.closed || revision !== this.revision || !vscode.workspace.isTrusted) return;
+    if (this.closed || revision !== this.revision || !vscode.workspace.isTrusted) {
+      this.log.write('debug', 'acp.connection.skipped', { revision, reason: this.closed ? 'closed' : revision !== this.revision ? 'replaced' : 'untrusted' });
+      return;
+    }
     let profiles: AcpProfile[];
     try {
       profiles = readAcpProfiles();
-    } catch {
+    } catch (error) {
+      this.log.write('warn', 'acp.configuration.invalid', { ...diagnosticError(error), diagnostic: acpErrorDiagnostic(error) });
       return;
     }
     const profile = profiles.find((item) => item.id === this.preferredId) ?? profiles[0];
     const cwd = this.directory();
-    if (!profile || !cwd) return;
+    if (!profile || !cwd) {
+      this.log.write('info', 'acp.connection.skipped', { reason: !profile ? 'no_profile' : 'no_workspace' });
+      return;
+    }
     await this.readiness.check(profile, cwd);
     this.rememberConnection(revision);
   }
@@ -90,19 +119,24 @@ export class AcpAgentSetup implements vscode.Disposable {
     const connected = this.readiness.snapshot();
     if (this.closed || revision !== this.revision || connected.status !== 'ready' || !connected.profile) return;
     this.preferredId = connected.profile.id;
-    void this.state.update('warden.acpProfile', this.preferredId).then(undefined, () => {});
+    void this.state
+      .update('warden.acpProfile', this.preferredId)
+      .then(undefined, (error) => this.log.write('warn', 'acp.selection.save.failed', diagnosticError(error)));
   }
 
   check(profileId?: string): Promise<void> {
     if (this.closed) return Promise.resolve();
     if (!this.checking) {
       clearTimeout(this.reconnectTimer);
+      this.connectionPending = true;
       const revision = ++this.revision;
       this.selection = new vscode.CancellationTokenSource();
       this.checking = this.checkAgent(revision, profileId).finally(() => {
         this.selection?.dispose();
         this.selection = undefined;
         this.checking = undefined;
+        if (revision === this.revision) this.connectionPending = false;
+        if (!this.closed) this.changed();
       });
     }
     return this.checking;
@@ -154,8 +188,10 @@ export class AcpAgentSetup implements vscode.Disposable {
   }
 
   disconnect() {
+    this.log.write('info', 'acp.disconnect.requested');
     ++this.revision;
     clearTimeout(this.reconnectTimer);
+    this.connectionPending = false;
     this.selection?.cancel();
     return this.readiness.reset();
   }
@@ -280,7 +316,7 @@ export class AcpAgentSetup implements vscode.Disposable {
     this.configurationChanged.dispose();
     this.picker?.hide();
     this.input?.hide();
-    void this.readiness.close().catch(() => {});
+    void this.readiness.close().catch((error) => this.log.write('error', 'acp.close.failed', diagnosticError(error)));
   }
 
   async close() {

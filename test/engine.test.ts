@@ -3,6 +3,7 @@ import path from 'node:path';
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Engine, PreviewService, WardenError, WorkflowService } from '@warden/engine';
+import { DiagnosticLog } from '@warden/shared';
 import * as worktrees from '../packages/engine/src/worktrees.js';
 import * as git from '../packages/engine/src/git.js';
 import { checkoutWorktree } from '../packages/engine/src/worktrees.js';
@@ -28,6 +29,22 @@ afterEach(async () => {
 });
 
 describe('desktop engine', () => {
+  it('logs operation outcomes and codes without task or repository contents', async () => {
+    const rows: Array<{ level: string; [key: string]: unknown }> = [];
+    const log = new DiagnosticLog((level, line) => rows.push({ level, ...JSON.parse(line.slice('[diagnostic] '.length)) }));
+    const logged = await Engine.open(fixture.root, engine.store.file, log);
+    engines.push(logged);
+    await logged.execute('config.save', { hooks: {}, previewSetup: 'private-script-value' });
+    await logged.execute('workflow.get', undefined);
+    await expect(logged.execute('task.update', { taskId: '', title: 'private-title' })).rejects.toMatchObject({ code: 'invalid_request' });
+    await logged.close();
+    expect(rows).toContainEqual(expect.objectContaining({ event: 'engine.execute.start', method: 'config.save', level: 'info' }));
+    expect(rows).toContainEqual(expect.objectContaining({ event: 'engine.execute.end', method: 'workflow.get', level: 'trace', outcome: 'ok' }));
+    expect(rows).toContainEqual(expect.objectContaining({ event: 'engine.execute.end', method: 'task.update', level: 'error', code: 'invalid_request' }));
+    expect(rows).toContainEqual(expect.objectContaining({ event: 'engine.close.end', outcome: 'ok' }));
+    expect(new Set(rows.map((row) => row.engine)).size).toBe(1);
+    for (const value of ['private-script-value', 'private-title', fixture.root]) expect(JSON.stringify(rows)).not.toContain(value);
+  });
   it('reads workspace safety and rebase state without retired management-page graph comparisons', async () => {
     const shared = await engine.execute('task.create', { title: 'Shared task' });
     const workflow = new WorkflowService(engine.repo, engine.store);

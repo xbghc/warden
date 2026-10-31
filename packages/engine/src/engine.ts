@@ -1,6 +1,8 @@
 import { watch, type FSWatcher } from 'node:fs';
 import path from 'node:path';
 import { mkdir } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { DiagnosticLog } from '@warden/shared';
 import type {
   AcceptChangeRequest,
   CreateChangeRequest,
@@ -175,33 +177,49 @@ export class Engine {
   private constructor(
     readonly repo: RepoContext,
     readonly store: StateStore,
+    private readonly log: DiagnosticLog,
   ) {
     this.root = repo.commonRoot;
     const service = commands(repo, store);
     this.handlers = service.handlers;
     this.preview = service.previewService;
   }
-  static async open(directory: string, file?: string) {
-    const repo = await resolveRepo(directory);
-    return new Engine(repo, new StateStore(file ?? stateFilePath(repo.commonRoot), repo.commonRoot));
+  static async open(directory: string, file?: string, diagnostics = new DiagnosticLog()) {
+    const log = diagnostics.child({ component: 'engine', engine: randomUUID() });
+    return log.measure(
+      'engine.open',
+      async () => {
+        const repo = await resolveRepo(directory);
+        return new Engine(repo, new StateStore(file ?? stateFilePath(repo.commonRoot), repo.commonRoot), log);
+      },
+      {},
+      'info',
+    );
   }
   execute<K extends EngineCommand>(command: K, request: EngineInput<K>, context?: { developmentBranch: string | null }): Promise<EngineOutput<K>> {
     if (this.stopped) return Promise.reject(new WardenError(409, 'The repository session is closed.', 'session_closed'));
     const write = !reads.has(command);
     if (write) ++this.writers;
-    const operation = Promise.resolve().then(async () => {
-      const handler = this.handlers[command];
-      if (!Object.hasOwn(this.handlers, command)) throw badRequest('Unknown operation.', 'unknown_command');
-      // Our own preview can legitimately outlast the cross-window lock timeout.
-      // Finish it before a requested write starts competing for repository ownership.
-      if (write) await this.ticking;
-      if (!reads.has(command) && command !== 'preview.refresh' && command !== 'preview.setup') record(request);
-      const invoke = () => (handler as (input: never) => Promise<unknown>)(request as never);
-      const result = context && !reads.has(command) ? await this.store.withDevelopmentBranch(context.developmentBranch, invoke) : await invoke();
-      if (command === 'workspaces.list') this.observe((result as WorktreesResponse).worktrees.map((row) => row.path));
-      if (!reads.has(command)) this.changed();
-      return result;
-    });
+    const operation = this.log.measure(
+      'engine.execute',
+      async () => {
+        // Keep execution deferred so callers can observe the same pending-operation barrier.
+        await Promise.resolve();
+        const handler = this.handlers[command];
+        if (!Object.hasOwn(this.handlers, command)) throw badRequest('Unknown operation.', 'unknown_command');
+        // Our own preview can legitimately outlast the cross-window lock timeout.
+        // Finish it before a requested write starts competing for repository ownership.
+        if (write) await this.ticking;
+        if (!reads.has(command) && command !== 'preview.refresh' && command !== 'preview.setup') record(request);
+        const invoke = () => (handler as (input: never) => Promise<unknown>)(request as never);
+        const result = context && !reads.has(command) ? await this.store.withDevelopmentBranch(context.developmentBranch, invoke) : await invoke();
+        if (command === 'workspaces.list') this.observe((result as WorktreesResponse).worktrees.map((row) => row.path));
+        if (!reads.has(command)) this.changed();
+        return result;
+      },
+      { method: command, mutation: write },
+      write ? 'info' : 'trace',
+    );
     this.pending.add(operation);
     void operation
       .finally(() => {
@@ -250,21 +268,30 @@ export class Engine {
   async start(onUpdate: () => Promise<void>, onError: (error: unknown) => void) {
     if (this.timer || this.stopped) return;
     this.onUpdate = onUpdate;
-    this.onError = onError;
+    this.onError = (error) => {
+      this.log.write('error', 'engine.observer.failed', {
+        code: error instanceof WardenError ? error.code : undefined,
+        errorType: error instanceof Error ? error.name : typeof error,
+      });
+      onError(error);
+    };
     await mkdir(path.dirname(this.store.file), { recursive: true });
     if (this.stopped) return;
     this.stateWatcher = watch(path.dirname(this.store.file), (_event, filename) => {
       if (filename?.toString() === path.basename(this.store.file)) this.changed();
     });
-    this.stateWatcher.on('error', onError);
+    this.stateWatcher.on('error', this.onError);
     this.observe([this.root]);
     this.timer = setInterval(() => {
       if (!this.ticking && this.writers === 0)
         this.ticking = (async () => {
-          this.lease ??= (await this.store.acquirePreviewLease()) ?? undefined;
+          if (!this.lease) {
+            this.lease = (await this.store.acquirePreviewLease()) ?? undefined;
+            if (this.lease) this.log.write('info', 'preview.owner.acquired');
+          }
           if (this.lease && !this.stopped) await this.preview.tick();
         })()
-          .catch(onError)
+          .catch(this.onError)
           .finally(() => {
             this.ticking = undefined;
           });
@@ -275,6 +302,7 @@ export class Engine {
       }
     }, 1000);
     this.timer.unref();
+    this.log.write('debug', 'engine.observers.started', { watchers: this.watchers.size });
     this.changed();
   }
   close(): Promise<void> {
@@ -283,10 +311,16 @@ export class Engine {
     clearInterval(this.timer);
     clearTimeout(this.notification);
     this.stateWatcher?.close();
-    this.closing = (async () => {
-      await Promise.allSettled([this.ticking, this.notifying, ...this.pending, ...[...this.watchers.values()].map((w) => w.close())]);
-      await this.lease?.release();
-    })();
+    this.closing = this.log.measure(
+      'engine.close',
+      async () => {
+        await Promise.allSettled([this.ticking, this.notifying, ...this.pending, ...[...this.watchers.values()].map((w) => w.close())]);
+        await this.lease?.release();
+        if (this.lease) this.log.write('info', 'preview.owner.released');
+      },
+      { pending: this.pending.size, watchers: this.watchers.size },
+      'info',
+    );
     return this.closing;
   }
 }
