@@ -2,7 +2,16 @@ import * as vscode from 'vscode';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { formatTargetKey, taskReview, sameReview, previewStatusLabels, scriptStatusLabels } from '@warden/shared';
-import type { FileEntry, TaskReview, PreviewResponse, RebaseResponse, WorkflowResponse, WorkflowTask, WorktreesResponse } from '@warden/shared';
+import type {
+  FileEntry,
+  TaskReview,
+  PreviewResponse,
+  RebaseResponse,
+  WorkflowResponse,
+  WorkflowTask,
+  WorktreesResponse,
+  WorkspaceConfig,
+} from '@warden/shared';
 import { Engine, WardenError } from '@warden/engine';
 import type { EngineCommand, EngineInput, EngineOutput } from '@warden/engine';
 import type { WorkbenchAction, WorkbenchModel, Surface, WorkspaceRow, WorkbenchError, RebaseBatchResponse } from '@warden/shared';
@@ -12,11 +21,16 @@ import { Views } from './views.js';
 import { Sidebar } from './sidebar.js';
 import type { SidebarNode } from './sidebar.js';
 
+import { Settings } from './settings.js';
+import type { SettingsNode } from './settings.js';
+import { ScriptSettings, scriptValue } from './script-settings.js';
+import type { ScriptBinding, ScriptKind } from './script-settings.js';
+
 import { AcpConversations } from './acp/conversations.js';
 import { AcpAgentSetup } from './acp/setup.js';
 import { BranchViews } from './branch-view.js';
 
-type Node = SidebarNode | { kind: 'commit'; sha: string; message: string; session?: string };
+type Node = SidebarNode | SettingsNode | { kind: 'commit'; sha: string; message: string; session?: string };
 
 const fileModeChange = (file: FileEntry): string | undefined =>
   file.oldMode === file.newMode ? undefined : `File mode ${file.oldMode ?? 'none'} → ${file.newMode ?? 'none'}`;
@@ -43,6 +57,8 @@ export class Workbench {
 
   private readonly views: Views;
   private readonly sidebar: Sidebar;
+  private readonly settings: Settings;
+  private readonly scriptSettings: ScriptSettings;
   private taskInput?: vscode.InputBox;
   private commitInput?: vscode.InputBox;
   private fileErrors = new Map<string, string>();
@@ -101,9 +117,16 @@ export class Workbench {
       (action, session) => this.handleAction(action, session),
       (node, expanded) => this.rememberExpansion(node, expanded).catch((error) => this.report(error)),
     );
+    this.settings = new Settings(() => this.model('settings'));
+    this.scriptSettings = new ScriptSettings(
+      () => this.model('settings'),
+      (binding, value) => this.saveScript(binding, value),
+    );
     context.subscriptions.push(
       this.agentSetup,
       this.sidebar,
+      this.settings,
+      this.scriptSettings,
       this.output,
       this.status,
       vscode.workspace.registerTextDocumentContentProvider('warden-review', this.documents),
@@ -115,6 +138,17 @@ export class Workbench {
         }
       }),
       this.views,
+      vscode.commands.registerCommand('warden.editSetupScript', (kind: ScriptKind, session: string) =>
+        this.perform(
+          async () => {
+            this.assertSession(session);
+            if (!['workspace', 'reuse', 'preview'].includes(kind)) throw new Error('Unknown setup script.');
+            await this.scriptSettings.open(kind, session);
+          },
+          undefined,
+          'settings',
+        ),
+      ),
     );
     this.status.command = 'warden.showPreview';
     const commands: Record<string, (node?: Node) => unknown> = {
@@ -148,7 +182,7 @@ export class Workbench {
       previewPath: () => this.previewPath(),
       refreshPreview: () => this.api('preview.refresh', undefined),
       setup: () => this.setup(),
-      configureScripts: () => this.views.show('settings'),
+      configureScripts: () => this.settings.show(),
       rebase: (node) => this.showRebase(node),
       syncTask: (node) => this.showRebase(node),
       syncConflict: (node) => this.showRebase(node),
@@ -159,8 +193,9 @@ export class Workbench {
       chat: (node) => this.openConversation(node),
       switchChat: () => this.openConversation(),
       expandChat: () => this.conversations.expand(),
-      configureAgents: () => this.views.show('settings'),
-      checkAgent: () => (this.conversations.configuration().status === 'configured' ? this.agentSetup.check() : this.views.show('settings')),
+      configureAgents: () => this.settings.show(),
+      chooseAgentPreset: () => this.agentSetup.configure(),
+      checkAgent: () => (this.conversations.configuration().status === 'configured' ? this.agentSetup.check() : this.settings.show()),
       cancelAgentCheck: () => this.agentSetup.disconnect(),
       sendSelectionToAgent: () => this.sendSelectionToAgent(),
     };
@@ -193,7 +228,7 @@ export class Workbench {
     for (const [name, action] of Object.entries(commands))
       context.subscriptions.push(
         vscode.commands.registerCommand(`warden.${name}`, (node?: Node) =>
-          ['configureAgents', 'checkAgent', 'cancelAgentCheck'].includes(name)
+          ['configureScripts', 'configureAgents', 'chooseAgentPreset', 'checkAgent', 'cancelAgentCheck'].includes(name)
             ? this.agentAction(() => action(node))
             : this.perform(
                 () => {
@@ -201,7 +236,7 @@ export class Workbench {
                   return action(node);
                 },
                 navigation.has(name) ? undefined : 'Working…',
-                node?.kind === 'task' ? `task:${node.task.id}` : 'repository',
+                node?.kind === 'task' ? `task:${node.task.id}` : node?.kind === 'setting' ? 'settings' : 'repository',
               ),
         ),
       );
@@ -232,6 +267,7 @@ export class Workbench {
       this.status.show();
     } else this.status.hide();
     this.sidebar?.refresh();
+    this.settings?.refresh();
     this.views.render();
   }
   private get agentReady() {
@@ -298,7 +334,8 @@ export class Workbench {
     this.errors.set(scope, { scope, message, code });
     this.output.appendLine(`${code ?? 'error'}: ${message}`);
     this.render();
-    if (!this.views.displaysError(scope)) void vscode.window.showErrorMessage(`Warden: ${message}`);
+    if (!(this.settings?.view.visible && ['settings', 'agent', 'repository'].includes(scope)) && !this.views.displaysError(scope))
+      void vscode.window.showErrorMessage(`Warden: ${message}`);
   }
   async initialize() {
     this.initializing = true;
@@ -1165,6 +1202,34 @@ ${text}`,
       busy: this.branchTransition ? 'Switching Base Branch…' : this.busy,
       errors: [...this.errors.values()],
     };
+  }
+  private async saveScript(binding: ScriptBinding, value: string): Promise<WorkspaceConfig> {
+    const result = await this.perform(
+      async () => {
+        this.assertSession(binding.session);
+        if (this.backend?.root !== binding.repository) throw new Error('Reopen the script from its original repository.');
+        const current = (await this.api('workflow.get', undefined)).workspaceConfig ?? { hooks: {} };
+        this.assertSession(binding.session);
+        if (
+          scriptValue(current, binding.kind) !== scriptValue(binding.config, binding.kind) ||
+          (binding.kind === 'workspace' && JSON.stringify(current.hooks) !== JSON.stringify(binding.config.hooks))
+        )
+          throw new Error('This script changed since it was opened. Copy your draft, revert the editor, then reopen it from Settings.');
+        const config: WorkspaceConfig = { ...current, hooks: { ...current.hooks } };
+        if (binding.kind === 'preview') config.previewSetup = value;
+        else if (binding.kind === 'reuse') config.hooks.reuse = value;
+        else {
+          config.hooks.create = value;
+          // Preserve a distinct legacy reuse script; its own Settings row edits it explicitly.
+          if (!current.hooks.reuse || current.hooks.reuse === current.hooks.create) config.hooks.reuse = value;
+        }
+        return this.api('config.save', { ...config, expected: current });
+      },
+      'Saving script…',
+      'settings',
+    );
+    if (!result) throw vscode.FileSystemError.Unavailable(this.errors.get('settings')?.message ?? 'The script was not saved. Reconnect and reopen Settings.');
+    return result;
   }
   private assertSession(session: string) {
     if (!this.agentReady) throw new Error('ACP is unavailable. Open Warden Settings to configure or reconnect the agent.');

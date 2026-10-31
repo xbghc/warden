@@ -53,7 +53,8 @@ exports.checkAgentSetup = async (workbench, extension, fixture, eventually) => {
     await fs.mkdir(directory, { recursive: true });
     await vscode.commands.executeCommand('workbench.action.closeAllEditors');
     await vscode.commands.executeCommand('workbench.action.closePanel');
-    await vscode.commands.executeCommand('warden.task.focus');
+    await vscode.commands.executeCommand('notifications.clearAll');
+    await vscode.commands.executeCommand('warden.settings.focus');
     await new Promise((resolve) => setTimeout(resolve, 500));
     execFileSync('import', ['-display', process.env.DISPLAY, '-window', 'root', `${directory}/${name}.png`]);
   };
@@ -72,27 +73,45 @@ exports.checkAgentSetup = async (workbench, extension, fixture, eventually) => {
     await configuration.update('acpAgents', [], vscode.ConfigurationTarget.Global);
     await eventually(() => workbench.model('workspaces').agentConfiguration.status === 'missing');
     await gate([]);
+    assert.deepEqual(
+      workbench.settings.getChildren().map((node) => node.id),
+      ['acp'],
+      'script controls remain hidden until connected',
+    );
     assert.equal(workbench.sidebar.view.message, undefined, 'missing ACP shows only the native button');
     await screenshot(hasBranch ? 'missing-with-saved-work' : 'missing-before-branch');
     await vscode.commands.executeCommand('warden.configureAgents');
-    const settings = workbench.views.panels.get('settings');
-    await eventually(() => settings?.active);
-    assert(settings, 'Configure ACP opens Warden Settings before branch selection');
+    const settings = workbench.settings.view;
+    await eventually(() => settings.visible);
+    assert.equal(workbench.views.panels.has('settings'), false, 'Configure ACP reveals native Settings before branch selection');
     assert.equal(workbench.agentSetup.picker, undefined, 'the sidebar button does not open the preset picker');
     await workbench.handleAction({ type: 'setup.agents' }, workbench.session);
-    assert.equal(workbench.views.panels.get('settings'), settings, 'all configuration entry points reuse one Settings panel');
+    assert.equal(workbench.settings.view, settings, 'all configuration entry points reuse one Settings view');
     assert.equal(workbench.model('settings').agentConfiguration.status, 'missing', 'opening Settings does not configure an agent');
     await assert.rejects(configuration.update('acpAgents', [healthyProfile(fixture)], vscode.ConfigurationTarget.Workspace), /only into User settings/);
 
     await configuration.update('acpAgents', [{ id: 'broken' }], vscode.ConfigurationTarget.Global);
     await gate([]);
+    assert.deepEqual(
+      workbench.settings.getChildren().map((node) => node.id),
+      ['acp'],
+      'script controls remain hidden until connected',
+    );
     assert.equal(workbench.model('settings').agentConfiguration.status, 'invalid');
+    assert(workbench.settings.view.message, 'invalid configuration is readable in the native view');
     await screenshot('invalid-profile');
 
     await configuration.update('acpAgents', [healthyProfile(fixture, 'initialize-hangs')], vscode.ConfigurationTarget.Global);
     assert.equal(workbench.model('settings').agentConfiguration.status, 'configured');
     await eventually(() => workbench.model('settings').agentReadiness.status === 'checking');
     await gate([]);
+    assert.deepEqual(
+      workbench.settings.getChildren().map((node) => node.id),
+      ['acp'],
+      'script controls remain hidden until connected',
+    );
+    assert.equal(workbench.settings.getChildren()[0].description, 'Connecting…');
+    assert.equal(workbench.settings.getChildren()[0].children.find((node) => node.id === 'connect').label, 'Cancel Connection');
     await screenshot('connecting');
     await vscode.commands.executeCommand('warden.cancelAgentCheck');
     assert.equal(workbench.model('settings').agentReadiness.status, 'unchecked');
@@ -100,15 +119,33 @@ exports.checkAgentSetup = async (workbench, extension, fixture, eventually) => {
     await configuration.update('acpAgents', [{ ...healthyProfile(fixture), command: `${fixture.node}-missing-agent` }], vscode.ConfigurationTarget.Global);
     await eventually(() => workbench.model('settings').agentReadiness.status === 'error');
     await gate([]);
+    assert.deepEqual(
+      workbench.settings.getChildren().map((node) => node.id),
+      ['acp'],
+      'script controls remain hidden until connected',
+    );
+    assert.equal(workbench.settings.getChildren()[0].description, 'Connection Failed');
+    assert(workbench.settings.view.message, 'connection errors remain visible in Settings');
     await screenshot('unavailable-agent');
 
     await configuration.update('acpAgents', [healthyProfile(fixture, 'incompatible')], vscode.ConfigurationTarget.Global);
     await eventually(() => workbench.model('settings').agentReadiness.status === 'error');
     await gate([]);
+    assert.deepEqual(
+      workbench.settings.getChildren().map((node) => node.id),
+      ['acp'],
+      'script controls remain hidden until connected',
+    );
 
     await configuration.update('acpAgents', [healthyProfile(fixture, 'auth')], vscode.ConfigurationTarget.Global);
     await eventually(() => workbench.model('settings').agentReadiness.status === 'authentication_required');
     await gate([]);
+    assert.deepEqual(
+      workbench.settings.getChildren().map((node) => node.id),
+      ['acp'],
+      'script controls remain hidden until connected',
+    );
+    assert.equal(workbench.settings.getChildren()[0].children.find((node) => node.id === 'connect').label, 'Authenticate Agent');
     await screenshot('authentication-required');
     const login = vscode.commands.executeCommand('warden.checkAgent');
     await eventually(async () => {
@@ -130,6 +167,11 @@ exports.checkAgentSetup = async (workbench, extension, fixture, eventually) => {
     process.kill(connectedPid, 'SIGTERM');
     await eventually(() => workbench.model('settings').agentReadiness.status === 'error');
     await gate([]);
+    assert.deepEqual(
+      workbench.settings.getChildren().map((node) => node.id),
+      ['acp'],
+      'script controls remain hidden until connected',
+    );
     await exports.verifyAgent(workbench, fixture);
     assert.deepEqual(
       workbench.tasks().map((task) => task.id),
@@ -202,7 +244,8 @@ exports.checkAgentPresets = async (workbench, fixture, eventually) => {
   try {
     await configuration.update('acpAgents', [], vscode.ConfigurationTarget.Global);
     await vscode.commands.executeCommand('warden.configureAgents');
-    let pending = workbench.handleAction({ type: 'settings.agents' }, workbench.session);
+    const presetRow = workbench.settings.getChildren(workbench.settings.getChildren()[0]).find((node) => node.id === 'preset');
+    let pending = vscode.commands.executeCommand(presetRow.command.command);
     await eventually(() => !!setup.picker);
     assert.deepEqual(
       setup.picker.items.map((item) => item.label),

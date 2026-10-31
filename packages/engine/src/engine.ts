@@ -103,10 +103,18 @@ function commands(repo: RepoContext, store: StateStore) {
       'history.get': () => history.get(),
       'history.preview': (request: HistoryPreviewRequest) => history.preview(request),
       'history.apply': (request: { id: string; head: string }) => history.apply(request),
-      'config.save': async (request: WorkspaceConfig) => {
+      'config.save': async (request: WorkspaceConfig & { expected?: WorkspaceConfig }) => {
         const config = workspaceConfig(request);
+        const expected = request.expected === undefined ? undefined : workspaceConfig(request.expected);
         await store.withRepositoryLock(() =>
           store.update((state) => {
+            // Native script editors must not overwrite a configuration saved by another window.
+            if (expected && JSON.stringify(workspaceConfig(state.workspaceConfig ?? { hooks: {} })) !== JSON.stringify(expected))
+              throw new WardenError(
+                409,
+                'Script configuration changed in another window. Copy your draft, revert the editor, then reopen it from Settings.',
+                'config_changed',
+              );
             state.workspaceConfig = config;
           }),
         );

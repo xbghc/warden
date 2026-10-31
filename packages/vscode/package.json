@@ -54,7 +54,15 @@
         {
           "id": "warden.task",
           "name": "Workbench",
-          "when": "workspaceFolderCount > 0"
+          "when": "workspaceFolderCount > 0",
+          "initialSize": 2
+        },
+        {
+          "id": "warden.settings",
+          "name": "Settings",
+          "when": "workspaceFolderCount > 0",
+          "initialSize": 1,
+          "visibility": "visible"
         }
       ],
       "warden-chat": [
@@ -186,8 +194,7 @@
       {
         "command": "warden.configureScripts",
         "title": "Settings",
-        "category": "Warden",
-        "enablement": "warden.agentReady"
+        "category": "Warden"
       },
       {
         "command": "warden.rebase",
@@ -353,6 +360,11 @@
         "title": "Disconnect ACP",
         "category": "Warden",
         "enablement": "warden.agentReadiness == checking || warden.agentReadiness == authentication_required || warden.agentReadiness == ready"
+      },
+      {
+        "command": "warden.chooseAgentPreset",
+        "title": "Choose Agent Preset",
+        "category": "Warden"
       }
     ],
     "menus": {
@@ -377,11 +389,8 @@
         },
         {
           "command": "warden.configureScripts",
-          "when": "warden.agentReady && (view == warden.task && warden.hasDevelopmentBranch)"
-        },
-        {
-          "command": "warden.configureAgents",
-          "when": "view == warden.task && warden.agentReady"
+          "when": "view == warden.task && warden.agentReady",
+          "group": "5_settings@1"
         },
         {
           "command": "warden.rebase",
@@ -430,6 +439,10 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "warden.chooseAgentPreset",
+          "when": "false"
+        },
         {
           "command": "warden.openDiff",
           "when": "false"
@@ -536,10 +549,6 @@
         },
         {
           "command": "warden.setup",
-          "when": "warden.agentReady"
-        },
-        {
-          "command": "warden.configureScripts",
           "when": "warden.agentReady"
         },
         {

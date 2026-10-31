@@ -3,8 +3,6 @@ import { GitBranch, RefreshCw } from 'lucide-react';
 import type { WorkbenchAction, WorkbenchModel } from '@warden/shared';
 import { rebaseCheckLabels, rebaseResultLabels } from '@warden/shared';
 import { Button } from './components/ui/button';
-import { Textarea } from './components/ui/textarea';
-import { AcpSetup } from './components/AcpSetup';
 import { Checkbox } from './components/ui/checkbox';
 import { Task, taskDraftKey } from './task';
 import type { ViewState } from './task';
@@ -24,17 +22,10 @@ export function WorkbenchApp({ model, send, state: persisted }: Props) {
       },
     [persisted],
   );
-  if (model.agentConfiguration.status !== 'configured' || model.agentReadiness.status !== 'ready')
+  if (model.agentConfiguration.status !== 'configured' || model.agentReadiness.status !== 'ready' || model.surface === 'settings')
     return (
       <main className="setup">
-        <AgentConfiguration model={model} send={send} compact={model.surface !== 'settings'} />
-        {model.errors
-          .filter((error) => model.surface === 'settings' && error.scope === 'agent')
-          .map((error) => (
-            <p className="error" role="alert" key={error.message}>
-              {error.message}
-            </p>
-          ))}
+        <Button onClick={() => send({ type: 'setup.agents' })}>{model.agentReadiness.status === 'ready' ? 'Open Settings' : 'Configure ACP'}</Button>
       </main>
     );
   if (model.repositoryState === 'loading')
@@ -67,12 +58,11 @@ export function WorkbenchApp({ model, send, state: persisted }: Props) {
         <p className="muted" role="status">
           Loading…
         </p>
-      ) : !model.workflow.workflow && model.surface !== 'settings' ? (
+      ) : !model.workflow.workflow ? (
         <Setup model={model} send={send} />
       ) : (
         <>
           {model.surface === 'task' && <Task key={taskDraftKey(model)} model={model} send={send} state={state} />}
-          {model.surface === 'settings' && <Settings model={model} send={send} />}
           {model.surface === 'rebase' && <Rebase model={model} send={send} />}
         </>
       )}
@@ -88,94 +78,6 @@ function Setup({ model, send }: Props) {
       <Button disabled={!!model.busy} onClick={() => send({ type: repository ? 'setup.branch' : 'setup.repository' })}>
         {repository ? 'Select Base Branch' : 'Select Repository'}
       </Button>
-    </div>
-  );
-}
-
-function AgentConfiguration({ model, send, compact = false }: Props & { compact?: boolean }) {
-  const configuration = model.agentConfiguration;
-  const readiness = model.agentReadiness;
-  const invalid = configuration.status === 'invalid';
-  const checking = readiness.status === 'checking';
-  if (compact) return <Button onClick={() => send({ type: 'setup.agents' })}>Configure ACP</Button>;
-  return (
-    <section aria-label="ACP">
-      <h2>ACP</h2>
-      {invalid ? (
-        <p className="error" role="alert">
-          Agent configuration is invalid. {configuration.message}
-        </p>
-      ) : (
-        <p className="muted">
-          {configuration.status === 'configured'
-            ? `${configuration.count} agent profile${configuration.count === 1 ? '' : 's'} configured.`
-            : 'Connect an agent that can receive messages in its assigned task workspace.'}
-        </p>
-      )}
-      {configuration.status === 'configured' && (
-        <>
-          <p
-            role={readiness.status === 'error' || readiness.status === 'authentication_required' ? 'alert' : 'status'}
-            className={readiness.status === 'error' ? 'error' : 'muted'}
-          >
-            {readiness.profile && <strong>{readiness.profile.label}: </strong>}
-            {readiness.message ?? 'ACP is disconnected.'}
-          </p>
-          <Button size="sm" onClick={() => send({ type: checking ? 'setup.cancelAgentCheck' : 'setup.checkAgent' })}>
-            {checking
-              ? 'Cancel Connection'
-              : readiness.status === 'authentication_required' && readiness.authMethods?.length
-                ? 'Authenticate Agent'
-                : readiness.status === 'ready'
-                  ? 'Reconnect ACP'
-                  : 'Connect ACP'}
-          </Button>{' '}
-        </>
-      )}
-      <Button variant="secondary" size="sm" onClick={() => send({ type: 'settings.agents' })}>
-        {invalid ? 'Fix Agent Configuration' : 'Choose Agent Preset'}
-      </Button>
-      <AcpSetup />
-    </section>
-  );
-}
-
-function Settings({ model, send }: Props) {
-  const config = model.workflow?.workspaceConfig;
-  const [initialize, setInitialize] = useState(config?.hooks.create ?? config?.hooks.reuse ?? '');
-  const [setup, setSetup] = useState(config?.previewSetup ?? '');
-  return (
-    <div role="region" aria-label="Settings">
-      <AgentConfiguration model={model} send={send} />
-      <h2>Scripts</h2>
-      <p className="path">{model.repository}</p>
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          send({ type: 'settings.save', config: { hooks: { create: initialize, reuse: initialize }, previewSetup: setup } });
-        }}
-      >
-        <label className="field">
-          Workspace Setup Script
-          <Textarea rows={4} value={initialize} onChange={(event) => setInitialize(event.target.value)} />
-        </label>
-        <p className="muted">Runs automatically when a task is added. Keep it safe to rerun; the workspace path is supplied through environment variables.</p>
-        {config?.hooks.create !== config?.hooks.reuse && config?.hooks.reuse && (
-          <details>
-            <summary>Legacy Script Configuration</summary>
-            <pre>{config.hooks.reuse}</pre>
-            <p>Saving replaces the legacy configuration with the setup script above.</p>
-          </details>
-        )}
-        <label className="field">
-          Preview Setup Script
-          <Textarea rows={4} value={setup} onChange={(event) => setSetup(event.target.value)} />
-        </label>
-        <p className="muted">Runs after preview initialization and content updates. Keep it safe to rerun, and keep dependencies and caches ignored by Git.</p>
-        <Button type="submit" disabled={!!model.busy}>
-          Save Script Configuration
-        </Button>
-      </form>
     </div>
   );
 }
