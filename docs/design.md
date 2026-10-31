@@ -151,27 +151,16 @@ uses the same short setup prompt. Keep errors visible and put workflow education
 ## Plan and create a workspace
 
 `＋` opens one compact inline input for the task description, stored as its title. Enter or the check
-icon creates the plan item. One `×` icon, labelled **取消新增任务**, and Escape close the input without
+icon creates the task and allocates its workspace. One `×` icon, labelled **取消新增任务**, and Escape close the input without
 creating anything. Cancellation preserves the draft and previous selection; a successful creation
 clears the new-task draft. Submission disables cancellation until creation succeeds or fails.
-Existing longer task notes remain editable. It does not allocate a workspace,
-ask for an owner or lifecycle state, or impose a dependency or delivery-report form.
+Existing longer task notes remain editable. Creation does not ask for an owner or lifecycle state,
+or impose a dependency or delivery-report form. Allocation failure preserves the task for retry.
 
-```text
-订单接口                                             [编辑说明]
-为订单列表增加筛选参数……
-
-尚无工作区
-创建后可查看 Git 差异，并执行已配置的工作区脚本。
-
-[创建工作区…]
-```
-
-The creation sheet identifies the branch and worktree path. An explicit option may associate an
-existing workspace, showing its real branch and path. Directory-name similarity does not establish
-task identity. New tasks default to shared Git workspaces outside primary; independent clones are
-available for compatibility. Existing primary-linked worktrees can still be associated. Numbered
-task paths remain stable across deliveries, and internal repository layout does not add UI steps.
+Task creation allocates a fresh shared Git workspace without a separate setup action or storage,
+directory, branch or executor inputs. Existing independent clones remain supported. Numbered
+task paths remain stable across deliveries. Legacy plans and failed allocations retain an explicit
+workspace allocation action; retries do not replace an assigned workspace.
 
 After creation, the same task detail becomes the working surface:
 

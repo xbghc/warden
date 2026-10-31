@@ -53,7 +53,7 @@ Commit failures retain recovery data and show recovery actions beside the affect
 
 Task notes, delivery records and optional workspace settings open inline in the workspace list. Unsaved
 notes, choices and scroll survive hiding/reopening the webview. Script failures show output/retry actions
-in place; successful scripts do not add a menu entry. Default workspace creation executes directly.
+in place; successful scripts do not add a menu entry. Adding a task allocates its workspace automatically. Legacy plans and failed allocations retain explicit allocation controls.
 Every creation remains a fresh logical allocation and branch; physical directory reuse is internal.
 
 Add-task opens a compact single-line **任务说明** input. Enter or the check icon saves it; the sole `×`

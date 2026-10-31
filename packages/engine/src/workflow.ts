@@ -195,7 +195,16 @@ export class WorkflowService {
     return patch;
   }
 
+  /** Retained for legacy plan imports and the compatibility adapter. */
   create(request: CreateChangeRequest) {
+    return this.createChange(request, false);
+  }
+
+  createTask(request: Pick<CreateChangeRequest, 'title' | 'body'>) {
+    return this.createChange(request, true);
+  }
+
+  private createChange(request: CreateChangeRequest, allocate: boolean) {
     return this.store.withRepositoryLock(async () => {
       const state = await this.store.load();
       const workflow = workflowOf(state);
@@ -210,10 +219,20 @@ export class WorkflowService {
         status: 'planned',
         createdAt: new Date().toISOString(),
       };
-      // Adopting an existing checkout is an explicit execution request. Ordinary planning does
-      // not inspect or create worktrees and does not pin a development baseline prematurely.
+      // Legacy adoption stays outside the desktop task-creation contract.
       if (request.worktree) return this.startTask(change, { worktree: request.worktree }, workflow);
       await this.save(change);
+      if (allocate) {
+        try {
+          return await this.allocateTask(change, {}, workflow);
+        } catch (error) {
+          const saved = workflowOf(await this.store.load()).changes.find((row) => row.id === id);
+          // The task already exists. Return its recoverable allocation failure so callers
+          // select it and clear the new-task draft instead of creating a duplicate on retry.
+          if (saved && !saved.worktree && saved.workspaceError) return saved;
+          throw error;
+        }
+      }
       return change;
     });
   }
@@ -275,12 +294,26 @@ export class WorkflowService {
       const workflow = workflowOf(await this.store.load());
       const change = workflow.changes.find((row) => row.id === id);
       if (!change) throw notFound('Task not found.', 'unknown_change');
-      // Duplicate clicks and retries share the original allocation.
-      if (change.status === 'working') return change;
-      if (change.status !== 'planned') fail('Restore the archived task first.', 'change_not_planned');
       if (change.developmentBranch !== workflow.developmentBranch) fail('Switch to the base branch for this task first.', 'requirement_changed');
-      return this.startTask(change, request, workflow);
+      // Duplicate clicks and retries share the original allocation, including during delivery.
+      if (change.worktree) return change;
+      if (change.status !== 'planned') fail('Restore the archived task first.', 'change_not_planned');
+      return this.allocateTask(change, request, workflow);
     });
+  }
+
+  private async allocateTask(plan: PlannedChange, request: StartChangeRequest, workflow: DevelopmentWorkflow): Promise<DevelopmentChange> {
+    try {
+      return await this.startTask(plan, request, workflow);
+    } catch (error) {
+      const saved = workflowOf(await this.store.load()).changes.find((row) => row.id === plan.id);
+      // A later persistence or hook failure must not replace an assigned workspace with a plan.
+      if (saved && !saved.worktree) {
+        saved.workspaceError = { message: errorMessage(error), ...(error instanceof WardenError ? { code: error.code } : {}) };
+        await this.save(saved);
+      }
+      throw error;
+    }
   }
 
   private async startTask(plan: PlannedChange, request: StartChangeRequest, workflow: DevelopmentWorkflow): Promise<DevelopmentChange> {
@@ -322,6 +355,7 @@ export class WorkflowService {
       await this.store.update((state) => forgetWorktreeTargets(state, worktree));
     }
     const change: DevelopmentChange = { ...plan, branch, worktree, base: fork, status: 'working', agent: request.agent?.trim() || undefined };
+    delete change.workspaceError;
     if (fork !== base) change.sync = { status: 'pending', target: base, message: 'The base branch has changed. Rebase the workspace when ready.' };
     await this.save(change);
     if (hookEvent) await this.runHook(change, hookEvent);

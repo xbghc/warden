@@ -319,9 +319,9 @@ exports.run = async () => {
     const newTask = (await state()).workflow.changes.at(-1);
     assert.equal(workbench.model('workspaces').createdTaskId, newTask.id, 'successful creation has an explicit draft-clear receipt');
     assert.equal(newTask.body, 'Line one\nLine two');
-    await workbench.handleAction({ type: 'task.start', taskId: newTask.id, kind: 'shared', agent: 'worker-b' }, session);
+    assert(newTask.worktree, 'task creation includes automatic workspace allocation');
     await workbench.handleAction({ type: 'task.brief', taskId: newTask.id }, session);
-    assert.match(await vscode.env.clipboard.readText(), /执行者：worker-b/);
+    assert((await vscode.env.clipboard.readText()).includes(newTask.worktree));
     assert.notEqual((await state()).workflow.changes.at(-1).worktree, workspace);
 
     const beforeHistory = primaryGit('rev-parse', 'HEAD');

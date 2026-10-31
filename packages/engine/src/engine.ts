@@ -54,7 +54,7 @@ function commands(repo: RepoContext, store: StateStore) {
       'task.create': (request: NewTask) => {
         record(request);
         if ('worktree' in request) throw badRequest('A new task cannot adopt an existing workspace.', 'invalid_request');
-        return workflow.create({ title: request.title, body: request.body });
+        return workflow.createTask({ title: request.title, body: request.body });
       },
       'task.update': ({ taskId, ...request }: UpdateChangeRequest & { taskId: string }) => {
         id(taskId);

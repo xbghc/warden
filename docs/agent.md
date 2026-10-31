@@ -51,7 +51,7 @@ commit, deliver or rebase. See the [ACP boundary](acp-design.md) for ownership a
 
 ## Task briefs
 
-Plan and order small changes in the left navigation. Allocate a workspace when needed, then copy
+Add and order small tasks in the left navigation. Each new task receives a workspace automatically; copy
 its task brief and paste it into the task conversation or an external tool. The brief includes the
 task title, goal, acceptance notes, assignment, workspace path, development branch and instructions.
 

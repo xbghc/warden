@@ -99,7 +99,10 @@ exports.checkBranches = async (workbench, root, eventually) => {
   assert.deepEqual(workbench.historyDraft, draft('A history draft'));
   assert.deepEqual(
     workbench.checks.checks.map((check) => check.changeId),
-    [a.id],
+    workbench
+      .tasks()
+      .filter((task) => task.worktree)
+      .map((task) => task.id),
   );
   assert((await workbench.getChildren({ kind: 'tasks' })).every((node) => node.task.developmentBranch === 'main'));
 
@@ -137,7 +140,10 @@ exports.checkBranches = async (workbench, root, eventually) => {
   assert.deepEqual(workbench.historyDraft, draft('B history draft'));
   assert.deepEqual(
     workbench.checks.checks.map((check) => check.changeId),
-    [b.id],
+    workbench
+      .tasks()
+      .filter((task) => task.worktree)
+      .map((task) => task.id),
   );
   assert.equal(workbench.preview.worktree, preview, 'the preview directory persists across requirements');
 

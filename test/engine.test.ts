@@ -2,7 +2,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Engine, PreviewService } from '@warden/engine';
+import { Engine, PreviewService, WardenError, WorkflowService } from '@warden/engine';
+import * as worktrees from '../packages/engine/src/worktrees.js';
 import { checkoutWorktree } from '../packages/engine/src/worktrees.js';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
@@ -45,7 +46,7 @@ describe('desktop engine', () => {
       await engine.store.update((state) => {
         state.connectionPreview!.status = 'stale';
         state.connectionPreview!.syncStatus = 'error';
-        state.connectionPreview!.message = '预览目录有额外改动，已停止更新；请在主目录编辑代码';
+        state.connectionPreview!.message = 'The preview folder has unexpected changes. Sync stopped; edit code in the primary folder.';
       });
       expect(await engine.execute('preview.refresh', undefined)).toMatchObject({ worktree: first.worktree, syncStatus: 'synced' });
       await writeFile(path.join(first.worktree!, 'gradlew.bat'), '@echo off\r\necho Preview edit\r\n');
@@ -164,8 +165,9 @@ describe('desktop engine', () => {
     fixture.git('-C', old.worktree.path, 'add', '.');
     fixture.git('-C', old.worktree.path, 'commit', '-qm', 'Old task');
     fixture.git('-C', old.worktree.path, 'switch', '--detach');
-    const plan = await engine.execute('task.create', { title: 'New workspace', body: 'Fresh task' });
-    const task = await engine.execute('task.start', { taskId: plan.id });
+    const task = await engine.execute('task.create', { title: 'New workspace', body: 'Fresh task' });
+    expect(task.status).toBe('working');
+    if (!task.worktree) throw new Error('Task creation must allocate a workspace');
     expect(task.worktree).toBe(old.worktree.path);
     expect(task.branch).not.toBe('old-task');
     expect(task.base).toBe(base);
@@ -173,14 +175,63 @@ describe('desktop engine', () => {
     expect(fixture.git('-C', task.worktree, 'rev-parse', 'HEAD').trim()).toBe(base);
     await expect(readFile(path.join(task.worktree, 'old.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
     const next = await engine.execute('task.create', { title: 'Another workspace' });
-    expect((await engine.execute('task.start', { taskId: next.id })).worktree).not.toBe(task.worktree);
+    expect(next.worktree).toBeTruthy();
+    expect(next.worktree).not.toBe(task.worktree);
+    expect((await engine.execute('task.start', { taskId: task.id })).worktree).toBe(task.worktree);
+    expect(fixture.git('status', '--porcelain')).toBe('');
+  });
+
+  it('keeps a failed allocation on its task and retries once across concurrent requests', async () => {
+    const allocation = vi.spyOn(worktrees, 'checkoutWorktree').mockRejectedValueOnce(new WardenError(409, 'Allocation unavailable', 'checkout_unavailable'));
+    const task = await engine.execute('task.create', { title: 'Retained task', body: 'Keep these notes' });
+    expect(task).toMatchObject({ status: 'planned', workspaceError: { message: 'Allocation unavailable', code: 'checkout_unavailable' } });
+    expect(task.worktree).toBeUndefined();
+    const persisted = (await engine.execute('workflow.get', undefined)).workflow!.changes;
+    expect(persisted).toHaveLength(1);
+    expect(persisted[0]).toEqual(task);
+    const [first, second] = await Promise.all([engine.execute('task.start', { taskId: task.id }), engine.execute('task.start', { taskId: task.id })]);
+    expect(first).toMatchObject({ id: task.id, title: task.title, body: task.body, status: 'working' });
+    expect(second.worktree).toBe(first.worktree);
+    expect(first.workspaceError).toBeUndefined();
+    expect(allocation).toHaveBeenCalledTimes(2);
+    expect((await engine.execute('workflow.get', undefined)).workflow!.changes).toHaveLength(1);
+  });
+
+  it('runs initialization during creation and preserves its workspace when the script fails', async () => {
+    await engine.execute('config.save', { hooks: { create: 'echo retained > hook.txt; exit 1' } });
+    const task = await engine.execute('task.create', { title: 'Script failure' });
+    expect(task.status).toBe('working');
+    if (!task.worktree) throw new Error('Script failure must retain the assigned workspace');
+    expect(task.workspaceHook?.status).toBe('failed');
+    expect(task.workspaceError).toBeUndefined();
+    expect(await readFile(path.join(task.worktree, 'hook.txt'), 'utf8')).toContain('retained');
+    await engine.execute('config.save', { hooks: { create: 'echo retried >> hook.txt' } });
+    const retried = await engine.execute('task.hook', { taskId: task.id });
+    expect(retried.worktree).toBe(task.worktree);
+    expect(retried.workspaceHook?.status).toBe('succeeded');
+    expect(await readFile(path.join(task.worktree, 'hook.txt'), 'utf8')).toMatch(/retained\s+retried/);
+  });
+
+  it('allocates legacy plans on demand and preserves archived plans until restoration', async () => {
+    const workflow = new WorkflowService(engine.repo, engine.store);
+    const plan = await workflow.create({ title: 'Legacy plan' });
+    expect((await engine.execute('workflow.get', undefined)).workflow!.changes[0]!.worktree).toBeUndefined();
+    await engine.execute('task.update', { taskId: plan.id, status: 'archived' });
+    await expect(engine.execute('task.start', { taskId: plan.id })).rejects.toMatchObject({ code: 'change_not_planned' });
+    await engine.execute('task.update', { taskId: plan.id, status: 'planned' });
+    const ready = await engine.execute('task.start', { taskId: plan.id });
+    expect(ready.worktree).toBeTruthy();
+    expect(ready.id).toBe(plan.id);
+    fixture.git('branch', 'feature/other');
+    await engine.execute('workflow.configure', { branch: 'feature/other' });
+    await expect(engine.execute('task.start', { taskId: plan.id })).rejects.toMatchObject({ code: 'requirement_changed' });
   });
 
   it('preserves structured errors and rejects adoption through the desktop API', async () => {
     await expect(engine.execute('task.create', { title: '' })).rejects.toMatchObject({ code: 'invalid_title' });
     const plan = await engine.execute('task.create', { title: 'Task' });
     await expect(engine.execute('task.start', { taskId: plan.id, worktree: fixture.root } as never)).rejects.toMatchObject({ code: 'invalid_request' });
-    expect((await engine.execute('workflow.get', undefined)).workflow?.changes[0]?.worktree).toBeUndefined();
+    expect((await engine.execute('workflow.get', undefined)).workflow?.changes[0]?.worktree).toBe(plan.worktree);
     expect(fixture.git('status', '--porcelain')).toBe('');
   });
 

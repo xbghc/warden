@@ -22,10 +22,10 @@ code --install-extension packages/vscode/warden-0.20.4.vsix
 
 ## Development workflow
 
-1. **Plan.** Add task titles and multiline notes in Warden. Dragging tasks changes plan order only.
-2. **Create a workspace.** Every creation is a fresh logical workspace and branch. Warden manages
-   physical directory allocation internally. Configure an optional initialization script; run
-   agents with your own tools.
+1. **Plan.** Add a task title; Warden automatically allocates its workspace and branch. Edit multiline
+   notes and drag tasks to arrange plan order.
+2. **Develop.** Configure an optional initialization script and run agents with your own tools.
+   Warden manages physical directory allocation and preserves each workspace across deliveries.
 3. **Connect for preview.** Use each task's connection action. Saved primary content and connected
    task changes appear in a persistent independent preview directory for tests and dev servers.
 4. **Review and commit.** Open task files in native read-only diffs. Use the workspace commit icon, enter a message in

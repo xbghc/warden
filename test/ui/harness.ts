@@ -155,6 +155,7 @@ const server = createServer(async (request, response) => {
           selected = task.id;
           creating = false;
           createdTaskId = task.id;
+          if (task?.worktree) await writeFile(path.join(task.worktree, 'ui-fixture.txt'), 'Workspace file for native diff routing\n');
           break;
         }
         case 'task.start': {

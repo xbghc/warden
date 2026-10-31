@@ -458,7 +458,17 @@ export class Workbench {
     const source = this.preview?.sources?.find((row) => row.changeId === task.id);
     const connected = this.preview?.connectedIds.includes(task.id);
     const sync = this.checks?.checks.find((check) => check.changeId === task.id);
-    const connection = task.worktree ? (connected ? (source ? statusLabels[source.status] : '待同步') : '未连接') : statusLabels[task.status];
+    const connection = task.worktree
+      ? connected
+        ? source
+          ? statusLabels[source.status]
+          : '待同步'
+        : '未连接'
+      : task.status === 'archived'
+        ? statusLabels[task.status]
+        : task.workspaceError
+          ? 'Workspace Allocation Failed'
+          : statusLabels[task.status];
     const problem = source?.status === 'conflict' || source?.status === 'error';
     const activity = this.backend && this.conversations.activity(this.backend.root, task.id);
     const facts = [
@@ -479,7 +489,14 @@ export class Workbench {
       task,
       expanded: !!this.expanded[task.id],
       description: facts.slice(0, 2).join(' · '),
-      tooltip: [task.title, task.body, task.worktree ?? '尚未分配工作区', facts.join(' · '), sync?.status !== 'current' ? sync?.message : '']
+      tooltip: [
+        task.title,
+        task.body,
+        task.worktree ?? '尚未分配工作区',
+        task.workspaceError?.message,
+        facts.join(' · '),
+        sync?.status !== 'current' ? sync?.message : '',
+      ]
         .filter(Boolean)
         .join('\n\n'),
       files: target ? this.files.get(target) : undefined,
@@ -1072,6 +1089,7 @@ export class Workbench {
             this.selected = created.id;
             this.creating = false;
             this.createdTaskId = created.id;
+            if (created.workspaceError) this.report(new WardenError(409, created.workspaceError.message, created.workspaceError.code), `task:${created.id}`);
             break;
           }
           case 'task.update':

@@ -7,10 +7,16 @@ Workspace creation does not install dependencies or launch an agent.
 
 ## Development workflow
 
-The left navigation’s *工作区* list holds the ordered work plan. Add a task and its notes, reorder it, and select
-*创建工作区* when needed. Planning does not create a Git branch or pin a baseline. A task can use
-a freshly allocated logical workspace and branch. Warden may internally reuse a clean, unassigned
-physical directory; the user does not choose a previous workspace.
+The left navigation’s *工作区* list holds the ordered work plan. Adding a task automatically allocates
+its own workspace and branch from the current requirement baseline, then runs the configured
+initialization script. The user enters a title and can edit notes or reorder tasks afterward.
+Directory, branch and storage choices stay internal. Warden may reuse a clean, unassigned physical
+directory without adopting its old logical workspace.
+
+Allocation failure preserves the task and its error for retry. Repeated requests reuse its assigned
+workspace. Legacy plans receive a workspace through explicit allocation; archived plans require restoration first.
+Read-only refresh never allocates workspaces. Script failure retains the assigned workspace and
+script output, with a separate script retry action.
 The default is a worktree of Warden's external shared repository. Agent development objects stay
 outside the primary repository while tasks and preview can read the same Git objects directly.
 Independent clones remain a compatibility option for tooling that requires its own `.git` directory.

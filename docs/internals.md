@@ -170,8 +170,13 @@ blocks the mutation. Backup creation copies files without running repository fil
 Switching branches in a reused slot passes `--no-overwrite-ignore`, so Git refuses to overwrite
 ignored local configuration even when status reports the slot clean.
 
-Task notes and ordering write only Warden state. Explicit allocation creates a fresh logical workspace in a validated
-numbered workspace from the selected primary baseline, without dependency enforcement.
+Task creation saves its plan and allocates a fresh logical workspace under one repository lock,
+using the existing validated numbered-path and shared-repository Git writes. Allocation selects
+the current requirement baseline without dependency enforcement. Notes and ordering write only
+Warden state. A pre-assignment failure persists `workspaceError` on the saved task; a retry keeps its
+ID and clears the error after successful assignment. Assigned workspaces are never replaced on retry.
+Legacy plan creation remains only for imports and the compatibility adapter; desktop task use
+prepares these plans explicitly, without allocating from a background read.
 `workflow.changes[].deliveries` stores stable delivery IDs, source ranges, primary commits and
 review records. `sourceBase` distinguishes a delivered source tip from its squash commit.
 

@@ -24,7 +24,7 @@ merging that branch into the company's main branch remains outside Warden's core
 | Activity | User responsibility | Warden responsibility |
 |---|---|---|
 | Plan | Decompose the requirement and arrange the work sequence. | Keep one ordered plan of intended commits; TODO and orchestration are the same thing. |
-| Prepare | Choose which work to start and how its workspace should be initialized. | Allocate a fresh logical workspace from the development branch and support user-defined workspace hooks. |
+| Prepare | Add a task and choose how its workspace should be initialized. | Allocate a fresh logical workspace from the development branch when creating the task and support user-defined workspace hooks. |
 | Execute | Choose an agent, send prompts and answer its permission requests, or use external tools. | Provide task-bound ACP conversations and stdio connections; agents execute their own tools and commands. |
 | Preview and test | Choose connected worktrees and edit primary code and run the development server, lint or tests in the preview directory. | Compose their live changes in a persistent independent preview, preserving primary Git state. |
 | Review | Inspect the worktree's changes and decide whether they are ready to integrate. | Show the complete delivery diff before squash; let the user copy code locations for their own tools. |
@@ -49,8 +49,8 @@ multiple accepted commits over time, such as A1 and A2 with another workspace's 
 them. Squash is the preferred integration method for each reviewed delivery. Splitting a task
 into branching execution paths is outside the current scope.
 
-A planned item does not reserve a worktree. Once allocated, a workspace remains available across
-deliveries. Warden does not require a task-complete declaration, automatically recycle it after a
+Adding a task automatically allocates its own workspace and task branch. The user supplies task
+content, not storage, directory or branch choices. That workspace remains available across deliveries. Warden does not require a task-complete declaration, automatically recycle it after a
 commit or add a release-button step. An accepted commit is an observable delivery result, not a
 claim that the entire task or requirement has ended.
 

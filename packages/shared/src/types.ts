@@ -148,6 +148,8 @@ export interface ChangePlan {
   /** Legacy planning metadata; never blocks allocation. */
   dependsOn?: string[];
   agent?: string;
+  /** Allocation failed before a workspace was assigned; retry uses this same task. */
+  workspaceError?: { message: string; code?: string };
   /** Kept when importing old checklists; a checked box is not evidence of a Git commit. */
   legacyTodo?: { branch: string; status: TodoStatus };
   createdAt: string;
