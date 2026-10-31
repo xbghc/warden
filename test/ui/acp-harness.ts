@@ -270,7 +270,7 @@ const server = createServer(async (request, response) => {
       return;
     }
     response.setHeader('Content-Type', 'text/html');
-    response.end(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><link rel="stylesheet" href="/index.css"></head><body><div id="root"></div><script>
+    response.end(`<!doctype html><html lang="en"><head><meta charset="utf-8"><link rel="stylesheet" href="/index.css"></head><body><div id="root"></div><script>
       const task = new URL(location.href).searchParams.get('task') || '0';
       let saved, refreshing, modelsPaused = false;
       let queue = Promise.resolve();

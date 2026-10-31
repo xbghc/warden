@@ -25,7 +25,7 @@ describe('ACP draft synchronization', () => {
   it('rejects sending before the panel has applied a new selection', () => {
     const draft = new AcpDraft('Task');
     draft.append('Review this source');
-    expect(() => draft.begin({ text: 'Task', revision: 0, version: 0 })).toThrow('草稿已更新');
+    expect(() => draft.begin({ text: 'Task', revision: 0, version: 0 })).toThrow('The draft was updated');
     expect(draft.text).toBe('Task\n\nReview this source');
     expect(draft.begin({ text: draft.text, revision: 0, version: 1 }).text).toContain('Review this source');
   });
@@ -54,7 +54,7 @@ describe('ACP draft synchronization', () => {
     const submitted = { text: 'Task', revision: 1, version: 0 };
     const first = draft.begin(submitted);
     expect(draft.complete(first.mutation)).toBe(true);
-    expect(() => draft.begin(submitted)).toThrow('草稿已更新');
+    expect(() => draft.begin(submitted)).toThrow('The draft was updated');
     expect(draft.text).toBe('');
 
     // A flushed draft and its following send can both arrive before the panel receives the clear.
@@ -64,7 +64,7 @@ describe('ACP draft synchronization', () => {
     expect(next.text).toBe(text);
     expect(draft.complete(next.mutation)).toBe(true);
     expect(draft.text).toBe('');
-    expect(() => draft.begin(followup)).toThrow('草稿已更新');
+    expect(() => draft.begin(followup)).toThrow('The draft was updated');
     expect(draft.begin({ text: 'Third task', revision: 3, version: 0 }).text).toBe('Third task');
   });
 
@@ -76,7 +76,7 @@ describe('ACP draft synchronization', () => {
     const followup = { text: 'Next task', revision: 2, version: 0 };
     draft.update(followup);
     const before = draft.snapshot();
-    expect(() => draft.begin(followup)).toThrow('草稿已更新');
+    expect(() => draft.begin(followup)).toThrow('The draft was updated');
     expect(draft.snapshot()).toEqual(before);
     expect(draft.begin({ text: draft.text, revision: 2, version: 2 }).text).toBe('Next task\n\nReview this source');
   });
@@ -120,7 +120,7 @@ describe('ACP draft synchronization', () => {
     const second = draft.begin({ text: 'Second task', revision: 2, version: 1 });
     draft.complete(second.mutation);
     const before = draft.snapshot();
-    expect(() => draft.begin({ text: 'Unobserved history', revision: 3, version: 0 })).toThrow('草稿已更新');
+    expect(() => draft.begin({ text: 'Unobserved history', revision: 3, version: 0 })).toThrow('The draft was updated');
     expect(draft.snapshot()).toEqual(before);
     expect(draft.begin({ text: 'Next task', revision: 3, version: 1 }).text).toBe('Next task');
   });
@@ -148,9 +148,9 @@ describe('ACP draft synchronization', () => {
     const draft = new AcpDraft('Saved');
     draft.append('Selected context');
     const before = draft.snapshot();
-    expect(() => draft.update({ text: 'x'.repeat(100_000), revision: 1, version: 0 })).toThrow('消息过长');
+    expect(() => draft.update({ text: 'x'.repeat(100_000), revision: 1, version: 0 })).toThrow('The message is too long');
     expect(draft.snapshot()).toEqual(before);
-    expect(() => draft.append('x'.repeat(100_000))).toThrow('消息过长');
+    expect(() => draft.append('x'.repeat(100_000))).toThrow('The message is too long');
     expect(draft.snapshot()).toEqual(before);
   });
 });

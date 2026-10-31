@@ -32,14 +32,14 @@ choices supplied by the agent. Select an offered authentication method when need
 agent's documented terminal login separately on the same host. Warden does not provide a login terminal
 or interpret tool activity as instructions to execute a command itself.
 
-**停止本轮** requests cancellation; **断开连接** closes Warden's agent connection and process. Neither
+**Stop Turn** requests cancellation; **Disconnect** closes Warden's agent connection and process. Neither
 proves that all agent-started background commands have stopped. The agent owns those commands and its
 execution policies. Coordinate ongoing work before delivery or rebase; Warden adds no execution guard
 or agent-idle declaration and retains its existing Git version checks.
 
 Conversation records persist outside the source repository. After reload or interruption, reconnect
-explicitly with **继续会话** when the agent supports loading its saved session. Otherwise use
-**新建会话**, retaining the previous record. Warden never silently resends an uncertain prompt or
+explicitly with **Resume Session** when the agent supports loading its saved session. Otherwise use
+**New Session**, retaining the previous record. Warden never silently resends an uncertain prompt or
 claims that saved text restores the agent's model state. A completed turn does not connect preview,
 commit, deliver or rebase. See the [ACP boundary](acp-design.md) for ownership and recovery details.
 

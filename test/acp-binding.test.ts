@@ -2,7 +2,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { Engine } from '@warden/engine';
+import { Engine, WorkflowService } from '@warden/engine';
 import { resolveAcpBinding, validateAcpBinding } from '../packages/vscode/src/acp/binding.js';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
@@ -26,7 +26,7 @@ afterEach(async () => {
 });
 
 async function allocate(title = 'Task', kind: 'shared' | 'clone' = 'shared') {
-  const plan = await engine.execute('task.create', { title });
+  const plan = await new WorkflowService(engine.repo, engine.store).create({ title });
   return engine.execute('task.start', { taskId: plan.id, kind });
 }
 
@@ -83,7 +83,7 @@ describe('ACP task binding', () => {
         const headName = path.join(gitDir, operation, 'head-name');
         const original = await readFile(headName, 'utf8');
         await writeFile(headName, 'refs/heads/unrelated-task\n');
-        await expect(validateAcpBinding(engine, binding)).rejects.toThrow('任务工作区已变化');
+        await expect(validateAcpBinding(engine, binding)).rejects.toThrow('The task workspace changed');
         await writeFile(headName, original);
         await validateAcpBinding(engine, binding);
       } else expect(checkout.branch).toBe(task.branch);
@@ -91,15 +91,15 @@ describe('ACP task binding', () => {
   );
 
   it('refuses planned tasks and a persisted association that points to primary', { timeout }, async () => {
-    const plan = await engine.execute('task.create', { title: 'Not allocated' });
-    await expect(resolveAcpBinding(engine, plan.id)).rejects.toThrow('请先为此任务创建工作区');
-    await expect(resolveAcpBinding(engine, 'missing-task')).rejects.toThrow('请先为此任务创建工作区');
+    const plan = await new WorkflowService(engine.repo, engine.store).create({ title: 'Not allocated' });
+    await expect(resolveAcpBinding(engine, plan.id)).rejects.toThrow('The task workspace is not ready. Reopen the task.');
+    await expect(resolveAcpBinding(engine, 'missing-task')).rejects.toThrow('The task workspace is not ready. Reopen the task.');
     const task = await allocate();
     // Historical/corrupt state must not turn a task chat into a primary-directory agent.
     await engine.store.update((state) => {
       state.workflow!.changes = state.workflow!.changes.map((row) => (row.id === task.id ? { ...task, worktree: fixture.root, branch: 'main' } : row));
     });
-    await expect(resolveAcpBinding(engine, task.id)).rejects.toThrow('Agent 会话必须使用任务工作区');
+    await expect(resolveAcpBinding(engine, task.id)).rejects.toThrow('Agent sessions must use the task workspace.');
     expect(fixture.git('status', '--porcelain')).toBe('');
   });
 
@@ -107,7 +107,7 @@ describe('ACP task binding', () => {
     const task = await allocate('Old task');
     const binding = await resolveAcpBinding(engine, task.id);
     fixture.git('-C', task.worktree, 'switch', '--detach');
-    await expect(validateAcpBinding(engine, binding)).rejects.toThrow('任务工作区已变化');
+    await expect(validateAcpBinding(engine, binding)).rejects.toThrow('The task workspace changed');
     // The desktop UI does not release active tasks. Simulate an externally retired allocation,
     // then exercise the real Engine's normal allocation into the free physical directory.
     await engine.store.update((state) => {
@@ -118,14 +118,14 @@ describe('ACP task binding', () => {
     expect(next.worktree).toBe(task.worktree);
     expect(current.taskId).not.toBe(binding.taskId);
     expect(current.identity).not.toBe(binding.identity);
-    await expect(validateAcpBinding(engine, binding)).rejects.toThrow('请先为此任务创建工作区');
+    await expect(validateAcpBinding(engine, binding)).rejects.toThrow('The task workspace is not ready. Reopen the task.');
   });
 
   it('invalidates a changed branch and a recreated Git registration even when the task path and branch are restored', { timeout }, async () => {
     const task = await allocate();
     const binding = await resolveAcpBinding(engine, task.id);
     fixture.git('-C', task.worktree, 'switch', '-qc', 'another-task');
-    await expect(validateAcpBinding(engine, binding)).rejects.toThrow('任务工作区已变化');
+    await expect(validateAcpBinding(engine, binding)).rejects.toThrow('The task workspace changed');
     fixture.git('-C', task.worktree, 'switch', '-q', task.branch);
     await validateAcpBinding(engine, binding);
     const repository = fixture.git('-C', task.worktree, 'rev-parse', '--git-common-dir').trim();
@@ -135,7 +135,7 @@ describe('ACP task binding', () => {
     expect(replacement.workspace).toBe(binding.workspace);
     expect(replacement.branch).toBe(binding.branch);
     expect(replacement.identity).not.toBe(binding.identity);
-    await expect(validateAcpBinding(engine, binding)).rejects.toThrow('工作区已被替换');
+    await expect(validateAcpBinding(engine, binding)).rejects.toThrow('was replaced');
   });
 
   it('rejects a copied Git pointer to another task instead of binding that task private index and HEAD', { timeout }, async () => {
@@ -157,7 +157,7 @@ describe('ACP task binding', () => {
     };
     try {
       await replacePointer(await readFile(path.join(b.worktree, '.git')));
-      await expect(validateAcpBinding(engine, binding)).rejects.toThrow('任务工作区已变化');
+      await expect(validateAcpBinding(engine, binding)).rejects.toThrow('The task workspace changed');
     } finally {
       await replacePointer(original);
     }

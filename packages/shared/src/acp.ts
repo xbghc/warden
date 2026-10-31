@@ -109,21 +109,21 @@ export type AcpAction =
   | { type: 'set-mode'; modeId: string };
 
 export function parseAcpAction(value: unknown): AcpAction {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('对话操作格式错误');
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid conversation action.');
   const action = value as Record<string, unknown>;
   const text = (key: string, max = 100_000) => {
     const v = action[key];
-    if (typeof v !== 'string' || v.length > max) throw new Error('对话参数格式错误');
+    if (typeof v !== 'string' || v.length > max) throw new Error('Invalid conversation parameters.');
     return v;
   };
   const id = (key: string) => {
     const v = text(key, 500);
-    if (!v) throw new Error('对话标识不能为空');
+    if (!v) throw new Error('Conversation ID cannot be empty.');
     return v;
   };
   const sequence = (key: string) => {
     const value = action[key];
-    if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) throw new Error('草稿版本无效');
+    if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) throw new Error('Invalid draft version.');
     return value;
   };
   const draft = (): AcpDraftEdit => ({ text: text('text'), version: sequence('version'), revision: sequence('revision') });
@@ -131,7 +131,7 @@ export function parseAcpAction(value: unknown): AcpAction {
     case 'send':
       return { type: 'send', ...draft(), profileId: id('profileId') };
     case 'connect':
-      if (typeof action.resume !== 'boolean') throw new Error('会话恢复选项无效');
+      if (typeof action.resume !== 'boolean') throw new Error('Invalid session resume option.');
       return { type: 'connect', profileId: id('profileId'), resume: action.resume };
     case 'cancel':
     case 'disconnect':
@@ -152,6 +152,6 @@ export function parseAcpAction(value: unknown): AcpAction {
     case 'set-mode':
       return { type: 'set-mode', modeId: id('modeId') };
     default:
-      throw new Error('未知对话操作');
+      throw new Error('Unknown conversation action.');
   }
 }

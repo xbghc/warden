@@ -75,7 +75,7 @@ export const Interrupted: Story = {
     model: {
       ...model,
       status: 'error',
-      error: 'Agent 连接已断开。请检查 Agent 登录状态后继续会话。',
+      error: 'The agent disconnected. Check its authentication state before resuming.',
       record: {
         ...model.record,
         profileId: 'configured-agent',

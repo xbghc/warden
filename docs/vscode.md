@@ -70,8 +70,8 @@ ACP conversations remain separate task-bound panels and do not follow workspace-
 
 ## ACP agent configuration
 
-Open **设置 → ACP Agent** or **ACP 配置说明与示例** in a task conversation for the inline setup
-example. **配置 Agent** opens the matching VS Code setting; the guide stays collapsed until requested.
+Open **设置 → ACP Agent** or **ACP Setup Guide and Example** in a task conversation for the inline setup
+example. **Configure Agent** opens the matching VS Code setting; the guide stays collapsed until requested.
 
 Configure `warden.acpAgents` in VS Code User settings, or Remote User settings for SSH, WSL and
 containers. Executable profiles cannot come from workspace or folder settings. The executable must
@@ -109,21 +109,21 @@ commands can be inserted into the draft without sending it. Streamed thoughts, r
 and cost, live notices and context-compaction updates are displayed when the agent provides them.
 These reports do not change task state or run Git operations.
 At most two common selectors stay visible, favoring model and mode categories. Other controls live
-under **更多会话选项**; **任务与会话信息** holds the reported agent name, session title and usage.
+under **More Session Options**; **Task and Session Info** holds the reported agent name, session title and usage.
 Permission requests, live notices and connection errors remain directly visible.
 
-**Warden: 发送选区到任务对话** appends selected editor text to a chosen task's draft; it does not send
+**Warden: Add Selection to Task Chat** appends selected editor text to a chosen task's draft; it does not send
 the message. The excerpt includes its file or immutable review snapshot, line range and an unsaved
 content label when applicable. The original editor and native review remain unchanged.
 
 The panel retains its original task, workspace identity and repository. One extension window owns each
 task's executable connection; other tasks can run independently. Conversation records persist outside
-the source repository. After interruption, **继续会话** explicitly loads the original session when the
-agent supports it. Otherwise **新建会话** starts again while retaining previous history. Warden never
+the source repository. After interruption, **Resume Session** explicitly loads the original session when the
+agent supports it. Otherwise **New Session** starts again while retaining previous history. Warden never
 silently resends a prompt whose outcome is uncertain.
 
-**停止本轮** requests cancellation. **断开连接** closes Warden's connection and its agent process; an
-active connection can expose this as **结束 Agent 进程**. These actions do not promise that every command
+**Stop Turn** requests cancellation. **Disconnect** closes Warden's connection and its agent process; an
+active connection can expose this as **End Agent Process**. These actions do not promise that every command
 started by the agent has stopped. The agent owns its child commands and execution policies; coordinate
 ongoing work before Git mutations. A turn ending never connects preview, commits, delivers or rebases.
 Native review and its source/baseline pins remain unchanged.

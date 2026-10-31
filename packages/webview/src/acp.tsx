@@ -11,26 +11,26 @@ import { StatusBadge } from './components/ui/status-badge';
 
 type Props = { model: AcpModel; send(action: AcpAction): void };
 const statusLabels: Record<AcpStatus, string> = {
-  disconnected: '未连接',
-  connecting: '连接中',
-  connected: '已连接',
-  running: '响应中',
-  waiting_permission: '等待授权',
-  cancelling: '正在停止',
-  resetting: '正在新建会话',
-  error: '会话出错',
+  disconnected: 'Disconnected',
+  connecting: 'Connecting',
+  connected: 'Connected',
+  running: 'Responding',
+  waiting_permission: 'Permission Required',
+  cancelling: 'Stopping',
+  resetting: 'Starting New Session',
+  error: 'Session Error',
 };
 const toolLabels: Record<string, string> = {
-  pending: '待执行',
-  in_progress: '执行中',
-  completed: '已执行',
-  failed: '执行失败',
-  cancelled: '已取消',
-  history_truncated: '历史已截断',
-  '已响应 · end_turn': '已响应',
-  '已响应 · max_tokens': '达到本轮输出上限',
-  '已响应 · max_turn_requests': '达到本轮操作上限',
-  '已响应 · refusal': 'Agent 拒绝执行',
+  pending: 'Pending',
+  in_progress: 'Running',
+  completed: 'Completed',
+  failed: 'Failed',
+  cancelled: 'Cancelled',
+  history_truncated: 'History Truncated',
+  'Responded · end_turn': 'Responded',
+  'Responded · max_tokens': 'Turn output limit reached',
+  'Responded · max_turn_requests': 'Turn action limit reached',
+  'Responded · refusal': 'Agent declined the request',
 };
 
 export function AcpApp({ model, send }: Props) {
@@ -178,29 +178,29 @@ export function AcpApp({ model, send }: Props) {
             <StatusBadge status={status}>{statusLabels[status]}</StatusBadge>
           </span>
         </div>
-        <p className="metadata path" aria-label="工作区" title="工作区">
+        <p className="metadata path" aria-label="Workspace" title="Workspace">
           <FolderOpen aria-hidden="true" />
           <span>{binding.workspace}</span>
         </p>
         <details className="acp-context">
-          <summary>任务与会话信息</summary>
-          <p className="path">主目录：{binding.repository}</p>
-          <p className="path">任务分支：{binding.branch}</p>
-          {record.agentName && <p>当前 Agent：{record.agentName}</p>}
-          {controls?.title && <p className="acp-message-text">Agent 会话：{controls.title}</p>}
+          <summary>Task and Session Info</summary>
+          <p className="path">Primary folder: {binding.repository}</p>
+          <p className="path">Task branch: {binding.branch}</p>
+          {record.agentName && <p>Agent: {record.agentName}</p>}
+          {controls?.title && <p className="acp-message-text">Agent session: {controls.title}</p>}
           {controls?.usage && (
-            <p className="acp-usage" aria-label="会话用量">
-              上下文：{controls.usage.used.toLocaleString('zh-CN')} / {controls.usage.size.toLocaleString('zh-CN')} tokens
+            <p className="acp-usage" aria-label="Session Usage">
+              Context: {controls.usage.used.toLocaleString('en-US')} / {controls.usage.size.toLocaleString('en-US')} tokens
               {controls.usage.cost &&
-                ` · 累计费用：${controls.usage.cost.amount.toLocaleString('zh-CN', { maximumFractionDigits: 6 })} ${controls.usage.cost.currency}`}
+                ` · Total cost: ${controls.usage.cost.amount.toLocaleString('en-US', { maximumFractionDigits: 6 })} ${controls.usage.cost.currency}`}
             </p>
           )}
         </details>
         <div className="acp-profile">
           <div className="field">
-            <NativeSelect aria-label="Agent 配置" value={profileId} disabled={!canChooseProfile} onChange={(event) => setProfileId(event.target.value)}>
-              {!model.profiles.length && <NativeSelectOption value="">尚未配置 Agent</NativeSelectOption>}
-              {!!profileId && !availableProfile && <NativeSelectOption value={profileId}>配置已移除：{profileId}</NativeSelectOption>}
+            <NativeSelect aria-label="Agent Profile" value={profileId} disabled={!canChooseProfile} onChange={(event) => setProfileId(event.target.value)}>
+              {!model.profiles.length && <NativeSelectOption value="">No agent profiles configured</NativeSelectOption>}
+              {!!profileId && !availableProfile && <NativeSelectOption value={profileId}>Profile removed: {profileId}</NativeSelectOption>}
               {model.profiles.map((profile) => (
                 <NativeSelectOption key={profile.id} value={profile.id}>
                   {profile.label}
@@ -208,15 +208,15 @@ export function AcpApp({ model, send }: Props) {
               ))}
             </NativeSelect>
           </div>
-          <IconButton label="配置 Agent" size="icon-sm" onClick={() => send({ type: 'configure' })}>
+          <IconButton label="Configure Agent" size="icon-sm" onClick={() => send({ type: 'configure' })}>
             <Settings aria-hidden="true" />
           </IconButton>
-          <IconButton label="查看任务差异" size="icon-sm" onClick={() => send({ type: 'review' })}>
+          <IconButton label="View Task Diff" size="icon-sm" onClick={() => send({ type: 'review' })}>
             <FileDiff aria-hidden="true" />
           </IconButton>
         </div>
         {controls && (controls.configuring || (controls.configOptions !== undefined ? configOptions.length > 0 : controls.modes)) && (
-          <section className="acp-session-settings" aria-label="会话配置" aria-busy={controls.configuring}>
+          <section className="acp-session-settings" aria-label="Session Configuration" aria-busy={controls.configuring}>
             {controls.configOptions !== undefined ? (
               <>
                 {!!primaryOptions.length && (
@@ -228,7 +228,7 @@ export function AcpApp({ model, send }: Props) {
                 )}
                 {!!extraOptions.length && (
                   <details className="acp-extra-options">
-                    <summary>更多会话选项 · {extraOptions.length}</summary>
+                    <summary>More Session Options · {extraOptions.length}</summary>
                     <div className="acp-config-row">
                       {extraOptions.map((option) => (
                         <ConfigOption key={option.id} option={option} disabled={busy || sending || status !== 'connected'} send={send} />
@@ -240,9 +240,9 @@ export function AcpApp({ model, send }: Props) {
             ) : (
               controls.modes && (
                 <label className="field">
-                  会话模式
+                  Session Mode
                   <NativeSelect
-                    aria-label="会话模式"
+                    aria-label="Session Mode"
                     value={controls.modes!.currentModeId}
                     disabled={busy || sending || status !== 'connected'}
                     onChange={(event) => send({ type: 'set-mode', modeId: event.target.value })}
@@ -258,7 +258,7 @@ export function AcpApp({ model, send }: Props) {
             )}
             {controls.configuring && (
               <p className="muted" role="status">
-                正在应用配置…
+                Applying configuration…
               </p>
             )}
           </section>
@@ -271,21 +271,21 @@ export function AcpApp({ model, send }: Props) {
               disabled={!availableProfile || busy || sending || (needsRestore && !record.canLoad)}
               onClick={() => send({ type: 'connect', profileId, resume: needsRestore })}
             >
-              {needsRestore ? '继续会话' : '连接 Agent'}
+              {needsRestore ? 'Resume Session' : 'Connect Agent'}
             </Button>
           )}
           {hasConnection &&
             (busy || status === 'error' ? (
               <Button variant="secondary" size="sm" onClick={() => send({ type: 'disconnect' })}>
-                结束 Agent 进程
+                End Agent Process
               </Button>
             ) : (
-              <IconButton label="断开连接" size="icon-sm" onClick={() => send({ type: 'disconnect' })}>
+              <IconButton label="Disconnect" size="icon-sm" onClick={() => send({ type: 'disconnect' })}>
                 <Unplug aria-hidden="true" />
               </IconButton>
             ))}
           {(record.profileId || record.sessionId || record.messages.length > 0) && (
-            <IconButton label="新建会话" size="icon-sm" disabled={busy || sending} onClick={() => send({ type: 'new' })}>
+            <IconButton label="New Session" size="icon-sm" disabled={busy || sending} onClick={() => send({ type: 'new' })}>
               <MessageSquarePlus aria-hidden="true" />
             </IconButton>
           )}
@@ -295,17 +295,23 @@ export function AcpApp({ model, send }: Props) {
       <AcpSetup />
       {needsRestore && (
         <p className="notice">
-          {record.canLoad ? '已有会话尚未连接。请选择「继续会话」，或新建会话重新开始。' : '此 Agent 未声明支持恢复旧会话。可以查看记录，或新建会话继续。'}
+          {record.canLoad
+            ? 'A previous session is disconnected. Resume it or start a new session.'
+            : 'This agent does not advertise session restoration. View the saved history or start a new session.'}
         </p>
       )}
-      {record.interrupted && !busy && <p className="notice">上次执行已中断，现有文件改动会保留。请先查看会话和任务差异，再决定如何继续。</p>}
+      {record.interrupted && !busy && (
+        <p className="notice">
+          The previous turn was interrupted. Existing file changes are preserved. Review the conversation and task diff before continuing.
+        </p>
+      )}
       {model.error && (
         <div className="error" role="alert">
           {model.error}
         </div>
       )}
       {!!controls?.notices.length && (
-        <section aria-label="会话通知" className="acp-notices">
+        <section aria-label="Session Notices" className="acp-notices">
           {controls.notices.map((notice) => (
             <div className={notice.severity === 'error' ? 'error' : 'notice'} key={notice.id} role={notice.severity === 'error' ? 'alert' : 'status'}>
               <strong className="acp-message-text">{notice.title}</strong>
@@ -315,8 +321,8 @@ export function AcpApp({ model, send }: Props) {
         </section>
       )}
       {!!model.authMethods.length && (status === 'error' || !record.sessionId) && (
-        <section className="notice acp-auth" aria-label="Agent 登录">
-          <h2>登录 Agent</h2>
+        <section className="notice acp-auth" aria-label="Agent Authentication">
+          <h2>Authenticate Agent</h2>
           {model.authMethods.map((method) => (
             <div key={method.id}>
               {method.description && <p className="acp-message-text">{method.description}</p>}
@@ -332,7 +338,7 @@ export function AcpApp({ model, send }: Props) {
         className="acp-transcript"
         ref={transcript}
         role="log"
-        aria-label="任务对话记录"
+        aria-label="Conversation History"
         aria-live="polite"
         aria-relevant="additions"
         onScroll={() => {
@@ -344,13 +350,13 @@ export function AcpApp({ model, send }: Props) {
           record.messages.map((message) => <Message key={message.id} message={message} />)
         ) : (
           <div className="acp-empty muted">
-            <p>在此发送任务说明，Agent 将在上方工作区中执行。</p>
+            <p>Send task instructions here. The agent works in the workspace shown above.</p>
           </div>
         )}
       </div>
 
       {!!model.permissions.length && (
-        <section className="acp-permissions" aria-label="待处理的授权">
+        <section className="acp-permissions" aria-label="Pending Permissions">
           {model.permissions.map((permission) => (
             <Permission key={permission.id} permission={permission} task={binding.title} workspace={binding.workspace} status={status} send={send} />
           ))}
@@ -366,8 +372,8 @@ export function AcpApp({ model, send }: Props) {
       >
         {!!controls?.commands.length && (
           <details className="acp-commands">
-            <summary>Agent 命令</summary>
-            <p className="muted">选择命令后会加入消息草稿。</p>
+            <summary>Agent Commands</summary>
+            <p className="muted">Choosing a command adds it to your message draft.</p>
             <div className="acp-command-list">
               {controls.commands.map((command) => (
                 <div key={command.name}>
@@ -394,12 +400,12 @@ export function AcpApp({ model, send }: Props) {
         )}
         <div className="field">
           <Textarea
-            aria-label="消息"
+            aria-label="Message"
             ref={composer}
             value={draft}
             maxLength={100_000}
             rows={5}
-            placeholder="描述这项任务，或继续说明需要调整的地方…"
+            placeholder="Describe the task or explain what to change next…"
             onChange={(event) => updateDraft(event.target.value)}
             onBlur={flushDraft}
             onKeyDown={(event) => {
@@ -411,12 +417,12 @@ export function AcpApp({ model, send }: Props) {
           />
         </div>
         <div className="actions">
-          <Button type="submit" disabled={!canSend} title="发送（Ctrl / ⌘ + Enter）" aria-keyshortcuts="Control+Enter Meta+Enter">
-            {sending ? '正在发送…' : '发送'}
+          <Button type="submit" disabled={!canSend} title="Send (Ctrl / ⌘ + Enter)" aria-keyshortcuts="Control+Enter Meta+Enter">
+            {sending ? 'Sending…' : 'Send'}
           </Button>
           {canStop && (
             <IconButton
-              label={status === 'cancelling' ? '正在停止…' : '停止本轮'}
+              label={status === 'cancelling' ? 'Stopping…' : 'Stop Turn'}
               size="icon"
               disabled={status === 'cancelling'}
               onClick={() => send({ type: 'cancel' })}
@@ -493,20 +499,20 @@ function ConfigValues({ options }: { options: Extract<AcpConfigOption, { type: '
 }
 
 function Message({ message }: { message: AcpMessage }) {
-  const role = { user: '你', agent: 'Agent', thought: 'Agent 思考', tool: '操作记录', notice: '会话提示' }[message.role];
+  const role = { user: 'You', agent: 'Agent', thought: 'Agent Thoughts', tool: 'Activity', notice: 'Session Notice' }[message.role];
   const labels: Record<string, string> = message.compactionId
-    ? { in_progress: '正在压缩', completed: '压缩完成', failed: '压缩失败', cancelled: '压缩已取消' }
+    ? { in_progress: 'Compacting', completed: 'Compaction Complete', failed: 'Compaction Failed', cancelled: 'Compaction Cancelled' }
     : toolLabels;
   return (
     <article className={`acp-message acp-message-${message.role}`}>
       <div className="acp-message-heading">
         <strong>{role}</strong>
         {message.status && <span className="muted">{labels[message.status] ?? message.status}</span>}
-        {message.uncertain && <StatusBadge status="uncertain">结果未确认</StatusBadge>}
+        {message.uncertain && <StatusBadge status="uncertain">Outcome Unknown</StatusBadge>}
       </div>
       {message.role === 'thought' ? (
         <details className="acp-thought">
-          <summary>查看思考过程</summary>
+          <summary>Show Thoughts</summary>
           <div className="acp-message-text">{message.text}</div>
         </details>
       ) : (
@@ -531,9 +537,9 @@ function Permission({
 }) {
   return (
     <div className="notice acp-permission">
-      <h2>需要授权 · {permission.title}</h2>
-      <p>任务：{task}</p>
-      <p className="path">工作区：{workspace}</p>
+      <h2>Permission Required · {permission.title}</h2>
+      <p>Task: {task}</p>
+      <p className="path">Workspace: {workspace}</p>
       <div className="acp-message-text">{permission.detail}</div>
       <div className="actions">
         {permission.options.map((option) => (

@@ -436,7 +436,7 @@ exports.run = async () => {
     await conversations.handle(chat, { type: 'draft', ...typedDraft });
     await conversations.append(fixture.root, newTask.id, 'Selected source');
     assert.equal(chat.draft.text, 'Edited task\n\nSelected source');
-    await assert.rejects(conversations.handle(chat, { type: 'send', profileId: 'fixture', ...typedDraft }), /草稿已更新/);
+    await assert.rejects(conversations.handle(chat, { type: 'send', profileId: 'fixture', ...typedDraft }), /draft was updated/);
     assert.equal(chat.draft.text, 'Edited task\n\nSelected source', 'a stale send cannot erase appended context');
     const held = conversations.handle(chat, { type: 'send', profileId: 'fixture', ...edit('hold') });
     await eventually(async () => (await journal()).some((row) => row.method === 'session/prompt' && row.params.prompt[0].text === 'hold'));
@@ -466,7 +466,7 @@ exports.run = async () => {
     await conversations.show(fixture.root, newTask.id);
     assert(chat.panel, 'a replaced checkout still allows reopening the original connection to stop it');
     assert.equal(chat.session.snapshot().status, 'connected');
-    await assert.rejects(conversations.handle(chat, { type: 'send', profileId: 'fixture', ...edit('wrong allocation') }), /工作区已被替换/);
+    await assert.rejects(conversations.handle(chat, { type: 'send', profileId: 'fixture', ...edit('wrong allocation') }), /was replaced/);
     await conversations.handle(chat, { type: 'disconnect' });
     await conversations.show(fixture.root, newTask.id);
     const replacement = [...conversations.entries.values()].find((entry) => entry.binding.taskId === newTask.id);

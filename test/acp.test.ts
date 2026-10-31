@@ -200,7 +200,7 @@ describe('ACP subprocess conversations', () => {
   it('retires a timed-out configuration connection and drops its late updates before reconnecting', async () => {
     const f = await fixture('task', 'controls-timeout', 1_000);
     await f.session.connect(f.profile, { resume: false });
-    await expect(f.session.setConfigOption('model', 'deep')).rejects.toThrow('会话配置更新超时');
+    await expect(f.session.setConfigOption('model', 'deep')).rejects.toThrow('Session configuration timed out.');
     expect(f.storage.claimed).toBe(false);
     expect(f.session.snapshot().status).toBe('error');
     expect(f.session.snapshot().controls).toEqual({ commands: [], configuring: false, notices: [] });
@@ -266,11 +266,11 @@ describe('ACP subprocess conversations', () => {
     const messages = session.snapshot().record.messages;
     const first = messages.find((message) => message.compactionId === 'first')!;
     const second = messages.find((message) => message.compactionId === 'second')!;
-    expect(observed).toContain('上下文压缩\nDraft summary\nTemporary error');
-    expect(observed).toContain('上下文压缩\nReplacement');
-    expect(first).toMatchObject({ text: '上下文压缩\nFinal', status: 'completed', compaction: { summary: 'Final' } });
+    expect(observed).toContain('Context Compaction\nDraft summary\nTemporary error');
+    expect(observed).toContain('Context Compaction\nReplacement');
+    expect(first).toMatchObject({ text: 'Context Compaction\nFinal', status: 'completed', compaction: { summary: 'Final' } });
     expect(first.compaction?.error).toBeUndefined();
-    expect(second).toMatchObject({ text: '上下文压缩', status: 'cancelled', compaction: {} });
+    expect(second).toMatchObject({ text: 'Context Compaction', status: 'cancelled', compaction: {} });
     expect(messages.filter((message) => message.compactionId)).toHaveLength(2);
     expect(messages.indexOf(first)).toBeLessThan(messages.findIndex((message) => message.text === 'Between compactions'));
     expect(messages.indexOf(second)).toBeGreaterThan(messages.indexOf(first));
@@ -280,7 +280,7 @@ describe('ACP subprocess conversations', () => {
     await session.send('compaction-followup');
     expect(session.snapshot().record.messages.filter((message) => message.compactionId)).toHaveLength(2);
     expect(session.snapshot().record.messages.find((message) => message.compactionId === 'first')).toMatchObject({
-      text: '上下文压缩\nFinal\nFollow-up failure',
+      text: 'Context Compaction\nFinal\nFollow-up failure',
       status: 'failed',
       compaction: { summary: 'Final', error: 'Follow-up failure' },
     });
@@ -597,7 +597,7 @@ describe('ACP subprocess conversations', () => {
     try {
       expect(f.session.snapshot().record.sessionId).toBeUndefined();
       expect(f.session.snapshot().status).toBe('resetting');
-      await expect(f.session.connect(f.profile, { resume: false })).rejects.toThrow('连接操作尚未结束');
+      await expect(f.session.connect(f.profile, { resume: false })).rejects.toThrow('a connection attempt is still running');
     } finally {
       release();
       await reset;
@@ -657,7 +657,7 @@ describe('ACP subprocess conversations', () => {
     await f.session.disconnect();
 
     await expect(f.session.connect(f.profile, { resume: true })).rejects.toThrow();
-    await expect(f.session.authenticate('login')).rejects.toThrow('恢复会话超时');
+    await expect(f.session.authenticate('login')).rejects.toThrow('Resuming the session timed out');
     const timedOutPid = Number(await readFile(`${f.file}.delayed-load`, 'utf8'));
     expect(f.session.snapshot().status).toBe('error');
     expect(f.storage.claimed).toBe(false);
@@ -794,7 +794,7 @@ describe('ACP subprocess conversations', () => {
       f.storage.record = structuredClone(record);
     });
     await expect(f.session.send('completed response')).rejects.toThrow('disk full');
-    expect(f.session.snapshot()).toMatchObject({ status: 'error', error: expect.stringContaining('保存会话失败') });
+    expect(f.session.snapshot()).toMatchObject({ status: 'error', error: expect.stringContaining('Unable to save the session') });
     await f.session.disconnect();
     await f.session.connect(f.profile, { resume: true });
     await f.session.send('next prompt');
@@ -805,7 +805,7 @@ describe('ACP subprocess conversations', () => {
   it.each(['cancel', 'disconnect'] as const)('settles a pre-send %s exposed by a pending render while saving the prompt', async (action) => {
     const f = await fixture();
     vi.spyOn(f.storage, 'save').mockImplementation(async (record) => {
-      if (record.messages.some((message) => message.status === '发送中')) await new Promise((resolve) => setTimeout(resolve, 150));
+      if (record.messages.some((message) => message.status === 'Sending')) await new Promise((resolve) => setTimeout(resolve, 150));
       f.storage.record = structuredClone(record);
     });
     let renderTimer: ReturnType<typeof setTimeout> | undefined;
@@ -836,10 +836,10 @@ describe('ACP subprocess conversations', () => {
       status: action === 'cancel' ? 'connected' : 'disconnected',
       record: {
         interrupted: false,
-        messages: [{ role: 'user', text: 'cancel before delivery', status: '发送前已取消', uncertain: false }],
+        messages: [{ role: 'user', text: 'cancel before delivery', status: 'Cancelled before sending', uncertain: false }],
       },
     });
-    expect(f.storage.record?.messages[0]).toMatchObject({ status: '发送前已取消', uncertain: false });
+    expect(f.storage.record?.messages[0]).toMatchObject({ status: 'Cancelled before sending', uncertain: false });
     expect((await journal(f.file)).some((message) => message.method === 'session/prompt' || message.method === 'session/cancel')).toBe(false);
     if (action === 'cancel') {
       await f.session.send('next prompt');

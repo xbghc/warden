@@ -25,14 +25,14 @@ interface Owner {
 }
 
 function object(value: unknown, allowed: string[]): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('对象格式无效');
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid object format.');
   const record = value as Record<string, unknown>;
-  if (Object.keys(record).some((key) => !allowed.includes(key))) throw new Error('包含不支持的字段');
+  if (Object.keys(record).some((key) => !allowed.includes(key))) throw new Error('Unsupported fields found.');
   return record;
 }
 
 function string(value: unknown, max = 500, empty = false): string {
-  if (typeof value !== 'string' || value.length > max || (!empty && !value.length)) throw new Error('文本字段无效');
+  if (typeof value !== 'string' || value.length > max || (!empty && !value.length)) throw new Error('Invalid text field.');
   return value;
 }
 
@@ -41,13 +41,13 @@ function optionalString(value: unknown, max = 500): string | undefined {
 }
 
 function boolean(value: unknown): boolean {
-  if (typeof value !== 'boolean') throw new Error('布尔字段无效');
+  if (typeof value !== 'boolean') throw new Error('Invalid boolean field.');
   return value;
 }
 
 function timestamp(value: unknown): string {
   const text = string(value, 100);
-  if (!Number.isFinite(Date.parse(text))) throw new Error('时间字段无效');
+  if (!Number.isFinite(Date.parse(text))) throw new Error('Invalid timestamp field.');
   return text;
 }
 
@@ -55,7 +55,7 @@ function binding(value: unknown): AcpBinding {
   const raw = object(value, ['repository', 'taskId', 'title', 'workspace', 'branch', 'identity']);
   const repository = string(raw.repository, 32_768);
   const workspace = string(raw.workspace, 32_768);
-  if (!path.isAbsolute(repository) || !path.isAbsolute(workspace)) throw new Error('工作目录必须为绝对路径');
+  if (!path.isAbsolute(repository) || !path.isAbsolute(workspace)) throw new Error('Working directories must use absolute paths.');
   return {
     repository,
     taskId: string(raw.taskId),
@@ -72,7 +72,7 @@ function sameBinding(a: AcpBinding, b: AcpBinding): boolean {
 
 function message(value: unknown): AcpMessage {
   const raw = object(value, ['id', 'role', 'text', 'status', 'toolCallId', 'compactionId', 'compaction', 'uncertain']);
-  if (typeof raw.role !== 'string' || !['user', 'agent', 'thought', 'tool', 'notice'].includes(raw.role)) throw new Error('消息角色无效');
+  if (typeof raw.role !== 'string' || !['user', 'agent', 'thought', 'tool', 'notice'].includes(raw.role)) throw new Error('Invalid message role.');
   const compaction = raw.compaction === undefined ? undefined : object(raw.compaction, ['summary', 'error']);
   return {
     id: string(raw.id),
@@ -100,12 +100,12 @@ function record(value: unknown, expected: AcpBinding): AcpRecord {
     'updatedAt',
     'interrupted',
   ]);
-  if (raw.schemaVersion !== 1) throw new Error('不支持的会话记录版本');
+  if (raw.schemaVersion !== 1) throw new Error('Unsupported session record version.');
   const savedBinding = binding(raw.binding);
-  if (!sameBinding(savedBinding, expected)) throw new Error('会话记录与当前工作区身份不匹配');
-  if (!Array.isArray(raw.messages) || raw.messages.length > MAX_MESSAGES) throw new Error('消息数量超出限制');
+  if (!sameBinding(savedBinding, expected)) throw new Error('The session record does not match the current workspace identity.');
+  if (!Array.isArray(raw.messages) || raw.messages.length > MAX_MESSAGES) throw new Error('Too many messages.');
   const signature = optionalString(raw.profileSignature, 64);
-  if (signature !== undefined && !HASH.test(signature)) throw new Error('配置签名无效');
+  if (signature !== undefined && !HASH.test(signature)) throw new Error('Invalid profile signature.');
   return {
     schemaVersion: 1,
     id: string(raw.id),
@@ -123,10 +123,10 @@ function record(value: unknown, expected: AcpBinding): AcpRecord {
 
 function owner(value: unknown, taskKey: string): Owner {
   const raw = object(value, ['schemaVersion', 'taskKey', 'identity', 'hostname', 'pid', 'token', 'createdAt']);
-  if (raw.schemaVersion !== 1 || raw.taskKey !== taskKey) throw new Error('会话占用归属无效');
-  if (typeof raw.pid !== 'number' || !Number.isSafeInteger(raw.pid) || raw.pid < 1 || raw.pid > 2_147_483_647) throw new Error('进程标识无效');
+  if (raw.schemaVersion !== 1 || raw.taskKey !== taskKey) throw new Error('Invalid session owner.');
+  if (typeof raw.pid !== 'number' || !Number.isSafeInteger(raw.pid) || raw.pid < 1 || raw.pid > 2_147_483_647) throw new Error('Invalid process ID.');
   const token = string(raw.token, 36);
-  if (!TOKEN.test(token)) throw new Error('会话占用令牌无效');
+  if (!TOKEN.test(token)) throw new Error('Invalid session ownership token.');
   return {
     schemaVersion: 1,
     taskKey,
@@ -161,7 +161,7 @@ export class AcpSessionStorage implements AcpStorage {
 
   constructor(directory: string, expected: AcpBinding) {
     this.binding = binding(expected);
-    if (!path.isAbsolute(directory)) throw new Error('会话存储目录必须为绝对路径');
+    if (!path.isAbsolute(directory)) throw new Error('The session storage folder must use an absolute path.');
     this.directory = path.resolve(directory);
     this.assertOutside(this.directory);
     this.taskKey = digest([this.binding.repository, this.binding.taskId]);
@@ -204,10 +204,10 @@ export class AcpSessionStorage implements AcpStorage {
             if (error.code !== 'EEXIST') throw error;
           });
           const info = await lstat(directory);
-          if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('会话归档目录被重定向，请检查外部数据目录');
+          if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('The session archive folder was redirected. Inspect the external data folder.');
         }
         if ((await realpath(this.archiveDirectory)) !== path.join(await realpath(this.directory), 'archives', path.basename(this.archiveDirectory)))
-          throw new Error('会话归档目录被重定向，请检查外部数据目录');
+          throw new Error('The session archive folder was redirected. Inspect the external data folder.');
         await this.writeAtomic(path.join(this.archiveDirectory, `${Date.now()}-${randomUUID()}.json`), encoded);
       }),
     );
@@ -255,19 +255,19 @@ export class AcpSessionStorage implements AcpStorage {
 
   private assertOutside(directory: string) {
     if (within(path.resolve(this.binding.repository), directory) || within(path.resolve(this.binding.workspace), directory))
-      throw new Error('会话记录必须保存在主目录和任务工作区之外');
+      throw new Error('Session records must be stored outside the primary folder and task workspaces.');
   }
 
   private async prepareDirectory() {
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
     const info = await lstat(this.directory);
-    if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('会话存储目录已被替换，请检查外部数据目录');
+    if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('The session storage folder was replaced. Inspect the external data folder.');
     this.assertOutside(await realpath(this.directory));
   }
 
   private encode(value: AcpRecord): string {
     const encoded = `${JSON.stringify(record(value, this.binding))}\n`;
-    if (Buffer.byteLength(encoded) > MAX_RECORD_BYTES) throw new Error('会话记录超过 8 MiB，无法继续保存；请新建对话');
+    if (Buffer.byteLength(encoded) > MAX_RECORD_BYTES) throw new Error('The session record exceeds 8 MiB and cannot be saved. Start a new conversation.');
     return encoded;
   }
 
@@ -276,7 +276,9 @@ export class AcpSessionStorage implements AcpStorage {
       const raw = await this.readJson(this.file, MAX_RECORD_BYTES);
       return raw === undefined ? undefined : record(raw, this.binding);
     } catch (error) {
-      throw new Error(`会话记录无法读取，原文件已保留：${this.file}。请检查文件后重试。${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(
+        `Unable to read the session record. The original file has been preserved: ${this.file}. Inspect the file and retry.${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 
@@ -285,7 +287,9 @@ export class AcpSessionStorage implements AcpStorage {
       const raw = await this.readJson(this.ownerFile, MAX_CLAIM_BYTES);
       return raw === undefined ? undefined : owner(raw, this.taskKey);
     } catch (error) {
-      throw new Error(`会话占用记录无法验证，已保留：${this.ownerFile}。请检查文件后重试。${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(
+        `Unable to validate the session ownership record. It has been preserved: ${this.ownerFile}. Inspect the file and retry.${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 
@@ -295,11 +299,11 @@ export class AcpSessionStorage implements AcpStorage {
       return undefined;
     });
     if (!info) return undefined;
-    if (!info.isFile() || info.isSymbolicLink() || info.size > max) throw new Error('文件类型或大小无效');
+    if (!info.isFile() || info.isSymbolicLink() || info.size > max) throw new Error('Invalid file type or size.');
     const handle = await open(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
     try {
       const opened = await handle.stat();
-      if (!opened.isFile() || opened.size > max) throw new Error('文件类型或大小无效');
+      if (!opened.isFile() || opened.size > max) throw new Error('Invalid file type or size.');
       // Do not let a growing file bypass the stat limit or allocate an unbounded read buffer.
       const bytes = Buffer.allocUnsafe(max + 1);
       let length = 0;
@@ -308,7 +312,7 @@ export class AcpSessionStorage implements AcpStorage {
         if (!read.bytesRead) break;
         length += read.bytesRead;
       }
-      if (length > max) throw new Error('文件大小超出限制');
+      if (length > max) throw new Error('File size exceeds the limit.');
       return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, length))) as unknown;
     } finally {
       await handle.close();
@@ -358,6 +362,6 @@ export class AcpSessionStorage implements AcpStorage {
   }
 
   private busy(): never {
-    throw new Error('这个任务的对话已由另一个 Warden 窗口持有；请先在该窗口断开连接');
+    throw new Error('Another Warden window owns this task conversation. Disconnect it in that window first.');
   }
 }

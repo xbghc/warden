@@ -454,14 +454,14 @@ export class Workbench {
     const problem = source?.status === 'conflict' || source?.status === 'error';
     const activity = this.backend && this.conversations.activity(this.backend.root, task.id);
     const facts = [
-      activity === 'Agent 等待授权' ? activity : '',
+      activity === 'Agent: Permission Required' ? activity : '',
       task.integration?.error ? '提交失败' : '',
       problem ? connection : '',
       this.reviews.has(task.id) && !sameReview(this.reviews.get(task.id), taskReview(this.data!, task.id, this.checkouts?.worktrees ?? []))
         ? '审阅版本已变化'
         : '',
       task.worktree && task.workspaceHook?.status === 'failed' ? '初始化失败' : '',
-      activity !== 'Agent 等待授权' ? activity : '',
+      activity !== 'Agent: Permission Required' ? activity : '',
       task.status === 'integrating' ? '待提交' : '',
       !problem ? connection : '',
       task.agent,

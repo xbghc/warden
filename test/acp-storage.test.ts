@@ -81,7 +81,7 @@ describe('external ACP session storage', () => {
     const saved = JSON.parse(await readFile(storage.file, 'utf8'));
     saved.messages.at(-1).compaction.summary = { command: 'untrusted' };
     await writeFile(storage.file, JSON.stringify(saved));
-    await expect(storage.load()).rejects.toThrow('原文件已保留');
+    await expect(storage.load()).rejects.toThrow('The original file has been preserved');
   });
 
   it('persists interrupted conversation data across instances without writing code directories', async () => {
@@ -216,8 +216,8 @@ describe('external ACP session storage', () => {
     await storage.save(conversation());
     for (const contents of ['{"schemaVersion":1', JSON.stringify({ ...conversation(), schemaVersion: 2 })]) {
       await writeFile(storage.file, contents);
-      await expect(storage.load()).rejects.toThrow('原文件已保留');
-      await expect(storage.save(conversation())).rejects.toThrow('原文件已保留');
+      await expect(storage.load()).rejects.toThrow('The original file has been preserved');
+      await expect(storage.save(conversation())).rejects.toThrow('The original file has been preserved');
       expect(await readFile(storage.file, 'utf8')).toBe(contents);
     }
   });
@@ -227,12 +227,12 @@ describe('external ACP session storage', () => {
     const record = conversation();
     await storage.save(record);
     const original = await readFile(storage.file);
-    await expect(storage.save({ ...record, command: 'agent', env: { PROVIDER_TOKEN: 'must-not-persist' } } as AcpRecord)).rejects.toThrow('不支持的字段');
+    await expect(storage.save({ ...record, command: 'agent', env: { PROVIDER_TOKEN: 'must-not-persist' } } as AcpRecord)).rejects.toThrow('Unsupported fields');
     await expect(storage.save({ ...record, messages: [{ id: 'oversize', role: 'agent', text: 'x'.repeat(1024 * 1024 + 1) }] })).rejects.toThrow();
     expect(await readFile(storage.file)).toEqual(original);
     const huge = Buffer.alloc(8 * 1024 * 1024 + 1, 32);
     await writeFile(storage.file, huge);
-    await expect(storage.load()).rejects.toThrow('大小无效');
+    await expect(storage.load()).rejects.toThrow('Invalid file type or size');
     expect((await readFile(storage.file)).length).toBe(huge.length);
   });
 
@@ -241,12 +241,14 @@ describe('external ACP session storage', () => {
     const record = conversation();
     await storage.save(record);
     expect((await new AcpSessionStorage(directory, { ...binding, title: 'Renamed task' }).load())?.sessionId).toBe(record.sessionId);
-    await expect(new AcpSessionStorage(directory, { ...binding, workspace: path.join(root, 'replacement') }).load()).rejects.toThrow('身份不匹配');
+    await expect(new AcpSessionStorage(directory, { ...binding, workspace: path.join(root, 'replacement') }).load()).rejects.toThrow(
+      'does not match the current workspace identity',
+    );
     const replacement = new AcpSessionStorage(directory, { ...binding, identity: 'replacement-checkout' });
     expect(replacement.file).not.toBe(storage.file);
     expect(await replacement.load()).toBeUndefined();
     const release = await storage.claim();
-    await expect(replacement.claim()).rejects.toThrow('另一个 Warden 窗口');
+    await expect(replacement.claim()).rejects.toThrow('Another Warden window');
     await release();
   });
 
@@ -258,7 +260,7 @@ describe('external ACP session storage', () => {
     expect(claims.filter((result) => result.status === 'rejected')).toHaveLength(1);
     for (const result of claims) if (result.status === 'fulfilled') await result.value();
     const release = await second.claim();
-    await expect(second.claim()).rejects.toThrow('另一个 Warden 窗口');
+    await expect(second.claim()).rejects.toThrow('Another Warden window');
     await release();
     await release();
   });
@@ -320,7 +322,7 @@ describe('external ACP session storage', () => {
       expect(claims.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
       expect(claims.filter((result) => result.status === 'rejected')).toHaveLength(1);
       const rejected = claims.find((result) => result.status === 'rejected') as PromiseRejectedResult;
-      expect(rejected.reason).toHaveProperty('message', expect.stringContaining('另一个 Warden 窗口'));
+      expect(rejected.reason).toHaveProperty('message', expect.stringContaining('Another Warden window'));
     } finally {
       bothReclaiming.resolve();
       firstReading.resolve();
@@ -344,7 +346,7 @@ describe('external ACP session storage', () => {
         await release();
         console.log('acquired');
       } catch (error) {
-        if (!error.message.includes('另一个 Warden 窗口')) throw error;
+        if (!error.message.includes('Another Warden window')) throw error;
         console.log('busy');
       }
     `;
@@ -378,8 +380,8 @@ describe('external ACP session storage', () => {
     const record = conversation();
     await first.save(record);
     expect(await second.load()).toEqual(record);
-    await expect(second.save({ ...record, profileId: 'another-profile' })).rejects.toThrow('另一个 Warden 窗口');
-    await expect(second.archive(record)).rejects.toThrow('另一个 Warden 窗口');
+    await expect(second.save({ ...record, profileId: 'another-profile' })).rejects.toThrow('Another Warden window');
+    await expect(second.archive(record)).rejects.toThrow('Another Warden window');
     expect(await first.load()).toEqual(record);
     await release();
   });
@@ -395,7 +397,7 @@ describe('external ACP session storage', () => {
     const current = await readFile(second.ownerFile);
     await staleRelease();
     expect(await readFile(second.ownerFile)).toEqual(current);
-    await expect(first.claim()).rejects.toThrow('另一个 Warden 窗口');
+    await expect(first.claim()).rejects.toThrow('Another Warden window');
     await release();
   });
 
@@ -405,14 +407,14 @@ describe('external ACP session storage', () => {
     await first.claim();
     const original = await savedOwner(first);
     await writeFile(first.ownerFile, JSON.stringify({ ...original, createdAt: '2000-01-01T00:00:00.000Z' }));
-    await expect(second.claim()).rejects.toThrow('另一个 Warden 窗口');
+    await expect(second.claim()).rejects.toThrow('Another Warden window');
     await writeFile(first.ownerFile, JSON.stringify({ ...original, hostname: `${os.hostname()}-other-host` }));
-    await expect(second.claim()).rejects.toThrow('另一个 Warden 窗口');
+    await expect(second.claim()).rejects.toThrow('Another Warden window');
     await writeFile(first.ownerFile, JSON.stringify(original));
     vi.spyOn(process, 'kill').mockImplementation(() => {
       throw Object.assign(new Error('Permission denied'), { code: 'EPERM' });
     });
-    await expect(second.claim()).rejects.toThrow('另一个 Warden 窗口');
+    await expect(second.claim()).rejects.toThrow('Another Warden window');
     expect(await savedOwner(first)).toEqual(original);
   });
 
@@ -421,20 +423,20 @@ describe('external ACP session storage', () => {
     const release = await storage.claim();
     const broken = '{"pid":';
     await writeFile(storage.ownerFile, broken);
-    await expect(new AcpSessionStorage(directory, binding).claim()).rejects.toThrow('占用记录无法验证');
-    await expect(storage.save(conversation())).rejects.toThrow('占用记录无法验证');
-    await expect(release()).rejects.toThrow('占用记录无法验证');
+    await expect(new AcpSessionStorage(directory, binding).claim()).rejects.toThrow('Unable to validate the session ownership record');
+    await expect(storage.save(conversation())).rejects.toThrow('Unable to validate the session ownership record');
+    await expect(release()).rejects.toThrow('Unable to validate the session ownership record');
     expect(await readFile(storage.ownerFile, 'utf8')).toBe(broken);
   });
 
   it('refuses storage inside code roots and archive directory redirection', async () => {
-    expect(() => new AcpSessionStorage(path.join(binding.repository, 'acp'), binding)).toThrow('工作区之外');
-    expect(() => new AcpSessionStorage(path.join(binding.workspace, 'acp'), binding)).toThrow('工作区之外');
+    expect(() => new AcpSessionStorage(path.join(binding.repository, 'acp'), binding)).toThrow('outside the primary folder and task workspaces');
+    expect(() => new AcpSessionStorage(path.join(binding.workspace, 'acp'), binding)).toThrow('outside the primary folder and task workspaces');
     const storage = new AcpSessionStorage(directory, binding);
     const record = conversation();
     await storage.save(record);
     await symlink(binding.repository, path.join(directory, 'archives'), process.platform === 'win32' ? 'junction' : 'dir');
-    await expect(storage.archive(record)).rejects.toThrow('重定向');
+    await expect(storage.archive(record)).rejects.toThrow('redirected');
     expect(await readdir(binding.repository)).toEqual([]);
     expect(await storage.load()).toEqual(record);
   });

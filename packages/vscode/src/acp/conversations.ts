@@ -56,7 +56,7 @@ export class AcpConversations {
   }
   private profile(id: string) {
     const profile = this.profiles().find((row) => row.id === id);
-    if (!profile) throw new Error('此 Agent 配置已不存在，请在用户设置中配置 warden.acpAgents');
+    if (!profile) throw new Error('This agent profile no longer exists. Configure warden.acpAgents in User settings.');
     return profile;
   }
   private engine(repository: string) {
@@ -65,7 +65,7 @@ export class AcpConversations {
       opening = Engine.open(repository).then(async (engine) => {
         if (this.closed) {
           await engine.close();
-          throw new Error('Warden 会话已关闭');
+          throw new Error('The Warden session is closed.');
         }
         await engine.start(async () => {}, this.report);
         return engine;
@@ -79,10 +79,10 @@ export class AcpConversations {
     return [
       `# ${task.title}`,
       task.body,
-      task.acceptance && `验收说明：${task.acceptance}`,
-      `任务工作区：${task.worktree}`,
-      `主开发分支：${task.developmentBranch}`,
-      '在此任务工作区修改和提交代码。主目录由用户编辑，独立预览目录由 Warden 生成。用户会完整审阅后交付。',
+      task.acceptance && `Acceptance criteria: ${task.acceptance}`,
+      `Task workspace: ${task.worktree}`,
+      `Base branch: ${task.developmentBranch}`,
+      'Edit and commit code in this task workspace. The user edits the primary folder; Warden generates the separate preview folder. The user reviews the full changes before committing them to the base branch.',
     ]
       .filter(Boolean)
       .join('\n\n');
@@ -107,7 +107,7 @@ export class AcpConversations {
       binding,
       storage: new AcpSessionStorage(path.join(path.dirname(engine.store.file), 'acp'), binding),
       validate: async () => {
-        if (!vscode.workspace.isTrusted || this.closed) throw new Error('当前工作区不可执行 Agent 操作');
+        if (!vscode.workspace.isTrusted || this.closed) throw new Error('Agent actions are unavailable for this workspace.');
         await validateAcpBinding(engine, binding);
       },
       changed: () => {
@@ -118,7 +118,7 @@ export class AcpConversations {
     await entry.session.initialize();
     if (this.closed) {
       await entry.session.close();
-      throw new Error('Warden 会话已关闭');
+      throw new Error('The Warden session is closed.');
     }
     if (!entry.draft.text && !entry.session.snapshot().record.messages.length) {
       const task = (await engine.execute('workflow.get', undefined)).workflow?.changes.find((row) => row.id === taskId);
@@ -129,7 +129,7 @@ export class AcpConversations {
   }
 
   async show(repository: string, taskId: string) {
-    if (this.closed || !vscode.workspace.isTrusted) throw new Error('请先信任并打开工作区');
+    if (this.closed || !vscode.workspace.isTrusted) throw new Error('Open and trust a workspace first.');
     const key = this.key(repository, taskId);
     let opening = this.opening.get(key);
     if (!opening) {
@@ -146,7 +146,7 @@ export class AcpConversations {
           }
           if (binding.identity === previous.binding.identity) return previous;
           if (previous.session.snapshot().status !== 'disconnected') {
-            previous.error = '任务工作区已被替换，请先断开原会话，再重新打开任务对话';
+            previous.error = 'The task workspace was replaced. Disconnect the original session, then reopen the task conversation.';
             return previous;
           }
           // Old transcripts remain under their original allocation identity.
@@ -166,7 +166,7 @@ export class AcpConversations {
     } finally {
       if (this.opening.get(key) === opening) this.opening.delete(key);
     }
-    if (this.closed) throw new Error('Warden 会话已关闭');
+    if (this.closed) throw new Error('The Warden session is closed.');
     if (entry.panel) {
       entry.panel.reveal(vscode.ViewColumn.Beside);
       this.render(entry);
@@ -184,19 +184,19 @@ export class AcpConversations {
     const nonce = randomBytes(24).toString('base64');
     const script = panel.webview.asWebviewUri(vscode.Uri.joinPath(root, 'index.js'));
     const style = panel.webview.asWebviewUri(vscode.Uri.joinPath(root, 'index.css'));
-    panel.webview.html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${panel.webview.cspSource}; script-src 'nonce-${nonce}';"><link rel="stylesheet" href="${style}"><title>Agent 对话</title></head><body><div id="root"></div><script nonce="${nonce}" src="${script}"></script></body></html>`;
+    panel.webview.html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${panel.webview.cspSource}; script-src 'nonce-${nonce}';"><link rel="stylesheet" href="${style}"><title>Agent Chat</title></head><body><div id="root"></div><script nonce="${nonce}" src="${script}"></script></body></html>`;
     const current = entry;
     const panelId = entry.panelId;
     const listener = panel.webview.onDidReceiveMessage(async (message: unknown) => {
       if (current.panel !== panel || current.panelId !== panelId || this.closed) return;
       try {
-        if (!message || typeof message !== 'object' || Array.isArray(message)) throw new Error('对话界面消息格式错误');
+        if (!message || typeof message !== 'object' || Array.isArray(message)) throw new Error('Invalid conversation view message.');
         const envelope = message as Record<string, unknown>;
         if (envelope.type === 'ready') {
           this.render(current);
           return;
         }
-        if (envelope.type !== 'acp-action' || envelope.panelId !== panelId) throw new Error('对话界面已变化，请重新打开');
+        if (envelope.type !== 'acp-action' || envelope.panelId !== panelId) throw new Error('The conversation view changed. Reopen it.');
         await this.handle(current, parseAcpAction(envelope.action));
       } catch (error) {
         current.error = error instanceof Error ? error.message : String(error);
@@ -249,12 +249,12 @@ export class AcpConversations {
       await vscode.commands.executeCommand('workbench.action.openSettings', 'warden.acpAgents');
       return;
     }
-    if (!vscode.workspace.isTrusted) throw new Error('请先信任此工作区');
+    if (!vscode.workspace.isTrusted) throw new Error('Trust this workspace first.');
     entry.error = undefined;
     const session = entry.session;
     switch (action.type) {
       case 'send': {
-        if (entry.sending || !action.text.trim()) throw new Error('请等待当前消息结束，或先停止本轮');
+        if (entry.sending || !action.text.trim()) throw new Error('Wait for the current response or stop this turn first.');
         const submission = entry.draft.begin(action);
         entry.sending = true;
         this.saveDraft(entry);
@@ -262,9 +262,9 @@ export class AcpConversations {
         try {
           const current = session.snapshot();
           if (current.status !== 'connected') {
-            if (current.record.sessionId) throw new Error('请先继续原会话，或明确新建会话');
+            if (current.record.sessionId) throw new Error('Resume the original session or explicitly start a new session first.');
             await session.connect(this.profile(action.profileId), { resume: false });
-          } else if (current.record.profileId !== action.profileId) throw new Error('更换 Agent 前请断开并新建会话');
+          } else if (current.record.profileId !== action.profileId) throw new Error('Disconnect and start a new session before changing agents.');
           await session.send(submission.text);
           const record = session.snapshot().record;
           if (!record.interrupted && entry.draft.complete(submission.mutation)) this.saveDraft(entry);
@@ -284,7 +284,7 @@ export class AcpConversations {
         break;
       case 'new':
         if (entry.sending || ['connecting', 'running', 'waiting_permission', 'cancelling', 'resetting'].includes(session.snapshot().status))
-          throw new Error('请先停止并断开当前会话');
+          throw new Error('Stop and disconnect the current session first.');
         await session.disconnect();
         await session.newConversation();
         break;
@@ -312,13 +312,13 @@ export class AcpConversations {
   activity(repository: string, taskId: string) {
     const status = this.entries.get(this.key(repository, taskId))?.session.snapshot().status;
     return status === 'waiting_permission'
-      ? 'Agent 等待授权'
+      ? 'Agent: Permission Required'
       : status === 'running'
-        ? 'Agent 响应中'
+        ? 'Agent: Responding'
         : status === 'connecting'
-          ? 'Agent 连接中'
+          ? 'Agent: Connecting'
           : status === 'cancelling'
-            ? 'Agent 正在停止'
+            ? 'Agent: Stopping'
             : undefined;
   }
 

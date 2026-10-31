@@ -2,7 +2,7 @@ const example = `{
   "warden.acpAgents": [
     {
       "id": "my-agent",
-      "label": "我的 Agent",
+      "label": "My Agent",
       "command": "/absolute/path/to/acp-agent",
       "args": []
     }
@@ -12,19 +12,20 @@ const example = `{
 export function AcpSetup() {
   return (
     <details className="acp-setup">
-      <summary>ACP 配置说明与示例</summary>
-      <p>先安装支持 ACP v1（stdio）的 Agent 或适配器，并按其文档完成登录。</p>
+      <summary>ACP Setup Guide and Example</summary>
+      <p>Install an agent or adapter supporting ACP v1 over stdio, then authenticate as described in its documentation.</p>
       <p>
-        打开 Agent 设置，在「用户」设置中编辑 <code>warden.acpAgents</code>；SSH、WSL 或容器使用「远程」用户设置。工作区设置中的配置不生效。
+        Open Agent settings and edit <code>warden.acpAgents</code> in User settings, or Remote User settings for SSH, WSL or containers. Workspace settings are
+        ignored.
       </p>
       <pre>
         <code>{example}</code>
       </pre>
       <p>
-        将 <code>command</code> 替换为工作区所在主机上的程序路径，<code>args</code> 按 Agent 文档填写，每个参数单独一个字符串。可选的 <code>env</code>{' '}
-        用于设置环境变量。
+        Replace <code>command</code> with the executable path on the workspace host. Set <code>args</code> according to the agent documentation, using one
+        string per argument. Optional <code>env</code> entries set environment variables.
       </p>
-      <p>保存后，在任务的「Agent 对话」中选择 Agent，再点击「连接 Agent」。</p>
+      <p>Save the settings, select an agent in the task conversation, then choose Connect Agent.</p>
     </details>
   );
 }

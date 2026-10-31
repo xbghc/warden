@@ -55,7 +55,7 @@ prompt at a time while other tasks, diff review and preview remain usable.
 The client includes text prompts, streamed agent text and thoughts, reported tool activity, user
 permission requests, authentication, cancellation, disconnect, new sessions and supported session loading.
 It does not automatically attach editor buffers, diagnostics, primary code or preview output.
-Users can paste chosen context or use **Warden: 发送选区到任务对话** to append selected editor text to
+Users can paste chosen context or use **Warden: Add Selection to Task Chat** to append selected editor text to
 the task's draft without sending it. The excerpt identifies its file or immutable review snapshot,
 line range and any unsaved content. Rich context attachments, MCP forwarding
 and client tool execution are outside this scope.
@@ -114,9 +114,9 @@ the same task. It protects connection ownership only: it is not a lock on task f
 Git delivery or rebase. A live owner cannot be displaced merely because its timestamp is old.
 Another window can inspect saved history and ordinary Git state without taking that connection.
 
-**停止本轮** sends `session/cancel` and cancels pending permission requests. Warden continues to
-handle the original prompt response. **断开连接** closes the owned connection and its agent process;
-an active connection may expose this as **结束 Agent 进程**. Neither a cancelled response, a completed
+**Stop Turn** sends `session/cancel` and cancels pending permission requests. Warden continues to
+handle the original prompt response. **Disconnect** closes the owned connection and its agent process;
+an active connection may expose this as **End Agent Process**. Neither a cancelled response, a completed
 prompt nor an exited stdio process proves that all agent-started background commands have stopped.
 Warden does not supervise those commands or kill unrelated terminals and preview servers.
 Stopping never resets, cleans or rolls back task files.
@@ -128,13 +128,13 @@ possibly delivered prompt.
 Record replacement remains atomic while bounded retries tolerate brief filesystem contention.
 If replacement keeps failing, the previous record is retained and the save error remains visible.
 
-On explicit **继续会话**, revalidate the binding and profile. If the same agent supports
+On explicit **Resume Session**, revalidate the binding and profile. If the same agent supports
 `session/load`, load its saved session and treat replayed updates as display history, not tool
 execution or new prompts. Preserve the prior local record when loading fails. If loading is
-unsupported, offer **新建会话** while retaining the previous record; local transcript storage is not
+unsupported, offer **New Session** while retaining the previous record; local transcript storage is not
 a promise of restored model state. Changing agents likewise starts an explicit new conversation.
 While the new record is saved and its temporary ownership claim is released, the panel shows
-**正在新建会话** and disables profile selection, connection and sending. It becomes disconnected
+**Starting New Session** and disables profile selection, connection and sending. It becomes disconnected
 and available only after reset cleanup finishes, so a newly visible record cannot race that cleanup.
 
 ## Git and preview remain user-operated

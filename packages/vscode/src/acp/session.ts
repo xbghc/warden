@@ -27,7 +27,7 @@ const MAX_HISTORY = 2_000_000;
 const MAX_HISTORY_BYTES = 6 * 1024 * 1024;
 const MAX_PERMISSION = 32;
 const STOP_REASONS = new Set(['end_turn', 'max_tokens', 'max_turn_requests', 'refusal', 'cancelled']);
-const TRUNCATION = '\n[内容已截断]';
+const TRUNCATION = '\n[Content truncated]';
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const text = (value: string, limit = MAX_TEXT) =>
   value.length > limit ? value.slice(0, Math.max(0, limit - TRUNCATION.length)) + TRUNCATION.slice(0, limit) : value;
@@ -117,7 +117,7 @@ export class AcpSession {
           name: method.name,
           description:
             'type' in method && method.type === 'terminal'
-              ? `${method.description ?? ''} 请先通过 Agent 自己的终端登录；Warden 不提供终端认证。`.trim()
+              ? `${method.description ?? ''} Log in using the agent's own terminal first; Warden does not provide terminal authentication.`.trim()
               : (method.description ?? undefined),
         })),
       controls: this.controls,
@@ -134,7 +134,7 @@ export class AcpSession {
             (key) => saved.binding[key as keyof typeof binding] !== binding[key as keyof typeof binding],
           )
         )
-          throw new Error('保存的会话不属于当前任务工作区，请重新打开任务对话');
+          throw new Error('The saved session does not belong to this task workspace. Reopen the task conversation.');
         this.record = { ...saved, binding: { ...binding } };
         this.history = { messages: this.record.messages };
         this.boundHistory(this.history);
@@ -183,7 +183,12 @@ export class AcpSession {
       trimmed = true;
     }
     if (trimmed && history.messages[0]?.status !== 'history_truncated')
-      history.messages.unshift({ id: randomUUID(), role: 'notice', text: '较早的本地对话已超出保存上限，当前仅保留最近内容。', status: 'history_truncated' });
+      history.messages.unshift({
+        id: randomUUID(),
+        role: 'notice',
+        text: 'Earlier conversation history exceeded the storage limit. Only recent content has been retained.',
+        status: 'history_truncated',
+      });
   }
 
   private persist(): Promise<void> {
@@ -205,7 +210,7 @@ export class AcpSession {
     this.flush = setTimeout(() => {
       this.flush = undefined;
       void this.persist().catch((error) => {
-        this.error = `无法保存本地会话：${message(error)}`;
+        this.error = `Unable to save the local session: ${message(error)}`;
         this.notify();
       });
     }, 100);
@@ -223,7 +228,7 @@ export class AcpSession {
       profile.args.some((arg) => typeof arg !== 'string' || arg.includes('\0')) ||
       Object.entries(profile.env ?? {}).some(([key, value]) => !key || /[=\0]/.test(key) || typeof value !== 'string' || value.includes('\0'))
     )
-      throw new Error('Agent 配置无效，请检查可执行文件、参数和环境变量');
+      throw new Error('Invalid agent profile. Check its executable, arguments and environment variables.');
   }
 
   private signature(profile: AcpProfile) {
@@ -234,8 +239,9 @@ export class AcpSession {
   }
 
   async connect(profile: AcpProfile, options: { resume: boolean }): Promise<void> {
-    if (this.disposed) throw new Error('此任务对话已关闭');
-    if (this.connecting || this.runtime || this.disconnecting || this.resetting) throw new Error('Agent 已连接或连接操作尚未结束');
+    if (this.disposed) throw new Error('This task conversation is closed.');
+    if (this.connecting || this.runtime || this.disconnecting || this.resetting)
+      throw new Error('The agent is already connected or a connection attempt is still running.');
     this.validateProfile(profile);
     this.connecting = true;
     const generation = ++this.generation;
@@ -245,18 +251,19 @@ export class AcpSession {
       await this.initialize();
       await this.options.validate();
       const signature = this.signature(profile);
-      if (this.record.profileId && this.record.profileId !== profile.id) throw new Error('切换 Agent 前请显式新建会话，旧记录将保留');
+      if (this.record.profileId && this.record.profileId !== profile.id)
+        throw new Error('Start a new session before switching agents. The previous record will be preserved.');
       if (options.resume) {
-        if (!this.record.sessionId) throw new Error('没有可恢复的 Agent 会话，请新建会话');
+        if (!this.record.sessionId) throw new Error('No agent session is available to resume. Start a new session.');
         if (this.record.profileId !== profile.id || this.record.profileSignature !== signature)
-          throw new Error('Agent 配置已变化，请使用原配置继续会话，或显式新建会话');
-      } else if (this.record.sessionId) throw new Error('已有历史会话，请选择继续会话或先新建会话');
+          throw new Error('The agent profile changed. Resume with the original profile or start a new session.');
+      } else if (this.record.sessionId) throw new Error('A previous session exists. Resume it or start a new session first.');
       this.status = 'connecting';
       this.error = undefined;
       this.controls = emptyControls();
       this.notify();
       release = await this.options.storage.claim();
-      if (generation !== this.generation || this.disposed) throw new Error('连接已取消');
+      if (generation !== this.generation || this.disposed) throw new Error('Connection cancelled.');
       // Another window may have advanced the saved conversation while this panel was open.
       // Claim first, then reload, so connecting can never overwrite its more recent history.
       const latest = await this.options.storage.load();
@@ -268,16 +275,17 @@ export class AcpSession {
             (key) => latest.binding[key as keyof typeof binding] !== binding[key as keyof typeof binding],
           )
         )
-          throw new Error('保存的会话归属已变化，请重新打开任务对话');
+          throw new Error('Saved session ownership changed. Reopen the task conversation.');
         this.record = { ...latest, binding: { ...binding } };
         this.history = { messages: this.record.messages };
-        if (latest.id !== previousId) throw new Error('另一窗口已更换会话，已刷新本地记录；请重新选择继续或新建会话');
+        if (latest.id !== previousId)
+          throw new Error('Another window replaced the session. Local history was refreshed; choose whether to resume or start a new session.');
         if (options.resume && (this.record.profileId !== profile.id || this.record.profileSignature !== signature || !this.record.sessionId))
-          throw new Error('保存的 Agent 会话已变化，请重新选择继续或新建会话');
-        if (!options.resume && this.record.sessionId) throw new Error('另一窗口已建立会话，请显式继续会话或新建会话');
+          throw new Error('The saved agent session changed. Choose whether to resume or start a new session.');
+        if (!options.resume && this.record.sessionId) throw new Error('Another window created a session. Resume it explicitly or start a new session.');
       }
       await this.options.validate();
-      if (generation !== this.generation || this.disposed) throw new Error('连接已取消');
+      if (generation !== this.generation || this.disposed) throw new Error('Connection cancelled.');
       this.record.profileId = profile.id;
       this.record.profileSignature = signature;
       this.ownsClaim = true;
@@ -294,10 +302,11 @@ export class AcpSession {
             session: { configOptions: { boolean: {} }, notices: {}, compaction: {} },
           },
         }),
-        'Agent 初始化超时，请检查该命令是否支持 ACP，然后重新连接',
+        'Agent initialization timed out. Check that the command supports ACP, then reconnect.',
       );
-      if (!this.current(runtime)) throw new Error('连接已结束');
-      if (!object(initialized) || initialized.protocolVersion !== PROTOCOL_VERSION) throw new Error('Agent 返回了无效或不兼容的 ACP 协议版本');
+      if (!this.current(runtime)) throw new Error('Connection closed.');
+      if (!object(initialized) || initialized.protocolVersion !== PROTOCOL_VERSION)
+        throw new Error('The agent returned an invalid or incompatible ACP protocol version.');
       runtime.initialized = true;
       this.authMethods = Array.isArray(initialized.authMethods)
         ? initialized.authMethods
@@ -322,7 +331,9 @@ export class AcpSession {
     } catch (error) {
       if (generation === this.generation) {
         this.status = 'error';
-        this.error = authRequired(error) ? 'Agent 需要登录。请选择其支持的认证方式，或在外部完成登录后重新连接。' : `无法连接 Agent：${message(error)}`;
+        this.error = authRequired(error)
+          ? 'The agent requires authentication. Choose a supported method, or log in externally and reconnect.'
+          : `Unable to connect to the agent: ${message(error)}`;
         this.notify();
       }
       if (runtime && !(runtime.initialized && authRequired(error))) await this.stopRuntime(runtime).catch(() => undefined);
@@ -372,19 +383,21 @@ export class AcpSession {
       runtime.connection.close();
       void this.releaseRuntime(runtime).catch((error) => {
         if (generation === this.generation) {
-          this.error = `Agent 已退出，但会话占用记录无法释放：${message(error)}`;
+          this.error = `The agent exited, but its session ownership could not be released: ${message(error)}`;
           this.notify();
         }
       });
     };
-    child.once('exit', (code, signal) => ended(`Agent 进程已退出（${signal ?? code ?? '未知状态'}），请检查配置或显式继续会话。`));
+    child.once('exit', (code, signal) =>
+      ended(`The agent process exited (${signal ?? code ?? 'unknown status'}). Check the profile or explicitly resume the session.`),
+    );
     child.once('error', (error) => {
-      if (!child.pid) ended(`无法启动 Agent：${message(error)}。请检查当前工作区宿主中的可执行文件路径。`);
+      if (!child.pid) ended(`Unable to start the agent: ${message(error)}. Check the executable path on the current workspace host.`);
     });
     void runtime.connection.closed.then(() => {
       if (this.current(runtime) && !runtime.exited) {
         this.status = 'error';
-        this.error = 'ACP 连接已断开，本轮结果可能不完整；请检查代码后显式重新连接。';
+        this.error = 'The ACP connection closed. This turn may be incomplete; inspect the code before reconnecting.';
         this.controls = emptyControls();
         if (this.turn?.runtime === runtime) this.record.interrupted = true;
         this.cancelPermissions(runtime);
@@ -400,18 +413,18 @@ export class AcpSession {
 
   private async openSession(runtime: Runtime) {
     await this.options.validate();
-    if (!this.current(runtime)) throw new Error('连接已结束');
+    if (!this.current(runtime)) throw new Error('Connection closed.');
     if (runtime.resume) {
-      if (!this.record.canLoad) throw new Error('此 Agent 不支持恢复会话，请显式新建会话；旧记录将保留');
+      if (!this.record.canLoad) throw new Error('This agent cannot resume sessions. Start a new session explicitly; the previous record will be preserved.');
       const sessionId = this.record.sessionId!;
       runtime.sessionId = sessionId;
       runtime.replay = { messages: [] };
       try {
         const session = await this.timeout(
           runtime.connection.agent.request('session/load', { sessionId, cwd: this.options.binding.workspace, mcpServers: [] }),
-          '恢复会话超时，请重新连接；Warden 不会自动重发消息',
+          'Resuming the session timed out. Reconnect; Warden will not resend messages automatically.',
         );
-        if (!this.current(runtime)) throw new Error('连接已结束');
+        if (!this.current(runtime)) throw new Error('Connection closed.');
         this.initialControls(runtime, session);
         const uncertain = this.record.messages.filter((item) => item.role === 'user' && item.uncertain);
         this.record.messages = [...runtime.replay.messages, ...uncertain];
@@ -426,11 +439,11 @@ export class AcpSession {
       runtime.pendingBytes = 0;
       const session = await this.timeout(
         runtime.connection.agent.request('session/new', { cwd: this.options.binding.workspace, mcpServers: [] }),
-        '创建 Agent 会话超时，请检查 Agent 后重新连接',
+        'Creating the agent session timed out. Check the agent and reconnect.',
       );
-      if (!this.current(runtime)) throw new Error('连接已结束');
+      if (!this.current(runtime)) throw new Error('Connection closed.');
       if (!object(session) || typeof session.sessionId !== 'string' || !session.sessionId || session.sessionId.length > 500)
-        throw new Error('Agent 返回了无效的会话标识，请检查 ACP 兼容性');
+        throw new Error('The agent returned an invalid session ID. Check ACP compatibility.');
       runtime.sessionId = session.sessionId;
       this.record.sessionId = session.sessionId;
       this.initialControls(runtime, session);
@@ -440,7 +453,7 @@ export class AcpSession {
       for (const update of pending) this.update(runtime, update);
     }
     await this.persist();
-    if (!this.current(runtime)) throw new Error('连接已结束');
+    if (!this.current(runtime)) throw new Error('Connection closed.');
     runtime.established = true;
     this.status = 'connected';
     this.error = undefined;
@@ -448,10 +461,12 @@ export class AcpSession {
   }
 
   send(value: string): Promise<void> {
-    if (!value.trim() || value.length > 100_000) return Promise.reject(new Error('消息不能为空，且不能超过 100000 个字符'));
+    if (!value.trim() || value.length > 100_000) return Promise.reject(new Error('Messages must contain 1–100,000 characters.'));
     const runtime = this.runtime;
-    if (!runtime || !this.current(runtime) || !runtime.sessionId || this.status !== 'connected') return Promise.reject(new Error('请先连接 Agent 会话'));
-    if (this.turn || this.connecting || this.authenticating || this.configuration) return Promise.reject(new Error('此会话已有请求正在进行，请等待或停止本轮'));
+    if (!runtime || !this.current(runtime) || !runtime.sessionId || this.status !== 'connected')
+      return Promise.reject(new Error('Connect to an agent session first.'));
+    if (this.turn || this.connecting || this.authenticating || this.configuration)
+      return Promise.reject(new Error('A request is already running in this session. Wait or stop this turn.'));
     const turn: Turn = { runtime, record: this.record, promise: Promise.resolve(), cancelling: false, sent: false };
     this.turn = turn;
     turn.promise = this.runPrompt(turn, value);
@@ -463,8 +478,8 @@ export class AcpSession {
     let completed = false;
     try {
       await this.options.validate();
-      if (!this.current(runtime) || turn.cancelling) throw new Error('发送已取消');
-      turn.user = { id: randomUUID(), role: 'user', text: value, status: '发送中', uncertain: true };
+      if (!this.current(runtime) || turn.cancelling) throw new Error('Send cancelled.');
+      turn.user = { id: randomUUID(), role: 'user', text: value, status: 'Sending', uncertain: true };
       this.record.messages.push(turn.user);
       this.record.interrupted = true;
       this.history.lastChunk = undefined;
@@ -474,7 +489,7 @@ export class AcpSession {
       this.notify();
       if (!this.current(runtime) || turn.cancelling) {
         turn.user.uncertain = false;
-        turn.user.status = '发送前已取消';
+        turn.user.status = 'Cancelled before sending';
         this.record.interrupted = false;
         completed = true;
         return;
@@ -483,16 +498,16 @@ export class AcpSession {
       const result = await runtime.connection.agent.request('session/prompt', { sessionId: runtime.sessionId!, prompt: [{ type: 'text', text: value }] });
       if (this.record !== turn.record) return;
       if (!object(result) || typeof result.stopReason !== 'string' || !STOP_REASONS.has(result.stopReason))
-        throw new Error('Agent 返回了无效的本轮结束结果，无法确认是否完成');
+        throw new Error('The agent returned an invalid turn result. Completion could not be confirmed.');
       turn.user.uncertain = false;
-      turn.user.status = result.stopReason === 'cancelled' ? '本轮已取消' : `已响应 · ${result.stopReason}`;
+      turn.user.status = result.stopReason === 'cancelled' ? 'Turn cancelled' : `Responded · ${result.stopReason}`;
       this.record.interrupted = false;
       completed = true;
     } catch (error) {
       if (this.record === turn.record && turn.sent) this.record.interrupted = true;
       if (this.current(runtime)) {
         this.status = 'error';
-        this.error = `本轮请求未完成：${message(error)}。请检查已有改动；Warden 不会自动重发。`;
+        this.error = `The turn request did not finish: ${message(error)}. Inspect existing changes; Warden will not resend automatically.`;
       }
       throw error;
     } finally {
@@ -503,7 +518,7 @@ export class AcpSession {
           await this.persist().catch((error) => {
             if (this.current(runtime)) {
               this.status = 'error';
-              this.error = `保存会话失败：${message(error)}。请检查会话记录后重新连接。`;
+              this.error = `Unable to save the session: ${message(error)}. Check the session record before reconnecting.`;
             }
             throw error;
           });
@@ -529,10 +544,13 @@ export class AcpSession {
     this.notify();
     try {
       if (turn.sent)
-        await this.timeout(turn.runtime.connection.agent.notify('session/cancel', { sessionId: turn.runtime.sessionId! }), '取消通知未能送达，请断开 Agent');
+        await this.timeout(
+          turn.runtime.connection.agent.notify('session/cancel', { sessionId: turn.runtime.sessionId! }),
+          'The cancellation request could not be delivered. Disconnect the agent.',
+        );
       await this.timeout(
         turn.promise.catch(() => undefined),
-        'Agent 尚未结束本轮，结果仍不确定；可选择断开 Agent 以结束其进程',
+        'The agent has not ended this turn; its result is still uncertain. Disconnect the agent to end its process.',
       );
     } catch (error) {
       if (this.turn === turn) {
@@ -546,16 +564,20 @@ export class AcpSession {
 
   async authenticate(methodId: string): Promise<void> {
     const runtime = this.runtime;
-    if (!runtime || !this.current(runtime) || !runtime.initialized) throw new Error('请先连接 Agent 以获取认证方式');
-    if (this.turn || this.connecting || this.authenticating || this.configuration) throw new Error('请等待当前请求结束后再登录');
+    if (!runtime || !this.current(runtime) || !runtime.initialized) throw new Error('Connect to the agent to obtain authentication methods.');
+    if (this.turn || this.connecting || this.authenticating || this.configuration) throw new Error('Wait for the current request before logging in.');
     const method = this.authMethods.find((item) => item.id === methodId);
-    if (!method) throw new Error('Agent 未提供此认证方式');
-    if ('type' in method && method.type === 'terminal') throw new Error('此认证方式需要 Agent 自己的终端，请在外部完成登录后重新连接');
+    if (!method) throw new Error('The agent did not offer this authentication method.');
+    if ('type' in method && method.type === 'terminal')
+      throw new Error("This authentication method requires the agent's own terminal. Log in externally and reconnect.");
     this.authenticating = true;
     try {
       await this.options.validate();
-      await this.timeout(runtime.connection.agent.request('authenticate', { methodId }), 'Agent 登录等待超时，请检查外部登录状态后重连');
-      if (!this.current(runtime)) throw new Error('连接已结束');
+      await this.timeout(
+        runtime.connection.agent.request('authenticate', { methodId }),
+        'Agent authentication timed out. Check the external login state and reconnect.',
+      );
+      if (!this.current(runtime)) throw new Error('Connection closed.');
       if (!runtime.established) await this.openSession(runtime);
       else {
         this.status = 'connected';
@@ -565,14 +587,14 @@ export class AcpSession {
     } catch (error) {
       if (this.current(runtime)) {
         this.status = 'error';
-        this.error = `Agent 登录失败：${message(error)}`;
+        this.error = `Agent authentication failed: ${message(error)}`;
         this.notify();
       }
       // A timeout does not cancel the old RPC. Retire this connection before another login or
       // load can accept delayed updates from the abandoned request into a newer replay buffer.
       if (!authRequired(error))
         await this.stopRuntime(runtime).catch((stopError) => {
-          this.error = `Agent 登录失败：${message(error)}；${message(stopError)}`;
+          this.error = `Agent authentication failed: ${message(error)}; ${message(stopError)}`;
           this.notify();
         });
       throw error;
@@ -595,11 +617,11 @@ export class AcpSession {
   setConfigOption(configId: string, value: string | boolean): Promise<void> {
     const option = this.controls.configOptions?.find((item) => item.id === configId);
     if (!option || (option.type === 'boolean' ? typeof value !== 'boolean' : typeof value !== 'string' || !option.options.some((item) => item.value === value)))
-      return Promise.reject(new Error('请选择 Agent 当前提供的配置值'));
+      return Promise.reject(new Error('Select a configuration value currently offered by the agent.'));
     return this.configure((runtime) => {
       const current = this.controls.configOptions?.find((item) => item.id === configId);
       if (!current || (current.type === 'boolean' ? typeof value !== 'boolean' : !current.options.some((item) => item.value === value)))
-        throw new Error('Agent 的配置选项已变化，请重新选择');
+        throw new Error("The agent's configuration options changed. Select again.");
       return runtime.connection.agent
         .request('session/set_config_option', {
           sessionId: runtime.sessionId!,
@@ -621,10 +643,10 @@ export class AcpSession {
 
   setMode(modeId: string): Promise<void> {
     if (this.controls.configOptions !== undefined || !this.controls.modes?.availableModes.some((mode) => mode.id === modeId))
-      return Promise.reject(new Error('请选择 Agent 当前提供的会话模式'));
+      return Promise.reject(new Error('Select a session mode currently offered by the agent.'));
     return this.configure((runtime) => {
       if (this.controls.configOptions !== undefined || !this.controls.modes?.availableModes.some((mode) => mode.id === modeId))
-        throw new Error('Agent 的会话模式已变化，请重新选择');
+        throw new Error("The agent's session modes changed. Select again.");
       return runtime.connection.agent.request('session/set_mode', { sessionId: runtime.sessionId!, modeId }).then(() => {
         const revision = runtime.modeRevision;
         return () => {
@@ -636,8 +658,10 @@ export class AcpSession {
 
   private async configure(request: (runtime: Runtime) => Promise<() => void>): Promise<void> {
     const runtime = this.runtime;
-    if (!runtime || !this.current(runtime) || !runtime.established || this.status !== 'connected') throw new Error('请先连接 Agent 会话并等待当前请求结束');
-    if (this.turn || this.connecting || this.authenticating || this.configuration) throw new Error('请等待当前请求结束后再修改会话配置');
+    if (!runtime || !this.current(runtime) || !runtime.established || this.status !== 'connected')
+      throw new Error('Connect to an agent session and wait for the current request to finish.');
+    if (this.turn || this.connecting || this.authenticating || this.configuration)
+      throw new Error('Wait for the current request before changing session configuration.');
     const operation = { runtime };
     this.configuration = operation;
     this.controls.configuring = true;
@@ -646,18 +670,20 @@ export class AcpSession {
     let timedOut = false;
     try {
       await this.options.validate();
-      if (!this.current(runtime)) throw new Error('连接已结束');
+      if (!this.current(runtime)) throw new Error('Connection closed.');
       sent = true;
-      const apply = await this.timeout(request(runtime), '会话配置更新超时，请重新连接以确认 Agent 的当前配置').catch((error) => {
-        timedOut = error instanceof Error && error.message.startsWith('会话配置更新超时');
-        throw error;
-      });
-      if (!this.current(runtime)) throw new Error('连接已结束');
+      const apply = await this.timeout(request(runtime), "Session configuration timed out. Reconnect to confirm the agent's current configuration.").catch(
+        (error) => {
+          timedOut = error instanceof Error && error.message.startsWith('Session configuration timed out.');
+          throw error;
+        },
+      );
+      if (!this.current(runtime)) throw new Error('Connection closed.');
       apply();
       this.error = undefined;
     } catch (error) {
       if (this.current(runtime)) {
-        this.error = `无法修改会话配置：${message(error)}`;
+        this.error = `Unable to change session configuration: ${message(error)}`;
         // A timed-out RPC may still change the agent later. Retire its connection before
         // accepting another prompt or configuration request with an uncertain value.
         if (sent && timedOut) {
@@ -737,7 +763,7 @@ export class AcpSession {
       (runtime.replay && update.sessionUpdate === 'user_message_chunk')
     ) {
       const role = update.sessionUpdate === 'user_message_chunk' ? 'user' : update.sessionUpdate === 'agent_thought_chunk' ? 'thought' : 'agent';
-      const value = update.content.type === 'text' ? update.content.text : `[当前仅支持文本，未显示 ${update.content.type} 内容]`;
+      const value = update.content.type === 'text' ? update.content.text : `[Only text is supported; ${update.content.type} content not shown]`;
       const key = `${role}:${update.messageId ?? ''}`;
       const previous = history.lastChunk?.key === key ? history.messages.find((item) => item.id === history.lastChunk!.id) : undefined;
       if (previous) previous.text = text(previous.text + value);
@@ -763,12 +789,12 @@ export class AcpSession {
         : update.compactionId;
     let item = history.messages.find((entry) => entry.compactionId === compactionId);
     if (!item) {
-      item = { id: randomUUID(), role: 'notice', compactionId, compaction: {}, text: '上下文压缩', status: 'in_progress' };
+      item = { id: randomUUID(), role: 'notice', compactionId, compaction: {}, text: 'Context Compaction', status: 'in_progress' };
       history.messages.push(item);
     }
     item.compaction ??= {};
     const display = item.compaction;
-    const content = (block: ContentBlock) => (block.type === 'text' ? block.text : `[当前仅支持文本，未显示 ${block.type} 内容]`);
+    const content = (block: ContentBlock) => (block.type === 'text' ? block.text : `[Only text is supported; ${block.type} content not shown]`);
     if ('status' in update) {
       item.status = text(update.status, 100);
       if (update.summary !== undefined) {
@@ -780,7 +806,7 @@ export class AcpSession {
         else display.error = text(update.error);
       }
     } else display.summary = text((display.summary ?? '') + content(update.content));
-    item.text = text(['上下文压缩', display.summary, display.error].filter(Boolean).join('\n'));
+    item.text = text(['Context Compaction', display.summary, display.error].filter(Boolean).join('\n'));
     history.lastChunk = undefined;
     this.boundHistory(history);
   }
@@ -794,7 +820,7 @@ export class AcpSession {
         : update.toolCallId;
     let item = history.messages.find((entry) => entry.toolCallId === toolCallId);
     if (!item) {
-      item = { id: randomUUID(), role: 'tool', toolCallId, text: update.title ?? 'Agent 操作' };
+      item = { id: randomUUID(), role: 'tool', toolCallId, text: update.title ?? 'Agent Action' };
       history.messages.push(item);
     }
     // ACP replaces title and content independently. Keep their display state with the
@@ -809,8 +835,8 @@ export class AcpSession {
     if (update.content != null) {
       const details = update.content.map((content) => {
         if (content.type === 'content' && content.content.type === 'text') return content.content.text;
-        if (content.type === 'diff') return `文件改动：${content.path}（请在任务差异中审查）`;
-        return content.type === 'terminal' ? 'Agent 终端活动（Warden 不管理此终端）' : '未显示非文本内容';
+        if (content.type === 'diff') return `File changes: ${content.path} (review in the task diff)`;
+        return content.type === 'terminal' ? 'Agent terminal activity (this terminal is not managed by Warden)' : 'Non-text content not shown';
       });
       display.content = text(details.join('\n'));
     }
@@ -831,7 +857,7 @@ export class AcpSession {
     const id = randomUUID();
     const view: AcpPermission = {
       id,
-      title: text(request.toolCall.title ?? 'Agent 请求授权', 1_000),
+      title: text(request.toolCall.title ?? 'Agent Permission Request', 1_000),
       detail: text(JSON.stringify(request.toolCall.rawInput ?? request.toolCall.locations ?? request.toolCall.content ?? '', null, 2), 12_000),
       options: request.options.map((option) => ({ id: option.optionId, label: option.name, kind: option.kind })),
     };
@@ -854,12 +880,13 @@ export class AcpSession {
 
   async respondPermission(requestId: string, optionId: string): Promise<void> {
     const permission = this.permissions.get(requestId);
-    if (!permission || !this.current(permission.runtime) || this.turn?.cancelling) throw new Error('此授权请求已结束，请查看当前会话');
-    if (!permission.view.options.some((option) => option.id === optionId)) throw new Error('请选择 Agent 实际提供的授权选项');
+    if (!permission || !this.current(permission.runtime) || this.turn?.cancelling)
+      throw new Error('This permission request has ended. Check the current session.');
+    if (!permission.view.options.some((option) => option.id === optionId)) throw new Error('Select a permission option actually offered by the agent.');
     return this.options.validate().then(
       () => {
         if (this.permissions.get(requestId) !== permission || !this.current(permission.runtime) || this.turn?.cancelling)
-          throw new Error('此授权请求已结束，请查看当前会话');
+          throw new Error('This permission request has ended. Check the current session.');
         permission.finish({ outcome: { outcome: 'selected', optionId } });
       },
       (error) => {
@@ -875,7 +902,7 @@ export class AcpSession {
   }
 
   private async releaseRuntime(runtime: Runtime) {
-    if (!runtime.exited) throw new Error('Agent 进程尚未确认退出，已保留会话占用记录');
+    if (!runtime.exited) throw new Error('Agent process exit has not been confirmed. Session ownership has been retained.');
     runtime.released ??= (async () => {
       const turn = this.turn?.runtime === runtime ? this.turn : undefined;
       if (turn) await turn.promise.catch(() => undefined);
@@ -901,10 +928,10 @@ export class AcpSession {
     if (!runtime.exited) {
       runtime.child.kill('SIGTERM');
       try {
-        await this.timeout(runtime.exit, 'Agent 尚未退出');
+        await this.timeout(runtime.exit, 'The agent has not exited.');
       } catch {
         if (!runtime.exited) runtime.child.kill('SIGKILL');
-        await this.timeout(runtime.exit, '无法确认 Agent 进程已退出，已保留占用记录；请检查该进程后重试断开');
+        await this.timeout(runtime.exit, 'Unable to confirm agent process exit. Ownership has been retained; inspect the process before disconnecting again.');
       }
     }
     runtime.child.stdout.destroy();
@@ -925,7 +952,7 @@ export class AcpSession {
       if (this.turn)
         await this.timeout(
           this.turn.promise.catch(() => undefined),
-          'Agent 已断开，但本地请求仍未结束，请重试',
+          'The agent disconnected, but local requests have not finished. Retry.',
         );
       this.status = 'disconnected';
       this.error = undefined;
@@ -942,8 +969,8 @@ export class AcpSession {
   }
 
   async newConversation(): Promise<void> {
-    if (this.disposed) throw new Error('此任务对话已关闭');
-    if (this.resetting || this.connecting) throw new Error('会话操作尚未结束，请稍候');
+    if (this.disposed) throw new Error('This task conversation is closed.');
+    if (this.resetting || this.connecting) throw new Error('A session operation is still running. Please wait.');
     this.resetting = true;
     this.notify();
     try {

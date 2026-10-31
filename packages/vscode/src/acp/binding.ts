@@ -31,12 +31,12 @@ async function rebaseBelongsToTask(gitDir: string, branch: string): Promise<bool
 export async function resolveAcpBinding(engine: Engine, taskId: string): Promise<AcpBinding> {
   const [workflow, workspaces] = await Promise.all([engine.execute('workflow.get', undefined), engine.execute('workspaces.list', undefined)]);
   const task = workflow.workflow?.changes.find((row) => row.id === taskId);
-  if (!task?.worktree || !task.branch) throw new Error('请先为此任务创建工作区');
+  if (!task?.worktree || !task.branch) throw new Error('The task workspace is not ready. Reopen the task.');
   const checkout = workspaces.worktrees.find((row) => row.path === task.worktree);
-  if (!checkout || checkout.foreign || checkout.prunable) throw new Error('任务工作区已变化，请确认任务归属后重新连接');
+  if (!checkout || checkout.foreign || checkout.prunable) throw new Error('The task workspace changed. Confirm its task association and reconnect.');
   const workspace = await realpath(task.worktree);
   const repository = await realpath(engine.root);
-  if (workspace === repository) throw new Error('Agent 会话必须使用任务工作区');
+  if (workspace === repository) throw new Error('Agent sessions must use the task workspace.');
   const gitPath = async (flag: string) => {
     const result = await runGit(['rev-parse', flag], { cwd: workspace });
     return realpath(path.resolve(workspace, result.stdout.trim()));
@@ -45,7 +45,7 @@ export async function resolveAcpBinding(engine: Engine, taskId: string): Promise
   // A conversation may be needed to resolve the operation itself. Keep allocation checks,
   // but do not turn Git's in-progress state into an agent execution gate.
   if (checkout.branch !== task.branch && !(checkout.detached && checkout.busy === 'rebase' && (await rebaseBelongsToTask(gitDir, task.branch))))
-    throw new Error('任务工作区已变化，请确认任务分支后重新连接');
+    throw new Error('The task workspace changed. Confirm its branch and reconnect.');
   const paths = [repository, workspace, path.join(workspace, '.git'), gitDir, commonDir];
   const identities = await Promise.all(
     paths.map(async (file) => {
@@ -62,5 +62,5 @@ export async function resolveAcpBinding(engine: Engine, taskId: string): Promise
 export async function validateAcpBinding(engine: Engine, binding: AcpBinding) {
   const current = await resolveAcpBinding(engine, binding.taskId);
   if (current.identity !== binding.identity || current.workspace !== binding.workspace || current.branch !== binding.branch)
-    throw new Error('此会话对应的任务工作区已被替换，请重新打开任务对话');
+    throw new Error('The workspace for this session was replaced. Reopen the task conversation.');
 }

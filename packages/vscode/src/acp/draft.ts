@@ -30,10 +30,10 @@ export class AcpDraft {
 
   update(edit: AcpDraftEdit) {
     if (!Number.isSafeInteger(edit.version) || edit.version < 0 || edit.version > this.version || !Number.isSafeInteger(edit.revision) || edit.revision < 0)
-      throw new Error('草稿版本无效，请重新打开对话');
+      throw new Error('Invalid draft version. Reopen the conversation.');
     if (edit.revision < this.revision || edit.version < this.last.version) return;
     if (edit.revision === this.last.revision && edit.version === this.last.version) {
-      if (edit.text !== this.last.text) throw new Error('草稿已变化，请确认最新内容后重试');
+      if (edit.text !== this.last.text) throw new Error('The draft changed. Review the latest contents and retry.');
       return;
     }
     let value = edit.text;
@@ -58,9 +58,10 @@ export class AcpDraft {
       edit.version < this.version &&
       unseen.length === this.version - edit.version &&
       unseen.every((change) => change.type === 'clear' && edit.revision > change.revision);
-    if ((edit.version !== this.version && !onlyCompletedDrafts) || edit.revision < this.revision) throw new Error('草稿已更新，请确认最新内容后重新发送');
+    if ((edit.version !== this.version && !onlyCompletedDrafts) || edit.revision < this.revision)
+      throw new Error('The draft was updated. Review the latest contents before sending.');
     this.update(edit);
-    if (edit.text !== this.value) throw new Error('草稿已更新，请确认最新内容后重新发送');
+    if (edit.text !== this.value) throw new Error('The draft was updated. Review the latest contents before sending.');
     return { text: this.value, mutation: this.mutation };
   }
 
@@ -85,6 +86,6 @@ export class AcpDraft {
   }
 
   private checkLength(value: string) {
-    if (value.length > 100_000) throw new Error('消息过长，请缩小选区');
+    if (value.length > 100_000) throw new Error('The message is too long. Select less text.');
   }
 }

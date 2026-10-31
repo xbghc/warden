@@ -21,7 +21,7 @@ describe('ACP executable profiles', () => {
   });
 
   it('rejects duplicate identifiers even when they name different executables', () => {
-    expect(() => parseAcpProfiles([profile, { ...profile, label: 'Other agent', command: '/another/agent' }])).toThrow('id 必须唯一');
+    expect(() => parseAcpProfiles([profile, { ...profile, label: 'Other agent', command: '/another/agent' }])).toThrow('IDs must be unique');
   });
 
   it.each([
