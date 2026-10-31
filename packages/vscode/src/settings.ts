@@ -119,6 +119,8 @@ export class Settings implements vscode.TreeDataProvider<SettingsNode>, vscode.D
     const kinds: ScriptKind[] = ['workspace', ...(config.hooks.reuse && config.hooks.reuse !== config.hooks.create ? ['reuse' as const] : []), 'preview'];
     scripts.children = kinds.map((kind) => {
       const item = this.row(`script:${kind}`, scriptLabels[kind], 'file-code', 'warden.editSetupScript', [kind, model.session]);
+      item.session = model.session;
+      if (kind === 'preview') item.contextValue = 'wardenPreviewSetup';
       item.description = scriptValue(config, kind).trim() ? 'Configured' : 'Not Set';
       item.tooltip = `${scriptLabels[kind]}\n${model.repository}\nOpen in the text editor. Save to update configuration. ${kind === 'preview' ? 'Runs on preview initialization, updates and configuration changes.' : 'Runs when a task workspace is allocated.'}`;
       return item;

@@ -97,13 +97,9 @@ exports.checkSidebar = async (workbench, extension, repository, eventually) => {
     contributions.viewsWelcome.some((row) => row.contents === '[New Task](command:warden.createTask)' && row.when.includes('warden.hasDevelopmentBranch')),
   );
   const previewMenu = contributions.menus['view/title'].filter((item) => item.group?.startsWith('2_preview@'));
-  for (const command of ['refreshPreview', 'previewTerminal', 'runPreview', 'previewPath', 'showPreview', 'setup'])
-    assert(
-      previewMenu.some((item) => item.command === `warden.${command}`),
-      `${command} stays available from the native heading menu`,
-    );
+  assert.deepEqual(previewMenu.map((item) => item.command).sort(), ['warden.previewTerminal', 'warden.runPreview']);
   assert(previewMenu.find((item) => item.command === 'warden.runPreview').when.includes('warden.hasPreviewCommand'));
-  assert(previewMenu.find((item) => item.command === 'warden.setup').when.includes('warden.hasPreviewSetup'));
+  assert(previewMenu.find((item) => item.command === 'warden.previewTerminal').when.includes('!warden.hasPreviewCommand'));
   assert(!contributions.menus['view/item/context'].some((item) => /viewItem == (preview|tasks)/.test(item.when)), 'retired grouping rows have no menu entries');
   assert(contributions.menus['view/item/context'].some((row) => row.command === 'warden.deliver'));
   assert(!contributions.menus['view/item/context'].some((row) => row.command === 'warden.taskOptions'), 'allocation details are not task actions');

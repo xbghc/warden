@@ -7,7 +7,7 @@ const { checkChats } = require('./chat.cjs');
 const { checkBranches } = require('./branches.cjs');
 const { checkSettings } = require('./settings.cjs');
 const { checkSidebar } = require('./sidebar.cjs');
-const { checkPreviewLineEndings } = require('./preview.cjs');
+const { checkPreviewLineEndings, checkPreviewActions, checkPreviewTerminals } = require('./preview.cjs');
 const { checkRepositoryLoading } = require('./repository.cjs');
 const { checkAgentSetup, checkAgentPresets, verifyAgent } = require('./agent-setup.cjs');
 // Git may materialize preview text with CRLF under the user's Windows configuration.
@@ -66,12 +66,16 @@ exports.run = async () => {
     console.log('Checking agent setup in the workbench');
     await checkAgentSetup(workbench, extension, fixture, eventually);
     await checkPreviewLineEndings(workbench, fixture.unconfigured, eventually);
+    console.log('Checking preview actions and recovery');
+    await checkPreviewActions(workbench, extension, eventually);
     console.log('Checking branch following');
     await checkBranches(workbench, fixture.unconfigured, eventually);
     console.log('Checking native task sidebar');
     await checkSidebar(workbench, extension, fixture.unconfigured, eventually);
     await workbench.open(fixture.root);
     assert.equal(workbench.backend.store.file, fixture.state);
+    console.log('Checking preview terminal reuse');
+    await checkPreviewTerminals(workbench, fixture, eventually);
     const tasks = await workbench.getChildren();
     assert.equal(tasks.length, 1);
     const attention = workbench.workspaceRow({

@@ -189,6 +189,7 @@
         "command": "warden.setup",
         "title": "Rerun Preview Setup",
         "category": "Warden",
+        "icon": "$(debug-restart)",
         "enablement": "warden.agentReady"
       },
       {
@@ -243,6 +244,11 @@
       {
         "command": "warden.configureAgents",
         "title": "Configure ACP",
+        "category": "Warden"
+      },
+      {
+        "command": "warden.chooseAgentPreset",
+        "title": "Choose Agent Preset",
         "category": "Warden"
       },
       {
@@ -360,11 +366,6 @@
         "title": "Disconnect ACP",
         "category": "Warden",
         "enablement": "warden.agentReadiness == checking || warden.agentReadiness == authentication_required || warden.agentReadiness == ready"
-      },
-      {
-        "command": "warden.chooseAgentPreset",
-        "title": "Choose Agent Preset",
-        "category": "Warden"
       }
     ],
     "menus": {
@@ -380,12 +381,9 @@
           "group": "navigation@2"
         },
         {
-          "command": "warden.configure",
-          "when": "warden.agentReady && (view == warden.task && warden.hasDevelopmentBranch)"
-        },
-        {
           "command": "warden.selectRepository",
-          "when": "warden.agentReady && (view == warden.task && (warden.repositoryState == unselected || (warden.repositoryState == ready && warden.multipleRoots)))"
+          "when": "warden.agentReady && (view == warden.task && (warden.repositoryState == unselected || (warden.repositoryState == ready && warden.multipleRoots)))",
+          "group": "4_repository@1"
         },
         {
           "command": "warden.configureScripts",
@@ -409,33 +407,23 @@
         },
         {
           "command": "warden.refreshPreview",
-          "when": "warden.agentReady && view == warden.task && warden.hasDevelopmentBranch",
-          "group": "2_preview@1"
+          "when": "warden.agentReady && view == warden.task && warden.hasDevelopmentBranch && warden.previewNeedsSync",
+          "group": "3_recovery@1"
         },
         {
           "command": "warden.runPreview",
           "when": "warden.agentReady && view == warden.task && warden.hasDevelopmentBranch && warden.hasPreviewCommand",
-          "group": "2_preview@2"
+          "group": "2_preview@1"
         },
         {
           "command": "warden.previewTerminal",
-          "when": "warden.agentReady && view == warden.task && warden.hasDevelopmentBranch",
-          "group": "2_preview@3"
-        },
-        {
-          "command": "warden.previewPath",
-          "when": "warden.agentReady && view == warden.task && warden.hasDevelopmentBranch",
-          "group": "2_preview@4"
-        },
-        {
-          "command": "warden.showPreview",
-          "when": "warden.agentReady && view == warden.task && warden.hasDevelopmentBranch",
-          "group": "2_preview@5"
+          "when": "warden.agentReady && view == warden.task && warden.hasDevelopmentBranch && !warden.hasPreviewCommand",
+          "group": "2_preview@1"
         },
         {
           "command": "warden.setup",
-          "when": "warden.agentReady && view == warden.task && warden.hasDevelopmentBranch && warden.hasPreviewSetup",
-          "group": "2_preview@6"
+          "when": "warden.agentReady && view == warden.task && warden.hasDevelopmentBranch && warden.hasPreviewSetup && warden.previewSetupFailed",
+          "group": "3_recovery@2"
         }
       ],
       "commandPalette": [
@@ -617,6 +605,11 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "warden.setup",
+          "when": "warden.agentReady && view == warden.settings && viewItem == wardenPreviewSetup && warden.hasDevelopmentBranch && warden.hasPreviewSetup",
+          "group": "inline@1"
+        },
         {
           "command": "warden.startTask",
           "when": "view == warden.task && viewItem =~ /^wardenTask:plan:allocationFailed/",

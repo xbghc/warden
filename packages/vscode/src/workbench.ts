@@ -470,6 +470,8 @@ export class Workbench {
       const state = this.repositoryState;
       const session = this.session;
       const hasRepository = state === 'ready';
+      const preview = hasRepository && this.data?.workflow ? this.preview : undefined;
+      const sync = preview?.syncStatus ?? preview?.status;
       const publish = async (key: string, value: unknown) => {
         if (this.contextValues.has(key) && this.contextValues.get(key) === value) return;
         await vscode.commands.executeCommand('setContext', key, value);
@@ -484,6 +486,8 @@ export class Workbench {
         publish('warden.multipleRoots', (vscode.workspace.workspaceFolders?.length ?? 0) > 1),
         publish('warden.hasPreviewCommand', hasRepository && !!this.previewCommand()?.trim()),
         publish('warden.hasPreviewSetup', hasRepository && !!this.data?.workspaceConfig?.previewSetup?.trim()),
+        publish('warden.previewNeedsSync', !!sync && ['stale', 'conflict', 'error', 'paused'].includes(sync)),
+        publish('warden.previewSetupFailed', preview?.setup?.status === 'failed'),
       ]);
       const failed = published.find((result) => result.status === 'rejected');
       if (failed?.status === 'rejected') throw failed.reason;
@@ -1223,10 +1227,26 @@ export class Workbench {
     return preview;
   }
   private async previewTerminal() {
+    const session = this.session;
     const preview = await this.ensurePreview();
-    vscode.window
-      .createTerminal({ name: 'Warden · Preview', cwd: preview.worktree, env: { WARDEN_PREVIEW: preview.worktree!, WARDEN_REPO: this.backend!.root } })
-      .show();
+    this.assertSession(session);
+    const repository = this.backend!.root;
+    const existing = vscode.window.terminals.find((terminal) => {
+      const options = terminal.creationOptions;
+      if (terminal.exitStatus || !('cwd' in options)) return false;
+      // Shell integration can tell us the user moved away from the preview directory.
+      const cwd = terminal.shellIntegration?.cwd?.fsPath ?? (typeof options.cwd === 'string' ? options.cwd : options.cwd?.fsPath);
+      return (
+        cwd !== undefined &&
+        vscode.Uri.file(cwd).fsPath === vscode.Uri.file(preview.worktree!).fsPath &&
+        options.env?.WARDEN_REPO === repository &&
+        options.env?.WARDEN_PREVIEW === preview.worktree
+      );
+    });
+    const terminal =
+      existing ??
+      vscode.window.createTerminal({ name: 'Warden · Preview', cwd: preview.worktree, env: { WARDEN_PREVIEW: preview.worktree!, WARDEN_REPO: repository } });
+    terminal.show();
   }
   private async previewPath() {
     const preview = await this.ensurePreview();

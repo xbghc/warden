@@ -84,6 +84,14 @@ exports.checkSettings = async (workbench, extension, fixture, eventually) => {
       ['Workspace Setup Script', 'Legacy Workspace Reuse Script', 'Preview Setup Script', 'Preview Command'],
     );
     assert.equal(scripts[0].command.arguments[1], session, 'script rows capture their repository session');
+    assert.equal(scripts[2].contextValue, 'wardenPreviewSetup');
+    assert.equal(scripts[2].session, session, 'the rerun action captures its repository session');
+    const rerun = extension.packageJSON.contributes.menus['view/item/context'].find((item) => item.command === 'warden.setup');
+    assert.equal(
+      rerun.when,
+      'warden.agentReady && view == warden.settings && viewItem == wardenPreviewSetup && warden.hasDevelopmentBranch && warden.hasPreviewSetup',
+    );
+    assert(rerun.group.startsWith('inline'), 'configured setup has an explicit row action even after success');
     if (process.env.WARDEN_VSCODE_AGENT_SETUP_SCREENSHOTS && process.platform === 'linux') {
       await vscode.commands.executeCommand('workbench.action.closeAllEditors');
       await vscode.commands.executeCommand('notifications.clearAll');
@@ -129,6 +137,19 @@ exports.checkSettings = async (workbench, extension, fixture, eventually) => {
     await assert.rejects(workbench.scriptSettings.writeFile(document.uri, Buffer.from('wrong repository')), /repository or base branch changed/);
     await assert.rejects(workbench.scriptSettings.open('workspace', session), /repository or base branch changed/);
     assert.deepEqual(await config(), other, 'stale editors cannot change the next repository');
+    const execute = workbench.backend.execute;
+    let reran = false;
+    workbench.backend.execute = function (command, ...args) {
+      if (command === 'preview.setup') reran = true;
+      return execute.call(this, command, ...args);
+    };
+    try {
+      await vscode.commands.executeCommand('warden.setup', scripts[2]);
+      assert.equal(reran, false, 'a stale Settings row cannot run setup in the next repository');
+      assert.match(workbench.errors.get('settings').message, /repository or base branch changed/);
+    } finally {
+      workbench.backend.execute = execute;
+    }
     await workbench.open(repository);
     const cleared = await open('preview');
     await replace(cleared, '');
