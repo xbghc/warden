@@ -59,6 +59,13 @@ itself queried every checkout. `get()` and `rebaseChecks()` now build one map fo
 look up every task in it. Writes continue to obtain a fresh inventory under the existing repository
 lock; a map from a prior response is never mutation authority.
 
+Workspace inventories contain checkout identity, dirty state, operation markers and allocation
+safety. They do not calculate upstream graph distances or list branches in free slots for the
+retired workspace management page. Those presentation queries live in `test/compat/worktrees.ts`.
+The desktop `workspaces.list` command adds only the local branches needed by the native picker;
+it does not search for a future slot or read the retired checkout form's preferences and the
+primary folder's default remote branch. Allocation still determines an available slot when a task is created.
+
 An isolated trial is reusable only when source HEAD, target HEAD, delivery boundary, task/branch
 association, physical repository identity, effective configuration and environment match. The
 cache belongs to one `WorkflowService`, keeps at most 64 entries and can share an in-flight trial.

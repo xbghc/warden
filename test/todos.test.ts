@@ -3,7 +3,8 @@ import path from 'node:path';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Hono } from 'hono';
-import type { Todo, TodosResponse } from '@warden/shared';
+import type { Todo } from '@warden/shared';
+import type { TodosResponse } from './compat/types.js';
 import { createApp, resolveRepo, StateStore } from './compat/index.js';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 

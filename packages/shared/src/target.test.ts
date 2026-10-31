@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatTargetKey, parseTargetKey, targetLabel, TargetKeyError } from './target.js';
+import { formatTargetKey, parseTargetKey, TargetKeyError } from './target.js';
 
 describe('target keys', () => {
   it('parses simple kinds', () => {
@@ -39,8 +39,6 @@ describe('target keys', () => {
         expect(parseTargetKey(key).worktree).toBe(worktree);
         expect(formatTargetKey(parseTargetKey(key))).toBe(key);
       }
-      const name = worktree.endsWith('中文 project') ? '中文 project' : 'project';
-      expect(targetLabel(parseTargetKey(`worktree:${worktree}:working`))).toBe(`[${name}] Working tree`);
     },
   );
 

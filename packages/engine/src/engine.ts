@@ -16,9 +16,9 @@ import type {
   WorktreesResponse,
 } from '@warden/shared';
 import { WardenError, badRequest } from './errors.js';
-import { resolveRepo, listWorktreesAll, remoteDefault, type RepoContext } from './repo.js';
+import { resolveRepo, listWorktreesAll, type RepoContext } from './repo.js';
 import { StateStore, stateFilePath } from './state.js';
-import { listBranches, listWorktreesDetailed, nextSlot } from './worktrees.js';
+import { listBranches, listWorktreesDetailed } from './worktrees.js';
 import { getFullFile, listTargetDiffs, resolveTargetContext, toSummary } from './targets.js';
 import { WorkflowService } from './workflow.js';
 import { PreviewService } from './preview.js';
@@ -113,13 +113,8 @@ function commands(repo: RepoContext, store: StateStore) {
         return config;
       },
       'workspaces.list': async (): Promise<WorktreesResponse> => {
-        const [list, state] = await Promise.all([listWorktreesDetailed(repo), store.load()]);
-        const [branches, newSlot, trunk] = await Promise.all([
-          listBranches(repo, list),
-          nextSlot(repo, list),
-          remoteDefault(repo.commonRoot).catch(() => undefined),
-        ]);
-        return { worktrees: list, branches, newSlot, slotKind: state.prefs.slotKind ?? 'shared', trunk };
+        const list = await listWorktreesDetailed(repo);
+        return { worktrees: list, branches: await listBranches(repo, list) };
       },
       'review.files': async ({ key }: { key: string }): Promise<FilesResponse> => {
         const context = await target(key);

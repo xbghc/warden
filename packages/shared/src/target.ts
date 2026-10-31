@@ -93,39 +93,6 @@ export function formatTargetKey(t: Target): TargetKey {
   return t.worktree ? `worktree:${t.worktree}:${suffix}` : suffix;
 }
 
-export function targetLabel(t: Target): string {
-  let label: string;
-  switch (t.kind) {
-    case 'working':
-      label = 'Working tree';
-      break;
-    case 'staged':
-      label = 'Staged';
-      break;
-    case 'all':
-      label = 'Working tree vs HEAD';
-      break;
-    case 'commit':
-      label = `Commit ${t.sha.length > 12 ? t.sha.slice(0, 8) : t.sha}`;
-      break;
-    case 'range':
-      label = `${t.base}..${t.head}`;
-      break;
-    case 'base':
-      label = `Branch vs ${t.ref}`;
-      break;
-  }
-  if (t.worktree) {
-    const name =
-      t.worktree
-        .split(isWindowsAbsolutePath(t.worktree) ? /[\\/]/ : '/')
-        .filter(Boolean)
-        .pop() ?? t.worktree;
-    return `[${name}] ${label}`;
-  }
-  return label;
-}
-
 /** Try to parse a key; returns undefined on failure. */
 export function tryParseTargetKey(key: string): Target | undefined {
   try {

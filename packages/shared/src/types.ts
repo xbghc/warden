@@ -368,25 +368,7 @@ export interface WorktreeInfo {
   trunk?: string;
 }
 
-/**
- * Commits a worktree's HEAD has that `base` lacks (`ahead`), and the other way round (`behind`).
- * `upstream`: `base` is the branch's upstream, so the two are what is not pushed and what is not
- * pulled yet. `base`: the checkout has no upstream, or one that is gone, and `base` is the branch
- * the main worktree has checked out right now — the base a sibling worktree is reviewed against,
- * which need not be `main`; nothing ahead there means merged. `trunk`: a clone with no upstream, or
- * one that is gone, counted against its remote's default branch (`origin/main`, as `origin/HEAD`
- * names it), the branch its work goes into — a clone shares nothing with the main worktree to be
- * compared with; nothing ahead means merged there.
- */
-export interface WorktreeComparison {
-  kind: 'upstream' | 'base' | 'trunk';
-  /** As git abbreviates it (`origin/topic`, `develop`), or `HEAD abc1234` for a detached main worktree. */
-  base: string;
-  ahead: number;
-  behind: number;
-}
-
-/** A worktree as the management panel lists it: the review-time fields plus what removing it needs. */
+/** Worktree identity and safety observations used by allocation, review, preview and delivery. */
 export interface WorktreeDetail extends WorktreeInfo {
   /** Entries `git status` reports; -1 means status could not be read and the slot is not reusable. */
   dirty: number;
@@ -407,12 +389,6 @@ export interface WorktreeDetail extends WorktreeInfo {
   slot?: number;
   /** A slot with nothing on it, detached and clean, that the next checkout may take over. */
   free: boolean;
-  comparison?: WorktreeComparison;
-  /** The upstream the branch is set to track when that ref no longer exists, as in `[origin/topic: gone]`. */
-  upstreamGone?: string;
-  comparisonError?: string;
-  /** A free clone/shared slot's local branches, separate from base branch choices. */
-  branches?: BranchInfo[];
 }
 
 export interface BranchInfo {
@@ -430,14 +406,8 @@ export interface WorktreeSlot {
 
 export interface WorktreesResponse {
   worktrees: WorktreeDetail[];
-  /** Local branches only: a remote can carry thousands, so `GET /api/worktrees/remotes` asks about one name. */
+  /** Local branches offered by the native base-branch picker. */
   branches: BranchInfo[];
-  /** The slot a checkout makes when it takes no free one: the lowest number with no directory yet. */
-  newSlot: WorktreeSlot;
-  /** How the form offers to make that slot: the kind made last time, shared until then. */
-  slotKind: SlotKind;
-  /** The main worktree's remote default branch, which a new clone starts a branch from unless told otherwise. */
-  trunk?: string;
 }
 
 export interface CreateWorktreeRequest {
@@ -463,11 +433,6 @@ export interface CreateWorktreeRequest {
   fetch?: boolean;
 }
 
-/** `GET /api/worktrees/remotes?branch=`: `<remote>/<branch>` for each remote that has the branch. */
-export interface RemoteBranchesResponse {
-  remotes: string[];
-}
-
 export interface CreateWorktreeResponse {
   worktree: WorktreeInfo;
   slot: number;
@@ -486,9 +451,6 @@ export interface ReleaseWorktreeRequest {
    */
   deleteBranch?: boolean;
 }
-
-/** What became of the branch, as after a removal. */
-export type ReleaseWorktreeResponse = RemoveWorktreeResponse;
 
 export interface RemoveWorktreeRequest {
   path: string;
@@ -519,20 +481,6 @@ export interface SafetyBackup {
   head: string;
 }
 
-export interface RepoInfo {
-  /** Root of the repository/worktree the server was started in. */
-  root: string;
-  /** Root of the main worktree (shared state is keyed by this). */
-  commonRoot: string;
-  branch: string;
-  head: string;
-  worktrees: WorktreeInfo[];
-  /** Default target key (last used comparison or `all`). */
-  defaultTarget: TargetKey;
-  /** Trunk a `base` target is offered against by default: `main` or `master`, whichever exists. */
-  defaultBase?: string;
-}
-
 export type FileEntry = FileSummary;
 
 export interface FilesResponse {
@@ -547,63 +495,4 @@ export interface FullFileResponse {
   side: DiffSide;
   /** null when the file doesn't exist on that side. */
   content: string | null;
-}
-
-/** Where HEAD forked off a base ref: what the Commits panel reports beside its *Branch vs* field. */
-export interface ForkPointResponse {
-  /** The ref the fork point was computed against, as requested. */
-  base: string;
-  /** `merge-base(base, HEAD)`: the last commit the branch shares with `base`. */
-  sha: string;
-  /** Commits on HEAD that `base` does not have. */
-  ahead: number;
-  /** Commits that landed on `base` after the fork. */
-  behind: number;
-}
-
-/** Reorder: put the item right before `before`, or last when null. */
-export interface MoveRequest {
-  before: string | null;
-}
-
-export interface CreateTodoRequest {
-  title: string;
-  body?: string;
-  /** Defaults to the current branch of `root` (or of the repository root). */
-  branch?: string;
-  root?: string;
-  status?: TodoStatus;
-  /** Put the new todo right after this one; omitted = at the top of the list. */
-  after?: string;
-}
-
-export interface UpdateTodoRequest {
-  title?: string;
-  body?: string;
-  status?: TodoStatus;
-}
-
-export interface TodosResponse {
-  todos: Todo[];
-  /** Branch the listing was filtered by, when one was requested. */
-  branch?: string;
-}
-
-/** Payload of the `changed` SSE event emitted by the repository watcher. */
-export interface ChangeEvent {
-  type: 'changed';
-  head: string;
-  branch: string;
-  at: string;
-}
-
-/** The state file was written by this server or another Warden instance. */
-export interface StateEvent {
-  type: 'state';
-  at: string;
-}
-
-export interface ApiError {
-  error: string;
-  code?: string;
 }

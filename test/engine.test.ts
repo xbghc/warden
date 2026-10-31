@@ -4,6 +4,7 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Engine, PreviewService, WardenError, WorkflowService } from '@warden/engine';
 import * as worktrees from '../packages/engine/src/worktrees.js';
+import * as git from '../packages/engine/src/git.js';
 import { checkoutWorktree } from '../packages/engine/src/worktrees.js';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
@@ -27,6 +28,32 @@ afterEach(async () => {
 });
 
 describe('desktop engine', () => {
+  it('reads workspace safety and rebase state without retired management-page graph comparisons', async () => {
+    const shared = await engine.execute('task.create', { title: 'Shared task' });
+    const workflow = new WorkflowService(engine.repo, engine.store);
+    const clone = await workflow.start((await workflow.create({ title: 'Clone task' })).id, { kind: 'clone' });
+    await writeFile(path.join(shared.worktree!, 'pending.txt'), 'Pending edit\n');
+    const reads = vi.spyOn(git, 'runGit');
+    const list = await engine.execute('workspaces.list', undefined);
+    expect(list.worktrees).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: shared.worktree, shared: true, dirty: 1, free: false }),
+        expect.objectContaining({ path: clone.worktree, clone: true, dirty: 0, free: false }),
+      ]),
+    );
+    expect(list.branches).toContainEqual(expect.objectContaining({ name: 'main', worktree: fixture.root }));
+    expect((await engine.execute('workflow.get', undefined)).workflow?.changes).toHaveLength(2);
+    expect((await engine.execute('rebase.check', undefined)).checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ changeId: shared.id, status: 'blocked' }),
+        expect.objectContaining({ changeId: clone.id, status: 'current' }),
+      ]),
+    );
+    expect(
+      reads.mock.calls.filter(([args]) => args.some((arg) => arg.includes('%(upstream:track)')) || (args[0] === 'rev-list' && args.includes('--left-right'))),
+    ).toEqual([]);
+  });
+
   it('initializes and recovers a CRLF preview while protecting real preview edits', async () => {
     const original = '@echo off\r\necho Original\r\n';
     await fixture.write('gradlew.bat', original);

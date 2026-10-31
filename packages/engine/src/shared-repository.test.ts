@@ -49,7 +49,7 @@ describe('external shared task repository', () => {
     expect((await runGit(['rev-parse', '--verify', `${source}^{commit}`], { cwd: fx.root, okCodes: [0, 128] })).code).toBe(128);
     expect(fx.git('show-ref')).toBe(primaryRefs);
     expect(fx.git('status', '--porcelain')).toBe('');
-    expect((await listWorktreesDetailed(ctx)).find((row) => row.path === one)?.comparison).toMatchObject({ kind: 'base', ahead: 1, behind: 0 });
+    expect((await listWorktreesDetailed(ctx)).find((row) => row.path === one)).toMatchObject({ shared: true, head: source, dirty: 0, free: false });
     expect(await listBranches(ctx, await listWorktreesAll(ctx))).toEqual([expect.objectContaining({ name: 'main', worktree: fx.root })]);
   });
 

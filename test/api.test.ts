@@ -8,18 +8,14 @@ import type {
   CreateWorktreeResponse,
   FileDiff,
   FilesResponse,
-  ForkPointResponse,
   ReleaseWorktreeRequest,
-  ReleaseWorktreeResponse,
   RemoveWorktreeRequest,
   RemoveWorktreeResponse,
-  RepoInfo,
   ReviewState,
   Todo,
-  WorktreesResponse,
 } from '@warden/shared';
 import { createApp, resolveRepo, StateStore } from './compat/index.js';
-import type { CommitsResponse, UpdateNotice } from './compat/types.js';
+import type { CommitsResponse, ForkPointResponse, ReleaseWorktreeResponse, RepoInfo, UpdateNotice, WorktreesResponse } from './compat/types.js';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
 let fx: FixtureRepo;

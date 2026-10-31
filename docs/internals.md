@@ -150,6 +150,9 @@ stay beside primary. The repository owns task branches and objects; it is never 
 common directory. Repository resolution validates its ownership and maps its task worktrees back to
 primary for state and locking. Inventory excludes the bare repository and internal operation
 worktrees. Existing `kind: worktree` and `kind: clone` layouts remain supported without migration.
+Product inventory reads retain dirty-state, ownership and unfinished-operation checks, but omit
+the retired management page's upstream comparisons and free-slot branch lists. The test-only HTTP
+adapter adds those fields with the same validated Git reader; no new Git write path is introduced.
 Primary commits are fetched into the shared repository only when absent; worktrees in that repository
 can already read each other's objects. Shared initialization preserves the primary commit identity.
 Clone refs remain independent, while composition imports the clone commits it needs into the shared

@@ -5,7 +5,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Hono } from 'hono';
-import type { WorktreesResponse } from '@warden/shared';
+import type { WorktreesResponse } from './compat/types.js';
 import { createApp, resolveRepo, StateStore } from './compat/index.js';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 

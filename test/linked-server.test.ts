@@ -3,7 +3,8 @@ import path from 'node:path';
 import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Hono } from 'hono';
-import type { FilesResponse, RepoInfo, ReviewState } from '@warden/shared';
+import type { FilesResponse, ReviewState } from '@warden/shared';
+import type { RepoInfo } from './compat/types.js';
 import { createApp, resolveRepo, StateStore } from './compat/index.js';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 

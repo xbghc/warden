@@ -1,0 +1,81 @@
+import path from 'node:path';
+import { rm, writeFile } from 'node:fs/promises';
+import { describe, expect, it } from 'vitest';
+import { makeFixtureRepo } from '../fixtures/make-repo.js';
+import { resolveRepo } from '../../packages/engine/src/repo.js';
+import { checkoutWorktree } from '../../packages/engine/src/worktrees.js';
+import { listWorktreesDetailed } from './worktrees.js';
+
+describe('legacy worktree comparisons', () => {
+  it('compares shared task branches and lists branches in a free shared slot', async () => {
+    const fx = await makeFixtureRepo();
+    try {
+      const ctx = await resolveRepo(fx.root);
+      const first = await checkoutWorktree(ctx, { branch: 'agent/one', base: 'main', kind: 'shared', slot: 1 });
+      const second = await checkoutWorktree(ctx, { branch: 'agent/two', base: 'main', kind: 'shared', slot: 2 });
+      await writeFile(path.join(first.worktree.path, 'agent.txt'), 'Agent change\n');
+      fx.git('-C', first.worktree.path, 'add', '.');
+      fx.git('-C', first.worktree.path, 'commit', '-qm', 'Agent change');
+      fx.git('-C', second.worktree.path, 'switch', '--detach');
+      const rows = await listWorktreesDetailed(ctx);
+      expect(rows.find((row) => row.path === first.worktree.path)?.comparison).toEqual({ kind: 'base', base: 'main', ahead: 1, behind: 0 });
+      const free = rows.find((row) => row.path === second.worktree.path);
+      expect(free).toMatchObject({ shared: true, free: true });
+      expect(free?.comparison).toBeUndefined();
+      expect(free?.branches).toContainEqual(expect.objectContaining({ name: 'agent/one', worktree: first.worktree.path }));
+    } finally {
+      for (const slot of [1, 2]) await rm(`${fx.root}-${slot}`, { recursive: true, force: true });
+      await fx.cleanup();
+    }
+  });
+
+  it('compares a branch without an upstream against the main checkout branch, including after a merge and branch switch', async () => {
+    const fx = await makeFixtureRepo();
+    try {
+      const wt = path.join(fx.root, 'topic-wt');
+      fx.git('worktree', 'add', '-b', 'topic', wt);
+      await fx.write('topic-wt/topic.txt', 'topic');
+      fx.git('-C', wt, 'add', 'topic.txt');
+      fx.git('-C', wt, 'commit', '-qm', 'topic change');
+      await fx.write('main.txt', 'main');
+      fx.git('add', 'main.txt');
+      fx.git('commit', '-qm', 'main change');
+      const ctx = await resolveRepo(fx.root);
+      const comparison = async () => (await listWorktreesDetailed(ctx)).find((w) => w.branch === 'topic')?.comparison;
+      expect(await comparison()).toEqual({ kind: 'base', base: 'main', ahead: 1, behind: 1 });
+      fx.git('merge', '--no-ff', 'topic', '-m', 'merge topic');
+      expect(await comparison()).toEqual({ kind: 'base', base: 'main', ahead: 0, behind: 2 });
+      fx.git('switch', '-c', 'release');
+      expect((await comparison())?.base).toBe('release');
+    } finally {
+      await fx.cleanup();
+    }
+  });
+
+  it('counts a branch with an upstream against the upstream, and against the main checkout once it is gone', async () => {
+    const fx = await makeFixtureRepo();
+    try {
+      const wt = path.join(fx.root, 'topic-wt');
+      fx.git('worktree', 'add', '-b', 'topic', wt);
+      // What pushing and fetching would leave, with no remote to reach: main level with origin/main,
+      // and origin/topic carrying a commit pushed from somewhere else.
+      fx.git('remote', 'add', 'origin', 'https://example.invalid/fixture.git');
+      fx.git('update-ref', 'refs/remotes/origin/main', 'main');
+      fx.git('update-ref', 'refs/remotes/origin/topic', fx.git('commit-tree', 'main^{tree}', '-p', 'main', '-m', 'pushed elsewhere').trim());
+      fx.git('branch', '--set-upstream-to=origin/main', 'main');
+      fx.git('branch', '--set-upstream-to=origin/topic', 'topic');
+      await fx.write('topic-wt/topic.txt', 'topic');
+      fx.git('-C', wt, 'add', 'topic.txt');
+      fx.git('-C', wt, 'commit', '-qm', 'topic change');
+      const ctx = await resolveRepo(fx.root);
+      const detail = async (branch: string) => (await listWorktreesDetailed(ctx)).find((w) => w.branch === branch);
+      expect((await detail('topic'))?.comparison).toEqual({ kind: 'upstream', base: 'origin/topic', ahead: 1, behind: 1 });
+      expect((await detail('main'))?.comparison).toEqual({ kind: 'upstream', base: 'origin/main', ahead: 0, behind: 0 });
+      // Deleted on the remote and pruned: `[origin/topic: gone]`.
+      fx.git('update-ref', '-d', 'refs/remotes/origin/topic');
+      expect(await detail('topic')).toMatchObject({ upstreamGone: 'origin/topic', comparison: { kind: 'base', base: 'main', ahead: 1, behind: 0 } });
+    } finally {
+      await fx.cleanup();
+    }
+  });
+});

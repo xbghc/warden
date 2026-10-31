@@ -2,7 +2,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { createApp, resolveRepo, RepoWatcher, statusPaths, StateStore } from './compat/index.js';
+import { createApp, resolveRepo, RepoWatcher, StateStore } from './compat/index.js';
 import * as worktreeState from '../packages/engine/src/worktree-state.js';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
@@ -37,14 +37,6 @@ afterEach(async () => {
   await Promise.all([...watching].map((watcher) => watcher.close()));
   watching.clear();
   vi.restoreAllMocks();
-});
-
-describe('statusPaths', () => {
-  it('reads porcelain -z entries and consumes the origin path of renames', () => {
-    expect(statusPaths(' M src/a.ts\0?? new.ts\0')).toEqual(['src/a.ts', 'new.ts']);
-    expect(statusPaths('R  dst.ts\0src.ts\0 M other.ts\0')).toEqual(['dst.ts', 'src.ts', 'other.ts']);
-    expect(statusPaths('')).toEqual([]);
-  });
 });
 
 describe('RepoWatcher', () => {

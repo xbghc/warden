@@ -13,28 +13,6 @@ export interface RepoChange {
 export type ChangeListener = (change: RepoChange) => void;
 
 /**
- * `git status --porcelain -z` output, as the paths it mentions. Rename and copy entries carry the
- * origin path in a second NUL-separated field, which has to be consumed or it is read as an entry.
- */
-export function statusPaths(out: string): string[] {
-  const parts = out.split('\0');
-  const paths: string[] = [];
-  for (let i = 0; i < parts.length; i++) {
-    const entry = parts[i];
-    if (!entry || entry.length < 3) continue;
-    const x = entry[0]!;
-    const y = entry[1]!;
-    const p = entry.slice(3);
-    if (p) paths.push(p);
-    if (x === 'R' || x === 'C' || y === 'R' || y === 'C') {
-      const origin = parts[++i];
-      if (origin) paths.push(origin);
-    }
-  }
-  return paths;
-}
-
-/**
  * Polls one worktree and reports that something changed. Only runs while somebody is subscribed.
  *
  * The signature covers more than `git status` alone: editing an already-modified file leaves the
@@ -139,7 +117,7 @@ export class RepoWatcher {
   private async snapshot(): Promise<{ signature: string; head: string; branch: string }> {
     const state = await readWorktreeState(this.root);
     const head = state.head ?? '';
-    // Preserve getRepoInfo's detached/unborn label so the client keeps the same task scope.
+    // Detached and unborn checkouts retain their existing branch labels.
     const branch = head ? (state.branch ?? head.slice(0, 7)) : 'HEAD';
     const stats = await Promise.all(
       state.paths.map(async (rel) => {
