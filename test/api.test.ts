@@ -5,7 +5,6 @@ import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Engine } from '@warden/engine';
 import type {
-  CommitsResponse,
   CreateWorktreeResponse,
   FileDiff,
   FilesResponse,
@@ -17,10 +16,10 @@ import type {
   RepoInfo,
   ReviewState,
   Todo,
-  UpdateNotice,
   WorktreesResponse,
 } from '@warden/shared';
 import { createApp, resolveRepo, StateStore } from './compat/index.js';
+import type { CommitsResponse, UpdateNotice } from './compat/types.js';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
 let fx: FixtureRepo;
@@ -888,7 +887,7 @@ describe('update notice', () => {
   });
 });
 
-describe('static + unknown routes', () => {
+describe('unknown routes', () => {
   it('unknown api routes return JSON 404', async () => {
     const res = await get('/api/nope');
     expect(res.status).toBe(404);

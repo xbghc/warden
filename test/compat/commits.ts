@@ -1,4 +1,4 @@
-import type { CommitInfo, CommitRef } from '@warden/shared';
+import type { CommitInfo, CommitRef } from './types.js';
 
 const SEP = '\x1f';
 

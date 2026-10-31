@@ -9,9 +9,9 @@ Branch switches when reusing a slot also refuse to overwrite ignored files; reba
 paths against its target and intermediate replay commits before execution.
 
 Backups live at `backups/<timestamp>-<uuid>/` beside this repository's `state.json`; see
-[State](internals.md#state) for the data directory. `GET /api/backups` lists completed backups with
-their reason, original checkout path, HEAD and backup path. Release/remove responses also include
-the created `backup`. The listing survives a extension restart and does not rely on a successful
+[State](internals.md#state) for the data directory. Inspect each completed backup's `manifest.json`
+for its reason, original checkout path, HEAD and backup path. The engine discovers completed backups
+from these manifests, so they survive an extension restart without relying on a successful
 post-operation state write. Warden never pushes backups anywhere.
 
 Rebase and history backups are temporary recovery data. Their operation journals retain their

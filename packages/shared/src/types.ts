@@ -533,14 +533,6 @@ export interface RepoInfo {
   defaultBase?: string;
 }
 
-/** A release newer than the running one; `GET /api/update` answers `null` when there is none. */
-export interface UpdateNotice {
-  current: string;
-  latest: string;
-  /** Command that installs it, matched to how this copy was started (npx, or a global install). */
-  command: string;
-}
-
 export type FileEntry = FileSummary;
 
 export interface FilesResponse {
@@ -555,31 +547,6 @@ export interface FullFileResponse {
   side: DiffSide;
   /** null when the file doesn't exist on that side. */
   content: string | null;
-}
-
-/** A branch or tag that points at a commit, as `git log --decorate` lists them. */
-export interface CommitRef {
-  name: string;
-  kind: 'branch' | 'tag';
-}
-
-export interface CommitInfo {
-  sha: string;
-  shortSha: string;
-  author: string;
-  email: string;
-  date: string;
-  subject: string;
-  parents: string[];
-  /** Branches (local and remote) and tags on this commit; the branch HEAD sits on comes first. */
-  refs: CommitRef[];
-  /** HEAD of the worktree the log was taken in is this commit. */
-  head: boolean;
-}
-
-export interface CommitsResponse {
-  commits: CommitInfo[];
-  hasMore: boolean;
 }
 
 /** Where HEAD forked off a base ref: what the Commits panel reports beside its *Branch vs* field. */

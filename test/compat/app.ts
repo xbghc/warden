@@ -5,7 +5,6 @@ import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type {
   ChangeEvent,
-  CommitsResponse,
   CreateTodoRequest,
   CreateWorktreeRequest,
   ForkPointResponse,
@@ -22,14 +21,14 @@ import type {
   StateEvent,
   Todo,
   TodosResponse,
-  UpdateNotice,
   UpdateTodoRequest,
   WorktreeInfo,
   WorktreesResponse,
 } from '@warden/shared';
 import { formatTargetKey, insertAfter, isLocalTarget, isValidRef, moveBefore, tryParseTargetKey } from '@warden/shared';
 import { badRequest, WardenError as HttpError, notFound } from '../../packages/engine/src/errors.js';
-import { COMMIT_FORMAT, parseCommitLog } from '../../packages/engine/src/commits.js';
+import { COMMIT_FORMAT, parseCommitLog } from './commits.js';
+import type { CommitsResponse, UpdateNotice } from './types.js';
 import { mergeBase, refExists, revParse, runGit } from '../../packages/engine/src/git.js';
 import { currentBranch, getRepoInfo, listWorktrees, remoteDefault, slotPath, type RepoContext } from '../../packages/engine/src/repo.js';
 import { getFileDiff, getFullFile, listTargetDiffs, literal, resolveTargetContext, toSummary, type TargetContext } from '../../packages/engine/src/targets.js';
@@ -50,13 +49,10 @@ import { HistoryService } from '../../packages/engine/src/history.js';
 import { listSafetyBackups } from '../../packages/engine/src/backups.js';
 import { workspaceConfig } from '../../packages/engine/src/workspace.js';
 import { DEFAULT_POLL_INTERVAL_MS, RepoWatcher } from '../../packages/engine/src/watcher.js';
-import { serveStaticFile } from './static.js';
 
 export interface AppOptions {
   repo: RepoContext;
   store: StateStore;
-  /** Directory of the built web app; when omitted only /api is served. */
-  webDir?: string;
   /** Poll interval of the repository watchers; tests use a short one. */
   watchIntervalMs?: number;
   /** Echoed by GET /api/ping, so a caller can tell this process apart from whatever else answers. */
@@ -698,12 +694,5 @@ export function createApp(opts: AppOptions): WardenApp {
     return c.text('Not Found', 404);
   });
 
-  if (opts.webDir) {
-    const webDir = opts.webDir;
-    app.get('*', (c) => {
-      if (c.req.path === '/api' || c.req.path.startsWith('/api/')) return c.notFound();
-      return serveStaticFile(c, webDir);
-    });
-  }
   return app;
 }

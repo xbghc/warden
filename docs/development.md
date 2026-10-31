@@ -31,6 +31,10 @@ The extension manifest owns the release version. The repository root is private 
 | `packages/webview` | React/shadcn forms using packaged resources and VS Code theme colors |
 | `test/compat` | Legacy in-process HTTP harness for existing behavior tests; not a product server |
 
+Retired HTTP response types and commit-list parsing stay in `test/compat` with their regression
+tests. The harness serves no static web application. Product coverage uses the typed Engine and
+packaged extension; the compatibility harness remains until its behavior coverage is migrated.
+
 `pnpm typecheck` checks the engine/shared/tests, webview DOM project and extension project separately.
 `pnpm test` runs colocated unit tests and isolated Git integration fixtures against the TypeScript
 engine and Git CLI. CI covers Windows, Linux and macOS, including x64 and arm64 runners.

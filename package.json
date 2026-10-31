@@ -46,7 +46,6 @@
     "@warden/shared": "workspace:*",
     "fflate": "0.8.2",
     "hono": "^4.13.7",
-    "rimraf": "^6.1.3",
     "tsup": "^8.5.1",
     "tsx": "^4.23.13",
     "typescript": "^5.9.3",
