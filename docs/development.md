@@ -77,11 +77,93 @@ development window appears in the local VS Code client. Use a test repository in
 environment. Source debugging does not require packaging or installing a VSIX. See
 [VS Code's remote extension debugging guide](https://code.visualstudio.com/api/advanced-topics/remote-extensions#debugging-using-ssh).
 
+### Diagnostic logs
+
+Open **View → Output → Warden** for the extension's native log channel. It is available even when
+ACP setup fails and Workbench is gated. Use **Developer: Set Log Level… → Warden** to select
+Debug or Trace, then reproduce the problem. VS Code manages the local log files and their retention;
+use **Developer: Open Logs Folder** to locate host logs. In SSH, WSL and container windows, Warden
+runs and logs on the workspace extension host. Logs are not uploaded or stored in repository state.
+
+- **Info** records activation, repository lifetime, engine mutations, preview status changes,
+  ACP connection/session/turn lifetime, permission waits and disconnect requests.
+- **Debug** adds ACP startup phases, process IDs, negotiated protocol capabilities, request methods,
+  durations, first streamed update, tool status, session restoration and view routing.
+- **Trace** adds engine reads, conversation saves and the types of individual ACP updates,
+  including ignored foreign-session or stale-connection notifications.
+- **Warning/Error** records failures, timeouts, authentication requirements, unexpected exits,
+  forced termination and persistence/cleanup problems at every verbosity level that includes them.
+
+`[diagnostic]` lines contain JSON with a timestamp and window `run` ID. Engine instances, task
+conversations, ACP connection attempts, turns, permissions and timed operations have separate
+correlation IDs. `operation` pairs each `.start` with its `.end`; `durationMs` uses a monotonic clock.
+Outcomes distinguish `ok`, `error`, `timeout`, `cancelled` and `authentication_required`. Filter by
+`connection` to inspect one attempt, or by `task` and `turn` to follow a conversation. A start without
+an end identifies pending work or an interrupted host. A successful RPC does not imply that the
+agent has stopped all child commands; turn completion retains its existing passive behavior.
+
+Routine records contain selected metadata and counts, not prompts, replies, thoughts, tool inputs,
+file contents, profile commands/arguments or environment dumps. ACP failures include bounded error
+details and recent stderr to explain generic provider errors. Structured payload/credential fields,
+known environment secrets and common credential formats are redacted before output. Stderr is
+buffered across chunks; oversized lines are dropped whole. Agent-supplied free-form error messages
+and stderr can still contain other project-specific context. Logging failures cannot replace the
+operation's result. Explicit **Show Preview Output** and **Show Setup Script Output** retain their
+user-requested script output.
+
+### Startup performance
+
+Warden automatically writes local `[performance]` JSON lines to **View → Output → Warden**.
+Reload the window to capture a fresh activation, then copy the lines from that output channel.
+No setting or agent prompt is required. These diagnostics are not uploaded or saved in repository
+state. They contain fixed stage names, generated IDs, timestamps, durations and outcomes; they omit
+repository paths, task content, agent commands, credentials and raw error messages.
+
+Task Chat failures also write `[ACP Task Chat]` diagnostics to the Warden output channel and the
+extension host's Debug Console. These separate error records identify the task, profile and failed
+operation, retain the ACP error code and bounded error details, and include the agent's recent stderr.
+Credential fields, common token formats and configured secret environment values are redacted;
+prompt payloads, executable configuration and stdout are not deliberately recorded. The panel also
+shows bounded error details so an `Internal error` response does not hide its underlying cause.
+
+Each record has `version: 1`, a window activation `run` ID, a numeric `span` ID, an optional `parent`
+span, a `stage`, an `event` (`start` or `end`) and a wall-clock `timestamp`. `elapsedMs` measures
+time since entry into Warden's `activate`; end records also have `durationMs` and `outcome`.
+Durations use a monotonic clock. Outcomes distinguish `ok`, `error`, `timeout`, `cancelled` and
+`authentication_required`. A start without an end identifies a pending phase (or an interrupted
+host). Logging failures do not fail the measured operation.
+
+- `activation` includes workbench construction, repository opening and the initial refresh.
+- `repository.open` includes waiting for previous work (`repository.wait`), `engine.open`,
+  `repository.refresh` and restoring expanded reviews (`review.restore`). The refresh measures
+  the combined workflow/preview/workspace read (`repository.get`), `workflow.context`, optional
+  branch following (`workflow.configure`) and observer startup (`engine.start`) separately.
+  `context.update` measures ordered context publication; unchanged values do not cross the host boundary again.
+- Initial advisory synchronization checks (`rebase.check`) run separately and may finish after
+  activation. Pending checks never block repository navigation or report a current workspace.
+- `acp.connect` includes previous-process cleanup (`acp.cleanup`), process creation (`acp.spawn`),
+  protocol negotiation (`acp.initialize`) and empty-session creation (`acp.session.new`). Explicit
+  authentication has a separate `acp.authenticate` span. Reconnects get new spans within the run.
+
+Automatic ACP connection starts once the primary directory is resolved, overlapping the initial
+repository refresh. During an uninterrupted automatic startup with a configured profile, the later
+of the successful `activation` and `acp.connect` end records' `elapsedMs` measures activation entry
+through repository and ACP readiness, including the 300 ms connection scheduling delay. Later retries also
+include the time spent waiting for user action; use `durationMs` to compare connection attempts.
+Missing or invalid configuration produces no connection span;
+inspect Settings for the configuration state. Authentication-required and failed attempts are not
+reported as ready. Parallel and nested spans overlap, so do not sum their durations.
+
+Only repository opens, their initial refreshes and associated background checks are instrumented; ordinary background refreshes
+do not emit performance records. This measures extension-host wall time, not VS Code startup before
+activation, module loading, visible paint, task-chat connections, CPU usage or individual Git commands.
+Use the separate [Git benchmark](git-reads.md#reproducible-measurements) for isolated Git measurements.
+
 ## ACP verification
 
 ACP tests use `test/fixtures/acp-agent.mjs`, an SDK-compatible child agent that performs its own file
 operations. Cover stable protocol initialization with no client filesystem/terminal capabilities,
-streamed updates, permission answers, cancellation, explicit authentication/restoration, stale task
+streamed updates, permission answers, cancellation, explicit authentication, automatic session restoration on opening, stale task
 bindings and cross-window connection ownership. The fixture must exercise real stdio and its own tools;
 client file callbacks or Warden-run agent commands would test an unsupported architecture.
 Also cover initial and between-turn configuration, grouped/boolean selectors, legacy mode fallback,
@@ -91,8 +173,10 @@ Keep controls connection-scoped and exercise foreign-session updates and interru
 Packaged extension-host and conversation webview tests verify the shipped UI/host bridge alongside
 existing native review and Git flows. Cover sidebar/editor transfers during permission requests,
 missing and invalid agent profiles before and after branch selection, live configuration updates,
-workspace-profile rejection, a single native Configure ACP button for missing profiles, shared Settings
-panel routing without launching the preset picker, preset controls available only in Settings,
+workspace-profile rejection, a single native Configure ACP button for missing profiles, shared native Settings
+view routing without launching an editor or preset picker, stacked/collapsible view contributions,
+multiline script saves, cancellation, legacy-script preservation and stale repository/configuration
+rejection, preset controls available only in Settings,
 automatic startup/reconfiguration connections, and gated workflow surfaces and actions
 for unchecked, missing-executable, incompatible-protocol, session-setup and authentication failures.
 Verify that successful initialization leaves the connection alive, unexpected exits revoke availability,
@@ -100,7 +184,8 @@ and replacement/shutdown stop owned processes and cancel pending startup. Cover 
 prompts and recovery without losing tasks or task-note drafts. Opening Settings alone does not start
 an additional connection; startup and profile saves do. Also cover
 native Codex/OpenCode preset selection, command-input cancellation, existing and concurrently edited
-profile preservation, workbench-selected agents for new Task Chats, composer mode/model controls,
+profile preservation, workbench-selected agents for new Task Chats, automatic first-session creation
+and saved-session restoration on opening, repeated opens without duplicate connections, composer mode/model controls,
 Enter/Shift+Enter and IME behavior, and the absence of agent setup inside Task Chat,
 per-task draft and reading-position restoration, stale view messages and concurrent background turns. Interrupted prompts must not be resent automatically, and cancel
 must not claim that all agent-owned background commands have stopped. These checks do not validate a
@@ -122,14 +207,14 @@ pnpm test:vscode
 ```
 
 `test/ui/smoke.py` starts and closes `test/ui/harness.ts`, exercises initialization, empty states,
-multiline task-note drafts after discarding webview-local state, save/discard behavior, optional settings and rebase selection, and saves screenshots under
+multiline task-note drafts after discarding webview-local state, save/discard behavior, native Settings links and rebase selection, and saves screenshots under
 `WARDEN_UI_ARTIFACTS` (default `/tmp/warden-ui-artifacts`). The harness is test-only and is not shipped.
 Inspect screenshots and console errors. Preserve intentional error cases in native-host tests as well.
 For manual verification, run `node --import tsx test/ui/harness.ts` and open its reported port. `/inspect`
 embeds the task-note editor at 320 pixels in light, dark and high-contrast themes. `WARDEN_UI_PORT` and
 `WARDEN_UI_HOST` optionally select the local test binding; defaults remain an ephemeral loopback port.
 `test/ui/acp-smoke.py` uses the same packaged assets with real ACP subprocesses to exercise concurrent
-task conversations, permission choices, cancellation, explicit recovery and draft preservation.
+task conversations, permission choices, cancellation, automatic restoration on opening and draft preservation.
 Set `CHROMIUM_PATH` to use an existing browser. CI runs this test against assets read directly from
 the same VSIX used by the extension-host matrix.
 
@@ -158,11 +243,15 @@ shell or arbitrary VS Code command bridge.
 packaged bytes. It never silently substitutes a source build. `WARDEN_VSCODE_VERSION` selects the
 host (default `1.106.0`); `VSCODE_EXECUTABLE_PATH` selects an existing executable. Linux CI uses Xvfb.
 `WARDEN_VSCODE_SUITE=chat pnpm test:vscode` runs the packaged agent-setup and task-chat flows while iterating.
+`WARDEN_VSCODE_SUITE=settings pnpm test:vscode` runs native Settings, ACP setup/recovery and script editors.
 In environments requiring an HTTP proxy, configure the test downloader's `npm_config_https_proxy`.
 
-The suite checks native tree setup with top-level tasks, row menus, drag/keyboard ordering, input cancellation, stale-session rejection,
+The suite checks native tree setup with top-level tasks, tree/list layout switching and saved preference,
+nested-file navigation and refresh, row menus, drag/keyboard ordering, input cancellation, stale-session rejection,
 independent expansion and native read-only snapshots, stale review rejection, preview isolation/setup/terminal,
-native preview status, persistent failure feedback and diagnostic output without a Preview editor page,
+native preview status, compact execution menus with and without a configured command, persistent sync/setup
+recovery actions, Settings-row reruns and stale-row rejection, preview terminal reuse across repository
+switches and recreation after closure, and diagnostic output without a Preview editor page,
 ordinary commit hooks and retained-stage recovery, native commit-input cancellation and stale-version
 rejection while typing, multiline delivery, fresh workspaces, stale-session
 rejection and preservation of delivery records. History rewriting remains covered by engine tests. CI runs the same VSIX in minimum and

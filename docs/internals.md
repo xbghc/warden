@@ -69,6 +69,24 @@ the same workspace. Unrelated historical metadata and internal snapshot objects 
 
 ## Security model
 
+Local diagnostics use an optional host-provided sink; the extension routes it to VS Code's native
+Warden log channel. Engine records contain operation names, timings, outcomes and stable error codes,
+without serializing operation inputs or results. ACP adds connection/request metadata and bounded,
+redacted failure details/stderr. Logging observes existing operations and adds no Git reads, writes,
+network requests or repository state files. See [Diagnostic logs](development.md#diagnostic-logs)
+for levels, correlation fields and the limits of redacting agent-provided free-form text.
+
+Native Settings uses a TreeView and VS Code inputs, pickers and text editors. Setup scripts are
+virtual `warden-script` documents registered only when opened from Settings. Their host-owned bindings
+pin repository, session, script kind and original configuration. Save rereads `workflow.get`, rejects
+stale bindings and script changes, and writes through `config.save`, preserving unrelated fields.
+The editor supplies an expected configuration; `config.save` compares it under the repository/state
+write locks and rejects a concurrent update with `config_changed` before writing. Existing callers
+without an expected configuration retain their explicit full-configuration save behavior.
+Unknown URIs, renames, directory creation and deletion are rejected. The editor adds no Git writes or direct shell
+execution; preview setup retains its existing automatic configuration-change trigger. Agent profiles still use only User or
+Remote User settings. Legacy webview settings navigation reveals the same native Settings view.
+
 The workbench ACP connection is separate from Engine Git operations. In a trusted workspace, startup
 and changes to User or Remote User profiles automatically launch a validated profile in the primary
 folder (or the first workspace folder before repository selection). The last successfully selected
@@ -84,8 +102,9 @@ wait. Pending connection attempts and authentication pickers are cancelled; stal
 the workbench. Settings edits are coalesced and failures do not trigger a restart loop. Task connections
 are separately closed on shutdown, even if cleanup of the workbench connection reports an error.
 Agent-owned tools, login data, empty-session records and child commands remain the agent's responsibility.
-Availability is window-local and is not stored as a persistent readiness flag. Task agents retain their
-own workspace cwd and require an explicit connect or send; startup never replays an uncertain prompt.
+Availability is window-local and is not stored as a persistent readiness flag. Task connections retain
+their own workspace cwd and start when the user opens Task Chat or sends a message. Workbench startup
+alone never opens a task session or replays an uncertain prompt.
 
 Single user, in the VS Code workspace extension host (local, SSH, WSL or container). There is no
 production HTTP listener. The internal engine executes Git with argument arrays,

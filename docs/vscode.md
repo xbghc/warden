@@ -21,16 +21,19 @@ browser-only virtual filesystems are unsupported. SSH, WSL and containers use th
 
 ## Workbench
 
-The **Workbench** sidebar contains ordered tasks as top-level items, without grouping rows. A task describes planned work; its
+The Warden sidebar stacks two native collapsible views: **Workbench** and **Settings**. Both appear
+by default; Settings uses a native tree for ACP controls and scripts. Workbench contains ordered tasks as
+top-level items, without grouping rows. A task describes planned work; its
 **Workspace** is the directory allocated for execution. **Sync Preview** composes saved content into the
 preview directory; **Rebase** brings a task workspace forward through an explicit rebase.
 
 Warden's sidebar and activity-bar entry appear only when the window contains at least one workspace
 folder. An empty window or a saved workspace with no folders does not show a repository picker.
-Warden automatically connects to the configured ACP server. While unavailable, the sidebar contains
-only **Configure ACP**, opening the shared Settings panel. There is no separate connection-check page.
-Connection progress, errors, authentication and reconnect controls live in Settings. Once connected,
-repository discovery shows **Opening repository…**, followed by **Select Repository** when needed and
+Warden automatically connects to the configured ACP server. **Configure ACP** stays hidden during
+workspace loading and pending connections. If setup, authentication or recovery is needed after loading,
+Workbench contains only **Configure ACP**, revealing the Settings view below it. There is no separate
+connection-check page. Connection progress, errors, authentication and reconnect controls live in Settings.
+Repository discovery shows **Opening repository…**. Once connected, it offers **Select Repository** when needed and
 **Select Base Branch**. An existing branch resumes its saved workbench. Other workflow panels link to
 Settings while unavailable, and ordinary commands remain blocked until connected.
 
@@ -46,7 +49,9 @@ you to return there to resolve it. Detached HEAD and unfinished Git operations k
 
 The native workbench tree opens directly into tasks and their changed files. With no tasks, **New Task**
 is available in the empty view and heading. The heading exposes refresh, add-task and rebase; its
-**More Actions** (⋯) menu contains **Settings** and preview commands. Preview has no editor page or tree row.
+**More Actions** (⋯) offers the configured **Run Preview** command, otherwise **Open Preview Terminal**,
+and reveals **Settings** in the sidebar. Repository selection appears only when needed or in multi-root
+windows; preview recovery actions appear while their failures persist. Preview has no editor page or tree row.
 The status bar shows preview synchronization; conflicts and setup failures remain visible above the task list.
 Each allocated task offers Agent, preview connection and commit as inline actions; its context menu holds opening the workspace,
 editing notes, delivery records, synchronization, copying and recovery. Allocation failures expose
@@ -71,8 +76,10 @@ recovery and re-review. Opening a workspace uses a new VS Code window.
 
 Delivery records use native pickers leading to read-only commit diffs. Script output uses the Warden
 output channel. Multiline task notes use an explicitly opened editor webview; its task-bound draft
-survives switching tasks and hiding/reopening the panel. Batch rebase and script settings retain
-dedicated editor panels. Preview diagnostics use the Warden output channel. Task Chat uses the Secondary Side Bar. Prefer native controls
+survives switching tasks and hiding/reopening the panel. Batch rebase retains a dedicated editor panel. Settings opens setup scripts in native text editors;
+Save updates the script for its original repository, preserving unrelated script configuration and
+distinct legacy reuse scripts. Unsaved edits stay in the editor; stale repository or script versions
+cannot overwrite current configuration. Workspace scripts run on allocation; preview setup retains its normal automatic triggers. Preview diagnostics use the Warden output channel. Task Chat uses the Secondary Side Bar. Prefer native controls
 for future interactions and choose a webview only when its particular layout warrants one.
 
 Task-note drafts persist in VS Code workspace state when the editor is closed. Saving or discarding
@@ -88,7 +95,7 @@ ACP is the currently implemented integration. The [agent contract](agent.md#mini
 requires messaging and task-workspace binding, not ACP or ownership of the agent process. Other
 integrations must implement and verify those capabilities before they can unlock the workbench.
 
-Use **Configure ACP** to open the shared **Warden · Settings** panel. **Choose Agent Preset** opens the
+Use **Configure ACP** to reveal the native **Settings** view below Workbench. **Choose Agent Preset** opens the
 native Codex/OpenCode picker. Each preset has one stable profile ID; selecting an existing preset
 opens its settings without adding a duplicate. Saving connects automatically, using the new preset.
 At startup Warden uses the last successfully selected profile when available, otherwise the first
@@ -119,9 +126,10 @@ use **Custom Agent / Edit Settings** to configure `node` with the installed Java
 and any required arguments instead. Saving a preset starts the automatic connection. Warden does not
 download, install or authenticate the agent automatically, or set a model or permission policy.
 
-Open **Configure ACP → ACP Setup Guide and Example** in Warden Settings for the inline setup example.
-It stays collapsed until requested. Other workflow pages link to this panel; Task Chat contains no
-preset picker or setup guide.
+Expand **Configure ACP → ACP → ACP Setup Guide** in Settings for the upstream installation guides.
+The guide stays collapsed until requested. **Agent Profiles** opens native User or Remote User settings
+for detailed configuration. Other workflow pages link to Settings; Task Chat contains no preset picker
+or setup guide.
 
 Configure `warden.acpAgents` in VS Code User settings, or Remote User settings for SSH, WSL and
 containers. Executable profiles cannot come from workspace or folder settings. The executable must
@@ -147,7 +155,8 @@ required by your agent or adapter; there is no universal ACP startup flag. An op
 string environment overrides. Use the agent's existing login and inherited environment as appropriate;
 Warden does not add a credential store. A normal CLI without ACP support cannot use this connection.
 
-Open a task's **Chat with Agent** to show **Task Chat** in the Secondary Side Bar and connect or send text.
+Open a task's **Chat with Agent** to show **Task Chat** in the Secondary Side Bar. Opening automatically
+resumes the saved session or creates the first session, without a manual connect or create step.
 New conversations use the agent verified in workbench setup; existing conversations retain their agent.
 Agent configuration and the ACP setup guide stay in workbench setup and settings.
 **Switch Task Chat** in the view title chooses another task; selecting a task
@@ -158,7 +167,7 @@ stays at the bottom, and session details and history scroll within the available
 Hiding or switching a chat leaves its agent running. Task rows show permission requests, activity
 and failures without stealing focus. VS Code remembers user changes to the view's location.
 
-Merely opening a chat does not launch the agent. The view shows replies, tool activity and permission choices supplied by
+Opening a chat never sends a prompt. The view shows replies, tool activity and permission choices supplied by
 the agent. Select an advertised authentication method if needed; terminal-based login must be completed
 separately on the same host. There are no client-side file or terminal tool callbacks.
 
@@ -180,8 +189,8 @@ content label when applicable. The original editor and native review remain unch
 
 The conversation retains its original task, workspace identity and repository. One extension window owns each
 task's executable connection; other tasks can run independently. Conversation records persist outside
-the source repository. After interruption, **Resume Session** explicitly loads the original session when the
-agent supports it. Otherwise **New Session** starts again while retaining previous history. Warden never
+the source repository. Reopening a disconnected chat loads the original session when the agent supports
+it. Otherwise **New Session** starts again while retaining previous history. Warden never
 silently resends a prompt whose outcome is uncertain.
 
 **Stop Turn** requests cancellation. **Disconnect** closes Warden's connection and its agent process; an
@@ -213,14 +222,25 @@ Its directory retains ignored dependencies and caches. Unexpected source edits t
 and remain available for manual handling. A conflicting initial connection fails without changing the
 selected combination; later conflicts keep the last coherent preview and report stale content.
 
-**Open Preview Terminal** sets a native terminal's cwd to preview. **Run Preview** executes the optional
+**Open Preview Terminal** opens or reveals a native terminal for the current repository and preview
+directory. It reuses a live matching terminal; a closed terminal or a different repository or directory
+gets a new one. When shell integration reports a changed cwd, that terminal is not reused.
+**Run Preview** executes the optional
 `warden.previewCommand` through VS Code Tasks there. Other user terminals, tasks and debug sessions
 are not redirected. Use the displayed preview path or `${command:warden.previewPath}` where supported.
-The workbench's **More Actions** menu shows **Run Preview** only when that command is configured,
-keeping **Open Preview Terminal**, **Sync Preview**, **Copy Preview Path** and **Show Preview Output** available.
-**Rerun Preview Setup** appears there only while a setup script is configured. Clicking the preview status
-bar item also opens **Show Preview Output**: current composition, directory, last successful sync,
-conflict paths and recorded setup status, output and exit code. Reading output does not synchronize or run setup.
+The workbench's **More Actions** menu shows **Run Preview** when that command is configured, otherwise
+**Open Preview Terminal**. Normal saved changes synchronize automatically. **Sync Preview** appears
+in the menu for stale, conflicting, failed or paused synchronization; **Rerun Preview Setup** appears
+for a failed configured setup script. Recovery entries remain visible until the problem clears.
+Conflicts still require inspecting the affected paths and adjusting the sources or connections.
+The Command Palette retains all preview commands, including **Open Preview Terminal**, **Sync Preview**,
+**Copy Preview Path** and **Show Preview Output**, regardless of the compact menu's selection.
+Clicking the preview status bar opens **Show Preview Output**: current composition, directory, last
+successful sync, conflict paths and recorded setup status, output and exit code. Reading output does
+not synchronize or run setup. **Refresh** only rereads visible state; it does not invoke **Sync Preview**.
+**Select Base Branch** remains in initial setup and the Command Palette. Later context changes follow
+the branch checked out through Git in primary. Settings is the single configuration entry in More Actions;
+the unavailable-agent welcome still offers **Configure ACP**.
 
 The engine combines repository-change hints, state-file notifications and periodic checks. Preview
 publication still compares content hashes and debounces updates. A separate background-owner lease
@@ -230,15 +250,19 @@ checked before preview synchronization resumes. Existing preview programs are no
 
 ## Environment setup
 
-Open **More Actions (⋯) → Settings** or **Warden: Settings** in the Command Palette. Save a workspace initialization
-command and an optional idempotent preview setup command. Initialization runs for every fresh allocation, including when an
-internally available directory is used. Existing distinct create/reuse script settings are preserved
-until the user explicitly saves a unified initialization command; differing legacy configuration is shown.
+Expand **Settings** below Workbench, use **More Actions (⋯) → Settings**, or run **Warden: Settings**.
+Select **Workspace Setup Script** or **Preview Setup Script** to edit a multiline shell script in the
+native text editor. Save updates the original repository's configuration; clearing and saving removes
+the script. Initialization runs for every fresh allocation, including when an internally available
+directory is used. A distinct legacy reuse script has its own row and is preserved when editing the
+workspace setup script. **Preview Command** opens the native VS Code setting for the development server.
 
 Preview setup runs on initialization, successful code updates, configuration changes and explicit retry.
 Its success, output and exit code are separate from code synchronization. It receives `WARDEN_REPO`,
 `WARDEN_WORKTREE`, `WARDEN_PREVIEW`, `WARDEN_DEVELOPMENT_BRANCH` and `WARDEN_HOOK_EVENT=preview`.
 Workspace initialization receives the task context documented in [Working with agents](agent.md).
+Use **Rerun Preview Setup** on the configured **Preview Setup Script** row for an explicit rerun,
+including after a successful run. The action remains bound to that row's repository and branch context.
 Scripts use the existing POSIX shell selection, ten-minute timeout and bounded output. Windows uses
 Git for Windows' shell. Task descriptions never become executable script configuration.
 

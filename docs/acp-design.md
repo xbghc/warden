@@ -41,6 +41,9 @@ changes are coalesced, the old connection is retired first, and startup never op
 
 Initialization launches the profile on the workspace host with the primary folder as cwd (or the first
 workspace folder before repository selection), negotiates ACP and creates an empty `session/new`.
+Once the primary directory is resolved, connection proceeds alongside repository observation rather
+than waiting for its initial refresh or advisory rebase checks. Workflow navigation still requires
+both repository readiness and a successful ACP session; repository loading cannot expose stale tasks.
 It advertises no client filesystem or terminal tools, cancels startup permission requests and never
 sends `session/prompt`. No Warden task, workspace allocation or conversation record is created. The
 agent may retain its own empty session metadata. This connection stays alive after initialization;
@@ -60,9 +63,27 @@ state and releases their claims. It does not supervise agent-owned child command
 conversations and drafts remain available for explicit recovery. Availability is held in the current
 window; only the selected profile ID is remembered, not a persistent success flag.
 
-While ACP is unavailable, the native sidebar contains only a **Configure ACP** welcome button,
-with no tree rows, setup text or duplicate toolbar entry. It opens the shared Warden Settings panel.
-Other workflow panels offer the same link; setup guides and preset controls appear only in Settings.
+Workbench connections emit local [startup performance diagnostics](development.md#startup-performance)
+for cleanup, process creation, initialization and session creation. Failed, timed-out, cancelled and
+authentication-required attempts retain their own outcomes; replacement attempts have distinct IDs.
+Records contain no profile commands, credentials, protocol payloads or raw errors and are never uploaded.
+
+Both workbench and task connections also use the local [diagnostic log](development.md#diagnostic-logs).
+Connection IDs distinguish retries and replacements; task, conversation, turn and operation IDs
+correlate session creation/loading, requests, permission waits, cancellation, persistence and cleanup.
+Debug records include request methods and durations, process IDs/exits, protocol capabilities and tool
+status; Trace records update types without their text or payloads. Failures retain bounded, redacted
+provider error details and recent stderr, including failures during automatic startup. Stderr buffering
+handles credentials split across chunks and drops oversized lines whole. Routine logs never serialize
+prompts, thoughts, tool input/output or executable configuration. Arbitrary agent error text may still
+include project context. Output failures cannot change connection behavior or prompt results.
+
+Workspace loading and pending connections, including the automatic connection scheduling delay,
+never show **Configure ACP**. Once loading finishes, missing or invalid configuration, authentication,
+failed connections and explicit disconnection expose the **Configure ACP** welcome button,
+with no task rows, setup text or duplicate toolbar entry. It reveals the native Settings view stacked
+below Workbench. The two views use VS Code's own collapse, resize and keyboard controls. Other workflow
+panels offer the same link; connection status, recovery, setup links and preset controls live in Settings.
 Opening Settings does not change profiles or start an additional connection.
 
 In Settings, **Choose Agent Preset** opens a native picker with Codex, OpenCode and
@@ -88,6 +109,13 @@ login and inherited environment remain available; optional profile environment o
 ordinary user configuration. Executable configuration and credentials are not sent to the webview
 or stored in conversation history.
 
+An advertised authentication method does not mean login is required. Task Chat shows login choices
+only after an explicit ACP authentication-required response on its live connection, not while opening
+a session or after an unrelated error. **I Have Signed In — Reconnect** replaces that task connection
+so the agent can read credentials saved externally. It retains the conversation and draft, resumes
+the saved session when available and never sends a prompt or starts a new login flow. Other failures
+offer **Reconnect** without implying that the user's login is missing.
+
 A user can select an authentication method advertised by the agent. Agents requiring an interactive
 terminal login should be authenticated separately on the same host, using their documented login
 command. Warden supplies no ACP terminal-auth facility. Authentication failure remains visible and
@@ -106,11 +134,14 @@ a failed capture leaves the current view available. Each mount receives a fresh 
 queued messages from an old mount are ignored. Drafts and reading position belong
 to the task allocation; changing presentation never transfers them to another task. An executor label is still only a label.
 
-Opening a chat shows saved history without launching an agent. New conversations use the profile
+Opening a chat shows saved history and automatically prepares its agent connection. If a saved
+session exists, resume it with `session/load`; otherwise create the first session with `session/new`.
+Opening a chat sends no prompt. New conversations use the profile
 verified in workbench setup, independent of settings order or an older saved view selection. Existing
 records retain their original profile, including after the workbench agent changes. The host rejects
-stale profile choices for new conversations. An explicit connect or send starts the configured process,
-negotiates capabilities and creates the session. One executable connection
+stale profile choices for new conversations. Repeated opens share a pending connection attempt or reuse
+the active session, without delaying navigation. Sending after a disconnect also restores the session
+before submitting the new message. One executable connection
 is allowed per task; separate tasks can have separate conversations. Each connection accepts one
 prompt at a time while other tasks, diff review and preview remain usable.
 
@@ -129,16 +160,26 @@ Sending from a panel that has not yet received appended context requires reviewi
 A newer local edit can be sent across a delayed acknowledgement that only clears the previous draft;
 it cannot bypass unseen appended context. Sending stays unavailable until the completed transcript
 is persisted and its draft acknowledgement is settled, including when a panel is reopened mid-turn.
+New chats start with an empty composer. **Use Task Brief** or **Insert Task Brief** explicitly appends
+the task's saved context without sending it. While a submitted draft is unchanged and its turn is
+running, the composer displays an empty input for a follow-up; the host retains the original draft
+until completion. A failed turn restores that text only if the user has not edited the draft. View
+moves remap the submission revision so neither a sent draft nor newer typing is lost or resurrected.
 
 Permission requests show the agent's supplied description and choices. Warden returns only the
 selected option identifier or the protocol's cancelled outcome. It does not invent approval options
 or add a global automatic approval policy. A late click cannot answer a request from an old
 connection, another panel or another window.
+Long agent-provided permission labels, including commands and paths without spaces, wrap inside
+the available sidebar width. All choices remain reachable by vertical scrolling in short views;
+the permission panel must not clip the authorization scope horizontally.
 
 The webview receives a finite, validated action vocabulary. Repository/session identity comes from
 the host-owned view binding, not arbitrary message fields. View-state messages contain only bounded
-reading positions and profile IDs; they cannot change the binding or execute commands. Agent content is displayed as text;
-it cannot invoke a VS Code command or supply executable profile settings.
+reading positions and profile IDs; they cannot change the binding or execute commands. Agent content
+is stored as text and rendered with safe Markdown, including lists, tables and copyable code blocks.
+Raw HTML is displayed as text; remote images are not loaded. Only HTTP(S) links are clickable, and
+content cannot invoke a VS Code command or supply executable profile settings.
 
 ## Session controls and updates
 
@@ -159,7 +200,7 @@ never submits. The send control becomes Stop Turn during an active turn.
 
 `config_option_update` replaces the entire configuration list. Mode, command, usage and session-title
 updates are also accepted between turns. These controls are live connection state: disconnecting
-clears them, and explicit restoration obtains fresh state from the agent. An agent's session title
+clears them, and restoration obtains fresh state from the agent. An agent's session title
 does not rename the Warden task or change its binding.
 
 `available_commands_update` supplies slash commands and optional input hints. Choosing a command
@@ -192,19 +233,26 @@ Stopping never resets, cleans or rolls back task files.
 
 Session metadata and conversation records are stored outside the source repository and bound to
 the original task/workspace/profile. A reload or connection loss preserves the last known record
-and marks uncertain work accordingly. It does not automatically relaunch, reconnect or resend a
-possibly delivered prompt.
+and marks uncertain work accordingly. Reopening the task chat restores its connection; a connection
+failure alone does not trigger a restart loop. A possibly delivered prompt is never resent automatically.
 Record replacement remains atomic while bounded retries tolerate brief filesystem contention.
 If replacement keeps failing, the previous record is retained and the save error remains visible.
 
-On explicit **Resume Session**, revalidate the binding and profile. If the same agent supports
+On opening a disconnected or failed task chat, retire any failed connection and revalidate the binding
+and profile. If the same agent supports
 `session/load`, load its saved session and treat replayed updates as display history, not tool
 execution or new prompts. Preserve the prior local record when loading fails. If loading is
 unsupported, offer **New Session** while retaining the previous record; local transcript storage is not
 a promise of restored model state. Changing agents likewise starts an explicit new conversation.
+An empty, uninterrupted conversation is an exception when Codex reports that its saved thread has
+no rollout: Codex does not persist the thread before its first prompt. If loading replays no history,
+create a replacement remote session automatically while retaining the local conversation and draft.
+Keep the old session ID until replacement succeeds. Other load errors and conversations containing
+history or uncertain work never trigger this fallback, and it never sends a prompt.
 While the new record is saved and its temporary ownership claim is released, the panel shows
 **Starting New Session** and disables connection and sending. It becomes disconnected
-and available only after reset cleanup finishes, so a newly visible record cannot race that cleanup.
+only after reset cleanup finishes, then connects automatically, so a newly visible record cannot race
+that cleanup. **New Session** remains an explicit reset, not a prerequisite for first use.
 
 ## Git and preview remain user-operated
 
@@ -233,7 +281,7 @@ branch; replacement workspaces and unrelated branches still invalidate the bindi
 
 Tests use an SDK-compatible child-agent fixture that performs its own file operations and reports
 updates over ACP. They exercise capability negotiation without client tools, task routing,
-permission/cancel behavior, connection ownership, interruption and explicit restoration. Packaged
+permission/cancel behavior, connection ownership, interruption and automatic restoration on opening. Packaged
 extension-host and webview checks cover the actual shipped bridge and UI while retaining native
 review, preview and delivery regression coverage.
 

@@ -97,8 +97,11 @@ as its baseline. Primary files, index and HEAD are unchanged by connections.
 
 Preview synchronization stays visible in the status bar. Its tooltip and **Show Preview Output**
 provide the current combination, runtime path and last successful sync; output also includes conflict
-paths and setup logs. Sync, terminal, run, copy-path and setup commands live in the workbench heading's
-**More Actions** menu. Tasks are top-level sidebar items, and each task owns its connection and file review.
+paths and setup logs. The workbench heading's **More Actions** menu offers Run Preview when a command
+is configured, otherwise Open Preview Terminal. Sync Preview appears for synchronization problems,
+and Rerun Preview Setup for a failed configured script; both remain available until recovery.
+The configured Preview Setup Script row also offers rerun. The Command Palette retains all preview
+commands, including copy-path and output. Tasks are top-level sidebar items, and each task owns its connection and file review.
 There is no Preview editor page. Synchronization and setup failures remain visible above the task list.
 
 One extension session owns background preview synchronization; it checks content each second and

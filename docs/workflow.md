@@ -50,14 +50,16 @@ Git state, selected connections and operation results instead. A clean worktree 
 An available agent integration is a prerequisite for using the workbench. Warden automatically
 connects to the configured ACP server at startup in a trusted workspace and after profile changes.
 It initializes an empty session, keeps the connection alive and shows branch selection and task
-workspaces once connected. There is no manual connection-check page. While unavailable, the sidebar
-contains just **Configure ACP**, opening the shared Settings panel for presets, connection status,
-authentication and recovery. Installation or configuration alone does not establish availability.
+workspaces once connected. There is no manual connection-check page. Workspace loading and pending
+connections hide **Configure ACP**. If the agent still needs user action after loading, Workbench
+contains just **Configure ACP**, revealing the native Settings view stacked below it for presets,
+connection status, authentication and recovery. Installation or configuration alone does not establish availability.
 
 Connection initialization sends no prompt, grants no tool permission and initiates no Git or preview
 operation. Disconnect, replacement, failure and shutdown retire the owned connection process. Task
 agents retain separate workspace-bound connections; shutdown closes them and persists their local
-records, while reopening the workbench does not resume task work or replay prompts automatically.
+records. Opening a task's chat automatically resumes its session or creates the first session;
+reopening the workbench alone does not resume task work or replay prompts automatically.
 Failures do not trigger a restart loop. Existing tasks, drafts and preview connections are retained.
 Other integrations must verify their supported interface without requiring ACP configuration or
 Warden ownership of their agent process.
@@ -101,7 +103,7 @@ A workspace is an execution resource, normally a Git worktree of Warden's extern
 on a task branch based on the base branch. The bare repository lives at
 `<primary>-warden/repo.git`, independently of task, preview and temporary operation directories.
 Task paths remain `<primary>-<n>`. Task creation allocates fresh logical workspaces and runs configured initialization hooks. Reusing a free physical directory is an internal implementation detail; users never select or adopt an old workspace.
-Workspace creation does not launch an agent. A user explicitly connects an agent integration or runs
+Workspace creation does not launch an agent. Opening Task Chat connects its agent session; users can also run
 external tools in that directory. In the current ACP integration, Warden owns only the agent process
 carrying the stdio connection; it does not implement ACP terminal tools or supervise agent-started
 commands. An integration with an externally managed agent must preserve that application's process
@@ -301,7 +303,7 @@ The working copy implements the workflow above. It has not been published as a r
 | Delivery | All current undelivered changes from a clean committed source, pinned by reviewed source, delivery boundary and primary HEAD. No file/commit subset picking in this version. |
 | Extension commit | Normal primary-directory Git commit with hooks/signing. Failed hooks retain files/index. No test-passed checkbox or agent handoff. |
 | Rebase | Isolated checks and explicit single/selected/all execution, with per-workspace results and pinned heads. Actual conflicts are left for the user to handle. |
-| Navigation | Ordered tasks are top-level sidebar items. Preview status uses the status bar; preview actions and Settings open from the view heading's More Actions menu. Selecting a task/file directly opens review. Preview has no editor page. |
+| Navigation | Ordered tasks are top-level sidebar items. Settings is a native collapsible view stacked below Workbench. More Actions offers one preview execution action and Settings, with repository selection and persistent recovery actions when needed. Preview diagnostics use the status bar and output; secondary commands remain in the Command Palette. Selecting a task/file directly opens review. Preview has no editor page. |
 
 `sourceBase` records the last delivered source tip, independently of the squash commit SHA.
 Each delivery has a stable identifier and a source range, primary parent, commit, message and

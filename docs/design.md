@@ -24,17 +24,27 @@ activation finishes. Show loading feedback without repository or branch setup ac
 repository state is known. The repository picker remains available when selection is needed and
 for switching among multiple workspace roots.
 
+Agent initialization overlaps repository loading after the primary directory is known. Advisory
+synchronization checks run in the background without blocking the task list. Pending task checks
+show a synchronization spinner and explicit checking feedback; the rebase form disables execution
+until the check finishes. Results for a replaced repository, branch or task binding are discarded.
+
 Prefer native VS Code UI for navigation and ordinary operations. Select a webview only for a
 specific interaction that benefits from a custom form or conversation layout. The workspace sidebar
 uses `TreeView`; native commands, menus, inputs and pickers own everyday task operations.
 
 Task rows expand into changed files and preserve their expansion across refreshes. Selecting a task
 opens or restores its native diff without replacing a pinned version or resetting editor scroll.
+The title bar offers **View as Tree** / **View as List**, matching Source Control's layout switch.
+List view shows file names with relative parent paths; tree view adds expandable directories.
+The choice persists in VS Code workspace state and leaves task order, expansion and open diffs intact.
 Common actions (Agent, preview connection and commit) are inline tree actions. The context menu
 contains editing, opening the assigned workspace, delivery records, synchronization, copying and recovery.
 Drag tasks or use Alt+Up/Down to reorder the plan; the Command Palette offers a move picker.
 The view heading places synchronization beside task creation and refresh. Its native **More Actions**
-menu contains **Settings** for workspace initialization, preview setup and Agent configuration.
+menu reveals **Settings**, a native TreeView stacked beneath Workbench for workspace initialization,
+preview setup and Agent configuration. Both views appear by default and retain VS Code's native
+collapse, resize, movement and keyboard controls.
 Background checks that find no sidebar changes leave the native tree untouched, without starting
 its loading animation. Refresh the tree when task/file content, connection state or error feedback
 changes; keep actual preview synchronization progress visible.
@@ -46,13 +56,23 @@ and native diffs, and initialization output uses the Warden output channel.
 
 Multiline task notes open an explicit editor webview with persistent task-bound drafts. Draft edits are saved to VS Code workspace state under the repository and task identity, so closing the editor preserves unsaved notes. Saving or discarding clears only the matching draft; later typing remains intact. Selecting
 another task leaves that editor bound to its original task; switching repository or branch disables
-saving until it is reopened in the matching context. Batch rebase and script configuration retain
-dedicated editor panels. Preview diagnostics use native output. The primary sidebar navigation
+saving until it is reopened in the matching context. Batch rebase retains a dedicated editor panel. Script rows in Settings open native text editors with
+multiline editing and normal Save. Saving is bound to the original repository and script version,
+and preserves other script settings. Workspace scripts run on allocation; preview setup keeps its
+normal automatic triggers. Preview diagnostics use native output. The primary sidebar navigation
 contains no webview. **Task Chat** is a separate webview in the Secondary Side Bar by default.
 Selecting a task still opens its diff; **Chat with Agent** explicitly switches the displayed chat.
 The view title offers **Switch Task Chat** and **Open Chat in Editor**. An expanded chat offers
 **Move Chat to Side Bar**; each task has one editable chat surface and the same underlying session.
 Different tasks may be expanded side by side. Hiding or switching the view does not disconnect agents.
+Opening Task Chat automatically resumes its saved session or creates the first session. Repeated
+opens reuse an active connection or its pending attempt; opening never sends the draft.
+New chats offer **Use Task Brief** beside an empty composer. The conversation is the main scrolling
+region, with a **Jump to Latest** control when the user reads older messages. Replies render Markdown
+and copyable code blocks; tool activity and thoughts are compact disclosures. Permission requests
+keep their action, a detail preview and the agent's choices visible, with full details on demand.
+Errors show a short explanation and recovery action, with technical details behind a disclosure.
+**New Session** lives in **More Chat Actions** to keep routine conversation controls focused.
 
 The task title and connection state stay above a scrolling transcript; the composer stays at the
 bottom. Task paths, agent identity and usage appear on demand under **More Chat Actions**, alongside
@@ -97,8 +117,11 @@ Git rebase replays task commits onto the base branch.
   and tooltips on icon buttons. Errors and recovery actions must remain visible.
 - Task rows show at most two facts, prioritizing permission requests, failures and stale reviews;
   the tooltip retains the complete context. Delivery records retain native commit-file review.
-- Preview run and setup menu entries appear only when their commands are configured. Sync and
-  terminal commands remain available for a selected base branch, including with no task connections.
+- More Actions shows Run Preview when a command is configured, otherwise Open Preview Terminal.
+  Sync Preview appears there only for stale, conflicting, failed or paused synchronization;
+  Rerun Preview Setup appears only for a failed configured script. Recovery actions stay visible
+  until the problem clears. The configured Preview Setup Script row also offers manual rerun.
+  The Command Palette retains sync, terminal, copy-path and output commands, including with no task connections.
   A failed check still offers retry. A visible form owns its scoped error;
   native notifications draw attention to errors whose form is not visible.
 - Task copy actions use the more-actions menu; workspace storage, directory and branch choices
@@ -132,7 +155,11 @@ The selected base branch is the current context. Ordered tasks are top-level ite
 sidebar, with no Preview row or Tasks parent. Each task owns its connection controls, commands and
 changed files. An empty workbench offers **New Task**.
 
-**Settings** and preview commands open from the view heading's **More Actions** menu. Preview
+**Settings** is a native view stacked below Workbench. In a healthy single-repository workbench,
+**More Actions** contains one preview execution action and Settings. Select Repository appears only
+when selection is needed or multiple roots are open. Select Base Branch remains in initial setup and
+the Command Palette; subsequent branch changes follow primary. Configure ACP remains the unavailable-agent
+welcome action and does not duplicate Settings in the menu. Preview
 synchronization is visible in the status bar; its tooltip shows the composition, directory and last
 successful sync. Clicking it opens **Show Preview Output**, including conflicts and setup logs.
 Synchronization and setup failures stay visible above the task list without adding navigation rows.
@@ -166,18 +193,20 @@ identifies the selected object and its actions; it does not duplicate global nav
 
 Task rows display at most two relevant facts, without “Done”, “Awaiting Acceptance” or “Agent Idle” badges.
 Dragging the list changes plan order only; label the action “Reorder Tasks”. “Rebase” opens a batch
-operation sheet rather than a fourth permanent page. Settings hold workspace hooks and an ACP
-configuration entry with a collapsed example.
+operation sheet rather than another permanent page. Settings holds native ACP and Scripts tree
+sections, with collapsed links to the ACP installation guides.
 
 Assumption: one repository and base branch in the current context. Cross-repository
 and multi-requirement dashboards are outside this design.
 
 Warden connects to the configured ACP server automatically at startup and after settings changes.
-There is no separate connection-check page. The native sidebar contains only **Configure ACP** while
-ACP is missing, invalid, connecting, disconnected or unavailable; it has no setup text or duplicate
-toolbar entry. The button opens the shared **Warden · Settings** panel, which owns preset selection,
-configuration, connection progress, errors, authentication and reconnect controls. Repeated entry
-actions reveal the same panel. Other workflow panels offer that same link rather than another setup
+There is no separate connection-check page. Hide **Configure ACP** while the workspace loads or an
+agent connection is pending, including the delay before automatic startup. After loading, Workbench
+contains only **Configure ACP** when ACP is missing, invalid, disconnected or needs authentication or
+error recovery; it has no setup text or duplicate toolbar
+entry. The button reveals the native **Settings** view stacked below Workbench. Its ACP tree owns
+preset selection, configuration, connection progress, errors, authentication and reconnect controls.
+Repeated entry actions reveal the same view. Other workflow panels offer that same link rather than another setup
 or check page. Opening Settings does not create an additional connection.
 
 Keep the connection open after successful initialization. Then show repository selection when needed

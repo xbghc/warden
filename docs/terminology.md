@@ -27,7 +27,7 @@ operation and its scope; they do not introduce additional domain concepts.
 | Baseline | Reference content for an operation. The preview baseline includes saved primary edits, which may be uncommitted. A task's incorporated baseline is an identified commit. |
 | Source Boundary | The source revision separating a previously committed contribution from the next increment. It is distinct from the final squash commit. |
 | Agent | The tool receiving task messages in its assigned workspace. It owns its tools and execution policies; Warden need not own its process or communicate through ACP. A legacy Executor label is only a label, not evidence of a connection or activity. |
-| Task Chat | The persistent conversation bound to one repository, task and workspace. Opening it does not start an agent. |
+| Task Chat | The persistent conversation bound to one repository, task and workspace. Opening it automatically resumes its agent session or creates the first session, without sending a prompt. |
 | Session | An identified agent interaction bound to a task workspace, managed by Warden's integration or an external application. A new session does not create a task or workspace. |
 
 A requirement remains the user's overall objective in the workflow documentation. It is not an
@@ -46,13 +46,15 @@ complete the task, recycle its workspace or prove that an agent is idle.
 | Connect / Disconnect Preview | Include or remove a workspace's contribution in the preview. |
 | Sync Preview | Synchronize the preview folder with saved primary content and connected task changes by recomposing them. Automatic synchronization uses the same operation. |
 | Run Preview | Run the configured command in the preview folder; separate from synchronizing files. |
+| Open Preview Terminal | Open or reveal a native terminal for the current repository's preview folder. |
+| Rerun Preview Setup | Explicitly rerun the configured preview setup script; available on its Settings row and in the failure menu. |
 | Show Preview Output | Show the current composition, path, synchronization details and setup output in the Warden output channel. |
 | Rebase | Open Git rebase controls for task branches. Warden supplies the selected workspace paths and base branch. |
 | Check Again | Repeat read-only rebase checks; do not execute a rebase. |
 | Rebase Selected | Run Git rebase in the selected workspaces, targeting the base branch. |
 | Commit to Base Branch | Commit the reviewed increment. When the destination is known, show **Commit to <branch>**, such as **Commit to feature/order**. |
-| Chat with Agent / Connect Agent / Disconnect | Open the task chat / start the agent connection / close it. Outside a task chat, qualify the connection as an agent connection. |
-| Configure ACP | Open the shared Warden Settings panel. This is the only sidebar content while ACP is unavailable. |
+| Chat with Agent / Reconnect / Disconnect | Open the task chat and prepare its session automatically / retry the task's agent connection / close it. Outside a task chat, qualify the connection as an agent connection. |
+| Configure ACP | Reveal the native Settings view stacked below Workbench. Shown when an unavailable agent needs user action; hidden during workspace loading and pending connections. |
 | Choose Agent Preset | Open the preset picker from Settings. A preset has one stable profile ID; selecting an existing one edits its settings instead of adding a duplicate. |
 | Connect ACP / Reconnect ACP / Cancel Connection | Explicitly connect or retry from Settings / replace the connection / stop a pending connection attempt. Startup and profile changes connect automatically. Initialization creates no Warden task or work prompt. |
 | Disconnect ACP | Close the workbench ACP connection and its owned process. Task conversations retain their own connections and stop controls. |

@@ -66,10 +66,11 @@ failure, configuration replacement and shutdown clean up its owned process. Shut
 active task connections and saves their records; it never automatically resends an uncertain prompt.
 An unavailable connection keeps workspaces hidden, while existing chats retain their stop controls.
 
-With no ACP server configured, the sidebar shows only **Configure ACP**. This native button opens
-the shared **Warden · Settings** panel; it does not open a picker, save settings or start an additional connection.
-The panel contains configuration, connection status and recovery, and the setup guide. Other workflow surfaces
-link to the same panel, and Task Chat does not duplicate agent setup.
+With no ACP server configured, Workbench shows only **Configure ACP**. This native button reveals
+**Settings**, a native collapsible view stacked below Workbench. Revealing it does not open a picker,
+save settings or start an additional connection. The view contains configuration, connection status,
+recovery and setup links. Other workflow surfaces link to the same view, and Task Chat does not
+duplicate agent setup.
 
 In Settings, **Choose Agent Preset** offers Codex and OpenCode. Select one, confirm its executable on
 the workspace host and press Enter to save. Install the `codex-acp` adapter for Codex; OpenCode uses its
@@ -78,11 +79,12 @@ and customized arguments or environment variables. Each preset has one stable pr
 profiles are preserved, and choosing an already configured preset opens its settings without adding
 another copy. Cancelling either input changes nothing.
 
-Open the task's **Chat with Agent** in the Secondary Side Bar and connect or send a message. New
+Open the task's **Chat with Agent** in the Secondary Side Bar. Warden automatically resumes its saved
+session or creates the first session, so the composer is ready without a manual connection step. New
 conversations use the agent connected by the workbench; existing conversations retain their original
 agent. Agent configuration and the ACP setup guide belong to workbench setup and settings.
 Mode and model selectors sit below the message text, with additional session options and commands
-available on demand. Enter sends; Shift+Enter inserts a new line. Opening a chat alone does not launch a process. **Switch Task Chat** explicitly opens
+available on demand. Enter sends; Shift+Enter inserts a new line. Opening a chat never sends a prompt. **Switch Task Chat** explicitly opens
 another task's conversation, preserving drafts and reading positions. **Open Chat in Editor** expands
 the same chat, and **Move Chat to Side Bar** returns it. Each conversation stays attached to its original
 task workspace and repository when the selected task or repository changes. Separate tasks can have separate sessions;
@@ -97,23 +99,32 @@ The panel accepts text prompts and displays streamed replies, reported tool acti
 choices supplied by the agent. Select an offered authentication method when needed, or complete the
 agent's documented terminal login separately on the same host. Warden does not provide a login terminal
 or interpret tool activity as instructions to execute a command itself.
+After signing in externally, use **I Have Signed In — Reconnect** in Task Chat to reload the agent's
+credentials without replacing the conversation or sending its draft. Login choices appear only when
+the agent requests authentication; connection failures have a separate **Reconnect** action.
 
 **Stop Turn** requests cancellation; **Disconnect** closes Warden's agent connection and process. Neither
 proves that all agent-started background commands have stopped. The agent owns those commands and its
 execution policies. Coordinate ongoing work before delivery or rebase; Warden adds no execution guard
 or agent-idle declaration and retains its existing Git version checks.
 
-Conversation records persist outside the source repository. After reload or interruption, reconnect
-explicitly with **Resume Session** when the agent supports loading its saved session. Otherwise use
+Conversation records persist outside the source repository. After reload or disconnect, reopening
+Task Chat automatically resumes the saved session when the agent supports loading it. Otherwise use
 **New Session**, retaining the previous record. Warden never silently resends an uncertain prompt or
-claims that saved text restores the agent's model state. A completed turn does not connect preview,
+claims that saved text restores the agent's model state. Reopening an active chat reuses its connection.
+**New Session** explicitly resets the conversation and connects after preserving the previous record.
+A completed turn does not connect preview,
 commit, deliver or rebase. See the [ACP boundary](acp-design.md) for ownership and recovery details.
 
 ## Task briefs
 
-Add and order small tasks in the left navigation. Warden automatically assigns each task a workspace; copy
-its task brief and paste it into the task conversation or an external tool. The brief includes the
-task title, goal, acceptance notes, assignment, workspace path, base branch and instructions.
+Add and order small tasks in the left navigation. Warden automatically assigns each task a workspace.
+In Task Chat, **Use Task Brief** or **Insert Task Brief** appends the task title, goal, acceptance notes,
+base branch and workflow boundaries without sending them. The brief omits the workspace path and
+directory reminders because the agent process and session are already bound to the task workspace.
+
+Copying a task brief for an external tool also includes the assignment, workspace path and instructions
+to edit and commit there, since Warden does not control that external session's working directory.
 
 Copying a brief only writes text to the clipboard. It does not launch an agent or update review state.
 Review feedback can be sent in the task conversation or through external tools. In a native Warden

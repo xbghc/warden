@@ -4,6 +4,7 @@ dist/
 .vite/
 coverage/
 test-results/
+.playwright-mcp/
 storybook-static/
 *.log
 .DS_Store
