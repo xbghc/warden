@@ -1,9 +1,9 @@
 # Development
 
 Warden is a pnpm workspace containing a VS Code extension, a reusable engine, shared contracts and
-webview components. Use Node 22+ for development and the pinned Rust toolchain for native builds.
+webview components. Use Node 22+ and Git for development.
 The engine still supports Node 20; the VS Code test launcher requires Node 22 or newer.
-Using the packaged extension requires Git, not a separately installed Node or Rust runtime.
+Using the packaged extension requires Git; VS Code supplies the Node runtime.
 
 ## Building and testing
 
@@ -18,8 +18,8 @@ pnpm check:vscode
 pnpm test:vscode
 ```
 
-`build` builds the Rust module and extension including its webviews. `build:vscode` rebuilds JavaScript
-and webviews using available native artifacts; `build:webview` refreshes just the webview bundle.
+`build` and `build:vscode` build the extension and its webviews. `build:webview` refreshes just the
+webview bundle. The VSIX contains bundled JavaScript and uses the workspace's Git CLI.
 The extension manifest owns the release version. The repository root is private and ships no npm CLI.
 
 | Directory | Responsibility |
@@ -28,15 +28,14 @@ The extension manifest owns the release version. The repository root is private 
 | `packages/shared` | Domain types, review versions and validated webview actions |
 | `packages/vscode` | Native views, immutable documents, commands and webview controllers |
 | `packages/webview` | React/shadcn forms using packaged resources and VS Code theme colors |
-| `crates/warden-core` | Independent fixed Git read operations |
-| `crates/warden-node` | Asynchronous Node binding |
 | `test/compat` | Legacy in-process HTTP harness for existing behavior tests; not a product server |
 
 `pnpm typecheck` checks the engine/shared/tests, webview DOM project and extension project separately.
-`pnpm test` runs colocated unit tests and isolated Git integration fixtures. `WARDEN_NATIVE=required`
-requires the native artifact; `WARDEN_NATIVE=disabled` exercises the compatible Git backend. CI runs both.
+`pnpm test` runs colocated unit tests and isolated Git integration fixtures against the TypeScript
+engine and Git CLI. CI covers Windows, Linux and macOS, including x64 and arm64 runners.
 Read-only Git operations retain their argument whitelist and environment isolation. New Git writes need
 an explanation in [State and security](internals.md). Never replace normal delivery commits with commit-tree.
+See [Git reads](git-reads.md) for status limits, query reuse and reproducible performance measurements.
 
 The extension invokes named typed engine commands; UI and transport code never bypass the engine's
 operation validation. Engine errors retain stable codes. `Engine.close()` rejects new requests and drains

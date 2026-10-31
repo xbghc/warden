@@ -3,9 +3,10 @@
 ## Windows, Linux and macOS
 
 Warden runs in the VS Code workspace extension host. Git must be installed in that environment.
-The packaged extension includes Node code and tested Rust bindings for Linux x64/arm64 with glibc,
-macOS x64/arm64, and Windows x64. Unsupported native targets use the existing Git compatibility
-backend; an installed but unloadable artifact is reported as a packaging error.
+The packaged extension contains bundled JavaScript and runs repository operations through Git CLI.
+It needs no native addons, platform-specific Warden binaries or separate language runtime.
+CI tests the engine on Linux and macOS x64/arm64 and Windows x64, and the packaged extension on
+Windows, Linux and macOS.
 
 Workspace scripts use a POSIX shell. Git for Windows supplies it on Windows. Script-specific tools
 must be installed by the user. Preview terminals and tasks inherit the workspace runtime environment.

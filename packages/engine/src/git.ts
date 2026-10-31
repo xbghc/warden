@@ -197,51 +197,63 @@ export async function runGitBuffer(args: readonly string[], opts: GitRunOptions)
   assertAllowedGitArgs(args);
   const okCodes = opts.okCodes ?? [0];
   return new Promise((resolve, reject) => {
-    execFile(
-      'git',
-      [...args],
-      {
-        cwd: opts.cwd,
-        timeout: opts.timeoutMs ?? DEFAULT_GIT_TIMEOUT_MS,
-        maxBuffer: opts.maxBuffer ?? 256 * 1024 * 1024,
-        encoding: 'buffer',
-        env: gitEnvironment({
-          // Never take the index lock / refresh the index as a side effect of diff/status.
-          GIT_OPTIONAL_LOCKS: '0',
-          ...snapshotVars(opts.snapshot),
-        }),
-        windowsHide: true,
-      },
-      (error, stdout, stderrBytes) => {
-        const stderr = stderrBytes.toString('utf8');
-        const err = error as (NodeJS.ErrnoException & { code?: number | string; killed?: boolean; signal?: string }) | null;
-        if (err) {
-          if (err.killed || err.signal === 'SIGTERM') {
-            reject(new GitError(`git ${args[0]} timed out`, null, stderr, 504, 'git_timeout'));
-            return;
-          }
-          if (err.code === 'ENOENT') {
-            // execFile reports a working directory that is gone exactly like a missing binary. The
-            // former is a worktree deleted since it was listed: a request problem, not a setup one.
-            if (opts.cwd && !existsSync(opts.cwd)) {
-              reject(new GitError(`working directory no longer exists: ${opts.cwd}`, null, '', 400, 'unknown_worktree'));
-              return;
-            }
-            reject(new GitError('git executable not found in PATH', null, '', 500, 'git_missing'));
-            return;
-          }
-          const code = typeof err.code === 'number' ? err.code : -1;
-          if (okCodes.includes(code)) {
-            resolve({ stdout, stderr, code });
-            return;
-          }
-          const msg = stderr.trim().split('\n')[0] || err.message;
-          reject(new GitError(msg, code, stderr, 500, 'git_failed'));
+    const complete = (error: unknown, stdout: Buffer = Buffer.alloc(0), stderrBytes: Buffer = Buffer.alloc(0)) => {
+      const stderr = stderrBytes.toString('utf8');
+      const err = error as (NodeJS.ErrnoException & { code?: number | string; killed?: boolean; signal?: string }) | null;
+      if (err) {
+        if (err.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') {
+          reject(new GitError(err.message, null, stderr, 500, 'git_failed'));
           return;
         }
-        resolve({ stdout, stderr, code: 0 });
-      },
-    );
+        if (err.killed || err.signal === 'SIGTERM') {
+          reject(new GitError(`git ${args[0]} timed out`, null, stderr, 504, 'git_timeout'));
+          return;
+        }
+        // execFile reports a deleted cwd like a missing binary; a cwd replaced by a file
+        // instead reports ENOTDIR. Both are checkout input errors, not missing Git.
+        if (err.code === 'ENOTDIR' || (err.code === 'ENOENT' && !existsSync(opts.cwd))) {
+          reject(new GitError(`working directory no longer exists: ${opts.cwd}`, null, '', 400, 'unknown_worktree'));
+          return;
+        }
+        if (err.code === 'ENOENT') {
+          reject(new GitError('git executable not found in PATH', null, '', 500, 'git_missing'));
+          return;
+        }
+        const code = typeof err.code === 'number' ? err.code : -1;
+        if (okCodes.includes(code)) {
+          resolve({ stdout, stderr, code });
+          return;
+        }
+        const msg = stderr.trim().split('\n')[0] || err.message;
+        reject(new GitError(msg, code, stderr, 500, 'git_failed'));
+        return;
+      }
+      resolve({ stdout, stderr, code: 0 });
+    };
+    try {
+      execFile(
+        'git',
+        [...args],
+        {
+          cwd: opts.cwd,
+          timeout: opts.timeoutMs ?? DEFAULT_GIT_TIMEOUT_MS,
+          maxBuffer: opts.maxBuffer ?? 256 * 1024 * 1024,
+          // Read deadlines must terminate Git even if it ignores the default SIGTERM.
+          killSignal: 'SIGKILL',
+          encoding: 'buffer',
+          env: gitEnvironment({
+            // Never take the index lock / refresh the index as a side effect of diff/status.
+            GIT_OPTIONAL_LOCKS: '0',
+            ...snapshotVars(opts.snapshot),
+          }),
+          windowsHide: true,
+        },
+        complete,
+      );
+    } catch (error) {
+      // Some spawn failures, including ENOTDIR, are synchronous and skip the callback.
+      complete(error);
+    }
   });
 }
 

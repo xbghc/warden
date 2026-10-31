@@ -1,32 +1,29 @@
-# Rust repository core
+# Git repository reads
 
-The first migration extracts worktree observations into an independent Rust library. It also
-removes repeated checkout inventories from workflow queries and reuses isolated synchronization
-trials when all their relevant inputs remain valid. The goal is lower repeated work and a reusable
-core, with Git implementation choices made per operation and supported by measurements.
+The engine uses TypeScript and the Git CLI for repository operations. Worktree observations use
+one fixed status command. Workflow queries share checkout inventories and reuse isolated
+synchronization trials only when all relevant inputs remain valid. These optimizations reduce
+repeated work without maintaining a second backend or shipping native addons.
 
 ## Module boundary
 
 | Module | Responsibility |
 | --- | --- |
-| `crates/warden-core` | Typed repository operations and errors, fixed Git status invocation, environment isolation, process/output limits, byte-level parsing |
-| `crates/warden-node` | Asynchronous N-API conversion between owned Rust values and JavaScript values |
-| `packages/engine/src/worktree-state.ts` | Server adapter, HTTP error mapping and equivalent portable backend |
-| `packages/engine/src/native.ts` | Loading the correct prebuilt binary, with explicit required/disabled modes |
+| `packages/engine/src/git.ts` | Validated Git calls, environment isolation, process/output limits and stable engine errors |
+| `packages/engine/src/worktree-state.ts` | Typed worktree observations, fixed status invocation, bounded scheduling and porcelain parsing |
 | `packages/engine/src/workflow.ts` | Request-scoped checkout inventories and bounded isolated-replay reuse, alongside existing workflow coordination |
 
-The core has no dependency on Node, Hono, HTTP status codes, Warden's JSON state store, or the web
-application. Another Rust program can depend on `warden-core` directly and call
-`read_worktree_state(path, GitReadOptions::default()).await` from a Tokio runtime. Its public model
-contains optional HEAD and branch, changed-entry count, changed paths, and a SHA-256 fingerprint
-of the exact porcelain bytes. An unborn branch has no HEAD; a detached checkout has no branch.
+`readWorktreeState(path)` returns optional HEAD and branch, changed-entry count, changed paths,
+and a SHA-256 fingerprint of the exact porcelain bytes. An unborn branch has no HEAD; a detached
+checkout has no branch. The operation is independent of UI and transport code.
 
-The Node module remains loaded for the life of the extension host. Its async functions use Tokio for child
-processes and pipes; they do not block the JavaScript event loop or occupy libuv workers while
-waiting for Git. The core limits concurrent status processes to eight. Status results themselves
+Git runs in asynchronous child processes; TypeScript parses the collected output. Readers in one
+JavaScript environment share a FIFO queue limiting concurrent status processes to eight. Status results themselves
 are not retained across completed calls, because external editors and Git commands can change
 the checkout without passing through Warden. The configured 30-second deadline includes waiting
-for a concurrency slot, and each output stream is limited to 256 MiB.
+for a concurrency slot, and each output stream is limited to 256 MiB. Expired waiters are removed
+without starting Git; completed and failed reads release their slot. Timeout and output-limit
+failures kill the direct child before returning through Node's close callback.
 
 ## Why status still uses Git
 
@@ -43,16 +40,16 @@ baseline: measure batching and query organization separately from replacing Git 
 and dirty state. Untracked files are enumerated individually so further edits inside an untracked
 directory remain observable.
 
-The Rust parser consumes NUL records, including the additional source path carried by renames
+The parser consumes NUL records, including the additional source path carried by renames
 and copies. A rename contributes one dirty entry. Fingerprints use raw bytes; the engine still
 represents filenames as UTF-8 strings, so its existing repeated-edit limitation for non-UTF-8 paths
 remains. The watcher also folds in mtime and size, because another edit to an already modified file
 can leave Git's porcelain output unchanged.
 
-Both backends set `GIT_OPTIONAL_LOCKS=0`, retain ordinary user/system configuration, and remove
-inherited repository, index, object-store and temporary config redirection. A Node worker passes
-its own environment explicitly; Rust's process environment is not a substitute for that snapshot.
-The binding has no raw-command API. See [Security model](internals.md#security-model) for the
+The guarded Git reader sets `GIT_OPTIONAL_LOCKS=0`, retains ordinary user/system configuration,
+and removes inherited repository, index, object-store and temporary config redirection from the
+calling Node worker's environment. The status adapter exposes no arbitrary command arguments.
+See [Security model](internals.md#security-model) for the
 approved reads and existing mutation protections.
 
 ## Workflow reads and synchronization checks
@@ -93,12 +90,10 @@ Normal delivery commits retain ordinary Git hooks, identity and signing.
 
 ## Reproducible measurements
 
-Build the native module, then run the synthetic read benchmark:
+Install dependencies, then run the synthetic read benchmark:
 
 ```sh
-pnpm build:native
-WARDEN_NATIVE=required pnpm bench:git --workspaces 4 --files 1000 --samples 12 --label rust
-WARDEN_NATIVE=disabled pnpm bench:git --workspaces 4 --files 1000 --samples 12 --label portable
+pnpm bench:git --workspaces 4 --files 1000 --samples 12 --label typescript-git
 ```
 
 The script creates disposable linked workspaces and an isolated state directory. It measures:
@@ -110,25 +105,25 @@ The script creates disposable linked workspaces and an isolated state directory.
 - Repeated synchronization checks with identical inputs.
 
 Each operation records wall time, process CPU time, and direct Git process starts from Git Trace2.
-Git's own child processes are counted separately. Node CPU and peak RSS include the Rust binding
-in process but exclude Git child-process CPU and memory. Measurements use warm filesystem caches,
+Git's own child processes are counted separately. Process CPU and peak RSS exclude Git
+child-process CPU and memory. Measurements use warm filesystem caches,
 include Trace2 overhead and have no preview connections. Run timing comparisons sequentially on
 an otherwise idle machine; do not time them alongside compilation or the full test suite.
 
 `--source-root` imports an older source checkout for a real baseline rather than reimplementing
 its old behavior inside the benchmark. That checkout needs its dependencies installed. For an
 archive without Git metadata, supply `--revision <archived-commit>` and a descriptive `--label`.
-Repeat with 1, 4 and 8 workspaces to distinguish fixed costs from repeated-work growth. Keep the
-portable comparison: an improvement shared by portable and Rust paths comes from reorganizing
-the operation, not from Rust alone.
+Repeat with 1, 4 and 8 workspaces to distinguish fixed costs from repeated-work growth. Compare
+equivalent operations and Git process counts before attributing a change to implementation speed.
 
 Use `--operations idle_watchers,workflow_get,sync_current` to narrow a follow-up measurement.
 
-## Initial measurements
+## Historical backend comparison
 
-The [raw observations](benchmarks/rust-reads.json) compare original commit
+The [raw observations](benchmarks/git-reads-baseline.json) predate removal of the optional Rust
+backend and are retained as historical evidence, not measurements of the current revision. They compare original commit
 `d53a18f0a0c04ae4d807d240a4936e39304f4457`, the optimized TypeScript + Git backend,
-and the optimized Rust + Git backend in this change. They were collected sequentially in a
+and the then-available optimized Rust + Git backend. They were collected sequentially in a
 Linux x64 container with 8 available CPUs (AMD EPYC 9V74), Node 24.19.0 and Git 2.51.1.
 These synthetic linked-worktree measurements establish a local baseline, not a latency promise
 for arbitrary repositories, filesystems, clone workspaces or connected previews.
@@ -165,8 +160,8 @@ The portable comparison matters. It receives nearly the same gains, and the Rust
 not consistent across operations or repeated runs. In the separate 24-sample follow-up at eight
 workspaces, workflow reads measured 94.64 ms in portable mode and 90.02 ms in Rust mode, compared
 with 86.31 ms and 100.37 ms in the table. These results do not establish a general speed advantage
-from moving the current operation to Rust. The binding uses two I/O workers rather than one per
-CPU; it still delegates the repository scan to Git.
+from moving that operation to Rust. The removed binding used two I/O workers rather than one per
+CPU; it still delegated the repository scan to Git.
 
 There is also an explicit first-check cost: one divergent workspace takes about 266 ms in the
 original code and 401 ms with Rust here (about 51% longer), with direct Git starts increasing from
@@ -183,19 +178,17 @@ samples, empirical p95 is effectively the maximum and should not be treated as a
 latency estimate. Child-process CPU and memory are not measured, so these results do not establish
 a reduction in total CPU or total memory.
 
-## Remaining migration
+## Further optimization
 
-This boundary covers worktree observations and their first engine consumers. Diff generation,
-preview composition, snapshots, delivery, explicit rebase and history replay still use their
-existing coordination modules and Git commands. They are separate migration candidates; none is
-silently routed through a partially compatible native Git implementation.
+Diff generation, preview composition, snapshots, delivery, explicit rebase and history replay
+use TypeScript coordination and validated Git commands. Their safety and recovery contracts
+remain independent of read-performance optimization.
 
 The next performance decisions should measure unchanged connected previews, large diffs and
-object reads. A native Git library such as `gix`, a persistent `git cat-file` process, or the current
-CLI can be chosen per operation behind typed interfaces. A library change should preserve the
-operation's tested semantics and outperform the organized CLI baseline on representative inputs.
-Moving state persistence or mutations also requires retaining the existing cross-process lock,
-ownership checks, backups and recovery journal; it is not implied by moving read parsing to Rust.
+object reads. Batching or a persistent `git cat-file` process can be evaluated per operation
+behind typed interfaces. Changes must preserve tested semantics and outperform the organized
+CLI baseline on representative inputs. State persistence and mutations must retain the existing
+cross-process lock, ownership checks, backups and recovery journal.
 
-For build targets, required native testing and release artifact collection, see
+For platform testing and release artifact verification, see
 [Development](development.md#building-and-testing).

@@ -20,11 +20,6 @@ assert(!strFromU8(files['extension/dist/webview/index.js']).includes('process.en
 const bundle = strFromU8(files[`extension/${manifest.main.replace(/^\.\//, '')}`]);
 assert(!bundle.includes('hono/dist') && !bundle.includes('registry.npmjs.org'), 'The extension must not bundle the legacy server or npm update checker.');
 
-const targets = ['linux-x64-gnu', 'linux-arm64-gnu', 'darwin-x64', 'darwin-arm64', 'win32-x64-msvc'];
-const host = `${process.platform}-${process.arch}${process.platform === 'linux' ? '-gnu' : process.platform === 'win32' ? '-msvc' : ''}`;
-const required = process.env.WARDEN_NATIVE_EXPECT_ALL === '1' ? targets : targets.filter((target) => target === host);
-for (const target of required) {
-  assert(files[`extension/dist/native/warden.${target}.node`]?.length, `The VSIX is missing the ${target} native module.`);
-}
+assert(!Object.keys(files).some((name) => name.endsWith('.node')), 'The VSIX must run through TypeScript and Git without native addons.');
 assert(!Object.keys(files).some((name) => /^extension\/(src|node_modules)\//.test(name)), 'The VSIX must contain bundled code, not development sources.');
-console.log(`VSIX checked: ${manifest.publisher}.${manifest.name} ${manifest.version}; ${required.length} native target(s).`);
+console.log(`VSIX checked: ${manifest.publisher}.${manifest.name} ${manifest.version}; JavaScript and Git CLI.`);

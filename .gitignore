@@ -7,7 +7,5 @@ test-results/
 storybook-static/
 *.log
 .DS_Store
-target/
-native/*.node
 *.vsix
 .vscode-test/

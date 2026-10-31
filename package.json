@@ -22,8 +22,7 @@
   "scripts": {
     "storybook": "pnpm --filter @warden/webview storybook",
     "build:storybook": "pnpm --filter @warden/webview build:storybook",
-    "build": "pnpm build:native && pnpm build:vscode",
-    "build:native": "node scripts/native-build.mjs",
+    "build": "pnpm build:vscode",
     "lint": "biome check .",
     "typecheck": "tsc --noEmit -p tsconfig.json && pnpm --filter @warden/webview typecheck && tsc --noEmit -p packages/vscode/tsconfig.json",
     "test": "vitest run",

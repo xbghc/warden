@@ -1,42 +1,73 @@
 import { createHash } from 'node:crypto';
-import { DEFAULT_GIT_TIMEOUT_MS, gitEnvironment, GitError, runGitBuffer } from './git.js';
-import { loadNativeBinding, type NativeWorktreeState } from './native.js';
+import { DEFAULT_GIT_TIMEOUT_MS, GitError, runGitBuffer } from './git.js';
 
 /** One read of Git's status, HEAD and branch, without refreshing the repository's index. */
-export type WorktreeState = NativeWorktreeState;
+export interface WorktreeState {
+  head?: string;
+  branch?: string;
+  dirtyCount: number;
+  statusFingerprint: string;
+  paths: string[];
+}
 
 const STATUS_ARGS = ['status', '--porcelain=v2', '--branch', '--untracked-files=all', '--no-ahead-behind', '-z'];
+const STATUS_CONCURRENCY = 8;
+let activeReads = 0;
+const waitingReads = new Set<() => void>();
+
+function statusTimeout(): GitError {
+  return new GitError('git status timed out', null, '', 504, 'git_timeout');
+}
+
+async function acquireStatusSlot(deadline: number): Promise<void> {
+  if (activeReads < STATUS_CONCURRENCY) {
+    activeReads++;
+    return;
+  }
+  await new Promise<void>((resolve, reject) => {
+    const ready = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(
+      () => {
+        waitingReads.delete(ready);
+        reject(statusTimeout());
+      },
+      Math.max(1, Math.ceil(deadline - performance.now())),
+    );
+    waitingReads.add(ready);
+  });
+}
+
+function releaseStatusSlot(): void {
+  const next = waitingReads.values().next().value;
+  if (next) {
+    // Transfer the slot before waking the oldest waiter so new callers cannot bypass the queue.
+    waitingReads.delete(next);
+    next();
+  } else {
+    activeReads--;
+  }
+}
 
 /**
  * Keep completed status reads uncached: agents and ordinary Git commands can change any checkout
  * outside Warden. Callers may share a read within their own request, but mutation guards must be
- * able to ask for a new observation. Native work runs on Tokio, away from the JavaScript thread.
+ * able to ask for a new observation. Bound concurrent Git processes and include queue time in
+ * the deadline so a batch of workspaces cannot create an unbounded process burst or wait.
  */
 export async function readWorktreeState(cwd: string): Promise<WorktreeState> {
-  const native = loadNativeBinding();
-  if (!native) return readWorktreeStateWithGit(cwd);
-  // A Node worker has its own process.env. Reading std::env in Rust would silently ignore that
-  // worker's Git isolation (including the test suite's global/system configuration overrides).
-  const environment = Object.fromEntries(Object.entries(gitEnvironment()).filter((entry): entry is [string, string] => entry[1] !== undefined));
-  const result = await native.readWorktreeState(cwd, environment);
-  if (result.state) return result.state;
-  const error = result.error;
-  if (!error) throw new GitError('Native Git read returned no result', null, '', 500, 'git_failed');
-  const [status, code]: [number, string] =
-    error.kind === 'timeout'
-      ? [504, 'git_timeout']
-      : error.kind === 'missing_worktree'
-        ? [400, 'unknown_worktree']
-        : error.kind === 'missing_git'
-          ? [500, 'git_missing']
-          : [500, 'git_failed'];
-  throw new GitError(error.message, error.exitCode ?? null, error.stderr, status, code);
-}
-
-/** Portable backend for platforms without a prebuilt native module, and the comparison baseline. */
-export async function readWorktreeStateWithGit(cwd: string): Promise<WorktreeState> {
-  const { stdout } = await runGitBuffer(STATUS_ARGS, { cwd, timeoutMs: DEFAULT_GIT_TIMEOUT_MS });
-  return parseWorktreeState(stdout);
+  const deadline = performance.now() + DEFAULT_GIT_TIMEOUT_MS;
+  await acquireStatusSlot(deadline);
+  try {
+    const timeoutMs = Math.ceil(deadline - performance.now());
+    if (timeoutMs <= 0) throw statusTimeout();
+    const { stdout } = await runGitBuffer(STATUS_ARGS, { cwd, timeoutMs });
+    return parseWorktreeState(stdout);
+  } finally {
+    releaseStatusSlot();
+  }
 }
 
 /** Porcelain v2 fields are space-separated, but the final path can contain any non-NUL byte. */

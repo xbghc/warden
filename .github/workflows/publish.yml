@@ -29,8 +29,6 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    env:
-      WARDEN_NATIVE_EXPECT_ALL: '1'
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6

@@ -71,7 +71,7 @@ the same workspace. Unrelated historical metadata and internal snapshot objects 
 
 Single user, in the VS Code workspace extension host (local, SSH, WSL or container). There is no
 production HTTP listener. The internal engine executes Git with argument arrays,
-through Node's `execFile` or the Rust core's fixed status operation, without a shell. General
+through Node's `execFile`, without a shell. General
 reads go through an argument whitelist (`rev-parse`, `diff`, `show`, `log`,
 `worktree list`, `ls-files`, `ls-tree`, `status`, `merge-base`, `rev-list`, `for-each-ref`, `check-ref-format`,
 `grep` without `-O` / `--open-files-in-pager`, and `config` only as `--get`, `--get-all` or
@@ -139,15 +139,15 @@ upstream. Only then does `update-ref -d <ref> <observed-tip>` remove that exact 
 repository. A squash delivery does not establish ancestry of its source branch; such branches are
 retained unless a valid ancestry check permits deletion. Primary refs are never changed by this cleanup.
 
-The independent `warden-core` Rust crate exposes a typed worktree observation, rather than a raw
-command API. It executes exactly `git status --porcelain=v2 --branch --untracked-files=all
+The TypeScript worktree-state adapter exposes a typed observation and uses the guarded Git reader
+to execute exactly `git status --porcelain=v2 --branch --untracked-files=all
 --no-ahead-behind -z`, returning HEAD, branch, changed-entry count, paths and a hash of the raw
-status bytes. It limits concurrent status children to eight and applies a 30-second deadline,
-including queue time, plus 256 MiB limits per output stream. Timeout/output-limit failures kill and
-reap the direct Git child before returning. Reads set `GIT_OPTIONAL_LOCKS=0`; the real index is not
-refreshed. The N-API binding passes the calling Node worker's environment explicitly, and the core
-independently removes repository redirection variables. Platforms without a prebuilt module use
-the same fixed operation through the guarded Node runner. Both paths hash original bytes; paths
+status bytes. Readers in the same JavaScript environment share an eight-child concurrency limit
+and a 30-second deadline, including queue time. Expired queued reads never spawn Git. The guarded
+reader limits each output stream to 256 MiB and kills the direct Git child on timeout or overflow,
+waiting for its close callback before returning. Overflow is `git_failed`, distinct from `git_timeout`.
+Reads set `GIT_OPTIONAL_LOCKS=0`; the real index is not refreshed. Child processes use the calling
+Node worker's environment with repository redirection removed. Status fingerprints hash original bytes; paths
 retain the engine's existing UTF-8 representation. Watching repeated edits to a non-UTF-8 filename
 still has the existing lossy-path limitation.
 

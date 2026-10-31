@@ -8,7 +8,6 @@ HTTP, a listening port, a browser server or an installed Warden CLI.
 
 ```sh
 pnpm install
-pnpm build:native
 pnpm package:vscode
 code --install-extension packages/vscode/warden-0.20.4.vsix
 ```
@@ -221,7 +220,7 @@ Only an explicitly requested `vX.Y.Z` tag publishes `xbghc.warden`. The extensio
 source; the repository root is a private workspace without an npm binary or publishing entry.
 `pnpm check:release` validates release metadata; `pnpm check:vscode` validates the packaged assets.
 
-CI tests the Git engine on Windows, Linux and macOS, bundles their tested native modules in one VSIX,
+CI tests the TypeScript and Git CLI engine on Windows, Linux and macOS, packages one JavaScript VSIX,
 and exercises that same artifact in minimum-supported and stable VS Code hosts on all three platforms.
 The release workflow publishes the tested bytes through the existing `vscode-marketplace` Entra
 federated identity. Manual runs only verify Marketplace authentication. No local publication is performed.

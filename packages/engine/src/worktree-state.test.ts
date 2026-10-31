@@ -4,7 +4,7 @@ import { parseWorktreeState } from './worktree-state.js';
 const oid = '1'.repeat(40);
 const headers = `# branch.oid ${oid}\0# branch.head main\0`;
 
-describe('portable worktree status parser', () => {
+describe('worktree status parser', () => {
   it('keeps paths intact and counts renames and unmerged paths once', () => {
     const status =
       headers +
