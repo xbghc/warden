@@ -127,4 +127,14 @@ describe('Git repository environment isolation', () => {
     await expect(runGitWrite(['commit', '--allow-empty', '-m', 'Must be signed'], { cwd: selected.root })).rejects.toMatchObject({ code: 'git_failed' });
     expect(selected.git('rev-parse', 'HEAD')).toBe(head);
   });
+
+  it('restricts snapshot blob imports to the private temporary file', async () => {
+    const options = { cwd: selected.root, objects: path.join(storage, 'objects'), index: path.join(storage, 'index') };
+    await expect(runGitSnapshot(['hash-object', '-w', '--no-filters', '--', path.join(selected.root, 'README.md')], options)).rejects.toMatchObject({
+      code: 'git_subcommand_forbidden',
+    });
+    await expect(runGitSnapshot(['hash-object', '-w', '--path=README.md', '--', path.join(storage, 'blob')], options)).rejects.toMatchObject({
+      code: 'git_subcommand_forbidden',
+    });
+  });
 });

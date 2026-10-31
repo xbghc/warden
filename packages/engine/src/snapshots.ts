@@ -1,6 +1,6 @@
 import path from 'node:path';
-import { copyFile, mkdir, mkdtemp, open, rm, utimes, writeFile } from 'node:fs/promises';
-import { runGit, runGitSnapshot, type SnapshotEnv } from './git.js';
+import { access, copyFile, mkdir, mkdtemp, open, rm, utimes, writeFile } from 'node:fs/promises';
+import { runGit, runGitBuffer, runGitSnapshot, type SnapshotEnv } from './git.js';
 import { WardenError } from './errors.js';
 
 /**
@@ -127,9 +127,41 @@ async function withIndexCopy<T>(cwd: string, store: string, fn: (env: Required<S
   }
 }
 
+/** Git's automatic CRLF handling needs the indexed blob, even when the working file is unchanged.
+ * Copy only blobs Git may rehash (plus indexed attributes), so writes never freshen source objects.
+ */
+async function seedIndexedBlobs(cwd: string, snapshot: Required<SnapshotEnv>) {
+  const listing = await runGit(['ls-files', '--stage', '-z'], { cwd, snapshot });
+  const entries = listing.stdout.split('\0').flatMap((record) => {
+    const match = /^(100644|100755|120000) ([0-9a-f]{40}(?:[0-9a-f]{24})?) [0-3]\t([\s\S]*)$/.exec(record);
+    return match ? [{ oid: match[2]!, file: match[3]! }] : [];
+  });
+  const copy = async (oid: string) => {
+    const destination = path.join(snapshot.objects, oid.slice(0, 2), oid.slice(2));
+    const exists = await access(destination).then(
+      () => true,
+      (error: NodeJS.ErrnoException) => {
+        if (error.code !== 'ENOENT') throw error;
+        return false;
+      },
+    );
+    if (exists) return;
+    const blob = await runGitBuffer(['show', oid, '--'], { cwd, snapshot });
+    const file = path.join(path.dirname(snapshot.index), 'blob');
+    await writeFile(file, blob.stdout, { mode: 0o600 });
+    const stored = await runGitSnapshot(['hash-object', '-w', '--no-filters', '--', file], { cwd, ...snapshot });
+    if (stored.stdout.trim() !== oid) throw new WardenError(409, 'Git 索引对象不匹配，无法生成预览快照', 'snapshot_object_invalid');
+  };
+  // Missing working-tree attributes still apply through the index, including in sparse checkouts.
+  for (const entry of entries) if (entry.file === '.gitattributes' || entry.file.endsWith('/.gitattributes')) await copy(entry.oid);
+  const modified = new Set((await runGitSnapshot(['ls-files', '--modified', '-z'], { cwd, ...snapshot })).stdout.split('\0'));
+  for (const entry of entries) if (modified.has(entry.file)) await copy(entry.oid);
+}
+
 /** Writes the working tree of `cwd` into the store as a tree, tracked and untracked files alike; returns its sha. */
 export async function snapshotWorktree(cwd: string, store: string): Promise<string> {
   return withIndexCopy(cwd, store, async (snapshot) => {
+    await seedIndexedBlobs(cwd, snapshot);
     await runGitSnapshot(['add', '--all'], { cwd, ...snapshot });
     const r = await runGitSnapshot(['write-tree', '--missing-ok'], { cwd, ...snapshot });
     return r.stdout.trim();

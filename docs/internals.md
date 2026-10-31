@@ -109,7 +109,12 @@ request after a release or removal (`-d`, so only a merged one), and the review 
 the repository. Internal snapshots write only there: `git add --all` and
 `git write-tree --missing-ok`, with `GIT_INDEX_FILE` and `GIT_OBJECT_DIRECTORY` set to files in
 Warden's data directory and no alternates. Reads add the repository's objects as alternates;
-writes must not, because Git can freshen alternate objects. `snapshots.ts` owns these operations.
+writes must not, because Git can freshen alternate objects. Before capture, `ls-files --stage -z`
+reads the copied index and `ls-files --modified -z` identifies files Git may rehash without source
+object access. Their indexed blobs and indexed `.gitattributes` blobs are read with `show` and
+copied into Warden's object store with `hash-object -w --no-filters` from a private temporary file.
+Existing copies are reused. This preserves Git's automatic CRLF handling and attribute fallback
+without freshening loose or packed source objects. `snapshots.ts` owns these operations.
 For split indexes, it copies the referenced shared index into disposable private Git metadata and
 runs only `git update-index --no-split-index` there before capturing content. Source shared indexes
 are never passed to Git during that expansion, because even reading one refreshes its timestamp.

@@ -282,8 +282,9 @@ export async function runGitWrite(args: readonly string[], opts: { cwd: string; 
 export const LONG_GIT_TIMEOUT_MS = 10 * 60_000;
 
 /**
- * The writes a snapshot needs, and nothing else: `add --all` (with `--intent-to-add` for a diff)
- * and `write-tree --missing-ok`, always into an index and an object directory of warden's own.
+ * Snapshot commands use an index and object directory of Warden's own. `ls-files --modified`
+ * identifies indexed blobs to copy before `add --all`; `hash-object --no-filters` imports their
+ * original bytes, and `write-tree --missing-ok` records the result.
  * A copied split index is expanded with `update-index --no-split-index` in private Git metadata. No
  * alternates are set here, deliberately: git "freshens" an object it finds in one — touches its
  * mtime — so the repository's objects would be written after all. Without them the entries git
@@ -297,7 +298,14 @@ export async function runGitSnapshot(
   const allowed = opts.gitDirectory
     ? args.length === 2 && args[0] === 'update-index' && args[1] === '--no-split-index'
     : (args[0] === 'add' && args[1] === '--all' && args.slice(2).every((a) => a === '--intent-to-add')) ||
-      (args[0] === 'write-tree' && args[1] === '--missing-ok' && args.length === 2);
+      (args[0] === 'write-tree' && args[1] === '--missing-ok' && args.length === 2) ||
+      (args.length === 3 && args[0] === 'ls-files' && args[1] === '--modified' && args[2] === '-z') ||
+      (args.length === 5 &&
+        args[0] === 'hash-object' &&
+        args[1] === '-w' &&
+        args[2] === '--no-filters' &&
+        args[3] === '--' &&
+        args[4] === path.join(path.dirname(opts.index), 'blob'));
   if (!allowed) throw new GitError(`not a snapshot command: git ${args.join(' ')}`, null, '', 400, 'git_subcommand_forbidden');
   // Index writes can invoke post-index-change hooks or create shared indexes in the source
   // Git directory. Snapshot bookkeeping must stay external and never invoke those hooks.
@@ -305,6 +313,7 @@ export async function runGitSnapshot(
     ['-c', 'core.splitIndex=false', '-c', 'core.fsmonitor=false', '-c', `core.hooksPath=${path.join(opts.index, 'disabled-hooks')}`, ...args],
     opts,
     {
+      GIT_OPTIONAL_LOCKS: '0',
       GIT_OBJECT_DIRECTORY: opts.objects,
       GIT_INDEX_FILE: opts.index,
       ...(opts.gitDirectory ? { GIT_DIR: opts.gitDirectory, GIT_WORK_TREE: opts.cwd } : {}),

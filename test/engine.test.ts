@@ -26,6 +26,41 @@ afterEach(async () => {
 });
 
 describe('desktop engine', () => {
+  it('initializes and recovers a CRLF preview while protecting real preview edits', async () => {
+    const original = '@echo off\r\necho Original\r\n';
+    await fixture.write('gradlew.bat', original);
+    fixture.git('-c', 'core.autocrlf=false', 'add', 'gradlew.bat');
+    fixture.git('commit', '-qm', 'Keep a CRLF wrapper');
+    const config = path.join(directory, 'global.gitconfig');
+    await writeFile(config, '[core]\n\tautocrlf = input\n\tsafecrlf = true\n');
+    vi.stubEnv('GIT_CONFIG_GLOBAL', config);
+    try {
+      await fixture.write('README.md', 'Saved primary edit\n');
+      const index = await readFile(path.join(fixture.root, '.git', 'index'));
+      const head = fixture.git('rev-parse', 'HEAD');
+      const first = await engine.execute('preview.refresh', undefined);
+      expect(first).toMatchObject({ syncStatus: 'synced', connectedIds: [] });
+      expect(await readFile(path.join(first.worktree!, 'gradlew.bat'), 'utf8')).toBe(original);
+      expect(await readFile(path.join(first.worktree!, 'README.md'), 'utf8')).toBe('Saved primary edit\n');
+      await engine.store.update((state) => {
+        state.connectionPreview!.status = 'stale';
+        state.connectionPreview!.syncStatus = 'error';
+        state.connectionPreview!.message = '预览目录有额外改动，已停止更新；请在主目录编辑代码';
+      });
+      expect(await engine.execute('preview.refresh', undefined)).toMatchObject({ worktree: first.worktree, syncStatus: 'synced' });
+      await writeFile(path.join(first.worktree!, 'gradlew.bat'), '@echo off\r\necho Preview edit\r\n');
+      await expect(engine.execute('preview.connect', { connectedIds: [] })).rejects.toMatchObject({ code: 'preview_dirty' });
+      expect(await readFile(path.join(first.worktree!, 'gradlew.bat'), 'utf8')).toContain('Preview edit');
+      await writeFile(path.join(first.worktree!, 'gradlew.bat'), original);
+      expect(await engine.execute('preview.refresh', undefined)).toMatchObject({ worktree: first.worktree, syncStatus: 'synced' });
+      expect(await readFile(path.join(fixture.root, '.git', 'index'))).toEqual(index);
+      expect(fixture.git('rev-parse', 'HEAD')).toBe(head);
+      expect(await readFile(path.join(fixture.root, 'README.md'), 'utf8')).toBe('Saved primary edit\n');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('reads long committed file names without treating revision expressions as disk paths', async () => {
     // The file itself fits each filesystem; the additional object ID can exceed its path limit.
     const file = `${'long'.repeat(process.platform === 'win32' ? 40 : 55)}.txt`;

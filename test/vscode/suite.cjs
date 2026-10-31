@@ -4,6 +4,7 @@ const path = require('node:path');
 const vscode = require('vscode');
 const { execFileSync } = require('node:child_process');
 const { checkBranches } = require('./branches.cjs');
+const { checkPreviewLineEndings } = require('./preview.cjs');
 // Git may materialize preview text with CRLF under the user's Windows configuration.
 const textLines = (text) => text.replace(/\r\n/g, '\n');
 const eventually = async (condition, timeout = 10_000) => {
@@ -55,6 +56,7 @@ exports.run = async () => {
       (await workbench.getChildren()).map((node) => node.kind),
       ['preview', 'history', 'tasks', 'settings'],
     );
+    await checkPreviewLineEndings(workbench, fixture.unconfigured, eventually);
     await checkBranches(workbench, fixture.unconfigured, eventually);
     await workbench.open(fixture.root);
     assert.equal(workbench.backend.store.file, fixture.state);
