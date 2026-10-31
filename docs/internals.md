@@ -158,8 +158,17 @@ worktrees. Existing `kind: worktree` and `kind: clone` layouts remain supported 
 Product inventory reads retain dirty-state, ownership and unfinished-operation checks, but omit
 the retired management page's upstream comparisons and free-slot branch lists. The test-only HTTP
 adapter adds those fields with the same validated Git reader; no new Git write path is introduced.
-Primary commits are fetched into the shared repository only when absent; worktrees in that repository
-can already read each other's objects. Shared initialization preserves the primary commit identity.
+Primary commits are fetched into the shared repository when absent; worktrees in that repository
+can already read each other's objects. Imports use `fetch --update-shallow` to retain the source's
+shallow history boundary without fetching from a remote or changing primary. Source validation combines
+`rev-parse --is-shallow-repository --verify <sha>^{commit}`. For an already present commit from a shallow
+source, `rev-list --count <sha>` verifies that its history is traversable; a failed traversal retries the
+same local fetch to repair older imports that omitted the boundary, including commits already held by
+task refs. Repair counts the source's available commits with `rev-list --count <sha>` and requests an
+explicit depth one greater than that count, preserving all available local history while forcing Git
+to update its shallow boundary. It verifies traversal again afterward. Full sources retain the object-presence
+shortcut. Git owns updates to the external repository's `shallow` file; Warden does not rewrite it directly.
+Shared initialization preserves the primary commit identity.
 Clone refs remain independent, while composition imports the clone commits it needs into the shared
 object store. This never imports agent development history into primary.
 Internal commands disable hooks/signing through command-local configuration, never by changing the

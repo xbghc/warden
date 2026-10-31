@@ -4,7 +4,9 @@ import { execFile } from 'node:child_process';
 import { copyFile, lstat, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { taskReview } from '@warden/shared';
 import { makeFixtureRepo, type FixtureRepo } from '../../../test/fixtures/make-repo.js';
+import { Engine } from './engine.js';
 import { runGit } from './git.js';
 import { listWorktreesAll, resolveRepo } from './repo.js';
 import { StateStore } from './state.js';
@@ -107,6 +109,76 @@ describe('external shared task repository', () => {
     expect((await runGit(['config', '--get', 'core.hooksPath'], { cwd: repository, okCodes: [0, 1] })).code).toBe(1);
     await expect(importSharedCommit(fx.root, fx.root, 'main')).rejects.toMatchObject({ code: 'invalid_commit' });
     expect(fx.git('status', '--porcelain')).toBe('');
+  });
+
+  it.each([false, true])('preserves shallow history when importing a commit (previous import: %s)', async (previousImport) => {
+    const primary = path.join(data, 'shallow');
+    fx.git('clone', '--quiet', '--depth=1', '--no-local', '--', fx.root, primary);
+    const head = fx.git('-C', primary, 'rev-parse', 'HEAD').trim();
+    const boundary = await readFile(path.join(primary, '.git', 'shallow'), 'utf8');
+    const refs = fx.git('-C', primary, 'show-ref');
+    const repository = await ensureSharedRepository(primary);
+    if (previousImport) {
+      // Older imports transferred the object but silently rejected its shallow boundary.
+      fx.git('-C', repository, 'fetch', '--quiet', '--no-tags', '--no-write-fetch-head', '--', primary, head);
+      expect(fx.git('-C', repository, 'rev-parse', `${head}^{commit}`).trim()).toBe(head);
+      fx.git('-C', repository, 'update-ref', 'refs/heads/retained-task', head);
+    }
+    await importSharedCommit(primary, primary, head);
+    expect(fx.git('-C', repository, 'rev-list', '--count', head).trim()).toBe('1');
+    expect(await readFile(path.join(repository, 'shallow'), 'utf8')).toBe(boundary);
+    expect(await importSharedCommit(primary, primary, head)).toBe(repository);
+    if (previousImport) expect(fx.git('-C', repository, 'rev-parse', 'retained-task').trim()).toBe(head);
+    expect(await readFile(path.join(primary, '.git', 'shallow'), 'utf8')).toBe(boundary);
+    expect(fx.git('-C', primary, 'show-ref')).toBe(refs);
+    expect(fx.git('-C', primary, 'status', '--porcelain')).toBe('');
+    expect(await lstat(path.join(repository, 'FETCH_HEAD')).catch(() => undefined)).toBeUndefined();
+  });
+
+  it('previews, reviews, delivers twice and rebases a task allocated from a shallow primary', async () => {
+    const primary = path.join(data, 'shallow');
+    fx.git('clone', '--quiet', '--depth=1', '--no-local', '--', fx.root, primary);
+    fx.git('-C', primary, 'config', 'user.name', 'Fixture');
+    fx.git('-C', primary, 'config', 'user.email', 'fixture@example.com');
+    const engine = await Engine.open(primary, path.join(data, 'state.json'));
+    try {
+      await engine.execute('workflow.configure', { branch: 'main' });
+      const task = await engine.execute('task.create', { title: 'Shallow task' });
+      expect(task.worktree).toBeTruthy();
+      const workspace = task.worktree!;
+      const originalHead = fx.git('-C', primary, 'rev-parse', 'HEAD').trim();
+      for (const file of ['first.txt', 'second.txt']) {
+        await writeFile(path.join(workspace, file), `${file}\n`);
+        fx.git('-C', workspace, 'add', file);
+        fx.git('-C', workspace, 'commit', '-qm', `Add ${file}`);
+        const sourceHead = fx.git('-C', workspace, 'rev-parse', 'HEAD').trim();
+        const preview = await engine.execute('preview.connect', { connectedIds: [task.id] });
+        expect(preview.syncStatus).toBe('synced');
+        expect(await readFile(path.join(preview.worktree!, file), 'utf8')).toBe(`${file}\n`);
+        const data = await engine.execute('repository.get', undefined);
+        const review = taskReview(data.workflow, task.id, data.workspaces.worktrees)!;
+        expect(review.sourceHead).toBe(sourceHead);
+        expect((await engine.execute('review.files', { key: review.targetKey })).files.map((entry) => entry.path)).toEqual([file]);
+        await engine.execute('task.deliver', {
+          taskId: task.id,
+          sourceHead,
+          sourceBase: review.sourceBase,
+          developmentHead: review.developmentHead!,
+          message: `Deliver ${file}`,
+        });
+        expect(fx.git('-C', primary, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD').trim()).toBe(file);
+        expect(fx.git('-C', primary, 'status', '--porcelain')).toBe('');
+        expect((await runGit(['rev-parse', '--verify', `${sourceHead}^{commit}`], { cwd: primary, okCodes: [0, 128] })).code).toBe(128);
+      }
+      expect(fx.git('-C', primary, 'rev-list', '--count', `${originalHead}..HEAD`).trim()).toBe('2');
+      const checks = await engine.execute('rebase.check', undefined);
+      expect(checks.checks[0]?.status).toBe('ready');
+      const result = await engine.execute('rebase.run', { items: checks.checks });
+      expect(result.results).toEqual([{ changeId: task.id, status: 'updated' }]);
+      expect(fx.git('-C', workspace, 'rev-parse', 'HEAD')).toBe(fx.git('-C', primary, 'rev-parse', 'HEAD'));
+    } finally {
+      await engine.close();
+    }
   });
 
   it('retains a branch held by a shared worktree outside the numbered task inventory', async () => {

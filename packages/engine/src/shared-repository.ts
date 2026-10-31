@@ -135,15 +135,34 @@ export async function ensureSharedRepository(primary: string): Promise<string> {
 export async function importSharedCommit(primary: string, source: string, sha: string): Promise<string> {
   if (!immutableCommit.test(sha)) throw new WardenError(400, 'The shared repository requires a full commit ID.', 'invalid_commit');
   const from = await realpath(source);
-  const sourceCommit = await runGit(['rev-parse', '--verify', `${sha}^{commit}`], { cwd: from });
-  if (sourceCommit.stdout.trim() !== sha) throw new WardenError(409, 'The source commit does not match the requested version.', 'invalid_commit');
+  const sourceCommit = await runGit(['rev-parse', '--is-shallow-repository', '--verify', `${sha}^{commit}`], { cwd: from });
+  const [shallow, sourceHead] = sourceCommit.stdout.trim().split('\n');
+  if (sourceHead !== sha) throw new WardenError(409, 'The source commit does not match the requested version.', 'invalid_commit');
   const repository = await ensureSharedRepository(primary);
   const present = await runGit(['rev-parse', '--verify', `${sha}^{commit}`], { cwd: repository, okCodes: [0, 128] });
-  if (present.code !== 0)
-    await runGitWrite(['fetch', '--quiet', '--no-tags', '--no-write-fetch-head', '--no-auto-maintenance', '--', from, sha], {
+  let needsFetch = present.code !== 0;
+  let repairBoundary = false;
+  // Older fetches could transfer a shallow commit while rejecting its boundary with exit 0.
+  // Repair those imports without overwriting task refs or traversing every full repository.
+  if (!needsFetch && shallow === 'true') {
+    const history = await runGit(['rev-list', '--count', sha], { cwd: repository, okCodes: [0, 128] });
+    repairBoundary = history.code !== 0;
+    needsFetch = repairBoundary;
+  }
+  const depth: string[] = [];
+  if (repairBoundary) {
+    const available = Number((await runGit(['rev-list', '--count', sha], { cwd: from })).stdout.trim());
+    if (!Number.isSafeInteger(available) || available < 1 || available >= 2147483647) invalid('Unable to determine the local shallow history depth.');
+    // An explicit depth makes Git update the boundary even when task refs already hold
+    // this object. One beyond the source's commit count retains all available local history.
+    depth.push(`--depth=${available + 1}`);
+  }
+  if (needsFetch)
+    await runGitWrite(['fetch', '--quiet', '--update-shallow', ...depth, '--no-tags', '--no-write-fetch-head', '--no-auto-maintenance', '--', from, sha], {
       cwd: repository,
       timeoutMs: LONG_GIT_TIMEOUT_MS,
     });
+  if (repairBoundary) await runGit(['rev-list', '--count', sha], { cwd: repository });
   return repository;
 }
 

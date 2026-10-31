@@ -61,6 +61,8 @@ Warden does not relocate active tasks or existing previews. Old operation journa
 Warden started from a shared task still resolves to the primary repository's state and lock.
 Internal composition disables hooks and signing only for its own commands, without changing the
 shared repository's configuration or ordinary agent commits.
+Shallow primary clones retain their shallow boundary when imported into the shared repository. This
+keeps task history and review usable after agent commits without downloading additional remote history.
 
 ## Workspace hooks
 
