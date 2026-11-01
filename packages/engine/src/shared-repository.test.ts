@@ -135,7 +135,8 @@ describe('external shared task repository', () => {
     expect(await lstat(path.join(repository, 'FETCH_HEAD')).catch(() => undefined)).toBeUndefined();
   });
 
-  it('previews, reviews, delivers twice and rebases a task allocated from a shallow primary', async () => {
+  // Two complete deliveries and a rebase need more than one operation's timeout on busy CI hosts.
+  it('previews, reviews, delivers twice and rebases a task allocated from a shallow primary', { timeout: 90_000 }, async () => {
     const primary = path.join(data, 'shallow');
     fx.git('clone', '--quiet', '--depth=1', '--no-local', '--', fx.root, primary);
     fx.git('-C', primary, 'config', 'user.name', 'Fixture');

@@ -70,7 +70,8 @@ jobs:
 
   vscode:
     name: Package and test VS Code extension
-    needs: [quality, test]
+    # UI checks can run alongside the engine matrix; publication still needs the entire workflow.
+    needs: quality
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     steps:

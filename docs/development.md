@@ -265,6 +265,8 @@ rejection and preservation of delivery records. History rewriting remains covere
 stable hosts on Windows, Linux and macOS. Branch-following coverage switches the primary checkout
 through Git, including branches at the same commit, verifies per-branch task/draft restoration and
 stale action rejection, and preserves dirty task workspaces and connected-preview switch guards.
+CI packages the VSIX after quality checks so browser and extension-host tests run alongside the engine
+matrix. Marketplace publication requires the entire reusable workflow to succeed, including both matrices.
 
 ## Release
 
