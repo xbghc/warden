@@ -35,6 +35,9 @@ export async function makeFixtureRepo(prefix = 'warden-fixture-', options: { obj
     await writeFile(full, content);
   };
   git('init', '-q', '-b', 'main', ...(options.objectFormat ? [`--object-format=${options.objectFormat}`] : []));
+  // Background maintenance can race assertions that inventory objects and timestamps.
+  git('config', 'maintenance.auto', 'false');
+  git('config', 'gc.auto', '0');
   // Server-side commits do not inherit the fixture helper's identity environment.
   git('config', 'user.name', 'Fixture');
   git('config', 'user.email', 'fixture@example.com');
