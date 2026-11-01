@@ -164,3 +164,17 @@ Warden 现在会在长度限制内追加 `terminal_output_delta` 和 `terminal_o
 `connection-reversal.json`、`readonly-check.json`、`rebase.json`、`final-git.json`、`primary-source-objects.json`、
 原生宿主和浏览器日志、截图。临时宿主桥接和启动器仅作为测试产物保留在产品之外，没有重写上一份验收报告。
 真实测试宿主已正常关闭，退出码为 0；临时仓库和测试证据均已保留。
+
+## 发布验证补充
+
+跨平台 CI 进一步发现并处理了以下问题：
+
+- Git 自动维护会在测试扫描对象目录时删除 `maintenance.lock`，导致夹具误报失败。临时测试仓库现在关闭自动维护和自动 GC，原有对象内容与时间戳断言保留。
+- Windows 把普通文件作为工作目录时也可能返回 `ENOENT`。Git 读写调用现在只在启动失败后检查目录类型，返回 `unknown_worktree`；有效目录中找不到 Git 仍返回 `git_missing`。新增六项跨平台模拟回归，修复后本地共 51 个文件、665 项测试通过。
+- 智能体提交可能打断尚未显示的新审查快照。宿主现在只重试同一仓库会话内的只读观察，最多三次；持续变化显示为文件列表错误。已打开的审查版本和交付前的版本校验不变。最低版和稳定版 VS Code 的打包回归均已验证重试上限、仓库切换和审查版本保持。
+- Intel macOS 的 Git 集成文件改为串行，减少子进程竞争；空会话恢复保留完整功能断言，采用覆盖加载与重建会话的等待预算，并在失败时输出实际连接状态。VSIX 和界面检查与引擎矩阵并行，发布仍要求整个 CI 成功。
+
+另在一次 Linux / VS Code 1.106.0 的[发布验证日志](https://github.com/xbghc/warden/actions/runs/41283843621/job/124781294299)中，
+观察到 Settings 树刷新期间的 `TreeError [warden.settings]`，目标为 `preview-command`。
+该警告未直接触发测试失败；同次运行随后因审查快照变化而失败。Settings 警告尚未稳定复现，保留为待定位的 UI 问题，
+不与前文已修复的 `warden.task` 树问题或已隔离的 `toJSON` 宿主警告合并。
