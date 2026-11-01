@@ -61,10 +61,25 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   assert.match(await fs.readFile(path.join(chat.binding.workspace, 'agent-output.txt'), 'utf8'), /^Task context edited by /);
   await assert.rejects(fs.access(path.join(fixture.root, 'agent-output.txt')));
   await assert.rejects(fs.access(path.join(preview.worktree, 'agent-output.txt')));
+  await conversations.handle(chat, { type: 'open-file', reference: 'agent-output.txt:1' });
+  assert(
+    vscode.window.tabGroups.all
+      .flatMap((group) => group.tabs)
+      .some((tab) => tab.input instanceof vscode.TabInputTextDiff && tab.label.includes('agent-output.txt')),
+    'a task file reference opens its native reviewed diff',
+  );
+  await conversations.handle(chat, { type: 'open-file', reference: 'README.md#L1' });
+  assert.equal(vscode.window.activeTextEditor.document.uri.scheme, 'warden-review', 'unchanged task files open as readonly snapshots');
+  await assert.rejects(conversations.handle(chat, { type: 'open-file', reference: '../fixture.json' }), /inside this task workspace/);
+  await assert.rejects(
+    conversations.handle(chat, { type: 'open-file', reference: 'command:workbench.action.closeWindow' }),
+    /Invalid workspace file reference/,
+  );
   const initialized = (await journal()).find((row) => row.method === 'initialize');
   assert.deepEqual(initialized.params.clientCapabilities, {
     fs: { readTextFile: false, writeTextFile: false },
     terminal: false,
+    _meta: { terminal_output_delta: true },
     session: { configOptions: { boolean: {} }, notices: {}, compaction: {} },
   });
   assert.equal(initialized.cwd, chat.binding.workspace);

@@ -1,4 +1,4 @@
-import { memo, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import {
   ArrowDown,
   ArrowUp,
@@ -64,6 +64,12 @@ export function AcpApp({ model, send: dispatch }: Props) {
   const send = (action: AcpAction) => {
     if (!switchingRef.current) dispatch(action);
   };
+  const openFile = useCallback(
+    (reference: string) => {
+      if (!switchingRef.current) dispatch({ type: 'open-file', reference });
+    },
+    [dispatch],
+  );
   const [draft, setDraft] = useState(model.draft);
   const [sending, setSending] = useState(false);
   const [pending, setPending] = useState<{ text: string; messageIds: Set<string>; status: AcpStatus; updatedAt: string }>();
@@ -389,7 +395,23 @@ export function AcpApp({ model, send: dispatch }: Props) {
         >
           <div className="acp-transcript-content" ref={transcriptContent}>
             {record.messages.length ? (
-              record.messages.map((message) => <Message key={message.id} message={message} active={model.sending && message.id === lastUser?.id} />)
+              activityRows(record.messages).map((messages) =>
+                messages.length >= 3 ? (
+                  <details className="acp-activity-group" key={messages[0]!.id}>
+                    <summary>
+                      <ChevronRight className="acp-disclosure" aria-hidden="true" />
+                      {messages.length} earlier activities
+                    </summary>
+                    {messages.map((message) => (
+                      <Message key={message.id} message={message} active={false} openFile={openFile} />
+                    ))}
+                  </details>
+                ) : (
+                  messages.map((message) => (
+                    <Message key={message.id} message={message} active={model.sending && message.id === lastUser?.id} openFile={openFile} />
+                  ))
+                ),
+              )
             ) : (
               <div className="acp-empty muted">
                 <MessageSquare aria-hidden="true" />
@@ -451,7 +473,7 @@ export function AcpApp({ model, send: dispatch }: Props) {
             maxLength={100_000}
             rows={3}
             disabled={switching}
-            placeholder={canStop ? 'Write a follow-up while the agent works…' : 'Describe what to work on…'}
+            placeholder={model.permissions.length ? 'Write a follow-up…' : canStop ? 'Write a follow-up while the agent works…' : 'Describe what to work on…'}
             onChange={(event) => updateDraft(event.target.value)}
             onBlur={flushDraft}
             onKeyDown={(event) => {
@@ -665,8 +687,20 @@ function ChatError({ error, canRetry, retry }: { error: string; canRetry: boolea
   );
 }
 
+/** Keep failures, running tools and agent replies visible; only completed adjacent activity folds. */
+function activityRows(messages: AcpMessage[]): AcpMessage[][] {
+  const rows: AcpMessage[][] = [];
+  const foldable = (message: AcpMessage) => message.role === 'thought' || (message.role === 'tool' && message.status === 'completed' && !message.compactionId);
+  for (const message of messages) {
+    const last = rows.at(-1);
+    if (last && foldable(message) && foldable(last[0]!)) last.push(message);
+    else rows.push([message]);
+  }
+  return rows;
+}
+
 const Message = memo(
-  function Message({ message, active }: { message: AcpMessage; active: boolean }) {
+  function Message({ message, active, openFile }: { message: AcpMessage; active: boolean; openFile(reference: string): void }) {
     const [expanded, setExpanded] = useState(false);
     const role = { user: 'You', agent: 'Agent', thought: 'Agent Thoughts', tool: 'Activity', notice: 'Session Notice' }[message.role];
     const labels: Record<string, string> = message.compactionId
@@ -674,20 +708,26 @@ const Message = memo(
       : toolLabels;
     if (message.role === 'tool') {
       const [title, ...body] = message.text.split('\n');
+      const unknown = message.uncertain && (message.status === 'pending' || message.status === 'in_progress');
       return (
         <article className="acp-message acp-message-tool">
           <details>
             <summary>
               <ChevronRight className="acp-disclosure" aria-hidden="true" />
-              {message.status === 'in_progress' ? (
+              {message.status === 'in_progress' && !unknown ? (
                 <LoaderCircle className="acp-spinner" aria-hidden="true" />
               ) : message.status === 'completed' ? (
                 <Check aria-hidden="true" />
               ) : null}
               <span className="acp-tool-title">{title || 'Agent activity'}</span>
-              <span className="muted">{labels[message.status ?? ''] ?? message.status}</span>
+              <span className="acp-tool-status muted">
+                <span>{unknown ? 'Outcome Unknown' : (labels[message.status ?? ''] ?? message.status)}</span>
+                {message.exitCode !== undefined && <span>Exit {message.exitCode}</span>}
+                {message.exitSignal && <span>Signal {message.exitSignal}</span>}
+              </span>
             </summary>
             <div className="acp-tool-detail">
+              {unknown && <p className="muted">The agent did not report a final outcome. Its command may still be running.</p>}
               <pre className="acp-message-text">{body.join('\n') || title}</pre>
               <CopyText text={message.text} label="Copy Activity" />
             </div>
@@ -703,7 +743,7 @@ const Message = memo(
               <ChevronRight className="acp-disclosure" aria-hidden="true" />
               Thoughts
             </summary>
-            <ChatMarkdown text={message.text} />
+            <ChatMarkdown text={message.text} openFile={openFile} />
           </details>
         </article>
       );
@@ -723,7 +763,7 @@ const Message = memo(
           <CopyText text={message.text} />
         </div>
         <div className={`acp-message-text${longPrompt && !expanded ? ' acp-prompt-collapsed' : ''}`}>
-          {message.role === 'agent' ? <ChatMarkdown text={message.text} /> : message.text}
+          {message.role === 'agent' ? <ChatMarkdown text={message.text} openFile={openFile} /> : message.text}
         </div>
         {longPrompt && (
           <button className="acp-text-action" type="button" onClick={() => setExpanded(!expanded)}>
@@ -735,9 +775,12 @@ const Message = memo(
   },
   (previous, next) =>
     previous.active === next.active &&
+    previous.openFile === next.openFile &&
     previous.message.text === next.message.text &&
     previous.message.role === next.message.role &&
     previous.message.status === next.message.status &&
+    previous.message.exitCode === next.message.exitCode &&
+    previous.message.exitSignal === next.message.exitSignal &&
     previous.message.uncertain === next.message.uncertain &&
     previous.message.compactionId === next.message.compactionId,
 );
@@ -755,25 +798,51 @@ function Permission({
   status: AcpStatus;
   send: Props['send'];
 }) {
+  let command = permission.command;
+  let decodedCommand = false;
+  // Some adapters JSON-encode the command string again inside rawInput. Decode one
+  // display layer only; preserve shell escapes and the untouched raw request below.
+  if (command?.startsWith('"')) {
+    try {
+      const decoded: unknown = JSON.parse(command);
+      if (typeof decoded === 'string') {
+        command = decoded;
+        decodedCommand = true;
+      }
+    } catch {
+      // Ordinary shell quoting is displayed exactly as supplied.
+    }
+  }
   return (
     <div className="acp-permission">
       <h2>
         <ShieldQuestion aria-hidden="true" />
         {permission.title}
       </h2>
-      <div className="acp-permission-preview acp-message-text">{permission.detail}</div>
-      <details className="acp-permission-details">
-        <summary>Details and Workspace</summary>
-        <p>Task: {task}</p>
-        <p className="path">Workspace: {workspace}</p>
-        <pre className="acp-message-text">{permission.detail}</pre>
-      </details>
+      <div className="acp-permission-context" role="region" aria-label="Permission Details" tabIndex={0}>
+        <pre
+          className="acp-permission-preview acp-message-text"
+          aria-label={permission.command ? 'Requested Command' : 'Permission Request'}
+          title={decodedCommand ? 'Decoded JSON preview. Original request in Details and Workspace.' : undefined}
+        >
+          {command ?? permission.detail}
+        </pre>
+        {decodedCommand && <p className="acp-permission-encoding muted">Decoded JSON preview. Original request in Details and Workspace.</p>}
+        {permission.reason && <p className="acp-permission-reason">{permission.reason}</p>}
+        {permission.cwd && <p className="acp-permission-cwd path">Working directory: {permission.cwd}</p>}
+        <details className="acp-permission-details">
+          <summary>Details and Workspace</summary>
+          <p>Task: {task}</p>
+          <p className="path">Workspace: {workspace}</p>
+          <pre className="acp-message-text">{permission.detail}</pre>
+        </details>
+      </div>
       <div className="actions">
         {permission.options.map((option) => (
           <Button
             key={option.id}
             size="sm"
-            variant={option.kind.startsWith('reject') ? 'secondary' : 'default'}
+            variant={option.kind === 'allow_once' ? 'default' : 'secondary'}
             disabled={status === 'cancelling' || status === 'disconnected' || status === 'resetting' || status === 'error'}
             onClick={() => send({ type: 'permission', requestId: permission.id, optionId: option.id })}
           >

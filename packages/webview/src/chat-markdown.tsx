@@ -4,6 +4,7 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Check, Copy } from 'lucide-react';
 import { IconButton } from './components/ui/icon-button';
+import { parseFileReference } from '@warden/shared';
 
 export function CopyText({ text, label = 'Copy Message' }: { text: string; label?: string }) {
   const [result, setResult] = useState<'copied' | 'failed'>();
@@ -49,19 +50,23 @@ function CodeBlock({ children }: ComponentProps<'pre'>) {
   );
 }
 
-export const ChatMarkdown = memo(function ChatMarkdown({ text }: { text: string }) {
+export const ChatMarkdown = memo(function ChatMarkdown({ text, openFile }: { text: string; openFile?(reference: string): void }) {
   return (
     <div className="acp-markdown">
       <Markdown
         remarkPlugins={[remarkGfm]}
-        urlTransform={(url, key) => (key === 'href' && /^https?:\/\//i.test(url) ? url : '')}
+        urlTransform={(url, key) => (key === 'href' && (/^https?:\/\//i.test(url) || (openFile && parseFileReference(url))) ? url : '')}
         components={{
           pre: CodeBlock,
           a: ({ href, children }) =>
-            href ? (
+            href && /^https?:\/\//i.test(href) ? (
               <a href={href} target="_blank" rel="noreferrer">
                 {children}
               </a>
+            ) : href && openFile && parseFileReference(href) ? (
+              <button className="acp-file-link" type="button" title={`Open task file: ${href}`} onClick={() => openFile(href)}>
+                {children}
+              </button>
             ) : (
               <span>{children}</span>
             ),

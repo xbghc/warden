@@ -1,6 +1,6 @@
 import path from 'node:path';
 import os from 'node:os';
-import { mkdtemp, mkdir, rm, writeFile, readFile, realpath } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile, readFile, realpath, readdir } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { unzipSync } from 'fflate';
 import { runTests } from '@vscode/test-electron';
@@ -64,9 +64,11 @@ try {
     extensionTestsPath: path.resolve(
       process.env.WARDEN_VSCODE_SUITE === 'chat'
         ? 'test/vscode/chat.cjs'
-        : process.env.WARDEN_VSCODE_SUITE === 'settings'
-          ? 'test/vscode/settings.cjs'
-          : 'test/vscode/suite.cjs',
+        : process.env.WARDEN_VSCODE_SUITE === 'tree-refresh'
+          ? 'test/vscode/tree-refresh.cjs'
+          : process.env.WARDEN_VSCODE_SUITE === 'settings'
+            ? 'test/vscode/settings.cjs'
+            : 'test/vscode/suite.cjs',
     ),
     extensionTestsEnv: { XDG_DATA_HOME: process.env.XDG_DATA_HOME, WARDEN_VSCODE_FIXTURE: fixture },
     launchArgs: [
@@ -83,6 +85,24 @@ try {
       ...(process.env.WARDEN_VSCODE_HEADLESS ? ['--ozone-platform=headless'] : []),
     ],
   });
+  let rendererLogs = 0;
+  const inspectLogs = async (directory) => {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const file = path.join(directory, entry.name);
+      if (entry.isDirectory()) await inspectLogs(file);
+      else if (entry.name === 'renderer.log') {
+        rendererLogs++;
+        const log = await readFile(file, 'utf8');
+        if (process.env.WARDEN_VSCODE_ARTIFACTS) {
+          await mkdir(process.env.WARDEN_VSCODE_ARTIFACTS, { recursive: true });
+          await writeFile(path.join(process.env.WARDEN_VSCODE_ARTIFACTS, `${path.basename(directory)}-renderer.log`), log);
+        }
+        if (log.includes('TreeError [warden.task]')) throw new Error('Native Warden tree errors were reported in renderer.log');
+      }
+    }
+  };
+  await inspectLogs(path.join(directory, 'user', 'logs'));
+  if (!rendererLogs) throw new Error('Renderer logs were not available for native tree verification');
 } finally {
   await backend?.close();
   await rm(directory, { recursive: true, force: true });

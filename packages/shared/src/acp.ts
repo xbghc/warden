@@ -1,4 +1,5 @@
 import type { AgentAuthMethod, AgentConfiguration, AgentIdentity, AgentReadiness } from './agent.js';
+import { parseFileReference } from './file-reference.js';
 
 /** ACP UI data contains no executable configuration or provider credentials. */
 export interface AcpBinding {
@@ -20,6 +21,9 @@ export interface AcpMessage {
   role: 'user' | 'agent' | 'thought' | 'tool' | 'notice';
   text: string;
   status?: string;
+  /** Agent-reported command result, independent of its reported tool status. */
+  exitCode?: number;
+  exitSignal?: string;
   toolCallId?: string;
   compactionId?: string;
   compaction?: { summary?: string; error?: string };
@@ -29,6 +33,9 @@ export interface AcpPermission {
   id: string;
   title: string;
   detail: string;
+  command?: string;
+  cwd?: string;
+  reason?: string;
   options: { id: string; label: string; kind: string }[];
 }
 export type AcpAuthMethod = AgentAuthMethod;
@@ -116,7 +123,8 @@ export type AcpAction =
   | { type: 'permission'; requestId: string; optionId: string }
   | { type: 'authenticate'; methodId: string }
   | { type: 'set-config'; configId: string; value: string | boolean }
-  | { type: 'set-mode'; modeId: string };
+  | { type: 'set-mode'; modeId: string }
+  | { type: 'open-file'; reference: string };
 
 export function parseAcpAction(value: unknown): AcpAction {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid conversation action.');
@@ -180,6 +188,11 @@ export function parseAcpAction(value: unknown): AcpAction {
     }
     case 'set-mode':
       return { type: 'set-mode', modeId: id('modeId') };
+    case 'open-file': {
+      const reference = text('reference', 16000);
+      if (!parseFileReference(reference)) throw new Error('Invalid workspace file reference.');
+      return { type: 'open-file', reference };
+    }
     default:
       throw new Error('Unknown conversation action.');
   }

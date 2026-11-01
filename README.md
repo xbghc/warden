@@ -36,6 +36,7 @@ code --install-extension packages/vscode/warden-0.20.4.vsix
    Tasks sit directly in the sidebar; preview commands use its menu, and synchronization stays in the status bar.
 4. **Review and commit.** Open task files in native read-only diffs. Use the workspace commit icon, enter a message in
    VS Code’s top input box and submit the reviewed increment with ordinary Git hooks and signing.
+   Saved workspace edits can be squashed directly; no task-branch commit is required.
 5. **Synchronize.** Explicitly rebase selected workspaces when needed. Use VS Code’s native
    Source Control Graph to inspect base-branch commit history.
 

@@ -27,6 +27,10 @@ export class Sidebar implements vscode.TreeDataProvider<SidebarNode>, vscode.Tre
   private readonly subscriptions: vscode.Disposable[];
   private readonly files = new Map<string, { session: string; nodes: FileNode[] }>();
   private mode: FileViewMode;
+  private context?: string;
+  private pendingExpansion?: { scope: string; session: string; published?: boolean };
+  private restoring?: Promise<void>;
+  private disposed = false;
 
   get fileViewMode() {
     return this.mode;
@@ -38,6 +42,7 @@ export class Sidebar implements vscode.TreeDataProvider<SidebarNode>, vscode.Tre
     private readonly action: (action: WorkbenchAction, session: string) => Promise<unknown>,
     expansion: (node: SidebarNode, expanded: boolean) => Promise<void>,
     private readonly state: vscode.Memento,
+    private readonly report: (error: unknown) => void = console.error,
   ) {
     this.mode = state.get('warden.fileViewMode') === 'tree' ? 'tree' : 'list';
     this.view = vscode.window.createTreeView('warden.task', { treeDataProvider: this, dragAndDropController: this });
@@ -48,6 +53,7 @@ export class Sidebar implements vscode.TreeDataProvider<SidebarNode>, vscode.Tre
       this.view.onDidCollapseElement(({ element }) => {
         void expansion(element, false);
       }),
+      this.view.onDidChangeVisibility(() => this.restoreExpansion()),
     ];
   }
 
@@ -59,7 +65,20 @@ export class Sidebar implements vscode.TreeDataProvider<SidebarNode>, vscode.Tre
   }
 
   refresh() {
+    if (this.disposed) return;
     const model = this.model();
+    const scope = `${model.repository}:${model.workflow?.workflow?.developmentBranch ?? ''}:`;
+    const context = JSON.stringify([model.session, scope, model.repositoryState, model.agentReadiness.status === 'ready']);
+    if (context !== this.context) {
+      this.context = context;
+      this.pendingExpansion =
+        model.repositoryState === 'ready' &&
+        model.agentReadiness.status === 'ready' &&
+        model.workflow?.workflow &&
+        model.workspaces?.some((row) => row.expanded)
+          ? { scope, session: model.session }
+          : undefined;
+    }
     for (const [taskId, files] of this.files) {
       if (files.session !== model.session || !model.workspaces?.some((row) => row.task.id === taskId)) this.files.delete(taskId);
     }
@@ -107,6 +126,50 @@ export class Sidebar implements vscode.TreeDataProvider<SidebarNode>, vscode.Tre
     if (signature === this.signature) return;
     this.signature = signature;
     this.changed.fire(undefined);
+    this.restoreExpansion();
+  }
+
+  private restoreExpansion() {
+    const pending = this.pendingExpansion;
+    if (!pending || this.restoring || this.disposed || !this.view.visible) return;
+    const current = () => !this.disposed && this.pendingExpansion === pending;
+    this.restoring = (async () => {
+      const roots = await this.getChildren();
+      if (!current() || !this.view.visible) return;
+      const selected = this.model().task?.id;
+      const anchor = roots.find((node) => node.kind === 'task' && node.task.id === selected) ?? roots[0];
+      if (!anchor) {
+        this.pendingExpansion = undefined;
+        return;
+      }
+      // VS Code replaces its data nodes before awaiting expanded descendants, while its
+      // menu renderer still holds the old rows. Publish collapsed roots first. reveal()
+      // waits for the native refresh promise, providing a barrier without a timed delay.
+      if (!pending.published) {
+        await this.view.reveal(anchor, { select: false, focus: false, expand: false });
+        if (!current()) return;
+        pending.published = true;
+      }
+      for (const node of roots) {
+        if (!current() || !this.view.visible) return;
+        if (node.kind === 'task' && this.model().workspaces?.some((row) => row.task.id === node.task.id && row.expanded))
+          await this.view.reveal(node, { select: false, focus: false, expand: true });
+      }
+      if (current() && this.view.visible) {
+        await this.view.reveal(anchor, { select: false, focus: false, expand: false });
+        if (current()) this.pendingExpansion = undefined;
+      }
+    })()
+      .catch((error) => {
+        if (current()) {
+          this.pendingExpansion = undefined;
+          this.report(error);
+        }
+      })
+      .finally(() => {
+        this.restoring = undefined;
+        this.restoreExpansion();
+      });
   }
 
   async getChildren(node?: SidebarNode): Promise<SidebarNode[]> {
@@ -179,7 +242,7 @@ export class Sidebar implements vscode.TreeDataProvider<SidebarNode>, vscode.Tre
       const item = new vscode.TreeItem(
         task.title,
         task.worktree
-          ? row?.expanded
+          ? row?.expanded && !(this.pendingExpansion?.scope === prefix && this.pendingExpansion.session === node.session && !this.pendingExpansion.published)
             ? vscode.TreeItemCollapsibleState.Expanded
             : vscode.TreeItemCollapsibleState.Collapsed
           : vscode.TreeItemCollapsibleState.None,
@@ -268,6 +331,8 @@ export class Sidebar implements vscode.TreeDataProvider<SidebarNode>, vscode.Tre
   }
 
   dispose() {
+    this.disposed = true;
+    this.pendingExpansion = undefined;
     for (const subscription of this.subscriptions) subscription.dispose();
     this.view.dispose();
     this.changed.dispose();

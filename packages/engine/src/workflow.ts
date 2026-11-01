@@ -20,7 +20,7 @@ import type {
   RebaseBatchRequest,
   RebaseBatchResponse,
 } from '@warden/shared';
-import { moveBefore, isValidRef } from '@warden/shared';
+import { moveBefore, isValidRef, taskReview } from '@warden/shared';
 import { runWorkspaceHook } from './workspace.js';
 import { badRequest, WardenError, notFound } from './errors.js';
 import { GitError, LONG_GIT_TIMEOUT_MS, gitEnvironment, refExists, runGit, runGitWrite } from './git.js';
@@ -33,6 +33,7 @@ import { assertSafetyBackupCurrent, createSafetyBackup, discardOperationBackup }
 import { retireWorkflowRefs } from './retention.js';
 import { readWorktreeState } from './worktree-state.js';
 import { ensureSharedRepository } from './shared-repository.js';
+import { snapshotObjects, snapshotStore, snapshotWorktree } from './snapshots.js';
 
 function fail(message: string, code: string): never {
   throw new WardenError(409, message, code);
@@ -119,6 +120,7 @@ export class WorkflowService {
           if ((await deliveryBase(row, await revParse(checkout.path, 'HEAD'), developmentHead)) === developmentHead) {
             row.base = developmentHead;
             delete row.sourceBase;
+            delete row.sourceTree;
             delete row.sync;
           }
         } catch {
@@ -134,6 +136,24 @@ export class WorkflowService {
 
   private developmentHead(branch: string) {
     return revParse(this.repo.commonRoot, `refs/heads/${branch}`);
+  }
+
+  /** Pin saved content without changing the task's files, real index or branch. */
+  async review(id: string) {
+    const inventory = listWorktreesDetailed(this.repo);
+    const data = await this.get(inventory);
+    const checkouts = await inventory;
+    const task = data.workflow?.changes.find((row) => row.id === id);
+    if (!task?.worktree || task.developmentBranch !== data.workflow?.developmentBranch) return undefined;
+    const checkout = checkouts.find((row) => row.path === task.worktree);
+    const initial = taskReview(data, id, checkouts);
+    if (initial?.preparation || !checkout || checkout.busy || checkout.foreign || checkout.prunable || checkout.branch !== task.branch) return initial;
+    if (!checkout.dirty && !task.sourceTree) return initial;
+    const tree = await snapshotWorktree(task.worktree, snapshotStore(this.store.file));
+    const after = await readWorktreeState(task.worktree);
+    if (after.head !== checkout.head || after.branch !== task.branch)
+      fail('The workspace changed while reading. Refresh and review the current changes.', 'review_changed');
+    return taskReview(data, id, checkouts, tree);
   }
 
   private taskBaseline(workflow: DevelopmentWorkflow, branch = workflow.developmentBranch) {
@@ -431,6 +451,7 @@ export class WorkflowService {
     }
     change.base = target;
     delete change.sourceBase;
+    delete change.sourceTree;
     delete change.sync;
     change.status = 'working';
     delete change.submittedHead;
@@ -864,7 +885,6 @@ export class WorkflowService {
     if (change.status === 'accepted') fail('A legacy recorded commit cannot be submitted again.', 'change_closed');
     const target = await this.developmentHead(change.developmentBranch);
     const checkout = await this.checkout(change);
-    await this.assertClean(checkout.path);
     const source = await revParse(checkout.path, 'HEAD');
     if (source !== request?.sourceHead || target !== request?.developmentHead)
       fail('Code or the base branch changed. Refresh and review the current changes.', 'review_changed');
@@ -873,12 +893,31 @@ export class WorkflowService {
     // boundary shown in that review, including when the persisted sourceBase is older.
     if (request.sourceBase !== undefined && request.sourceBase !== boundary) fail('The source boundary changed. Review the changes again.', 'review_changed');
     if (!(await this.ancestor(checkout.path, boundary, source))) fail('Workspace history changed. Resolve the rebase boundary manually first.', 'base_changed');
+    const snapshots = snapshotStore(this.store.file);
+    const sourceTree = request.sourceTree;
+    if (sourceTree !== undefined && !gitOid(sourceTree)) throw badRequest('Invalid workspace snapshot.', 'invalid_request');
+    const validateSource = async () => {
+      await this.checkout(change);
+      if ((await revParse(checkout.path, 'HEAD')) !== source) fail('The workspace changed. Review the changes again.', 'review_changed');
+      if (sourceTree) {
+        if ((await snapshotWorktree(checkout.path, snapshots)) !== sourceTree)
+          fail('Saved workspace contents changed. Review the changes again.', 'review_changed');
+      } else await this.assertClean(checkout.path);
+    };
+    await validateSource();
+    const from = boundary === target ? boundary : (change.sourceTree ?? boundary);
+    const objects = sourceTree || change.sourceTree ? await snapshotObjects(checkout.path, snapshots) : undefined;
     const preview = new PreviewService(this.repo, this.store);
     const sandbox = await GitSandbox.create(this.store, this.repo.commonRoot, target);
     try {
       await sandbox.fetch(checkout.path, source);
       try {
-        await sandbox.apply(await patchBetween(checkout.path, boundary, source), true, true);
+        await sandbox.apply(
+          await patchBetween(checkout.path, from, sourceTree ?? source, objects),
+          true,
+          true,
+          objects ? { cwd: checkout.path, snapshot: objects } : undefined,
+        );
       } catch (error) {
         fail(
           `The changes conflict with the base branch. Resolve them in the workspace first: ${(await sandbox.conflicts()).join('、') || errorMessage(error)}`,
@@ -889,6 +928,7 @@ export class WorkflowService {
       const tree = await oid(sandbox.path, 'HEAD^{tree}');
       const patch = await patchBetween(sandbox.path, target, composed);
       if (!patch) fail('The workspace has no pending changes to commit to the base branch.', 'empty_change');
+      await validateSource();
       await preview.suspend();
       const destination = await this.destination(change.developmentBranch, !change.integration, change.integration?.worktree);
       if (change.integration && (await dirtyCount(destination.path))) {
@@ -903,7 +943,16 @@ export class WorkflowService {
         if (index.unstaged || staged.stdout !== expected.stdout)
           fail('Commit preparation was interrupted and the primary folder has other changes. Handle them manually before retrying.', 'development_dirty');
       } else {
-        change.integration = { id: randomUUID(), source, sourceBase: boundary, tree, parent: target, worktree: destination.path, message: change.title };
+        change.integration = {
+          id: randomUUID(),
+          source,
+          sourceTree,
+          sourceBase: boundary,
+          tree,
+          parent: target,
+          worktree: destination.path,
+          message: change.title,
+        };
         change.status = 'integrating';
         await this.save(change);
         await this.destination(change.developmentBranch, true, destination.path);
@@ -1016,6 +1065,7 @@ export class WorkflowService {
         change.deliveries.push({
           id: integration.id ?? randomUUID(),
           source: integration.source,
+          ...(integration.sourceTree ? { sourceTree: integration.sourceTree } : {}),
           sourceBase: integration.sourceBase ?? change.base,
           parent: integration.parent,
           commit: integration.commit!,
@@ -1023,6 +1073,8 @@ export class WorkflowService {
           createdAt: new Date().toISOString(),
         });
       change.sourceBase = integration.source;
+      if (integration.sourceTree) change.sourceTree = integration.sourceTree;
+      else delete change.sourceTree;
       change.status = 'working';
       delete change.submittedHead;
       delete change.integration;

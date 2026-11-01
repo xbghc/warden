@@ -148,6 +148,16 @@ jobs:
         with:
           name: vscode-extension
           path: packages/vscode
+      - name: Test native tree replacement on Linux
+        if: runner.os == 'Linux'
+        env:
+          WARDEN_VSCODE_SUITE: tree-refresh
+        run: xvfb-run -a pnpm test:vscode
+      - name: Test native tree replacement on Windows and macOS
+        if: runner.os != 'Linux'
+        env:
+          WARDEN_VSCODE_SUITE: tree-refresh
+        run: pnpm test:vscode
       - name: Test the packaged extension on Linux
         if: runner.os == 'Linux'
         run: xvfb-run -a pnpm test:vscode

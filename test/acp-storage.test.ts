@@ -62,6 +62,29 @@ function signal() {
 }
 
 describe('external ACP session storage', () => {
+  it('retains typed command outcomes and rejects malformed exit metadata', async () => {
+    const storage = new AcpSessionStorage(directory, binding);
+    const record = conversation();
+    record.messages.push(
+      { id: 'exit-zero', role: 'tool', text: 'Completed command', status: 'completed', exitCode: 0 },
+      { id: 'signal', role: 'tool', text: 'Interrupted command', status: 'failed', exitSignal: 'SIGTERM' },
+    );
+    await storage.save(record);
+    expect(await new AcpSessionStorage(directory, binding).load()).toEqual(record);
+    for (const exitCode of ['0', 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      const saved = JSON.parse(await readFile(storage.file, 'utf8'));
+      saved.messages[1].exitCode = exitCode;
+      await writeFile(storage.file, JSON.stringify(saved));
+      await expect(storage.load()).rejects.toThrow('The original file has been preserved');
+    }
+    // Repair the deliberately corrupted fixture before testing the independent signal field.
+    await writeFile(storage.file, JSON.stringify(record));
+    const saved = JSON.parse(await readFile(storage.file, 'utf8'));
+    saved.messages[2].exitSignal = 's'.repeat(129);
+    await writeFile(storage.file, JSON.stringify(saved));
+    await expect(storage.load()).rejects.toThrow('The original file has been preserved');
+  });
+
   it('retains thoughts and independent compaction summary and error state across reloads', async () => {
     const storage = new AcpSessionStorage(directory, binding);
     const record = conversation();

@@ -296,12 +296,26 @@ repository lock. The client sends its reviewed source, source boundary and prima
 records the expected composed index fingerprint; commit checks that fingerprint rather than adopting
 a newer index inspection. It preserves the ordinary hooks/signing and recovery journal described below.
 
-`POST /workflow/changes/:id/prepare` remains for recovery and compatibility. It pins a clean source and primary HEAD, composes the undelivered
+The read-only `task.review` command also captures saved task content when the checkout is dirty or its
+last delivery used a snapshot. It reuses the external temporary-index snapshot mechanism; no real
+task index, HEAD, branch, hooks or files are changed. The `snapshot:<base>..<tree>` review target accepts
+only full object IDs and reads exact trees through that task repository and the external snapshot
+store, with no merge-base substitution. Source HEAD and the current snapshot are rechecked during
+preparation and again before staging. A saved edit after review fails with `review_changed`.
+Preparation and delivery records retain `sourceTree`; future review and preview subtract that tree
+instead of replaying the same uncommitted contribution. Incorporating primary through rebase clears
+the snapshot boundary. Rebase still requires a clean task checkout and retains normal Git conflict handling.
+If a patch's saved base blob has been pruned from the shared repository, internal three-way composition
+reads that exact blob from snapshot storage and restores it with `hash-object -w --no-filters` in the
+validated sandbox repository, checking the resulting object ID. This never imports objects into primary.
+
+`POST /workflow/changes/:id/prepare` remains for recovery and compatibility. It pins reviewed saved content and primary HEAD, composes the undelivered
 range in isolation, and stages only that delivery. Existing primary user edits are rejected without
 being changed. The independent runtime remains available throughout delivery. `update-index --refresh`
 refreshes stat metadata before explicit `apply --index`; preview never refreshes the primary index.
 Preparation is journaled first. Interrupted preparation accepts only its known reviewed tree,
 preserving other edits.
+Legacy requests without `sourceTree` still require a clean source so they cannot authorize unseen edits.
 
 Only the final binary patch enters the primary index. Neither the agent's source commits nor
 temporary composition commits are fetched into the primary repository. Interrupted preparation

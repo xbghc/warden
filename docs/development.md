@@ -18,6 +18,13 @@ pnpm check:vscode
 pnpm test:vscode
 ```
 
+`WARDEN_VSCODE_SUITE=tree-refresh pnpm test:vscode` runs a focused native regression for branch
+replacement while descendant reads are held and menu contexts change. It also checks hidden views,
+tree file layout and superseded expansion restores. All packaged host suites inspect the renderer
+logs after shutdown and fail on `TreeError [warden.task]`, even when the extension tests exit with 0.
+Set `WARDEN_VSCODE_ARTIFACTS` to retain those renderer logs outside the disposable fixture directory.
+The packaged extension's CI matrix runs this regression before the full native suite on each platform.
+
 `build` and `build:vscode` build the extension and its webviews. `build:webview` refreshes just the
 webview bundle. The VSIX contains bundled JavaScript and uses the workspace's Git CLI.
 The extension requires VS Code 1.106+ for the stable Secondary Side Bar contribution point.

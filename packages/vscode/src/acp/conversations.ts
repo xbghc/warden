@@ -51,7 +51,7 @@ export class AcpConversations {
 
   constructor(
     private readonly context: vscode.ExtensionContext,
-    private readonly review: (binding: AcpBinding) => Promise<void>,
+    private readonly review: (binding: AcpBinding, reference?: string) => Promise<void>,
     private readonly changed: () => void,
     private readonly report: (error: unknown) => void,
     private readonly configureAgents: () => Promise<void>,
@@ -578,6 +578,10 @@ export class AcpConversations {
       case 'review':
         await validateAcpBinding(entry.engine, entry.binding);
         await this.review(entry.binding);
+        break;
+      case 'open-file':
+        await validateAcpBinding(entry.engine, entry.binding);
+        await this.review(entry.binding, action.reference);
         break;
     }
     this.render(entry);

@@ -133,12 +133,13 @@ exports.checkStartup = async (workbench, fixture, eventually) => {
     releaseRead = resolve;
   });
   oldEngine.execute = async function (command, ...args) {
+    // Count newly scheduled work, not an earlier check completing after the switch began.
+    if (command === 'rebase.check' && workbench.switching) obsoleteChecks++;
     const result = await execute.call(this, command, ...args);
     if (command === 'repository.get') {
       observed = true;
       await readGate;
     }
-    if (command === 'rebase.check') obsoleteChecks++;
     return result;
   };
   const reading = workbench.refresh();

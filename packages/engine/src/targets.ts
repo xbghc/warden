@@ -2,7 +2,7 @@ import path from 'node:path';
 import { lstat, readFile, readlink, realpath } from 'node:fs/promises';
 import type { FileDiff, FileSummary, Target, TargetKey, WorktreeInfo, DiffSide } from '@warden/shared';
 import { parseTargetKey, TargetKeyError } from '@warden/shared';
-import { DIFF_OUTPUT_ARGS, EMPTY_TREE_SHA, mergeBase, refExists, revParse, runGit } from './git.js';
+import { DIFF_OUTPUT_ARGS, EMPTY_TREE_SHA, mergeBase, refExists, revParse, runGit, type SnapshotEnv } from './git.js';
 import { parseUnifiedDiff } from './diffparse.js';
 import { badRequest, WardenError } from './errors.js';
 import type { RepoContext } from './repo.js';
@@ -13,10 +13,11 @@ export interface TargetContext {
   target: Target;
   /** Working directory to run git in (worktree root or repo root). */
   cwd: string;
+  snapshot?: SnapshotEnv;
 }
 
 async function runTargetDiff(ctx: TargetContext, args: string[]): Promise<string> {
-  return (await runGit(args, { cwd: ctx.cwd })).stdout;
+  return (await runGit(args, { cwd: ctx.cwd, snapshot: ctx.snapshot })).stdout;
 }
 
 const DIFF_BASE_ARGS = ['diff', ...DIFF_OUTPUT_ARGS, '-M', '--find-renames'];
@@ -84,6 +85,11 @@ async function baseSha(ctx: TargetContext, ref: string): Promise<string> {
 async function diffArgs(ctx: TargetContext): Promise<string[]> {
   const t = ctx.target;
   switch (t.kind) {
+    case 'snapshot':
+      if (!ctx.snapshot) throw badRequest('Snapshot storage is unavailable.', 'invalid_target');
+      await runTargetDiff(ctx, ['rev-parse', '--verify', `${t.base}^{tree}`]);
+      await runTargetDiff(ctx, ['rev-parse', '--verify', `${t.head}^{tree}`]);
+      return [...DIFF_BASE_ARGS, t.base, t.head];
     case 'working':
       return [...DIFF_BASE_ARGS];
     case 'staged':
@@ -233,16 +239,18 @@ async function refForSide(ctx: TargetContext, side: DiffSide): Promise<string | 
       // The diff is `base...head`: its old side is where the two forked, not `base` itself.
       if (side === 'new') return t.head;
       return (await mergeBase(ctx.cwd, t.base, t.head)) ?? t.base;
+    case 'snapshot':
+      return side === 'new' ? t.head : t.base;
     case 'base':
       return side === 'new' ? undefined : baseSha(ctx, t.ref);
   }
 }
 
 /** Gitlinks name commits in another repository; show must not dereference them as local objects. */
-async function gitlink(cwd: string, file: string, ref: string): Promise<string | undefined> {
+async function gitlink(cwd: string, file: string, ref: string, snapshot?: SnapshotEnv): Promise<string | undefined> {
   const staged = ref === ':0';
   const args = staged ? ['ls-files', '--stage', '-z', '--', literal(file)] : ['ls-tree', '-z', ref, '--', literal(file)];
-  const result = await runGit(args, { cwd });
+  const result = await runGit(args, { cwd, snapshot });
   const entry = result.stdout.split('\0')[0] ?? '';
   const fields = entry.slice(0, entry.indexOf('\t')).split(' ');
   if (fields[0] !== '160000' || (staged ? fields[2] !== '0' : fields[1] !== 'commit')) return undefined;
@@ -275,11 +283,11 @@ export async function getFullFile(ctx: TargetContext, filePath: string, side: Di
     }
   }
   try {
-    const commit = await gitlink(ctx.cwd, filePath, ref);
+    const commit = await gitlink(ctx.cwd, filePath, ref, ctx.snapshot);
     if (commit) return `Subproject commit ${commit}\n`;
     // Without the separator Git also stats the entire revision:path as a filename,
     // which can exceed filesystem limits even when the actual file path is valid.
-    const r = await runGit(['show', `${ref}:${filePath}`, '--'], { cwd: ctx.cwd });
+    const r = await runGit(['show', `${ref}:${filePath}`, '--'], { cwd: ctx.cwd, snapshot: ctx.snapshot });
     return r.stdout;
   } catch (e) {
     if (e instanceof WardenError && e.code === 'git_failed') return null;

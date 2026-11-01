@@ -6,6 +6,8 @@ export type Target = (
   | { kind: 'all' }
   | { kind: 'commit'; sha: string }
   | { kind: 'range'; base: string; head: string }
+  /** Exact saved trees in Warden's external snapshot store; no merge-base calculation. */
+  | { kind: 'snapshot'; base: string; head: string }
   /** Everything since the branch forked off `ref`: merge-base(ref, HEAD) against the working tree. */
   | { kind: 'base'; ref: string }
 ) & {
@@ -55,6 +57,11 @@ function parseSuffix(rest: string): Target {
     if (!isValidRef(base) || !isValidRef(head)) throw new TargetKeyError(`invalid range refs: ${spec}`);
     return { kind: 'range', base, head };
   }
+  if (rest.startsWith('snapshot:')) {
+    const match = /^snapshot:([a-f0-9]{40}(?:[a-f0-9]{24})?)\.\.([a-f0-9]{40}(?:[a-f0-9]{24})?)$/.exec(rest);
+    if (!match) throw new TargetKeyError('Invalid snapshot target');
+    return { kind: 'snapshot', base: match[1]!, head: match[2]! };
+  }
   throw new TargetKeyError(`unknown target key: ${rest}`);
 }
 
@@ -62,7 +69,7 @@ export function parseTargetKey(key: TargetKey): Target {
   if (typeof key !== 'string' || !key) throw new TargetKeyError('empty target key');
   if (key.startsWith('worktree:')) {
     const rest = key.slice('worktree:'.length);
-    const m = /^(.+):(working|staged|all|commit:.+|range:.+|base:.+)$/.exec(rest);
+    const m = /^(.+):(working|staged|all|commit:.+|range:.+|base:.+|snapshot:.+)$/.exec(rest);
     if (!m?.[1] || !m[2]) throw new TargetKeyError(`invalid worktree target key: ${key}`);
     const worktree = m[1];
     if (worktree.includes('\0') || (!worktree.startsWith('/') && !isWindowsAbsolutePath(worktree)))
@@ -85,6 +92,9 @@ export function formatTargetKey(t: Target): TargetKey {
       break;
     case 'range':
       suffix = `range:${t.base}..${t.head}`;
+      break;
+    case 'snapshot':
+      suffix = `snapshot:${t.base}..${t.head}`;
       break;
     case 'base':
       suffix = `base:${t.ref}`;

@@ -33,10 +33,15 @@ describe('task review version', () => {
     expect(sameReview(review, taskReview(updated, 'task', [checkout]))).toBe(false);
   });
 
-  it('keeps live uncommitted content visible without assigning a deliverable revision', () => {
+  it('requires a saved tree to authorize live uncommitted content', () => {
     const review = taskReview(data, 'task', [{ ...checkout, dirty: 1 }])!;
     expect(review.targetKey).toBe('worktree:/repo-1:base:base');
     expect(review.sourceHead).toBeUndefined();
+    const snapshot = taskReview(data, 'task', [{ ...checkout, dirty: 1 }], 'a'.repeat(40))!;
+    expect(snapshot.sourceHead).toBe('source');
+    expect(snapshot.sourceTree).toBe('a'.repeat(40));
+    expect(snapshot.targetKey).toBe(`worktree:/repo-1:snapshot:base..${'a'.repeat(40)}`);
+    expect(sameReview(snapshot, taskReview(data, 'task', [{ ...checkout, dirty: 1 }], 'b'.repeat(40)))).toBe(false);
   });
 
   it('binds recovery to the reviewed staged content or manual commit', () => {

@@ -28,6 +28,7 @@ import { PreviewService } from './preview.js';
 import { HistoryService } from './history.js';
 import { workspaceConfig } from './workspace.js';
 import { RepoWatcher } from './watcher.js';
+import { snapshotObjects, snapshotStore } from './snapshots.js';
 
 /** The desktop product has no adoption operation: allocation always creates a new logical workspace. */
 type NewWorkspace = Pick<StartChangeRequest, 'agent'> & { kind?: 'shared' | 'clone' };
@@ -50,7 +51,9 @@ function commands(repo: RepoContext, store: StateStore) {
   };
   const target = async (key: string) => {
     if (typeof key !== 'string' || !key || key.length > 16000) throw badRequest('Invalid review target.', 'invalid_request');
-    return resolveTargetContext(repo, await listWorktreesAll(repo), key);
+    const context = resolveTargetContext(repo, await listWorktreesAll(repo), key);
+    if (context.target.kind === 'snapshot') context.snapshot = await snapshotObjects(context.cwd, snapshotStore(store.file));
+    return context;
   };
   return {
     previewService: preview,
@@ -103,6 +106,10 @@ function commands(repo: RepoContext, store: StateStore) {
       'task.prepare': ({ taskId, ...request }: PrepareChangeRequest & { taskId: string }) => {
         id(taskId);
         return workflow.prepare(taskId, request);
+      },
+      'task.review': ({ taskId }: { taskId: string }) => {
+        id(taskId);
+        return workflow.review(taskId);
       },
       'task.deliver': ({ taskId, ...request }: DeliverChangeRequest & { taskId: string }) => {
         id(taskId);
@@ -164,6 +171,7 @@ const reads = new Set<EngineCommand>([
   'workspaces.list',
   'review.files',
   'review.file',
+  'task.review',
   'rebase.check',
 ]);
 

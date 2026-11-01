@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { lstat, mkdir, mkdtemp, realpath, rm, rmdir, writeFile } from 'node:fs/promises';
-import { DIFF_OUTPUT_ARGS, LONG_GIT_TIMEOUT_MS, runGit, runGitWrite, type SnapshotEnv } from './git.js';
+import { DIFF_OUTPUT_ARGS, LONG_GIT_TIMEOUT_MS, runGit, runGitBuffer, runGitWrite, type SnapshotEnv } from './git.js';
 import type { StateStore } from './state.js';
 import type { DevelopmentChange } from '@warden/shared';
 import { importSharedCommit, isSharedCheckout, sharedRepositoryPath, validatedSharedRepository } from './shared-repository.js';
@@ -138,8 +138,30 @@ export class GitSandbox {
     await this.repository();
   }
 
-  async apply(patch: string, index: boolean, threeWay = false) {
+  async apply(patch: string, index: boolean, threeWay = false, source?: { cwd: string; snapshot: SnapshotEnv }) {
     await this.repository();
+    // A delivered uncommitted blob may exist only in checkpoints after Git prunes trial
+    // commits. Three-way application needs that exact base even if primary hooks changed it.
+    if (threeWay && source) {
+      const bases = new Set(
+        [...patch.matchAll(/^index ([a-f0-9]{40}(?:[a-f0-9]{24})?)\.\.[a-f0-9]+(?: (?:100644|100755|120000))?$/gm)].map((match) => match[1]!),
+      );
+      for (const base of bases) {
+        if (/^0+$/.test(base)) continue;
+        const present = await runGit(['rev-parse', '--verify', '--quiet', `${base}^{blob}`], { cwd: this.path, okCodes: [0, 1, 128] });
+        if (present.code === 0) continue;
+        const blob = await runGitBuffer(['show', base, '--'], source);
+        const directory = await mkdtemp(path.join((await import('node:os')).tmpdir(), 'warden-base-'));
+        try {
+          const file = path.join(directory, 'blob');
+          await writeFile(file, blob.stdout, { mode: 0o600 });
+          const stored = await this.write(['hash-object', '-w', '--no-filters', '--', file]);
+          if (stored.stdout.trim() !== base) throw new Error('The saved patch base could not be restored.');
+        } finally {
+          await rm(directory, { recursive: true, force: true });
+        }
+      }
+    }
     // Applying also writes the index, so it needs the same hook isolation as trial commits.
     await applyPatch(this.path, patch, index, threeWay, (args) => this.write(args));
   }

@@ -306,10 +306,12 @@ export class PreviewService {
       for (const { change, from, tree } of inputs.sources) {
         await sandbox.fetch(change.worktree, from);
         try {
+          const objects = await snapshotObjects(change.worktree, snapshotStore(this.store.file));
           await sandbox.apply(
-            await patchBetween(change.worktree, from, tree, await snapshotObjects(change.worktree, snapshotStore(this.store.file))),
+            await patchBetween(change.worktree, from === head ? from : (change.sourceTree ?? from), tree, objects),
             true,
             true,
+            change.sourceTree && from !== head ? { cwd: change.worktree, snapshot: objects } : undefined,
           );
         } catch (error) {
           const conflicts = await sandbox.conflicts();

@@ -7,11 +7,12 @@ export interface TaskReview {
   targetKey: string;
   developmentHead?: string;
   sourceHead?: string;
+  sourceTree?: string;
   sourceBase: string;
   preparation?: DevelopmentPreparation;
 }
 
-export function taskReview(data: WorkflowResponse, changeId: string, checkouts: WorktreeDetail[]): TaskReview | undefined {
+export function taskReview(data: WorkflowResponse, changeId: string, checkouts: WorktreeDetail[], sourceTree?: string): TaskReview | undefined {
   const task = data.workflow?.changes.find((row) => row.id === changeId);
   if (!task?.worktree) return undefined;
   const sourceBase = task.sourceBase ?? task.base;
@@ -31,7 +32,7 @@ export function taskReview(data: WorkflowResponse, changeId: string, checkouts: 
   }
   const checkout = checkouts.find((row) => row.path === task.worktree);
   const sourceHead =
-    checkout && checkout.dirty === 0 && !checkout.busy && !checkout.foreign && !checkout.prunable && checkout.branch === task.branch
+    checkout && (checkout.dirty === 0 || sourceTree) && !checkout.busy && !checkout.foreign && !checkout.prunable && checkout.branch === task.branch
       ? checkout.head
       : undefined;
   return {
@@ -39,8 +40,13 @@ export function taskReview(data: WorkflowResponse, changeId: string, checkouts: 
     sourceBase,
     developmentHead: data.developmentHead,
     sourceHead,
+    ...(sourceTree ? { sourceTree } : {}),
     targetKey: formatTargetKey(
-      sourceHead ? { kind: 'range', base: sourceBase, head: sourceHead, worktree: task.worktree } : { kind: 'base', ref: sourceBase, worktree: task.worktree },
+      sourceTree && sourceHead
+        ? { kind: 'snapshot', base: task.sourceTree ?? sourceBase, head: sourceTree, worktree: task.worktree }
+        : sourceHead
+          ? { kind: 'range', base: sourceBase, head: sourceHead, worktree: task.worktree }
+          : { kind: 'base', ref: sourceBase, worktree: task.worktree },
     ),
   };
 }

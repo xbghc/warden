@@ -146,7 +146,7 @@ exports.run = async () => {
     const git = (...args) => execFileSync('git', ['-C', workspace, ...args], { encoding: 'utf8' }).trim();
     git('add', 'agent.txt');
     git('-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-qm', 'Reviewed version');
-    await assert.rejects(workbench.deliver(tasks[0]), /Reopen/, 'committing a live diff requires reopening the committed version');
+    await assert.rejects(workbench.deliver(tasks[0]), /Reopen/, 'a new source commit invalidates the reviewed snapshot');
     await workbench.refresh();
     let currentFiles = await workbench.getChildren(tasks[0]);
     await workbench.openDiff(currentFiles[0]);
@@ -167,8 +167,6 @@ exports.run = async () => {
     await eventually(() => !!workbench.commitInput);
     assert.equal(workbench.commitInput.value, 'Cancelled commit draft');
     await fs.writeFile(path.join(workspace, 'later.txt'), 'Unreviewed addition\n');
-    git('add', 'later.txt');
-    git('-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-qm', 'Later version');
     await workbench.refresh();
     assert.equal(pinnedDoc.getText(), pinnedText, 'open documents stay immutable');
     await eventually(async () => {
@@ -264,6 +262,20 @@ exports.run = async () => {
     const accepted = deliveredTask.deliveries[0];
     assert(accepted.id && accepted.commit, 'delivery is durable');
     assert.equal((await state()).workflow.changes[0].worktree, workspace);
+    assert.equal(git('status', '--porcelain'), '?? later.txt', 'delivery preserves uncommitted task files');
+    assert.equal(textLines(await fs.readFile(path.join(fixture.root, 'later.txt'), 'utf8')), 'Unreviewed addition\n');
+    await fs.writeFile(path.join(workspace, 'later.txt'), 'Second saved increment\n');
+    await workbench.refresh();
+    const secondFiles = await workbench.getChildren(tasks[0]);
+    assert.deepEqual(
+      secondFiles.map((node) => node.file.path),
+      ['later.txt'],
+      'the next review excludes previously delivered content',
+    );
+    await workbench.openDiff(secondFiles[0]);
+    await workbench.deliver(tasks[0], 'Second saved increment');
+    assert.equal(primaryGit('diff', '--name-only', 'HEAD^', 'HEAD'), 'later.txt');
+    assert.equal((await state()).workflow.changes[0].deliveries.length, 2);
 
     await workbench.refresh();
     const session = workbench.session;

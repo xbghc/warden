@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { DiagnosticLog, formatTargetKey, taskReview, sameReview, previewStatusLabels, scriptStatusLabels } from '@warden/shared';
+import { DiagnosticLog, formatTargetKey, sameReview, previewStatusLabels, scriptStatusLabels } from '@warden/shared';
+import { readWorkspaceReference } from './acp/file-reference.js';
 import type {
   FileEntry,
   TaskReview,
@@ -48,6 +49,7 @@ export class Workbench {
   private taskTargets = new Map<string, string>();
   private documents: Documents;
   private reviews = new Map<string, TaskReview>();
+  private observedReviews = new Map<string, TaskReview>();
   private reviewUris = new Map<string, Set<string>>();
   private output = vscode.window.createOutputChannel('Warden', { log: true });
   private readonly log = new DiagnosticLog((level, line) => this.output[level](line), { run: randomUUID() }, acpDiagnosticSecrets());
@@ -121,7 +123,7 @@ export class Workbench {
     this.documents = new Documents(context);
     this.conversations = new AcpConversations(
       context,
-      (binding) => this.reviewConversation(binding),
+      (binding, reference) => this.reviewConversation(binding, reference),
       () => this.render(),
       (error) => this.log.write('error', 'conversation.failed', { diagnostic: acpErrorDiagnostic(error) }),
       async () => {
@@ -146,6 +148,7 @@ export class Workbench {
       (action, session) => this.handleAction(action, session),
       (node, expanded) => this.rememberExpansion(node, expanded).catch((error) => this.report(error)),
       context.workspaceState,
+      (error) => this.report(error),
     );
     this.settings = new Settings(() => this.model('settings'));
     this.scriptSettings = new ScriptSettings(
@@ -447,6 +450,7 @@ export class Workbench {
       this.fileErrors.clear();
       this.taskTargets.clear();
       this.reviews.clear();
+      this.observedReviews.clear();
       this.reviewUris.clear();
       await span.measure('repository.refresh', (refresh) => this.refresh(false, refresh));
     } catch (error) {
@@ -460,7 +464,7 @@ export class Workbench {
         await span.measure('review.restore', () =>
           Promise.all(
             this.tasks()
-              .filter((task) => task.worktree && this.expanded[task.id])
+              .filter((task) => task.worktree && (this.expanded[task.id] || this.reviews.has(task.id)))
               .map((task) => this.getChildren({ kind: 'task', task })),
           ),
         );
@@ -530,6 +534,7 @@ export class Workbench {
     this.rebaseSelection = undefined;
     this.rebaseResult = undefined;
     this.reviews.clear();
+    this.observedReviews.clear();
     this.files.clear();
     this.fileErrors.clear();
     this.taskTargets.clear();
@@ -627,7 +632,7 @@ export class Workbench {
         await measure('review.restore', async () => {
           await Promise.all(
             this.tasks()
-              .filter((task) => task.worktree && this.expanded[task.id])
+              .filter((task) => task.worktree && (this.expanded[task.id] || this.reviews.has(task.id)))
               .map((task) => this.getChildren({ kind: 'task', task })),
           );
         });
@@ -759,9 +764,7 @@ export class Workbench {
       activity === 'Agent: Permission Required' ? activity : '',
       task.integration?.error ? 'Commit Failed' : '',
       problem ? connection : '',
-      this.reviews.has(task.id) && !sameReview(this.reviews.get(task.id), taskReview(this.data!, task.id, this.checkouts?.worktrees ?? []))
-        ? 'Review Out of Date'
-        : '',
+      this.reviews.has(task.id) && !sameReview(this.reviews.get(task.id), this.observedReviews.get(task.id)) ? 'Review Out of Date' : '',
       task.worktree && task.workspaceHook?.status === 'failed' ? 'Setup Failed' : '',
       activity !== 'Agent: Permission Required' ? activity : '',
       task.status === 'integrating' ? 'Pending Commit' : '',
@@ -816,13 +819,12 @@ export class Workbench {
     return this.data?.workflow?.changes.filter((c) => c.developmentBranch === this.data?.workflow?.developmentBranch) ?? [];
   }
   private async readReview(changeId: string) {
-    const { workflow: data, workspaces: checkouts } = await this.api('repository.get', undefined);
-    if (
-      data.workflow?.developmentBranch !== this.branch ||
-      !data.workflow?.changes.some((task) => task.id === changeId && task.developmentBranch === this.branch)
-    )
-      return undefined;
-    return taskReview(data, changeId, checkouts.worktrees);
+    const session = this.session;
+    const review = await this.api('task.review', { taskId: changeId });
+    if (session !== this.session) return undefined;
+    if (review) this.observedReviews.set(changeId, review);
+    else this.observedReviews.delete(changeId);
+    return review;
   }
   private async rememberReview(review: TaskReview) {
     const session = this.session;
@@ -1045,7 +1047,7 @@ export class Workbench {
       connectedIds: current.connectedIds.includes(task.id) ? current.connectedIds.filter((id) => id !== task.id) : [...current.connectedIds, task.id],
     });
   }
-  private async openDiff(node?: Node) {
+  private async openDiff(node?: Node, selection?: vscode.Range) {
     if (node?.kind !== 'file') return;
     const session = this.session;
     if (node.task) {
@@ -1094,7 +1096,7 @@ export class Workbench {
       left,
       right,
       [node.task?.title ?? 'Commit', latest.path, fileModeChange(latest), version?.slice(0, 8)].filter(Boolean).join(' · '),
-      { preview: true },
+      { preview: true, selection },
     );
     this.render();
   }
@@ -1115,6 +1117,8 @@ export class Workbench {
       await this.perform(() => this.deliver({ kind: 'task', task }), 'Recovering Commit…', `task:${task.id}`);
       return;
     }
+    if (pinned?.preparation ? !pinned.preparation.canCommit : !pinned?.sourceHead || !pinned.developmentHead)
+      throw new Error(pinned?.preparation?.message ?? 'The task workspace is unavailable. Resolve its Git operation, then reopen the diff.');
     const input = vscode.window.createInputBox();
     this.commitInput = input;
     input.title = `${task.title} · Commit to ${task.developmentBranch}`;
@@ -1174,7 +1178,12 @@ export class Workbench {
     if (!task?.worktree) return;
     const current = await this.readReview(task.id);
     if (task.integration && !task.integration.prepared && !current?.preparation) {
-      await this.api('task.prepare', { taskId: task.id, sourceHead: task.integration.source, developmentHead: task.integration.parent });
+      await this.api('task.prepare', {
+        taskId: task.id,
+        sourceHead: task.integration.source,
+        sourceTree: task.integration.sourceTree,
+        developmentHead: task.integration.parent,
+      });
       this.reviews.delete(task.id);
       void vscode.window.showInformationMessage('Commit preparation was recovered. Reopen the diff to review the contents preserved in the primary folder.');
       return;
@@ -1189,7 +1198,7 @@ export class Workbench {
       return;
     }
     if (p ? !p.canCommit : !review.sourceHead || !review.developmentHead)
-      throw new Error(p?.message ?? 'Commit changes in the task workspace first, then reopen the diff for review.');
+      throw new Error(p?.message ?? 'The task workspace is unavailable. Resolve its Git operation, then reopen the diff.');
     const message = submittedMessage ?? this.messages[task.id] ?? task.title;
     if (!message?.trim()) return;
     if (!sameReview(review, await this.readReview(task.id)))
@@ -1200,6 +1209,7 @@ export class Workbench {
       await this.api('task.deliver', {
         taskId: task.id,
         sourceHead: review.sourceHead!,
+        sourceTree: review.sourceTree,
         sourceBase: review.sourceBase,
         developmentHead: review.developmentHead!,
         message,
@@ -1316,14 +1326,25 @@ export class Workbench {
     const task = await this.ensureWorkspace(selected);
     await this.conversations.show(this.backend.root, task.id);
   }
-  private async reviewConversation(binding: AcpBinding) {
+  private async reviewConversation(binding: AcpBinding, reference?: string) {
+    const file = reference === undefined ? undefined : await readWorkspaceReference(binding.workspace, reference);
     await this.perform(
       async () => {
         if (this.backend?.root !== binding.repository) await this.open(binding.repository);
         await this.refresh();
         const task = this.tasks().find((row) => row.id === binding.taskId && row.worktree === binding.workspace);
         if (!task) throw new Error('This task does not belong to the current base branch. Switch back to its base branch first.');
-        await this.selectTask({ kind: 'task', task });
+        if (file) {
+          const line = (file.line ?? 1) - 1;
+          const column = (file.column ?? 1) - 1;
+          const selection = new vscode.Range(line, column, line, column);
+          const changed = (await this.getChildren({ kind: 'task', task })).find((node) => node.kind === 'file' && node.file.path === file.path);
+          if (changed) await this.openDiff(changed, selection);
+          else {
+            const uri = await this.documents.add(path.basename(file.path), file.content, binding.repository, file.path);
+            await vscode.window.showTextDocument(uri, { preview: true, selection });
+          }
+        } else await this.selectTask({ kind: 'task', task });
       },
       'Opening Task Review…',
       `task:${binding.taskId}`,
@@ -1396,7 +1417,7 @@ ${text}`,
       rebaseResult: this.rebaseResult,
       rebaseSelection: this.rebaseSelection,
       review,
-      reviewCurrent: !!task && !!this.data && sameReview(review, taskReview(this.data, task.id, this.checkouts?.worktrees ?? [])),
+      reviewCurrent: !!task && sameReview(review, this.observedReviews.get(task.id)),
       message: task ? (this.messages[task.id] ?? task.title) : '',
       busy: this.branchTransition ? 'Switching Base Branch…' : this.busy,
       errors: [...this.errors.values()],

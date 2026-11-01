@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { once } from 'node:events';
 import { Readable, Writable } from 'node:stream';
+import { markUnsettledTools, updateToolOutput, type ToolDisplay } from './tool-output.js';
 import {
   client,
   ndJsonStream,
@@ -93,7 +94,7 @@ export class AcpSession {
   private disposed = false;
   private turn?: Turn;
   private history: History;
-  private toolDisplays = new WeakMap<AcpMessage, { title: string; content: string }>();
+  private toolDisplays = new WeakMap<AcpMessage, ToolDisplay>();
   private permissions = new Map<string, Permission>();
   private authMethods: AuthMethod[] = [];
   private controls: AcpControls = emptyControls();
@@ -155,6 +156,7 @@ export class AcpSession {
         )
           throw new Error('The saved session does not belong to this task workspace. Reopen the task conversation.');
         this.record = { ...saved, binding: { ...binding } };
+        markUnsettledTools(this.record.messages);
         this.history = { messages: this.record.messages };
         this.boundHistory(this.history);
       }
@@ -365,6 +367,7 @@ export class AcpSession {
             clientCapabilities: {
               fs: { readTextFile: false, writeTextFile: false },
               terminal: false,
+              _meta: { terminal_output_delta: true },
               session: { configOptions: { boolean: {} }, notices: {}, compaction: {} },
             },
           }),
@@ -533,6 +536,7 @@ export class AcpSession {
         this.initialControls(runtime, session);
         const uncertain = this.record.messages.filter((item) => item.role === 'user' && item.uncertain);
         this.record.messages = [...runtime.replay.messages, ...uncertain];
+        markUnsettledTools(this.record.messages);
         this.history = { messages: this.record.messages };
       } catch (error) {
         if (
@@ -656,6 +660,7 @@ export class AcpSession {
     } finally {
       this.cancelPermissions(runtime);
       this.history.lastChunk = undefined;
+      if (this.record === turn.record) markUnsettledTools(this.record.messages);
       try {
         if (this.record === turn.record)
           await this.persist().catch((error) => {
@@ -1000,20 +1005,29 @@ export class AcpSession {
     // message so replay adoption preserves it and history truncation can release it.
     let display = this.toolDisplays.get(item);
     if (!display) {
-      display = { title: item.text, content: '' };
+      display = { title: item.text, content: '', exitCode: item.exitCode, exitSignal: item.exitSignal };
       this.toolDisplays.set(item, display);
     }
     if (update.title != null) display.title = text(update.title);
-    if (update.status) item.status = update.status;
+    if (update.status) {
+      item.status = update.status;
+      delete item.uncertain;
+    }
     if (update.content != null) {
-      const details = update.content.map((content) => {
-        if (content.type === 'content' && content.content.type === 'text') return content.content.text;
-        if (content.type === 'diff') return `File changes: ${content.path} (review in the task diff)`;
-        return content.type === 'terminal' ? 'Agent terminal activity (this terminal is not managed by Warden)' : 'Non-text content not shown';
+      display.terminal = update.content.some((content) => content.type === 'terminal');
+      const details = update.content.flatMap((content) => {
+        if (content.type === 'terminal') return [];
+        if (content.type === 'content' && content.content.type === 'text') return [content.content.text];
+        if (content.type === 'diff') return [`File changes: ${content.path} (review in the task diff)`];
+        return ['Non-text content not shown'];
       });
       display.content = text(details.join('\n'));
     }
-    item.text = text([display.title, display.content].filter(Boolean).join('\n'));
+    updateToolOutput(display, update, text);
+    item.exitCode = display.exitCode;
+    item.exitSignal = display.exitSignal;
+    const fallback = display.terminal && !display.output ? 'Agent terminal activity (this terminal is not managed by Warden)' : undefined;
+    item.text = text([display.title, display.content, fallback, display.exit, display.output].filter(Boolean).join('\n'));
     history.lastChunk = undefined;
   }
 
@@ -1031,10 +1045,19 @@ export class AcpSession {
     }
     const id = randomUUID();
     const span = runtime.log.start('acp.permission', { permission: id, turn: this.turn.id, options: request.options.length }, 'info');
+    const raw = request.toolCall.rawInput;
+    const input = object(raw) ? raw : undefined;
+    const command = input?.command ?? input?.cmd;
+    const readable = (value: unknown) => (typeof value === 'string' ? text(value, 12_000) : undefined);
     const view: AcpPermission = {
       id,
       title: text(request.toolCall.title ?? 'Agent Permission Request', 1_000),
-      detail: text(JSON.stringify(request.toolCall.rawInput ?? request.toolCall.locations ?? request.toolCall.content ?? '', null, 2), 12_000),
+      detail: text(typeof raw === 'string' ? raw : JSON.stringify(raw ?? request.toolCall.locations ?? request.toolCall.content ?? '', null, 2), 12_000),
+      command:
+        readable(command) ??
+        (Array.isArray(command) && command.every((part) => typeof part === 'string') ? text(JSON.stringify(command, null, 2), 12_000) : undefined),
+      cwd: readable(input?.cwd ?? input?.workdir),
+      reason: readable(input?.justification ?? input?.description),
       options: request.options.map((option) => ({ id: option.optionId, label: option.name, kind: option.kind })),
     };
     return new Promise((resolve) => {

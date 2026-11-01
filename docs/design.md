@@ -71,6 +71,9 @@ New chats offer **Use Task Brief** beside an empty composer. The conversation is
 region, with a **Jump to Latest** control when the user reads older messages. Replies render Markdown
 and copyable code blocks; tool activity and thoughts are compact disclosures. Permission requests
 keep their action, a detail preview and the agent's choices visible, with full details on demand.
+The permission context scrolls independently so long commands do not push the decision buttons out
+of view. In short windows, the follow-up input becomes one line while retaining its draft. Tool
+summaries include agent-reported exit codes or signals beside the status, without inferring success.
 Errors show a short explanation and recovery action, with technical details behind a disclosure.
 **New Session** lives in **More Chat Actions** to keep routine conversation controls focused.
 
@@ -346,14 +349,15 @@ diff as A2. Recompute the range without asking for task-completion declarations.
 
 “Delivery scope” means which changes from that workspace enter the next base-branch commit.
 For A1 already delivered and A2 now under development, the next scope must exclude A1. The first implementation delivers all reliably identified, reviewed and not-yet-delivered
-changes from a clean committed source, without a file or local-commit picker. Live connection
-previews continue to include uncommitted edits. `sourceBase` records the last delivered source tip.
+changes from saved workspace content, without a file or local-commit picker or a required task commit.
+`sourceBase` records the last delivered source HEAD and `sourceTree` its saved content when captured.
+Review and preview exclude that content from the next increment without changing task files or history.
 
 ## Integrate a reviewed delivery
 
 “Commit to Base Branch” opens a message field and identifies the complete small delivery. When the branch
 is known, the input title names it directly, such as “Commit to feature/order”. The source
-commit, delivery boundary and primary HEAD are fixed by the review. Background refresh cannot
+HEAD, saved content tree, delivery boundary and primary HEAD are fixed by the review. Background refresh cannot
 silently move this version; changes require refreshing the comparison and reviewing the full range.
 No read markers, checkpoints, test-passed checkboxes or agent-idle declarations are required.
 
@@ -452,7 +456,7 @@ The implementation follows these bounded choices:
 
 1. Later connection conflicts preserve the last coherent preview and mark it stale. Unexpected
    preview-directory edits block replacement; saved primary edits are baseline inputs.
-2. Each delivery includes all undelivered changes from a clean committed source. Delivery records
+2. Each delivery includes all undelivered saved workspace changes, whether committed or not. Delivery records
    preserve source boundaries independently of squash/rewrite SHAs. There is no subset picker.
 3. The page creates the primary commit with ordinary Git hooks. No terminal-only commit requirement.
 4. Rebase checks run in isolated temporary worktrees; explicit execution leaves actual

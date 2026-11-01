@@ -456,7 +456,8 @@ summary {
   font-size: 12px;
 }
 .acp-message-tool summary,
-.acp-thought summary {
+.acp-thought summary,
+.acp-activity-group > summary {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -466,11 +467,13 @@ summary {
   padding: 3px 0;
 }
 .acp-message-tool summary::-webkit-details-marker,
-.acp-thought summary::-webkit-details-marker {
+.acp-thought summary::-webkit-details-marker,
+.acp-activity-group > summary::-webkit-details-marker {
   display: none;
 }
 .acp-message-tool summary > svg,
-.acp-thought summary > svg {
+.acp-thought summary > svg,
+.acp-activity-group > summary > svg {
   width: 13px;
   height: 13px;
   flex: 0 0 auto;
@@ -482,9 +485,17 @@ summary {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.acp-message-tool summary > .muted {
-  flex: 0 0 auto;
+.acp-tool-status {
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 2px 6px;
+  min-width: 0;
+  max-width: 60%;
   font-size: 11px;
+  text-align: right;
+  overflow-wrap: anywhere;
 }
 .acp-tool-detail {
   margin: 6px 0 8px 18px;
@@ -505,6 +516,26 @@ details[open] > summary > .acp-disclosure {
 }
 .acp-thought > .acp-markdown {
   padding: 6px 0 10px 18px;
+}
+.acp-activity-group {
+  color: var(--color-muted-foreground);
+  font-size: 12px;
+}
+.acp-activity-group > .acp-message {
+  margin-left: 12px;
+}
+.acp-file-link {
+  display: inline;
+  padding: 0;
+  color: var(--vscode-textLink-foreground);
+  text-decoration: underline;
+  text-align: inherit;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.acp-file-link:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 2px;
 }
 .acp-message-notice {
   color: var(--color-muted-foreground);
@@ -628,8 +659,10 @@ details[open] > summary > .acp-disclosure {
   margin-right: 6px;
 }
 .acp-permissions {
-  flex: 0 0 auto;
-  max-height: 38%;
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 auto;
+  max-height: 70%;
   min-height: 0;
   overflow: auto;
   padding: 6px var(--chat-gutter) 0;
@@ -638,11 +671,22 @@ details[open] > summary > .acp-disclosure {
 .acp-permission {
   display: flex;
   flex-direction: column;
-  max-height: calc(38dvh - 6px);
+  flex: 0 0 auto;
   padding: 10px 12px;
   border: 1px solid var(--vscode-inputValidation-warningBorder, var(--color-border));
   border-radius: 6px;
   background: var(--color-background);
+}
+.acp-permission:only-child {
+  flex-shrink: 1;
+  min-height: 0;
+}
+.acp-permission-context {
+  flex: 0 1 auto;
+  min-height: 32px;
+  max-height: 160px;
+  overflow: auto;
+  scrollbar-gutter: stable;
 }
 .acp-permission + .acp-permission {
   margin-top: 6px;
@@ -662,31 +706,29 @@ details[open] > summary > .acp-disclosure {
   height: 15px;
 }
 .acp-permission-preview {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  min-height: 0;
-  flex: 0 1 auto;
-  overflow: hidden;
+  margin: 0 0 6px;
   font-size: 12px;
   color: var(--color-muted-foreground);
 }
+.acp-permission-reason,
+.acp-permission-encoding,
+.acp-permission-cwd {
+  margin: 0 0 6px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
 .acp-permission-details {
   margin-top: 6px;
-  min-height: 0;
-  overflow: auto;
 }
 .acp-permission-details > p,
 .acp-permission-details pre {
   margin-top: 8px;
   font-size: 12px;
-  max-height: 180px;
-  overflow: auto;
 }
 .acp-permission .actions {
   flex: 0 0 auto;
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 6px;
   margin-top: 10px;
 }
@@ -791,6 +833,19 @@ details[open] > summary > .acp-disclosure {
   background: transparent;
   font-size: 13px;
   line-height: 1.55;
+}
+@media (max-height: 600px) {
+  .acp-app:has(.acp-permissions) .acp-composer-tools {
+    display: none;
+  }
+  .acp-app:has(.acp-permissions) .acp-composer-toolbar {
+    justify-content: flex-end;
+  }
+  .acp-app:has(.acp-permissions) .acp-composer textarea {
+    min-height: 32px;
+    max-height: 32px;
+    padding-top: 6px;
+  }
 }
 .acp-options-popover .field {
   margin: 0;

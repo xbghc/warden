@@ -40,6 +40,22 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const NewConversation: Story = { args: { model: { ...model, status: 'connecting' } } };
+export const UnreportedToolOutcome: Story = {
+  args: {
+    model: {
+      ...model,
+      status: 'connected',
+      draft: '',
+      record: {
+        ...model.record,
+        messages: [
+          { id: 'cancelled-user', role: 'user', text: 'Run the preview checks.', status: 'Turn cancelled' },
+          { id: 'unfinished-tool', role: 'tool', text: 'Run preview checks\nLint passed. Starting tests…', status: 'in_progress', uncertain: true },
+        ],
+      },
+    },
+  },
+};
 export const Resuming: Story = {
   args: {
     model: {
@@ -207,6 +223,7 @@ export const SidebarPermission: Story = {
   args: { model: { ...WaitingForPermission.args!.model!, presentation: 'sidebar' } },
 };
 
+const longPermissionCommand = `printf "approved\\n" > /tmp/${'acceptance-'.repeat(12)}marker.txt`;
 export const SidebarLongPermission: Story = {
   ...SidebarPermission,
   args: {
@@ -216,7 +233,10 @@ export const SidebarLongPermission: Story = {
         {
           id: 'long-permission',
           title: 'Run command',
-          detail: 'Write the acceptance marker in /tmp/warden-acceptance/permission-approved.txt.',
+          detail: JSON.stringify({ command: JSON.stringify(longPermissionCommand), cwd: '/projects/orders-2' }, null, 2),
+          command: JSON.stringify(longPermissionCommand),
+          cwd: '/projects/orders-2',
+          reason: 'Write a disposable acceptance marker.',
           options: [
             { id: 'once', kind: 'allow_once', label: 'Yes, proceed' },
             {
@@ -228,6 +248,23 @@ export const SidebarLongPermission: Story = {
           ],
         },
       ],
+    },
+  },
+};
+
+export const SidebarCommandOutcomes: Story = {
+  ...Sidebar,
+  args: {
+    model: {
+      ...Sidebar.args!.model!,
+      record: {
+        ...model.record,
+        messages: [
+          { id: 'diff', role: 'tool', text: 'git diff --no-index before.txt after.txt\nExit code: 1\n+ Added line', status: 'failed', exitCode: 1 },
+          { id: 'test', role: 'tool', text: 'Run tests\nExit code: 0\nAll tests passed.', status: 'completed', exitCode: 0 },
+          { id: 'signal', role: 'tool', text: 'Run development server\nSignal: SIGTERM', status: 'failed', exitSignal: 'SIGTERM' },
+        ],
+      },
     },
   },
 };
@@ -285,6 +322,30 @@ export const SidebarLongHistory: Story = {
               ? 'The filter now preserves the existing pagination behavior. Review src/orders.ts before running the preview tests.'
               : 'Keep the existing pagination defaults when no filter is supplied.',
         })),
+      },
+    },
+  },
+};
+
+export const GroupedActivity: Story = {
+  ...Sidebar,
+  args: {
+    model: {
+      ...SessionControls.args!.model!,
+      presentation: 'sidebar',
+      record: {
+        ...model.record,
+        messages: [
+          { id: 'request', role: 'user', text: 'Add filtering and check the result.' },
+          ...Array.from({ length: 8 }, (_, index) => ({
+            id: `tool-${index}`,
+            role: 'tool' as const,
+            text: `Inspect file ${index + 1}\nFile contents`,
+            status: 'completed',
+          })),
+          { id: 'failure', role: 'tool', text: 'One check needs attention\nTest output', status: 'failed' },
+          { id: 'reply', role: 'agent', text: 'Review [the implementation](src/orders.ts#L12) and [its tests](/projects/orders-2/test/orders.ts:8).' },
+        ],
       },
     },
   },

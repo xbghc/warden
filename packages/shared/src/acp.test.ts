@@ -10,6 +10,7 @@ const actions: AcpAction[] = [
   { type: 'new' },
   { type: 'configure' },
   { type: 'review' },
+  { type: 'open-file', reference: 'src/example.ts#L12' },
   { type: 'open-sidebar' },
   { type: 'view-ready' },
   { type: 'insert-brief' },

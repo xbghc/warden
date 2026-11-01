@@ -41,7 +41,7 @@ try:
             page.wait_for_function('profile => window.__model.defaultProfileId === profile', arg=profile)
 
         def connected(page):
-            page.wait_for_function("window.__model.status === 'connected' && !window.__model.sending")
+            page.wait_for_function("window.__model?.status === 'connected' && !window.__model.sending")
 
         def wait_host(page, route, predicate):
             # Poll resolved host state: wait_for_function treats an async predicate's
@@ -160,6 +160,35 @@ try:
         assert state['entries'][1]['output'] is None
         assert state['primaryStatus'] == ''
         assert state['primaryContext'] == state['previewContext'] == 'primary baseline\n'
+
+        send(first, 'terminal-output')
+        connected(first)
+        failed_tool = first.locator('.acp-message-tool').filter(has_text='Check failed')
+        expect(failed_tool.locator('summary')).to_contain_text('Exit 7')
+        expect(first.locator('.acp-message-tool').filter(has_text='Inspect a diff').locator('summary')).to_contain_text('Failed')
+        expect(first.locator('.acp-message-tool').filter(has_text='Inspect a diff').locator('summary')).to_contain_text('Exit 1')
+        expect(first.locator('.acp-message-tool').filter(has_text='Inspect a diff')).not_to_contain_text('this terminal is not managed by Warden')
+        expect(first.locator('.acp-message-tool').filter(has_text='Read literal output').locator('summary')).not_to_contain_text('Exit 99')
+        failed_tool.locator('summary').click()
+        expect(failed_tool.locator('pre')).to_contain_text('first line\nfailure detail')
+        expect(failed_tool.locator('pre')).to_contain_text('Exit code: 7')
+        expect(failed_tool.locator('pre')).not_to_contain_text('wrong terminal')
+        first.screenshot(path=str(artifacts / 'acp-command-output.png'), full_page=True)
+
+        send(first, 'terminal-hold')
+        unfinished = first.locator('.acp-message-tool').filter(has_text='Long command')
+        expect(unfinished.locator('summary')).to_contain_text('Running')
+        first.get_by_role('button', name='Stop Turn', exact=True).click()
+        connected(first)
+        expect(unfinished.locator('summary')).to_contain_text('Outcome Unknown')
+        expect(unfinished.locator('.acp-spinner')).to_have_count(0)
+        unfinished.locator('summary').click()
+        expect(unfinished).to_contain_text('Its command may still be running.')
+        expect(unfinished.locator('pre')).to_contain_text('Output before cancellation')
+        first.screenshot(path=str(artifacts / 'acp-cancelled-tool.png'), full_page=True)
+        first.reload()
+        connected(first)
+        expect(unfinished.locator('summary')).to_contain_text('Outcome Unknown')
 
         composer = first.get_by_role('textbox', name='Message', exact=True)
         composer.fill('First line')
@@ -282,6 +311,7 @@ try:
 
         # A new transcript may arrive while its unchanged composer has newer local
         # edits. Hold both the model and outgoing edit to make the overlap explicit.
+        connected(first)
         previous_record = first.evaluate('window.__model.record.id')
         first.evaluate('window.__fixture.pauseModels()')
         first.evaluate('window.__fixture.holdDrafts()')
@@ -334,9 +364,12 @@ try:
         first.set_viewport_size({'width': 280, 'height': 520})
         expect(first.get_by_role('button', name='Allow this write', exact=True)).to_be_in_viewport()
         expect(first.get_by_role('button', name='Stop Turn', exact=True)).to_be_in_viewport()
+        expect(first.get_by_label('Session Configuration', exact=True)).not_to_be_visible()
         assert first.evaluate('document.documentElement.scrollWidth <= innerWidth')
         first.screenshot(path=str(artifacts / 'acp-short-permission.png'), full_page=True)
         first.set_viewport_size({'width': 1000, 'height': 900})
+        # This agent can expose no selectors; an empty container has no visible box.
+        expect(first.get_by_label('Session Configuration', exact=True)).not_to_have_css('display', 'none')
 
         expect(second.get_by_role('button', name='Allow this write', exact=True)).to_have_count(0)
         # Reopening the panel loses local pending-send state, but a completed turn
@@ -363,12 +396,11 @@ try:
         send(first, 'permission-long')
         permissions = first.get_by_role('region', name='Pending Permissions')
         expect(permissions.get_by_role('button')).to_have_count(3)
-        for width, height in [(320, 740), (280, 520)]:
+        for width, height in [(340, 760), (320, 740), (280, 520)]:
             first.set_viewport_size({'width': width, 'height': height})
             assert permissions.evaluate('(element) => element.scrollWidth <= element.clientWidth'), 'permission choices must not overflow horizontally'
             for button in permissions.get_by_role('button').all():
-                button.scroll_into_view_if_needed()
-                expect(button).to_be_in_viewport()
+                expect(button).to_be_in_viewport(ratio=1)
                 assert button.evaluate('(element) => element.scrollWidth <= element.clientWidth'), 'complete approval labels must wrap inside their buttons'
             expect(first.get_by_role('button', name='Stop Turn', exact=True)).to_be_in_viewport()
             first.screenshot(path=str(artifacts / f'acp-long-permission-{width}.png'), full_page=True)
@@ -380,6 +412,40 @@ try:
         send(first, unsafe)
         expect(first.locator('.acp-message-agent').last.locator('.acp-message-text')).to_contain_text('command')
         assert first.locator('.acp-transcript img, .acp-transcript a').count() == 0
+
+        send(first, 'permission-command')
+        expect(first.get_by_label('Requested Command', exact=True)).to_have_text('printf "first line\\n"\nprintf "second line\\n"')
+        expect(first.get_by_text('Decoded JSON preview. Original request in Details and Workspace.', exact=True)).to_be_visible()
+        raw_details = first.locator('.acp-permission-details')
+        raw_details.locator('summary').click()
+        expect(raw_details.locator('pre')).to_contain_text('\\\\n')
+        expect(first.get_by_text('Write a disposable test marker', exact=True)).to_be_visible()
+        expect(first.get_by_text('Working directory:', exact=False)).to_be_visible()
+        first.screenshot(path=str(artifacts / 'acp-readable-command.png'), full_page=True)
+        first.set_viewport_size({'width': 280, 'height': 520})
+        assert first.get_by_role('region', name='Pending Permissions').evaluate('(element) => element.scrollWidth <= element.clientWidth')
+        first.get_by_role('button', name='Reject this write', exact=True).scroll_into_view_if_needed()
+        expect(first.get_by_role('button', name='Stop Turn', exact=True)).to_be_in_viewport()
+        first.screenshot(path=str(artifacts / 'acp-readable-command-narrow.png'), full_page=True)
+        first.get_by_role('button', name='Reject this write', exact=True).click()
+        connected(first)
+        first.set_viewport_size({'width': 1000, 'height': 900})
+
+        send(first, '[Review output](agent-output.txt:1)')
+        file_link = first.locator('.acp-message-agent').last.get_by_role('button', name='Review output', exact=True)
+        file_link.click()
+        first.wait_for_function("window.__actions.some(message => message.action?.type === 'open-file' && message.action.reference === 'agent-output.txt:1')")
+
+        send(first, 'activity-batch')
+        connected(first)
+        activity = first.locator('.acp-activity-group').last
+        expect(activity.locator('summary').first).to_have_text('4 earlier activities')
+        expect(activity.locator('.acp-tool-title').filter(has_text='Completed activity 1')).not_to_be_visible()
+        expect(first.locator('.acp-tool-title').filter(has_text='Visible failed check')).to_be_visible()
+        expect(first.get_by_text('Activity summary is still visible', exact=True)).to_be_visible()
+        activity.locator('summary').first.click()
+        expect(activity.locator('.acp-tool-title').filter(has_text='Completed activity 1')).to_be_visible()
+        first.screenshot(path=str(artifacts / 'acp-grouped-activity.png'), full_page=True)
 
         # Switching views restores the reading position instead of jumping to new output.
         first.set_viewport_size({'width': 320, 'height': 740})

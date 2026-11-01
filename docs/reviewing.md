@@ -9,8 +9,9 @@ require an agent-delivery protocol or a separate final-approval flow.
 
 Select a task in the left work plan, then a file. This directly opens its undelivered diff;
 there is no separate review-mode switch. The baseline is the last delivered source tip, or the
-primary baseline already incorporated by the workspace. Live uncommitted edits remain visible;
-formal delivery in this version requires a clean committed source.
+primary baseline already incorporated by the workspace. Saved uncommitted edits can be reviewed and
+committed directly to the base branch without committing in the task workspace first. Following a
+snapshot delivery, the next comparison starts from that delivered content, even if task HEAD is unchanged.
 
 The native task tree provides inline actions and a context menu on each task. Its file list
 collapses independently without replacing the native diff or resetting editor scroll. Editing notes
@@ -24,6 +25,12 @@ remembered for the VS Code workspace. Switching views preserves task expansion a
 including their pinned review versions. Both views show the same complete comparison.
 Native tree nodes retain their original repository and base-branch identity while VS Code finishes
 pending renders, so switching context cannot rename nodes from the previous tree.
+Repository and base-branch switches first publish collapsed task rows, then restore saved expansion
+after the native refresh completes. This avoids VS Code's menu renderer retaining removed rows while
+waiting for the new branch's descendants. Restoration uses the native `TreeView.reveal` refresh barrier,
+does not request focus or selection, waits while the sidebar is hidden, and abandons superseded contexts.
+No timer or renderer-error suppression is involved. The upstream race is tracked in
+[VS Code issue #320985](https://github.com/microsoft/vscode/issues/320985).
 
 Choose the commit icon and enter a message in VS Code's native top input box. Enter submits the reviewed
 increment with ordinary Git hooks; Escape cancels without staging and retains the draft. The input keeps
@@ -32,8 +39,9 @@ while typing requires renewed review. Recovery remains explicit after interrupte
 hooks. Successful delivery preserves the workspace. See [Squash delivery](worktrees.md#squash-delivery).
 
 The read-only target APIs below underpin diff rendering.
-Task review pins the source commit, delivery boundary and primary HEAD. Background refresh does
-not advance a committed comparison. If any version changes, refresh the task review and inspect the
+Task review pins the source HEAD, saved content tree, delivery boundary and primary HEAD. Snapshot
+file lists and both diff sides read the same immutable tree. Background refresh does not advance an
+opened comparison. If any version changes, refresh the task review and inspect the
 complete new delivery. VS Code closes the task’s older diff tabs when a newer review version opens.
 Recovery review pins the primary HEAD and index fingerprint, or the exact manual commit.
 These checks bind content versions; they do not count viewed files or certify a completed review.
@@ -48,6 +56,7 @@ These checks bind content versions; they do not count viewed files or certify a 
 | Branch, everything since it forked off a base (committed or not) | `base:<ref>` | `git diff $(git merge-base <ref> HEAD)` (+ untracked) |
 | One commit | `commit:<sha>` | `git diff <sha>^ <sha>` |
 | Two refs | `range:<base>..<head>` | `git diff <base>...<head>` |
+| Saved task content | `snapshot:<base>..<tree>` | Exact tree comparison in Warden's external snapshot store |
 | Worktree, working tree | `worktree:<path>:working` | same, run inside the worktree |
 | Worktree, branch vs base | `worktree:<path>:range:<base>..<head>` | same, run inside the worktree |
 | Worktree, everything since base | `worktree:<path>:base:<ref>` | same, run inside the worktree |

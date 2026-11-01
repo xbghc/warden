@@ -71,14 +71,17 @@ function sameBinding(a: AcpBinding, b: AcpBinding): boolean {
 }
 
 function message(value: unknown): AcpMessage {
-  const raw = object(value, ['id', 'role', 'text', 'status', 'toolCallId', 'compactionId', 'compaction', 'uncertain']);
+  const raw = object(value, ['id', 'role', 'text', 'status', 'exitCode', 'exitSignal', 'toolCallId', 'compactionId', 'compaction', 'uncertain']);
   if (typeof raw.role !== 'string' || !['user', 'agent', 'thought', 'tool', 'notice'].includes(raw.role)) throw new Error('Invalid message role.');
+  if (raw.exitCode !== undefined && (typeof raw.exitCode !== 'number' || !Number.isSafeInteger(raw.exitCode))) throw new Error('Invalid command exit code.');
   const compaction = raw.compaction === undefined ? undefined : object(raw.compaction, ['summary', 'error']);
   return {
     id: string(raw.id),
     role: raw.role as AcpMessage['role'],
     text: string(raw.text, 1024 * 1024, true),
     status: optionalString(raw.status, 4096),
+    exitCode: raw.exitCode as number | undefined,
+    exitSignal: optionalString(raw.exitSignal, 128),
     toolCallId: optionalString(raw.toolCallId, 4096),
     compactionId: optionalString(raw.compactionId, 4096),
     compaction: compaction ? { summary: optionalString(compaction.summary, 256_000), error: optionalString(compaction.error, 256_000) } : undefined,

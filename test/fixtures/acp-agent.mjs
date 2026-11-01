@@ -1,6 +1,7 @@
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
+import { terminalOutputScenario } from './acp-terminal-output.mjs';
 
 // A real subprocess with no model or credentials. Its own tools edit only its cwd;
 // Warden is responsible for the ACP conversation, not these filesystem operations.
@@ -218,7 +219,7 @@ async function handle(message) {
   }
   if (method === 'session/cancel') {
     if (turn) turn.cancelled = true;
-    if (turn?.text === 'hold') {
+    if (turn?.text === 'hold' || turn?.text === 'terminal-hold') {
       result(turn.id, { stopReason: 'cancelled' });
       turn = undefined;
     }
@@ -307,6 +308,7 @@ async function handle(message) {
     answer(id, 'Compaction patched');
     return;
   }
+  if (terminalOutputScenario(text, toolUpdate, answer, id)) return;
   if (text === 'tool-progress') {
     const content = (text) => [{ type: 'content', content: { type: 'text', text } }];
     toolUpdate({ sessionUpdate: 'tool_call', toolCallId: 'progress', title: 'Run tests', status: 'in_progress', content: content('Partial output') });
@@ -316,6 +318,13 @@ async function handle(message) {
     toolUpdate({ sessionUpdate: 'tool_call', toolCallId: 'clear', title: 'Clear output', content: content('Temporary output') });
     toolUpdate({ sessionUpdate: 'tool_call_update', toolCallId: 'clear', content: [], status: 'completed' });
     answer(id, 'Tool progress completed');
+    return;
+  }
+  if (text === 'activity-batch') {
+    for (let index = 1; index <= 4; index++)
+      toolUpdate({ sessionUpdate: 'tool_call', toolCallId: `batch-${index}`, title: `Completed activity ${index}`, status: 'completed' });
+    toolUpdate({ sessionUpdate: 'tool_call', toolCallId: 'batch-failure', title: 'Visible failed check', status: 'failed' });
+    answer(id, 'Activity summary is still visible');
     return;
   }
   if (text === 'tool-refresh') {
@@ -365,10 +374,27 @@ async function handle(message) {
     answer(id, `Edited ${process.cwd()}`);
     return;
   }
-  if (text === 'permission' || text === 'permission-long' || text === 'foreign-permission') {
+  if (text === 'permission' || text === 'permission-long' || text === 'permission-command' || text === 'foreign-permission') {
     const permission = await request('session/request_permission', {
       sessionId: text === 'foreign-permission' ? `${sessionId}-foreign` : sessionId,
-      toolCall: { toolCallId: 'write-output', title: 'Write agent-output.txt', kind: 'edit', status: 'pending', rawInput: { path: 'agent-output.txt' } },
+      toolCall: {
+        toolCallId: 'write-output',
+        title: 'Write agent-output.txt',
+        kind: 'edit',
+        status: 'pending',
+        rawInput:
+          text === 'permission-command' || text === 'permission-long'
+            ? {
+                command: JSON.stringify(
+                  text === 'permission-command'
+                    ? 'printf "first line\\n"\nprintf "second line\\n"'
+                    : `printf "approved\\n" > /tmp/${'acceptance-'.repeat(12)}marker.txt`,
+                ),
+                cwd: process.cwd(),
+                justification: 'Write a disposable test marker',
+              }
+            : { path: 'agent-output.txt' },
+      },
       options: [
         { optionId: 'allow-once', name: 'Allow this write', kind: 'allow_once' },
         ...(text === 'permission-long'

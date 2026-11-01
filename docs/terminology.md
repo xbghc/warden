@@ -25,7 +25,7 @@ operation and its scope; they do not introduce additional domain concepts.
 | Commits | Within a task, the recorded commits contributed to the base branch. Prefer **Commits to <branch>** for the history picker title. These are not all source commits in the workspace. |
 | Pending Changes | Task changes not yet committed to the base branch. They may already have source commits in the task workspace, so do not call all of them “uncommitted.” |
 | Baseline | Reference content for an operation. The preview baseline includes saved primary edits, which may be uncommitted. A task's incorporated baseline is an identified commit. |
-| Source Boundary | The source revision separating a previously committed contribution from the next increment. It is distinct from the final squash commit. |
+| Source Boundary | The source revision and, for saved workspace deliveries, content tree separating a previous contribution from the next increment. It is distinct from the final squash commit. |
 | Agent | The tool receiving task messages in its assigned workspace. It owns its tools and execution policies; Warden need not own its process or communicate through ACP. A legacy Executor label is only a label, not evidence of a connection or activity. |
 | Task Chat | The persistent conversation bound to one repository, task and workspace. Opening it automatically resumes its agent session or creates the first session, without sending a prompt. |
 | Session | An identified agent interaction bound to a task workspace, managed by Warden's integration or an external application. A new session does not create a task or workspace. |
@@ -86,6 +86,8 @@ The same protocol value can have different meanings by context. Keep the shared 
 | Missing check | Not Checked |
 | Rebase execution result | Rebased / Skipped / Failed, with per-workspace details |
 | Script execution | Pending / Running / Succeeded / Failed |
+| Agent activity without a final report | Outcome Unknown; preserve the last reported status and output without claiming that its command stopped |
+| Agent-reported command result | `Exit <code>` / `Signal <name>`; shown beside the agent's tool status without reclassifying it |
 | Task allocation | Workspace Allocation Failed with retry; legacy plans show Prepared on first use; archived plans show Archived |
 | Interrupted commit with prepared content | Pending Commit; this does not certify review or testing |
 

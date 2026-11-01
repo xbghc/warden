@@ -171,15 +171,32 @@ selected option identifier or the protocol's cancelled outcome. It does not inve
 or add a global automatic approval policy. A late click cannot answer a request from an old
 connection, another panel or another window.
 Long agent-provided permission labels, including commands and paths without spaces, wrap inside
-the available sidebar width. All choices remain reachable by vertical scrolling in short views;
-the permission panel must not clip the authorization scope horizontally.
+the available sidebar width. A single request reserves space for its complete choice list while
+command context scrolls separately. Short windows use a compact follow-up input without clearing
+its draft and temporarily hide session selectors that cannot change during a permission wait;
+sending and Stop Turn retain their existing behavior. Multiple or unusually large requests
+remain reachable by vertical scrolling, without clipping the authorization scope horizontally.
+Only an `allow_once` choice uses the primary button style; persistent approvals remain secondary.
+Agent-provided labels, ordering, IDs and authorization scope are unchanged.
+When supplied, command, working-directory and justification fields appear as readable text before
+the choices. Commands preserve line breaks and remain scrollable rather than being cut to two lines.
+Raw request details remain available separately; presentation never changes the offered choices.
+An additional JSON string layer around a command is decoded once for display, while shell escapes
+and the original request remain available without interpretation or execution. A decoded command is
+explicitly labeled as a preview, including its hover text, and the disclosure retains the original
+request. No shell unescaping or recursive decoding is applied.
 
 The webview receives a finite, validated action vocabulary. Repository/session identity comes from
 the host-owned view binding, not arbitrary message fields. View-state messages contain only bounded
 reading positions and profile IDs; they cannot change the binding or execute commands. Agent content
 is stored as text and rendered with safe Markdown, including lists, tables and copyable code blocks.
-Raw HTML is displayed as text; remote images are not loaded. Only HTTP(S) links are clickable, and
-content cannot invoke a VS Code command or supply executable profile settings.
+Raw HTML is displayed as text; remote images are not loaded. HTTP(S) links open normally. Local
+Markdown references use a finite `open-file` action, not a URI handler: the host validates the task
+binding, resolves the real path inside that task workspace and rejects traversal, escaping symlinks,
+binary or oversized files. Changed files open their native read-only diff; other text files open an
+immutable read-only snapshot at the supplied line. Agent content cannot invoke a VS Code command or
+supply executable profile settings. Consecutive completed tools and thoughts fold into compact groups;
+running tools, failures and agent replies stay visible, and all recorded details remain accessible.
 
 ## Session controls and updates
 
@@ -213,7 +230,21 @@ execution state. Live notices are displayed without adding them to saved history
 updates keep one timeline entry per compaction ID, support replacement and streamed summaries, and
 preserve summary/error patch state in saved history. Unknown extension metadata is ignored.
 
-The client advertises support for notices, context compaction and boolean configuration options.
+Tool activity also accepts the ACP v1 `terminal_output_delta` and `terminal_output` conventions:
+append bounded output chunks only when their terminal ID matches the enclosing tool call, retain
+the reported exit code or signal, and preserve the text through conversation saves and session replay.
+Status-only and content updates do not erase output. Unknown or malformed metadata is ignored.
+Reported exit codes and signals are stored as separate validated fields and shown beside the tool's
+reported status in its collapsed row. A nonzero code does not change that status, and output text is
+never parsed to invent an exit result. The generic terminal placeholder disappears when real output
+arrives; an identical sentence supplied as ordinary agent output is preserved.
+This is a passive transcript of agent-owned commands; Warden provides no terminal execution or control.
+After a turn ends or saved history is restored, unfinished activities show **Outcome Unknown**
+without a running spinner. Their last reported status and output remain stored. A later turn or
+session replay can supply a final status. Cancellation does not establish process termination.
+
+The client advertises support for notices, context compaction, boolean configuration options and
+`_meta.terminal_output_delta` display updates.
 It continues to advertise no filesystem or terminal capabilities. Rich attachments, MCP forwarding,
 global agent-session management and experimental v2 APIs are outside this integration.
 

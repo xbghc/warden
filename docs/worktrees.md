@@ -118,9 +118,11 @@ are observed by content and debounced into preview; they are not unexpected edit
 ## Squash delivery
 
 Select a task and file to review directly. *Commit to Base Branch…* accepts all current undelivered changes from
-a **clean committed source**, pinned to the reviewed source, delivery boundary and primary HEAD. Source commits may
+a saved workspace snapshot, including staged, unstaged and non-ignored untracked files. No source commit
+is required. The source HEAD, saved content, delivery boundary and primary HEAD are pinned by review. Source commits may
 continue from the previous delivery without first rebasing. `sourceBase` records that previous
-source tip so A1 is excluded when delivering A2. After a manual rebase incorporates the current
+source tip, and `sourceTree` records delivered saved content, so A1 is excluded when delivering A2 even
+without a new task commit. Delivery leaves the task files, index and branch unchanged. After a manual rebase incorporates the current
 primary HEAD, both refreshed review and delivery use that HEAD as the effective boundary; a request
 with the previous boundary requires a new review.
 
@@ -130,6 +132,8 @@ Only one preparation uses that directory at a time. Other connected workspaces c
 resulting commit. Review takes place before preparation; normal delivery prepares and commits
 in one operation. The staged diff is shown for recovery after an interrupted operation.
 
+Only saved file contents are included; unsaved editor buffers and ignored files are excluded.
+For a partially staged file, the saved working copy is the reviewed content, not only its index version.
 Run tests in the preview directory when needed, review the complete delivery, enter a message,
 and choose *Commit to Base Branch*. Editing a message does not stage anything.
 There is no test-passed checkbox. Warden runs ordinary `git commit -m` with the checkout's identity,

@@ -175,6 +175,8 @@ export interface DevelopmentChange extends ChangePlan {
   base: string;
   /** Source tip of the last delivery; excludes already delivered commits until the next rebase. */
   sourceBase?: string;
+  /** Saved workspace content at the last delivery, when it differed from its source commit. */
+  sourceTree?: string;
   deliveries?: ChangeDelivery[];
   status: 'working' | 'ready' | 'integrating' | 'accepted';
   createdAt: string;
@@ -187,6 +189,7 @@ export interface DevelopmentChange extends ChangePlan {
   integration?: {
     id?: string;
     source: string;
+    sourceTree?: string;
     sourceBase?: string;
     tree?: string;
     /** Fingerprint of the composed delivery, before any user or hook edits. */
@@ -206,6 +209,7 @@ export interface DevelopmentChange extends ChangePlan {
 export interface ChangeDelivery {
   id: string;
   source: string;
+  sourceTree?: string;
   sourceBase: string;
   parent: string;
   commit: string;
@@ -335,6 +339,8 @@ export interface StartChangeRequest {
 
 export interface PrepareChangeRequest {
   sourceHead: string;
+  /** Immutable saved workspace content reviewed for this delivery. */
+  sourceTree?: string;
   developmentHead: string;
   sourceBase?: string;
 }
