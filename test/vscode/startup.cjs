@@ -28,7 +28,11 @@ exports.checkStartup = async (workbench, fixture, eventually) => {
   try {
     await eventually(() => entered, 30_000);
     assert.equal(workbench.agentSetupRequired, false, 'automatic startup never exposes setup during repository loading');
-    await eventually(() => workbench.agentSetup.readiness.snapshot().status === 'ready', 30_000);
+    try {
+      await eventually(() => workbench.agentSetup.readiness.snapshot().status === 'ready', 30_000);
+    } catch (error) {
+      throw new Error(`Startup ACP did not become ready: ${JSON.stringify(workbench.agentSetup.readiness.snapshot())}`, { cause: error });
+    }
     assert.equal(finished, false, 'ACP becomes ready while repository observation is still blocked');
     assert.equal(workbench.model('workspaces').repositoryState, 'loading');
     assert.deepEqual(await workbench.getChildren(), [], 'agent readiness alone does not expose a loading repository');

@@ -301,7 +301,17 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   const emptyDraft = emptyChat.draft.text;
   await conversations.handle(emptyChat, { type: 'disconnect' });
   await conversations.show(fixture.root, emptyTask.id);
-  await eventually(() => emptyChat.session.snapshot().status === 'connected');
+  assert(conversations.sidebarEntry === emptyChat, 'reopening an unchanged allocation keeps its conversation entry');
+  try {
+    // Recovery validates the workspace and performs both session/load and session/new.
+    await eventually(() => emptyChat.session.snapshot().status === 'connected', 30_000);
+  } catch (error) {
+    const snapshot = emptyChat.session.snapshot();
+    throw new Error(
+      `Empty-session recovery did not connect: ${JSON.stringify({ status: snapshot.status, error: emptyChat.error ?? snapshot.error, connecting: !!emptyChat.connecting })}`,
+      { cause: error },
+    );
+  }
   assert.equal(emptyChat.session.snapshot().record.id, emptyRecord.id);
   assert.notEqual(emptyChat.session.snapshot().record.sessionId, emptyRecord.sessionId);
   assert.equal(emptyChat.draft.text, emptyDraft, 'recreating an unpersisted empty session retains the task draft');
@@ -317,8 +327,8 @@ exports.run = async () => {
   const fixture = JSON.parse(await fs.readFile(process.env.WARDEN_VSCODE_FIXTURE, 'utf8'));
   const extension = vscode.extensions.getExtension('xbghc.warden');
   const workbench = await extension.activate();
-  const eventually = async (condition) => {
-    const deadline = Date.now() + 15_000;
+  const eventually = async (condition, timeout = 15_000) => {
+    const deadline = Date.now() + timeout;
     while (!(await condition())) {
       if (Date.now() > deadline) throw new Error('Timed out waiting for task chat state');
       await new Promise((resolve) => setTimeout(resolve, 25));

@@ -11,9 +11,9 @@ export default defineConfig({
   test: {
     environment: 'node',
     setupFiles: ['test/setup.ts'],
-    // Each integration file already runs parallel Git reads. Serialize Windows files
-    // so independent fixtures do not compete for process startup and disk access.
-    maxWorkers: process.platform === 'win32' ? 1 : undefined,
+    // Each integration file already runs parallel Git reads. Serialize Windows and
+    // Intel macOS files so fixtures do not compete for process startup and disk access.
+    maxWorkers: process.platform === 'win32' || (process.platform === 'darwin' && process.arch === 'x64') ? 1 : undefined,
     projects: [
       {
         extends: true,

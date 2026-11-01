@@ -267,6 +267,7 @@ through Git, including branches at the same commit, verifies per-branch task/dra
 stale action rejection, and preserves dirty task workspaces and connected-preview switch guards.
 CI packages the VSIX after quality checks so browser and extension-host tests run alongside the engine
 matrix. Marketplace publication requires the entire reusable workflow to succeed, including both matrices.
+Windows and Intel macOS serialize Git integration files because each file already issues parallel Git reads.
 
 ## Release
 
