@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const vscode = require('vscode');
+const { checkReviewRaces } = require('./review-race.cjs');
 
 const eventually = async (condition) => {
   const deadline = Date.now() + 15_000;
@@ -14,6 +15,7 @@ exports.run = async () => {
   const fixture = JSON.parse(await fs.readFile(process.env.WARDEN_VSCODE_FIXTURE, 'utf8'));
   const workbench = await vscode.extensions.getExtension('xbghc.warden').activate();
   const Sidebar = workbench.sidebar.constructor;
+  await checkReviewRaces(workbench);
   await workbench.close();
   const task = (id) => ({ id, title: id, branch: id, developmentBranch: id, worktree: `${fixture.root}-${id}`, base: 'base', status: 'working' });
   const oldTask = task('old-branch');

@@ -45,6 +45,9 @@ opened comparison. If any version changes, refresh the task review and inspect t
 complete new delivery. VS Code closes the task’s older diff tabs when a newer review version opens.
 Recovery review pins the primary HEAD and index fingerprint, or the exact manual commit.
 These checks bind content versions; they do not count viewed files or certify a completed review.
+If an agent commit interrupts a new snapshot observation, the host retries that read up to three times
+within the same repository session. Repeated changes appear as a task file-list error. These retries
+never advance an opened comparison, retry a delivery, or authorize newer content for an existing review.
 
 ## Targets (what is being reviewed)
 

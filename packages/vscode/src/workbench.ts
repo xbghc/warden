@@ -793,16 +793,16 @@ export class Workbench {
     if (!node) return this.tasks().map((task) => ({ kind: 'task', task }));
     let target: string;
     let review: TaskReview | undefined;
-    if (node.kind === 'task' && node.task.worktree) {
-      review = await this.readReview(node.task.id);
-      if (!review || session !== this.session) return [];
-      target = review.targetKey;
-      const previous = this.taskTargets.get(node.task.id);
-      if (previous && previous !== target) this.files.delete(previous);
-      this.taskTargets.set(node.task.id, target);
-    } else if (node.kind === 'commit') target = formatTargetKey({ kind: 'commit', sha: node.sha });
-    else return [];
     try {
+      if (node.kind === 'task' && node.task.worktree) {
+        review = await this.readReview(node.task.id);
+        if (!review || session !== this.session) return [];
+        target = review.targetKey;
+        const previous = this.taskTargets.get(node.task.id);
+        if (previous && previous !== target) this.files.delete(previous);
+        this.taskTargets.set(node.task.id, target);
+      } else if (node.kind === 'commit') target = formatTargetKey({ kind: 'commit', sha: node.sha });
+      else return [];
       const response = await this.api('review.files', { key: target });
       if (session !== this.session) return [];
       this.files.set(target, response.files);
@@ -820,11 +820,20 @@ export class Workbench {
   }
   private async readReview(changeId: string) {
     const session = this.session;
-    const review = await this.api('task.review', { taskId: changeId });
-    if (session !== this.session) return undefined;
-    if (review) this.observedReviews.set(changeId, review);
-    else this.observedReviews.delete(changeId);
-    return review;
+    for (let attempt = 0; attempt < 3; ++attempt) {
+      try {
+        const review = await this.api('task.review', { taskId: changeId });
+        if (session !== this.session) return undefined;
+        if (review) this.observedReviews.set(changeId, review);
+        else this.observedReviews.delete(changeId);
+        return review;
+      } catch (error) {
+        if (session !== this.session) return undefined;
+        // A concurrent agent commit can invalidate an observation before it is displayed.
+        // Retry only the read; pinned reviews and all delivery guards remain unchanged.
+        if (!(error instanceof WardenError) || error.code !== 'review_changed' || attempt === 2) throw error;
+      }
+    }
   }
   private async rememberReview(review: TaskReview) {
     const session = this.session;
