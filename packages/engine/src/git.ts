@@ -1,5 +1,5 @@
 import { execFile, spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { statSync } from 'node:fs';
 import path from 'node:path';
 import { WardenError } from './errors.js';
 
@@ -192,6 +192,17 @@ export async function runGit(args: readonly string[], opts: GitRunOptions): Prom
   return { ...result, stdout: result.stdout.toString('utf8') };
 }
 
+function gitSpawnPathError(cwd: string): GitError {
+  // Windows also reports ENOENT when cwd is an existing file. Inspect its type only
+  // after a spawn failure, keeping the ordinary Git path free of extra filesystem reads.
+  try {
+    if (statSync(cwd).isDirectory()) return new GitError('git executable not found in PATH', null, '', 500, 'git_missing');
+  } catch {
+    // Missing or inaccessible paths cannot serve as a working directory.
+  }
+  return new GitError(`working directory is unavailable or not a directory: ${cwd}`, null, '', 400, 'unknown_worktree');
+}
+
 /** The same guarded read, preserving bytes for NUL protocols and lossless fingerprints. */
 export async function runGitBuffer(args: readonly string[], opts: GitRunOptions): Promise<GitBufferResult> {
   assertAllowedGitArgs(args);
@@ -209,14 +220,8 @@ export async function runGitBuffer(args: readonly string[], opts: GitRunOptions)
           reject(new GitError(`git ${args[0]} timed out`, null, stderr, 504, 'git_timeout'));
           return;
         }
-        // execFile reports a deleted cwd like a missing binary; a cwd replaced by a file
-        // instead reports ENOTDIR. Both are checkout input errors, not missing Git.
-        if (err.code === 'ENOTDIR' || (err.code === 'ENOENT' && !existsSync(opts.cwd))) {
-          reject(new GitError(`working directory no longer exists: ${opts.cwd}`, null, '', 400, 'unknown_worktree'));
-          return;
-        }
-        if (err.code === 'ENOENT') {
-          reject(new GitError('git executable not found in PATH', null, '', 500, 'git_missing'));
+        if (err.code === 'ENOENT' || err.code === 'ENOTDIR') {
+          reject(gitSpawnPathError(opts.cwd));
           return;
         }
         const code = typeof err.code === 'number' ? err.code : -1;
@@ -384,12 +389,8 @@ function execWrite(
         reject(new GitError(`git ${args[0]} timed out`, null, stderr, 504, 'git_timeout'));
         return;
       }
-      if (err.code === 'ENOENT') {
-        if (!existsSync(opts.cwd)) {
-          reject(new GitError(`working directory no longer exists: ${opts.cwd}`, null, '', 400, 'unknown_worktree'));
-          return;
-        }
-        reject(new GitError('git executable not found in PATH', null, '', 500, 'git_missing'));
+      if (err.code === 'ENOENT' || err.code === 'ENOTDIR') {
+        reject(gitSpawnPathError(opts.cwd));
         return;
       }
       const code = typeof err.code === 'number' ? err.code : -1;
@@ -397,16 +398,21 @@ function execWrite(
       reject(new GitError(first.trim().replace(/^(fatal|error): /, ''), code, stderr, 500, 'git_failed'));
     };
     const env = gitEnvironment(extraEnv);
-    if (opts.network) {
-      execDetached(args, { cwd: opts.cwd, timeout: opts.timeoutMs ?? LONG_GIT_TIMEOUT_MS, env }, done);
-      return;
+    try {
+      if (opts.network) {
+        execDetached(args, { cwd: opts.cwd, timeout: opts.timeoutMs ?? LONG_GIT_TIMEOUT_MS, env }, done);
+        return;
+      }
+      execFile(
+        'git',
+        [...args],
+        { cwd: opts.cwd, timeout: opts.timeoutMs ?? DEFAULT_GIT_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024, encoding: 'utf8', env, windowsHide: true },
+        (error, stdout, stderr) => done(error, stdout, stderr),
+      );
+    } catch (error) {
+      // Invalid cwd errors may be thrown before either runner installs its callback.
+      done(error as ExecFailure, '', '');
     }
-    execFile(
-      'git',
-      [...args],
-      { cwd: opts.cwd, timeout: opts.timeoutMs ?? DEFAULT_GIT_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024, encoding: 'utf8', env, windowsHide: true },
-      (error, stdout, stderr) => done(error, stdout, stderr),
-    );
   });
 }
 

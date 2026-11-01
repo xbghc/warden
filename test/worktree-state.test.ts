@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { gitEnvironment, runGit, runGitBuffer } from '../packages/engine/src/git.js';
+import { gitEnvironment, runGit, runGitBuffer, runGitWrite } from '../packages/engine/src/git.js';
 import { readWorktreeState } from '../packages/engine/src/worktree-state.js';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
@@ -148,7 +148,7 @@ describe('worktree state', () => {
     expect(await readFile(path.join(fx.root, 'src/a.ts'))).toEqual(content);
   });
 
-  it('supports unborn branches and reports a deleted checkout as an input error', async () => {
+  it('supports unborn branches and rejects missing or non-directory checkout paths', async () => {
     const fx = await fixture();
     const unborn = path.join(fx.root, 'unborn');
     await mkdir(unborn);
@@ -156,8 +156,11 @@ describe('worktree state', () => {
     const state = await readWorktreeState(unborn);
     expect(state).toMatchObject({ branch: 'unborn', dirtyCount: 0 });
     expect(state.head).toBeUndefined();
-    await expect(readWorktreeState(path.join(fx.root, 'missing'))).rejects.toMatchObject({ status: 400, code: 'unknown_worktree' });
-    await expect(readWorktreeState(path.join(fx.root, 'src/a.ts'))).rejects.toMatchObject({ status: 400, code: 'unknown_worktree' });
+    for (const cwd of [path.join(fx.root, 'missing'), path.join(fx.root, 'src/a.ts')]) {
+      await expect(readWorktreeState(cwd)).rejects.toMatchObject({ status: 400, code: 'unknown_worktree' });
+      for (const network of [false, true])
+        await expect(runGitWrite(['status'], { cwd, network })).rejects.toMatchObject({ status: 400, code: 'unknown_worktree' });
+    }
   });
 
   it('retains Git failure diagnostics and distinguishes output limits from timeouts', async () => {

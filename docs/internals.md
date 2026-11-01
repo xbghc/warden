@@ -205,6 +205,9 @@ status bytes. Readers in the same JavaScript environment share an eight-child co
 and a 30-second deadline, including queue time. Expired queued reads never spawn Git. The guarded
 reader limits each output stream to 256 MiB and kills the direct Git child on timeout or overflow,
 waiting for its close callback before returning. Overflow is `git_failed`, distinct from `git_timeout`.
+After `ENOENT` or `ENOTDIR` spawn failures, both Git runners inspect the working directory's type.
+Missing or non-directory paths return `unknown_worktree`; an existing directory retains `git_missing`.
+This metadata read runs only on failure and does not change repository content or relax path validation.
 Reads set `GIT_OPTIONAL_LOCKS=0`; the real index is not refreshed. Child processes use the calling
 Node worker's environment with repository redirection removed. Status fingerprints hash original bytes; paths
 retain the engine's existing UTF-8 representation. Watching repeated edits to a non-UTF-8 filename
