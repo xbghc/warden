@@ -78,6 +78,9 @@ native `acp` subcommand. **Custom Agent / Edit Settings** retains direct configu
 and customized arguments or environment variables. Each preset has one stable profile ID. Existing
 profiles are preserved, and choosing an already configured preset opens its settings without adding
 another copy. Cancelling either input changes nothing.
+**Custom Agent Example** opens a commented template from the installed extension. Configure agents
+as a name-to-options object, like the contents of Zed or JetBrains `agent_servers`; older profile
+arrays still work. See [custom agent examples](vscode.md#custom-agent-examples) for copying or converting settings.
 
 Open the task's **Chat with Agent** in the Secondary Side Bar. Warden automatically resumes its saved
 session or creates the first session, so the composer is ready without a manual connection step. New

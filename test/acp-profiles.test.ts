@@ -1,9 +1,52 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import ts from 'typescript';
 import { acpPresets, addAcpPreset, parseAcpProfiles, presetCommandError } from '../packages/vscode/src/acp/profiles.js';
 
 const profile = { id: 'local-agent', label: 'Local agent', command: '/path/to/agent' };
 
 describe('ACP executable profiles', () => {
+  it('accepts named Zed and JetBrains agent entries with stable names and optional labels', () => {
+    expect(
+      parseAcpProfiles({
+        'My Agent': { type: 'custom', command: '/agent', args: ['acp'], env: { OPTION: 'literal' } },
+        'local-agent': { label: 'Renamed display', command: '/other' },
+      }),
+    ).toEqual([
+      { id: 'My Agent', label: 'My Agent', command: '/agent', args: ['acp'], env: { OPTION: 'literal' } },
+      { id: 'local-agent', label: 'Renamed display', command: '/other', args: [] },
+    ]);
+    expect(parseAcpProfiles({ 'local-agent': { label: profile.label, command: profile.command } })).toEqual(parseAcpProfiles([profile]));
+    expect(parseAcpProfiles({})).toEqual([]);
+  });
+
+  it('ships a valid commented custom-agent example', () => {
+    const file = new URL('../packages/vscode/examples/acp-agents.jsonc', import.meta.url);
+    const parsed = ts.parseConfigFileTextToJson(file.pathname, readFileSync(file, 'utf8'));
+    expect(parsed.error).toBeUndefined();
+    expect(parseAcpProfiles(parsed.config['warden.acpAgents'])).toMatchObject([{ id: 'my-agent', command: '/absolute/path/to/acp-agent', args: [] }]);
+  });
+
+  it.each([
+    { '': { command: '/agent' } },
+    { '   ': { command: '/agent' } },
+    { 'bad\nname': { command: '/agent' } },
+    { ['x'.repeat(101)]: { command: '/agent' } },
+    { agent: null },
+    { agent: [] },
+    { agent: { command: ' ' } },
+    { agent: { command: '/agent', label: null } },
+    { agent: { command: '/agent', args: '--acp' } },
+    { agent: { command: '/agent', env: { OPTION: true } } },
+    { agent: { command: '/agent', id: 'another-identity' } },
+    { agent: { command: '/agent', type: 'registry' } },
+    { agent: { command: '/agent', use_idea_mcp: true } },
+    { agent_servers: { agent: { command: '/agent' } } },
+    Object.fromEntries(Array.from({ length: 41 }, (_, i) => [`agent-${i}`, { command: '/agent' }])),
+  ])('rejects malformed or unsupported named profiles: %j', (value) => {
+    expect(() => parseAcpProfiles(value)).toThrow();
+  });
+
   it('keeps executable arguments and environment values literal rather than interpolating shell or editor expressions', () => {
     const configured = {
       ...profile,
@@ -12,6 +55,8 @@ describe('ACP executable profiles', () => {
       env: { AGENT_CONTEXT: `\${workspaceFolder}`, AGENT_OPTION: '$(echo literal)', EMPTY_VALUE: '' },
     };
     expect(parseAcpProfiles([configured])).toEqual([configured]);
+    const { id, ...options } = configured;
+    expect(parseAcpProfiles({ [id]: options })).toEqual([configured]);
   });
 
   it('supports no configured agent and an executable with no arguments', () => {
@@ -25,7 +70,7 @@ describe('ACP executable profiles', () => {
   });
 
   it.each([
-    ['object instead of array', profile],
+    ['unkeyed profile object', profile],
     ['invalid array entry', [null]],
     ['missing identifier', [{ label: 'Agent', command: '/agent' }]],
     ['identifier with a path separator', [{ ...profile, id: '../agent' }]],
@@ -50,14 +95,23 @@ describe('ACP configuration presets', () => {
       { id: 'codex', command: 'codex-acp', args: [] },
       { id: 'opencode', command: 'opencode', args: ['acp'] },
     ]);
-    expect(addAcpPreset(undefined, 'codex', '/agents/codex-acp')).toEqual([{ id: 'codex', label: 'Codex', command: '/agents/codex-acp', args: [] }]);
+    expect(addAcpPreset(undefined, 'codex', '/agents/codex-acp')).toEqual({ codex: { label: 'Codex', command: '/agents/codex-acp', args: [] } });
+  });
+
+  it('preserves named profiles and their format when adding or reselecting presets', () => {
+    const existing = { 'My Agent': { type: 'custom', command: '/agent', env: { OPTION: 'keep' } } };
+    const next = addAcpPreset(existing, 'opencode', '/opencode');
+    expect(next).toEqual({ ...existing, opencode: { label: 'OpenCode', command: '/opencode', args: ['acp'] } });
+    expect(addAcpPreset(next, 'opencode', '/different')).toBe(next);
+    expect(parseAcpProfiles(existing)).toHaveLength(1);
+    expect(() => addAcpPreset({ agent: { command: '/agent', use_idea_mcp: true } }, 'codex', '/codex')).toThrow('Unsupported');
   });
 
   it('appends a preset without normalizing or discarding existing configuration', () => {
     const existing = [{ ...profile, env: { AGENT_TOKEN: 'fixture-only' }, extensionField: 'preserve' }];
     const next = addAcpPreset(existing, 'opencode', '/path with spaces/opencode');
     expect(next).toEqual([...existing, { id: 'opencode', label: 'OpenCode', command: '/path with spaces/opencode', args: ['acp'] }]);
-    expect(next[0]).toBe(existing[0]);
+    expect(Array.isArray(next) ? next[0] : undefined).toBe(existing[0]);
     expect(existing).toHaveLength(1);
     expect('args' in existing[0]!).toBe(false);
   });

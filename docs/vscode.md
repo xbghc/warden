@@ -95,7 +95,8 @@ ACP is the currently implemented integration. The [agent contract](agent.md#mini
 requires messaging and task-workspace binding, not ACP or ownership of the agent process. Other
 integrations must implement and verify those capabilities before they can unlock the workbench.
 
-Use **Configure ACP** to reveal the native **Settings** view below Workbench. **Choose Agent Preset** opens the
+Use **Configure ACP** to reveal the native **Settings** view below Workbench and expand its ACP section,
+including when it was previously collapsed or hidden. **Choose Agent Preset** opens the
 native Codex/OpenCode picker. Each preset has one stable profile ID; selecting an existing preset
 opens its settings without adding a duplicate. Saving connects automatically, using the new preset.
 At startup Warden uses the last successfully selected profile when available, otherwise the first
@@ -131,6 +132,15 @@ The guide stays collapsed until requested. **Agent Profiles** opens native User 
 for detailed configuration. Other workflow pages link to Settings; Task Chat contains no preset picker
 or setup guide.
 
+### Custom agent examples
+
+Open **Configure ACP → ACP → Custom Agent Example** for the
+[commented template](../packages/vscode/examples/acp-agents.jsonc) bundled with the extension.
+It opens in a native text editor, including offline. Opening or editing that example does not change
+your settings. Use **Agent Profiles → Edit in settings.json**, or **Preferences: Open User Settings (JSON)**,
+to copy the setting into your own configuration. In a remote window, use
+**Preferences: Open Remote Settings (JSON)** on that workspace host. Keep existing settings and agents.
+
 Configure `warden.acpAgents` in VS Code User settings, or Remote User settings for SSH, WSL and
 containers. Executable profiles cannot come from workspace or folder settings. The executable must
 exist on the workspace extension host and speak ACP over stdio, either natively or through an adapter.
@@ -139,21 +149,68 @@ capabilities or provide a shell runner, agent sandbox or execution guard.
 
 ```json
 {
-  "warden.acpAgents": [
-    {
-      "id": "local-agent",
+  "warden.acpAgents": {
+    "local-agent": {
       "label": "My ACP agent",
-      "command": "/path/to/agent",
-      "args": []
+      "command": "/absolute/path/to/acp-agent",
+      "args": [],
+      "env": {}
     }
-  ]
+  }
 }
 ```
 
-This is a profile shape, not a vendor command recipe. Replace the executable and arguments with those
-required by your agent or adapter; there is no universal ACP startup flag. An optional `env` object supplies
-string environment overrides. Use the agent's existing login and inherited environment as appropriate;
-Warden does not add a credential store. A normal CLI without ACP support cannot use this connection.
+Copy the object **inside** `agent_servers` from [Zed](https://zed.dev/docs/ai/external-agents#custom-agents)
+or [JetBrains](https://www.jetbrains.com/help/ai-assistant/acp.html#add-custom-agent) as the value of
+`warden.acpAgents`; do not include the `agent_servers` wrapper or place it at the root of VS Code settings.
+This supports their custom stdio entry shape, not their entire configuration file. Zed's optional
+`"type": "custom"` is accepted. Client-specific options such as MCP forwarding, registry installation
+and JetBrains execution environments are not implemented and must be removed. The agent must still
+meet Warden's tool-capability requirements above.
+
+| Field | Meaning |
+| --- | --- |
+| Object key (`local-agent`) | Stable name identifying the agent and its saved conversations. Spaces and Unicode are allowed; do not rename it to change only the display name. |
+| `label` | Optional display name; defaults to the object key. |
+| `command` | Installed executable name on PATH or absolute path on the workspace host. Supply only the executable here. |
+| `args` | Optional array of separate, literal arguments; defaults to `[]`. Use the agent's documented ACP startup arguments. |
+| `env` | Optional string environment overrides, merged with the host environment. For example, `{"EXAMPLE_OPTION": "value"}` only if your agent supports that variable. |
+
+Replace the placeholder executable with an installed ACP agent or adapter. There is no universal ACP
+startup flag: an agent might require `["acp"]`, another `[]` or a different argument list. Warden launches
+the executable directly, with no implicit shell or expansion of `~`, `$VAR`, `${env:NAME}` or
+`${workspaceFolder}`. Keep paths with spaces as one JSON string, without additional shell quotes.
+Warden supplies the process and session cwd; do not hard-code another project in the launch arguments.
+Use the agent's own login or inherited environment on the same host. A normal CLI without ACP support
+cannot use this connection.
+
+For a JavaScript adapter, use `node` (or its absolute path) as the command and the adapter entry point
+as its first argument. On Windows, this avoids trying to launch an npm `.cmd` wrapper directly:
+
+```json
+{
+  "warden.acpAgents": {
+    "local-agent": {
+      "command": "C:\\Program Files\\nodejs\\node.exe",
+      "args": ["C:\\Agents\\adapter.js"],
+      "env": {}
+    }
+  }
+}
+```
+
+Replace those paths with the actual Node executable and installed adapter's documented entry point.
+On Linux/macOS the equivalent is a native Node path and an absolute POSIX adapter path.
+Remote windows launch on the remote host, so use that host's paths, installation and login.
+
+Legacy arrays such as `[{"id": "local-agent", "label": "My ACP agent", "command": "/path/to/agent"}]`
+still work. To convert one, make each `id` the object key, keep its `label`, `command`, `args` and `env`,
+and remove the inner `id`. This preserves the profile identity used by existing conversations.
+Preset saves preserve whichever format is already configured; new configurations use objects.
+Saving User or Remote User settings triggers the normal automatic connection. Errors and
+authentication actions appear in Warden Settings; detailed diagnostics are in **Output → Warden**.
+
+### Task Chat
 
 Open a task's **Chat with Agent** to show **Task Chat** in the Secondary Side Bar. Opening automatically
 resumes the saved session or creates the first session, without a manual connect or create step.

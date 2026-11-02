@@ -207,7 +207,8 @@ There is no separate connection-check page. Hide **Configure ACP** while the wor
 agent connection is pending, including the delay before automatic startup. After loading, Workbench
 contains only **Configure ACP** when ACP is missing, invalid, disconnected or needs authentication or
 error recovery; it has no setup text or duplicate toolbar
-entry. The button reveals the native **Settings** view stacked below Workbench. Its ACP tree owns
+entry. The button reveals the native **Settings** view stacked below Workbench and expands, selects
+and focuses the ACP section, including when it was previously collapsed. Its ACP tree owns
 preset selection, configuration, connection progress, errors, authentication and reconnect controls.
 Repeated entry actions reveal the same view. Other workflow panels offer that same link rather than another setup
 or check page. Opening Settings does not create an additional connection.
@@ -228,6 +229,9 @@ requirements. A second native input confirms the executable; Enter saves the pro
 cancels without a write. Existing preset IDs and **Custom Agent / Edit Settings** open User or Remote
 User settings; invalid profiles go directly there for repair. Adding a preset preserves existing
 configuration and never installs an agent. Saving starts the automatic ACP connection.
+**Custom Agent Example** opens a bundled JSON template in the native editor. Named configuration
+objects use the same entry structure as Zed and JetBrains `agent_servers`; existing arrays remain
+supported. Opening the template does not save configuration or connect an agent.
 
 ## Add a task
 

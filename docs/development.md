@@ -21,7 +21,7 @@ pnpm test:vscode
 `WARDEN_VSCODE_SUITE=tree-refresh pnpm test:vscode` runs a focused native regression for branch
 replacement while descendant reads are held and menu contexts change. It also checks hidden views,
 tree file layout and superseded expansion restores. All packaged host suites inspect the renderer
-logs after shutdown and fail on `TreeError [warden.task]`, even when the extension tests exit with 0.
+logs after shutdown and fail on Warden tree errors (including Settings), even when the extension tests exit with 0.
 Set `WARDEN_VSCODE_ARTIFACTS` to retain those renderer logs outside the disposable fixture directory.
 The packaged extension's CI matrix runs this regression before the full native suite on each platform.
 
@@ -182,6 +182,8 @@ existing native review and Git flows. Cover sidebar/editor transfers during perm
 missing and invalid agent profiles before and after branch selection, live configuration updates,
 workspace-profile rejection, a single native Configure ACP button for missing profiles, shared native Settings
 view routing without launching an editor or preset picker, stacked/collapsible view contributions,
+reopening hidden views with collapsed ACP controls, the bundled custom-agent example, named profile
+configuration and conversion from legacy arrays without changing profile identity,
 multiline script saves, cancellation, legacy-script preservation and stale repository/configuration
 rejection, preset controls available only in Settings,
 automatic startup/reconfiguration connections, and gated workflow surfaces and actions

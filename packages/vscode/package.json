@@ -744,10 +744,12 @@
           "description": "Command to run in the preview folder. You can also use the Warden preview terminal directly."
         },
         "warden.acpAgents": {
-          "type": "array",
-          "default": [],
+          "type": [
+            "object",
+            "array"
+          ],
+          "default": {},
           "scope": "machine",
-          "description": "ACP agents that read and write files and run their own commands. Profiles are read only from User or Remote User settings and launched with an executable and arguments. Warden does not provide agent filesystem or terminal tools.",
           "items": {
             "type": "object",
             "required": [
@@ -785,7 +787,65 @@
                 "description": "Optional environment variables. Prefer the agent's own authentication setup instead of storing credentials in settings."
               }
             }
-          }
+          },
+          "markdownDescription": "Named ACP agents, using the object inside Zed or JetBrains `agent_servers`. Each entry supplies `command`, `args` and optional `env`; its name identifies saved conversations. Legacy profile arrays remain supported. Configure only in User or Remote User settings. Open **Warden: Configure ACP → Custom Agent Example** for a commented template. Agents must run their own file and command tools.",
+          "maxProperties": 40,
+          "maxItems": 40,
+          "propertyNames": {
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "^(?!\\s*$)[^\\u0000-\\u001f\\u007f]+$"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "command"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "label": {
+                "type": "string",
+                "description": "Optional display name; defaults to the agent name. Changing the display name preserves conversation bindings."
+              },
+              "command": {
+                "type": "string",
+                "description": "Executable on the local or remote extension host; launched without an implicit shell"
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "env": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Optional environment variables. Prefer the agent's own authentication setup instead of storing credentials in settings."
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "custom"
+                ],
+                "description": "Optional compatibility field for Zed custom stdio agents."
+              }
+            }
+          },
+          "defaultSnippets": [
+            {
+              "label": "Custom ACP agent",
+              "body": {
+                "${1:my-agent}": {
+                  "command": "${2:/absolute/path/to/acp-agent}",
+                  "args": [],
+                  "env": {}
+                }
+              }
+            }
+          ]
         }
       }
     },

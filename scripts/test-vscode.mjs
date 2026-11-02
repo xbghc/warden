@@ -97,7 +97,7 @@ try {
           await mkdir(process.env.WARDEN_VSCODE_ARTIFACTS, { recursive: true });
           await writeFile(path.join(process.env.WARDEN_VSCODE_ARTIFACTS, `${path.basename(directory)}-renderer.log`), log);
         }
-        if (log.includes('TreeError [warden.task]')) throw new Error('Native Warden tree errors were reported in renderer.log');
+        if (/TreeError \[warden\./.test(log)) throw new Error('Native Warden tree errors were reported in renderer.log');
       }
     }
   };

@@ -16,6 +16,9 @@ It runs in desktop VS Code, Remote SSH, WSL and Dev Containers.
 In a multi-root window, use **Warden: Select Repository** after connecting.
 Warden connects at startup and after profile changes, keeps the connection open, and cleans up its
 owned processes on shutdown. Connection errors, authentication and reconnect controls live in Settings.
+For a custom agent, open **Custom Agent Example** in Settings for a bundled, commented JSON template.
+Named objects match the entries inside Zed and JetBrains `agent_servers`; existing arrays remain supported.
+See the [configuration examples](https://github.com/xbghc/warden/blob/main/docs/vscode.md#custom-agent-examples).
 
 ## Work on a requirement
 

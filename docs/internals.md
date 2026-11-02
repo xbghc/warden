@@ -86,6 +86,11 @@ without an expected configuration retain their explicit full-configuration save 
 Unknown URIs, renames, directory creation and deletion are rejected. The editor adds no Git writes or direct shell
 execution; preview setup retains its existing automatic configuration-change trigger. Agent profiles still use only User or
 Remote User settings. Legacy webview settings navigation reveals the same native Settings view.
+Named ACP objects and legacy profile arrays pass through the same executable, argument and environment
+validation. Object keys become stable profile IDs, not paths or commands. Unknown client-specific
+options in named entries are rejected. Preset saves retain the existing settings shape and entries.
+The custom-agent example is a bundled JSON document; opening it neither changes profiles nor starts
+a connection. There are no additional Git operations or workspace configuration sources.
 
 The workbench ACP connection is separate from Engine Git operations. In a trusted workspace, startup
 and changes to User or Remote User profiles automatically launch a validated profile in the primary

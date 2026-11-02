@@ -54,7 +54,6 @@ exports.checkAgentSetup = async (workbench, extension, fixture, eventually) => {
     await vscode.commands.executeCommand('workbench.action.closeAllEditors');
     await vscode.commands.executeCommand('workbench.action.closePanel');
     await vscode.commands.executeCommand('notifications.clearAll');
-    await vscode.commands.executeCommand('warden.settings.focus');
     await new Promise((resolve) => setTimeout(resolve, 500));
     execFileSync('import', ['-display', process.env.DISPLAY, '-window', 'root', `${directory}/${name}.png`]);
   };
@@ -86,16 +85,50 @@ exports.checkAgentSetup = async (workbench, extension, fixture, eventually) => {
     );
     assert.equal(workbench.sidebar.view.message, undefined, 'missing ACP shows only the native button');
     assert.equal(workbench.agentSetupRequired, true, 'missing configuration offers setup after loading');
-    await screenshot(hasBranch ? 'missing-with-saved-work' : 'missing-before-branch');
+    await vscode.commands.executeCommand('workbench.action.closeSidebar');
+    await eventually(() => !workbench.settings.view.visible);
     await vscode.commands.executeCommand('warden.configureAgents');
     const settings = workbench.settings.view;
     await eventually(() => settings.visible);
+    let acpExpanded = true;
+    const expansion = settings.onDidExpandElement(({ element }) => {
+      if (element.id === 'acp') acpExpanded = true;
+    });
+    const collapse = settings.onDidCollapseElement(({ element }) => {
+      if (element.id === 'acp') acpExpanded = false;
+    });
+    try {
+      await vscode.commands.executeCommand('list.focusFirst');
+      await vscode.commands.executeCommand('list.collapse');
+      await eventually(() => !acpExpanded);
+      await vscode.commands.executeCommand('workbench.action.closeSidebar');
+      await eventually(() => !settings.visible);
+      await vscode.commands.executeCommand('warden.configureAgents');
+      await eventually(() => settings.visible);
+      await eventually(() => acpExpanded && settings.selection[0]?.id === 'acp');
+      assert.equal(acpExpanded, true, 'Configure ACP expands previously collapsed configuration controls');
+      assert.equal(settings.selection[0]?.id, 'acp', 'Configure ACP selects the revealed ACP section');
+    } finally {
+      expansion.dispose();
+      collapse.dispose();
+    }
+    await screenshot(hasBranch ? 'missing-with-saved-work' : 'missing-before-branch');
     assert.equal(workbench.views.panels.has('settings'), false, 'Configure ACP reveals native Settings before branch selection');
     assert.equal(workbench.agentSetup.picker, undefined, 'the sidebar button does not open the preset picker');
     await workbench.handleAction({ type: 'setup.agents' }, workbench.session);
     assert.equal(workbench.settings.view, settings, 'all configuration entry points reuse one Settings view');
     assert.equal(workbench.model('settings').agentConfiguration.status, 'missing', 'opening Settings does not configure an agent');
+    const example = workbench.settings.getChildren(workbench.settings.getChildren()[0]).find((node) => node.id === 'example');
+    await vscode.commands.executeCommand(example.command.command, ...example.command.arguments);
+    assert.equal(vscode.window.activeTextEditor.document.uri.toString(), example.command.arguments[0].toString());
+    assert(vscode.window.activeTextEditor.document.getText().includes('"warden.acpAgents": {'), 'the packaged example uses named agents');
+    assert.equal(workbench.model('settings').agentConfiguration.status, 'missing', 'reading the example does not save profiles');
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
     await assert.rejects(configuration.update('acpAgents', [healthyProfile(fixture)], vscode.ConfigurationTarget.Workspace), /only into User settings/);
+    await assert.rejects(
+      configuration.update('acpAgents', { fixture: { command: fixture.node } }, vscode.ConfigurationTarget.Workspace),
+      /only into User settings/,
+    );
 
     await configuration.update('acpAgents', [{ id: 'broken' }], vscode.ConfigurationTarget.Global);
     await gate([]);
@@ -190,12 +223,14 @@ exports.checkAgentSetup = async (workbench, extension, fixture, eventually) => {
       taskIds,
     );
     const originalPid = (await events()).filter((row) => row.method === 'initialize').at(-1).pid;
-    await configuration.update('acpAgents', [{ ...healthyProfile(fixture), label: 'Updated fixture' }], vscode.ConfigurationTarget.Global);
+    const { id, ...namedProfile } = healthyProfile(fixture);
+    await configuration.update('acpAgents', { [id]: { ...namedProfile, label: 'Updated fixture', type: 'custom' } }, vscode.ConfigurationTarget.Global);
     await eventually(() => {
       const state = workbench.agentSetup.readiness.snapshot();
       return state.status === 'ready' && state.profile.label === 'Updated fixture';
     });
     assert.throws(() => process.kill(originalPid, 0), 'settings replacement stops the previous connection');
+    assert.equal(workbench.agentSetup.readiness.snapshot().profile.id, id, 'converting to named profiles retains the selected identity');
 
     const startup = new workbench.agentSetup.constructor(
       () => fixture.root,
@@ -229,7 +264,7 @@ exports.checkAgentSetup = async (workbench, extension, fixture, eventually) => {
     assert.equal(workbench.conversations.entries.size, 0, 'checks do not create Warden task chats');
   } finally {
     await configuration.update('acpAgents', previous, vscode.ConfigurationTarget.Global);
-    if (previous?.length) await workbench.agentSetup.check();
+    if (previous && Object.keys(previous).length) await workbench.agentSetup.check();
   }
 };
 
@@ -335,6 +370,30 @@ exports.checkAgentPresets = async (workbench, fixture, eventually) => {
     await accept(setup.input, 'input');
     await pending;
     assert.deepEqual(value(), [concurrent], 'a preset configured while the input was open is preserved');
+
+    await configuration.update('acpAgents', undefined, vscode.ConfigurationTarget.Global);
+    pending = workbench.handleAction({ type: 'settings.agents' }, workbench.session);
+    await choose('codex');
+    await eventually(() => !!setup.input);
+    setup.input.value = executable;
+    await accept(setup.input, 'input');
+    await pending;
+    assert.deepEqual(value(), { codex: { label: 'Codex', command: executable, args: [] } }, 'new settings use a named object');
+
+    const named = { 'My Agent': { command: fixture.node, args: ['--custom'] } };
+    await configuration.update('acpAgents', named, vscode.ConfigurationTarget.Global);
+    pending = workbench.handleAction({ type: 'settings.agents' }, workbench.session);
+    await choose('opencode');
+    await eventually(() => !!setup.input);
+    setup.input.value = `${fixture.node}-opencode-fixture`;
+    await accept(setup.input, 'input');
+    await pending;
+    const namedWithPreset = { ...named, opencode: { label: 'OpenCode', command: `${fixture.node}-opencode-fixture`, args: ['acp'] } };
+    assert.deepEqual(value(), namedWithPreset, 'preset saves preserve the named-object format');
+    pending = workbench.handleAction({ type: 'settings.agents' }, workbench.session);
+    await choose('opencode');
+    await pending;
+    assert.deepEqual(value(), namedWithPreset, 'reselecting a named preset never replaces or duplicates it');
 
     const invalid = [{ id: 'broken' }];
     await configuration.update('acpAgents', invalid, vscode.ConfigurationTarget.Global);

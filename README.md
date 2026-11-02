@@ -12,6 +12,7 @@ Install **Warden Workspace Review** (`xbghc.warden`) in VS Code and open the pri
 Configure an agent through **Warden: Configure ACP**. Warden connects automatically at startup and
 after configuration changes. Once connected, choose **Warden: Select Base Branch**. Unavailable agents
 keep workspace controls hidden, with configuration and recovery in Settings.
+For custom agents, use **Custom Agent Example** in Settings or the [configuration examples](docs/vscode.md#custom-agent-examples).
 Git must be available in the workspace environment. The extension
 requires VS Code 1.106 or newer and runs in desktop VS Code, Remote SSH, WSL and Dev Containers. It requires Workspace Trust.
 There is no Warden server, browser application or CLI to start, and no separate Node installation

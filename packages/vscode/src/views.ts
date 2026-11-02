@@ -22,7 +22,7 @@ export class Views implements vscode.Disposable {
   async show(surface: Surface) {
     if (!Object.hasOwn(titles, surface)) throw new Error('Unknown view.');
     if (surface === 'workspaces' || surface === 'settings') {
-      await vscode.commands.executeCommand(surface === 'settings' ? 'warden.settings.focus' : 'warden.task.focus');
+      await vscode.commands.executeCommand(surface === 'settings' ? 'warden.configureAgents' : 'warden.task.focus');
       return;
     }
     if (surface === 'task') {

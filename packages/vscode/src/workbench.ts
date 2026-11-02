@@ -150,7 +150,7 @@ export class Workbench {
       context.workspaceState,
       (error) => this.report(error),
     );
-    this.settings = new Settings(() => this.model('settings'));
+    this.settings = new Settings(() => this.model('settings'), context.extensionUri);
     this.scriptSettings = new ScriptSettings(
       () => this.model('settings'),
       (binding, value) => this.saveScript(binding, value),

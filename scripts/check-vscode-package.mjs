@@ -16,6 +16,7 @@ assert(files[`extension/${manifest.main.replace(/^\.\//, '')}`]?.length, 'The VS
 assert(files['extension/LICENSE.txt']?.length, 'The VSIX must contain its license.');
 assert(files['extension/dist/webview/index.js']?.length, 'The VSIX must contain the webview script.');
 assert(files['extension/dist/webview/index.css']?.length, 'The VSIX must contain the webview styles.');
+assert(files['extension/examples/acp-agents.jsonc']?.length, 'The VSIX must contain the custom ACP configuration example.');
 assert(!strFromU8(files['extension/dist/webview/index.js']).includes('process.env'), 'Webviews must run without Node globals.');
 const bundle = strFromU8(files[`extension/${manifest.main.replace(/^\.\//, '')}`]);
 assert(!bundle.includes('hono/dist') && !bundle.includes('registry.npmjs.org'), 'The extension must not bundle the legacy server or npm update checker.');

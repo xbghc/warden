@@ -26,8 +26,13 @@ terminals are separate facilities, not ACP tool implementations.
 
 ## Profiles and authentication
 
-`warden.acpAgents` is an array of `{ id, label, command, args, env? }` profiles configured in VS Code
-User settings, or Remote User settings when the extension runs in SSH, WSL or a container. Workspace
+`warden.acpAgents` is an object mapping stable agent names to `{ command, args?, env?, label?, type? }`,
+matching the custom stdio entries inside Zed and JetBrains `agent_servers`. Names identify saved
+conversations; `label` optionally overrides the display name, and Zed's `type: "custom"` is accepted.
+Other client-specific fields are rejected rather than silently ignored. Legacy arrays of
+`{ id, label, command, args, env? }` remain supported; using each old ID as the object key retains
+session bindings. Preset saves preserve the existing format; new settings use an object.
+Profiles are configured in VS Code User settings, or Remote User settings when the extension runs in SSH, WSL or a container. Workspace
 and folder settings cannot supply executable profiles. The command must be available on the
 workspace extension host. An executable and argument array are launched directly; task text and
 agent replies never become executable configuration.
@@ -82,9 +87,14 @@ Workspace loading and pending connections, including the automatic connection sc
 never show **Configure ACP**. Once loading finishes, missing or invalid configuration, authentication,
 failed connections and explicit disconnection expose the **Configure ACP** welcome button,
 with no task rows, setup text or duplicate toolbar entry. It reveals the native Settings view stacked
-below Workbench. The two views use VS Code's own collapse, resize and keyboard controls. Other workflow
+below Workbench and expands, selects and focuses its ACP section, even after it was collapsed or hidden.
+The two views use VS Code's own collapse, resize and keyboard controls. Other workflow
 panels offer the same link; connection status, recovery, setup links and preset controls live in Settings.
 Opening Settings does not change profiles or start an additional connection.
+
+**Custom Agent Example** opens the bundled commented JSON template in a native text editor.
+It covers named profiles, arguments, environment overrides and Windows/JavaScript launchers.
+Opening the example does not copy it into user settings or launch a process.
 
 In Settings, **Choose Agent Preset** opens a native picker with Codex, OpenCode and
 **Custom Agent / Edit Settings**. Each preset has one stable profile ID.

@@ -7,6 +7,7 @@ export class SettingsNode extends vscode.TreeItem {
   readonly kind = 'setting';
   session?: string;
   children?: SettingsNode[];
+  parent?: SettingsNode;
 }
 
 const connectionLabels: Record<AgentReadiness['status'], string> = {
@@ -22,9 +23,13 @@ export class Settings implements vscode.TreeDataProvider<SettingsNode>, vscode.D
   private readonly changed = new vscode.EventEmitter<SettingsNode | undefined>();
   readonly onDidChangeTreeData = this.changed.event;
   readonly view: vscode.TreeView<SettingsNode>;
+  private readonly agent = this.row('acp', 'ACP', 'plug');
   private signature?: string;
 
-  constructor(private readonly model: () => WorkbenchModel) {
+  constructor(
+    private readonly model: () => WorkbenchModel,
+    private readonly extensionUri: vscode.Uri,
+  ) {
     this.view = vscode.window.createTreeView('warden.settings', { treeDataProvider: this });
   }
 
@@ -55,19 +60,28 @@ export class Settings implements vscode.TreeDataProvider<SettingsNode>, vscode.D
     this.changed.fire(undefined);
   }
 
-  show() {
-    return vscode.commands.executeCommand('warden.settings.focus');
+  async show() {
+    // Focusing the view alone leaves a previously collapsed ACP section closed.
+    // Reveal the provider's existing element so VS Code need not resolve a new root.
+    await this.view.reveal(this.agent, { select: true, focus: true, expand: true });
   }
   getTreeItem(node: SettingsNode) {
     return node;
   }
+  getParent(node: SettingsNode) {
+    return node.parent;
+  }
   getChildren(node?: SettingsNode): SettingsNode[] {
-    if (node) return node.children ?? [];
+    if (node)
+      return (node.children ?? []).map((child) => {
+        child.parent = node;
+        return child;
+      });
     const model = this.model();
     const { agentConfiguration: configuration, agentReadiness: readiness } = model;
     const configured = configuration.status === 'configured';
     const status = configured ? connectionLabels[readiness.status] : configuration.status === 'invalid' ? 'Invalid Configuration' : 'Not Configured';
-    const agent = this.row('acp', 'ACP', 'plug');
+    const agent = this.agent;
     agent.description = status;
     agent.collapsibleState = vscode.TreeItemCollapsibleState.Expanded;
     agent.children = [];
@@ -100,6 +114,7 @@ export class Settings implements vscode.TreeDataProvider<SettingsNode>, vscode.D
     agent.children.push(
       this.row('preset', configuration.status === 'invalid' ? 'Fix Agent Configuration' : 'Choose Agent Preset', 'list-selection', 'warden.chooseAgentPreset'),
       this.row('profiles', 'Agent Profiles', 'settings-gear', 'workbench.action.openSettings', ['warden.acpAgents']),
+      this.row('example', 'Custom Agent Example', 'file-code', 'vscode.open', [vscode.Uri.joinPath(this.extensionUri, 'examples', 'acp-agents.jsonc')]),
     );
     const help = this.row('guide', 'ACP Setup Guide', 'book');
     help.collapsibleState = vscode.TreeItemCollapsibleState.Collapsed;

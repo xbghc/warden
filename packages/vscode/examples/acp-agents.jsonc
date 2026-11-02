@@ -1,0 +1,41 @@
+// Copy this setting into VS Code User settings (JSON), or Remote User settings
+// for SSH, WSL or Dev Containers. Keep your other settings and existing agents.
+// Editing this example does not configure Warden. Saving User settings does:
+// Warden automatically connects without sending a work prompt.
+{
+  "warden.acpAgents": {
+    // This is the object inside Zed or JetBrains "agent_servers".
+    // Names identify saved conversations. Keep a name stable once it is in use.
+    "my-agent": {
+      // Optional display name. If omitted, Warden displays "my-agent".
+      "label": "My ACP Agent",
+      // Executable name on PATH or an absolute path on the workspace host.
+      // Replace this placeholder with an installed ACP agent or adapter.
+      "command": "/absolute/path/to/acp-agent",
+      // Use the agent's documented ACP arguments. There is no universal flag.
+      // Pass each argument separately, e.g. ["acp"] if the agent requires it.
+      "args": [],
+      // Optional string environment overrides; the host environment is inherited.
+      "env": {
+        // "EXAMPLE_OPTION": "replace-with-an-option-your-agent-supports"
+      }
+    }
+  }
+}
+
+// A JavaScript adapter can use a native Node executable:
+// "command": "/usr/bin/node",
+// "args": ["/absolute/path/to/adapter.js"]
+//
+// Windows example (escape backslashes in JSON):
+// "command": "C:\\Program Files\\nodejs\\node.exe",
+// "args": ["C:\\Agents\\adapter.js"]
+// Native .exe agents also work. Do not put a .cmd/.bat wrapper in "command".
+//
+// Values are literal: no shell, ~, ${env:NAME} or ${workspaceFolder} expansion.
+// Warden assigns the process/session working directory; do not pin a project
+// path in the agent's arguments. Sign in using the agent's own setup on this host.
+// Zed's optional "type": "custom" is accepted. Other client-specific options
+// (MCP forwarding, WSL launch settings, registry agents) are not implemented.
+// Existing [{ "id", "label", "command", "args", "env" }] arrays still work.
+// To convert one, use each old id as the object key to preserve session bindings.
