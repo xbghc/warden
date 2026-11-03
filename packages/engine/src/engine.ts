@@ -202,6 +202,7 @@ export class Engine {
   private notifying?: Promise<void>;
   private notifyAgain = false;
   private stopped = false;
+  private starting?: Promise<void>;
   private closing?: Promise<void>;
   private onUpdate?: () => Promise<void>;
   private observationScope: 'repository' | 'state' = 'repository';
@@ -300,8 +301,15 @@ export class Engine {
         });
     }, 100);
   }
-  async start(onUpdate: () => Promise<void>, onError: (error: unknown) => void, scope: 'repository' | 'state' = 'repository') {
-    if (this.timer || this.stopped) return;
+  start(onUpdate: () => Promise<void>, onError: (error: unknown) => void, scope: 'repository' | 'state' = 'repository'): Promise<void> {
+    if (this.starting) return this.starting;
+    if (this.timer || this.stopped) return Promise.resolve();
+    this.starting = this.startObservers(onUpdate, onError, scope).finally(() => {
+      this.starting = undefined;
+    });
+    return this.starting;
+  }
+  private async startObservers(onUpdate: () => Promise<void>, onError: (error: unknown) => void, scope: 'repository' | 'state') {
     this.observationScope = scope;
     this.onUpdate = onUpdate;
     this.onError = (error) => {
@@ -350,7 +358,7 @@ export class Engine {
     this.closing = this.log.measure(
       'engine.close',
       async () => {
-        await Promise.allSettled([this.ticking, this.notifying, ...this.pending, ...[...this.watchers.values()].map((w) => w.close())]);
+        await Promise.allSettled([this.starting, this.ticking, this.notifying, ...this.pending, ...[...this.watchers.values()].map((w) => w.close())]);
         await this.lease?.release();
         if (this.lease) this.log.write('info', 'preview.owner.released');
       },

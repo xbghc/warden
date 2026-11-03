@@ -376,20 +376,21 @@ describe('desktop engine', () => {
     });
     const errors: unknown[] = [];
     let titles: string[] = [];
-    await observer.start(
+    const starting = observer.start(
       async () => {
         titles = (await observer.store.load()).workflow?.changes.map((task) => task.title) ?? [];
       },
       (error) => errors.push(error),
       'state',
     );
-    // Repeated starts do not widen an existing observer's scope or replace its callback.
-    await observer.start(
+    // A concurrent start must not widen the original scope or replace its callback.
+    const repeated = observer.start(
       async () => {
         throw new Error('The state observer was replaced');
       },
       (error) => errors.push(error),
     );
+    await Promise.all([starting, repeated]);
     const task = await engine.execute('task.create', { title: 'Observed state' });
     await vi.waitFor(() => expect(titles).toContain('Observed state'));
     await observer.execute('repository.get', undefined);
@@ -459,6 +460,26 @@ describe('desktop engine', () => {
     await writer.execute('config.save', { hooks: {}, previewSetup: 'echo state changed' });
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(calls).toBe(1);
+    expect(errors).toEqual([]);
+  });
+
+  it('waits for state-only observer initialization when closed during startup', async () => {
+    const update = vi.fn(async () => {});
+    const errors: unknown[] = [];
+    let initialized = false;
+    const starting = engine
+      .start(update, (error) => errors.push(error), 'state')
+      .then(() => {
+        initialized = true;
+      });
+    await engine.close();
+    try {
+      expect(initialized).toBe(true);
+    } finally {
+      await starting;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(update).not.toHaveBeenCalled();
     expect(errors).toEqual([]);
   });
 

@@ -47,6 +47,8 @@ They watch the state directory and retain periodic state reads, but do not watch
 acquire the preview-owner lease or run preview synchronization. Reopening or replacing the workbench
 therefore leaves preview ownership with its repository observer, rather than a retained chat engine
 whose background writes could exhaust the workbench's repository-lock wait.
+Concurrent starts share the first initialization and its observation scope. Closing drains pending
+initialization as well as notifications, so a late startup cannot replace callbacks or outlive shutdown.
 
 The outer `.lock` and `v2` directories persist after release. New versions use exclusive directory
 creation for the outer path, so Windows directory rename cannot replace a legacy flat lock there.
