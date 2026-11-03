@@ -213,7 +213,7 @@ try:
         first.wait_for_function("window.__model.sending && window.__model.status === 'running'")
         expect(first.locator('.acp-composer button[type="submit"]')).to_have_count(0)
         first.reload()
-        first.wait_for_function("window.__model.sending && window.__model.status === 'running'")
+        first.wait_for_function("window.__model?.sending && window.__model.status === 'running'")
         expect(composer).to_have_value('')
         expect(first.locator('.acp-composer button[type="submit"]')).to_have_count(0)
         composer.fill('follow-up during completion')
@@ -498,13 +498,17 @@ try:
         expect(second.get_by_text('This agent does not advertise session restoration', exact=False)).to_be_visible()
         unsupported_session = second.evaluate('window.__model.record.sessionId')
         second.reload()
-        second.wait_for_function("window.__model.status === 'error'")
+        second.wait_for_function("window.__model?.status === 'error'")
         expect(second.get_by_role('alert')).to_contain_text('cannot resume sessions')
         assert second.evaluate('window.__model.record.sessionId') == unsupported_session
         expect(second.locator('.acp-message-agent')).to_contain_text('Echo: no-load turn')
 
+        # A live connection makes its claim cleanup precede the new conversation's
+        # release gate, so the resetting state cannot depend on a failed-load race.
+        new_session(second)
+        connected(second)
         use_agent(second, 'auth')
-        second.request.post(origin + '/reset-release?task=1')
+        assert second.request.post(origin + '/reset-release?task=1').ok
         try:
             new_session(second)
             second.wait_for_function("!window.__model.record.sessionId && window.__model.status === 'resetting'")
@@ -576,6 +580,8 @@ try:
         expect(thinking).not_to_be_checked()
         expect(first.get_by_role('combobox', name='Session Mode', exact=True)).to_have_count(0)
         thinking.press('Escape')
+        # Let the popover restore its trigger focus before moving into the composer.
+        expect(first.get_by_role('button', name='More Session Options', exact=True)).to_be_focused()
 
         # Typing a command opens completion without moving focus or sending a prompt.
         command_list = first.get_by_role('listbox', name='Agent Commands', exact=True)

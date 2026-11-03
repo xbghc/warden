@@ -1,6 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
-import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Engine, PreviewService, WorkflowService } from '@warden/engine';
 import type { AcpBinding } from '@warden/shared';
@@ -14,7 +14,8 @@ let directory: string;
 let engine: Engine;
 beforeEach(async () => {
   fixture = await makeFixtureRepo('warden-delete-');
-  directory = await mkdtemp(path.join(os.tmpdir(), 'warden-delete-data-'));
+  // macOS temporary paths can alias /private/var; deletion validates canonical storage paths.
+  directory = await realpath(await mkdtemp(path.join(os.tmpdir(), 'warden-delete-data-')));
   await fixture.write('.gitignore', 'node_modules/\n.env\n');
   fixture.git('add', '.gitignore');
   fixture.git('commit', '-qm', 'Ignore local environment');

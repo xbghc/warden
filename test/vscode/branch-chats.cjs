@@ -27,6 +27,18 @@ exports.checkBranchChats = async (workbench, root, eventually) => {
     return { text, version: draft.draftVersion, revision: draft.draftRevision + 1 };
   };
   let chat;
+  const connected = async () => {
+    try {
+      // Restoring a session validates Git state and reclaims its connection before loading it.
+      await eventually(() => chat.surface?.ready && chat.session.snapshot().status === 'connected', 30_000);
+    } catch (error) {
+      const snapshot = chat.session.snapshot();
+      throw new Error(
+        `Branch chat did not connect: ${JSON.stringify({ status: snapshot.status, error: chat.error ?? snapshot.error, connecting: !!chat.connecting })}`,
+        { cause: error },
+      );
+    }
+  };
   console.log('Checking running task conversations across primary branch changes');
   try {
     await configuration.update('acpAgents', [profile], vscode.ConfigurationTarget.Global);
@@ -39,7 +51,7 @@ exports.checkBranchChats = async (workbench, root, eventually) => {
     await workbench.selectTask({ kind: 'task', task }, 'select');
     await conversations.show(root, task.id);
     chat = conversations.sidebarEntry;
-    await eventually(() => chat.surface?.ready && chat.session.snapshot().status === 'connected');
+    await connected();
     const sessionId = chat.session.snapshot().record.sessionId;
     const identity = chat.binding.identity;
     const asking = conversations.handle(chat, { type: 'send', profileId: profile.id, ...edit(chat, 'permission') });
@@ -90,7 +102,7 @@ exports.checkBranchChats = async (workbench, root, eventually) => {
     const previous = chat;
     await conversations.show(root, task.id);
     chat = conversations.sidebarEntry;
-    await eventually(() => chat.surface?.ready && chat.session.snapshot().status === 'connected');
+    await connected();
     assert.notEqual(chat, previous);
     assert.equal(chat.session.snapshot().record.sessionId, sessionId);
     assert.deepEqual(history(chat), previousHistory);
@@ -122,7 +134,7 @@ exports.checkBranchChats = async (workbench, root, eventually) => {
     assert.equal(chat.draft.text, 'Do not send to another task branch');
     git('-C', task.worktree, 'switch', task.branch);
     await conversations.show(root, task.id);
-    await eventually(() => chat.session.snapshot().status === 'connected');
+    await connected();
     assert.equal(chat.session.snapshot().record.sessionId, sessionId, 'restoring the task branch resumes its original session');
     assert.equal(chat.draft.text, 'Do not send to another task branch');
     assert.equal((await journal()).filter((row) => row.method === 'session/prompt').length, 2);

@@ -47,8 +47,10 @@ class CompletionStorage extends AcpSessionStorage {
 
   override async claim() {
     const release = await super.claim();
+    // An armed reset gate must not block cleanup of an earlier connection claim.
+    const resetRelease = this.resetRelease;
     return async () => {
-      await this.resetRelease?.gate;
+      await resetRelease?.gate;
       await release();
     };
   }
