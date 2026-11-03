@@ -366,6 +366,102 @@ describe('desktop engine', () => {
     expect(fixture.git('status', '--porcelain')).toBe('');
   });
 
+  it('keeps state-only observers out of preview ownership across workbench replacement', async () => {
+    const observer = await Engine.open(fixture.root, engine.store.file);
+    engines.push(observer);
+    const claims = vi.spyOn(observer.store, 'acquirePreviewLease');
+    const owners = new Set<PreviewService>();
+    const ticks = vi.spyOn(PreviewService.prototype, 'tick').mockImplementation(async function (this: PreviewService) {
+      owners.add(this);
+    });
+    const errors: unknown[] = [];
+    let titles: string[] = [];
+    await observer.start(
+      async () => {
+        titles = (await observer.store.load()).workflow?.changes.map((task) => task.title) ?? [];
+      },
+      (error) => errors.push(error),
+      'state',
+    );
+    // Repeated starts do not widen an existing observer's scope or replace its callback.
+    await observer.start(
+      async () => {
+        throw new Error('The state observer was replaced');
+      },
+      (error) => errors.push(error),
+    );
+    const task = await engine.execute('task.create', { title: 'Observed state' });
+    await vi.waitFor(() => expect(titles).toContain('Observed state'));
+    await observer.execute('repository.get', undefined);
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    expect(claims).not.toHaveBeenCalled();
+    expect(ticks).not.toHaveBeenCalled();
+    expect((await engine.execute('preview.get', undefined)).worktree).toBeUndefined();
+
+    await engine.start(
+      async () => {},
+      (error) => errors.push(error),
+    );
+    await vi.waitFor(() => expect(owners.size).toBe(1), { timeout: 3000 });
+    await engine.close();
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    expect(claims).not.toHaveBeenCalled();
+    expect(owners.size).toBe(1);
+
+    const replacement = await Engine.open(fixture.root, observer.store.file);
+    engines.push(replacement);
+    await replacement.start(
+      async () => {},
+      (error) => errors.push(error),
+    );
+    await vi.waitFor(() => expect(owners.size).toBe(2), { timeout: 3000 });
+    await replacement.execute('task.update', { taskId: task.id, title: 'Updated after replacement' });
+    await vi.waitFor(() => expect(titles).toEqual(['Updated after replacement']));
+    expect(claims).not.toHaveBeenCalled();
+    expect(owners.size).toBe(2);
+    expect(errors).toEqual([]);
+  });
+
+  it('drains an in-flight state-only notification and stops observing after close', async () => {
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const running = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const errors: unknown[] = [];
+    let calls = 0;
+    await engine.start(
+      async () => {
+        calls++;
+        entered();
+        await gate;
+      },
+      (error) => errors.push(error),
+      'state',
+    );
+    await running;
+    let closed = false;
+    const closing = engine.close().then(() => {
+      closed = true;
+    });
+    const writer = await Engine.open(fixture.root, engine.store.file);
+    engines.push(writer);
+    try {
+      await writer.execute('task.create', { title: 'While the observer drains' });
+      expect(closed).toBe(false);
+    } finally {
+      release();
+      await closing;
+    }
+    await writer.execute('config.save', { hooks: {}, previewSetup: 'echo state changed' });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(calls).toBe(1);
+    expect(errors).toEqual([]);
+  });
+
   it('keeps one background preview owner and transfers ownership when its session closes', async () => {
     const second = await Engine.open(fixture.root, engine.store.file);
     engines.push(second);

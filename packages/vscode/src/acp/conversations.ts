@@ -111,10 +111,15 @@ export class AcpConversations {
           await engine.close();
           throw new Error('The Warden session is closed.');
         }
-        await engine.start(async () => {
-          const state = await engine.store.load();
-          for (const task of state.workflow?.deletedTasks ?? []) await this.forgetTask(repository, task.id);
-        }, this.report);
+        // Deletion notifications must not let a retained chat engine own preview synchronization.
+        await engine.start(
+          async () => {
+            const state = await engine.store.load();
+            for (const task of state.workflow?.deletedTasks ?? []) await this.forgetTask(repository, task.id);
+          },
+          this.report,
+          'state',
+        );
         return engine;
       });
       this.engines.set(repository, opening);

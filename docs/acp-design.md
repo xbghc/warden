@@ -277,6 +277,9 @@ the existing connection metadata lock; connection claims validate the task again
 that lock. Pending/deleted tasks cannot receive new prompts or recreate saved conversation records.
 Chat draft/view capture still completes while executable actions are blocked. After release, only
 that task's Warden-local records and archives are removed; external agent histories remain external.
+Retained conversation engines observe state changes for deletion cleanup without starting repository
+watchers or preview synchronization. Task Chat cannot take over the workbench's preview-owner lease
+when the repository is reopened or selected elsewhere.
 
 **Stop Turn** sends `session/cancel` and cancels pending permission requests. Warden continues to
 handle the original prompt response. **Disconnect** closes the owned connection and its agent process;

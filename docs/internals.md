@@ -42,6 +42,12 @@ lock wait. Further ticks pause while such writes are pending, so a slow local co
 consume their cross-window wait budget. Reads remain available, and another window's ownership
 still uses the ordinary bounded lock wait.
 
+Conversation engines start with state-only observation to receive task deletion notifications.
+They watch the state directory and retain periodic state reads, but do not watch repository checkouts,
+acquire the preview-owner lease or run preview synchronization. Reopening or replacing the workbench
+therefore leaves preview ownership with its repository observer, rather than a retained chat engine
+whose background writes could exhaust the workbench's repository-lock wait.
+
 The outer `.lock` and `v2` directories persist after release. New versions use exclusive directory
 creation for the outer path, so Windows directory rename cannot replace a legacy flat lock there.
 Before first using this version, close all older Warden windows and processes; upgrade them before

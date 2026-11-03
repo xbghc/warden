@@ -204,6 +204,7 @@ export class Engine {
   private stopped = false;
   private closing?: Promise<void>;
   private onUpdate?: () => Promise<void>;
+  private observationScope: 'repository' | 'state' = 'repository';
   private onError: (error: unknown) => void = () => {};
   private lastFallback = 0;
 
@@ -264,7 +265,7 @@ export class Engine {
     return operation as Promise<EngineOutput<K>>;
   }
   private observe(roots: string[]) {
-    if (!this.onUpdate || this.stopped) return;
+    if (this.observationScope === 'state' || !this.onUpdate || this.stopped) return;
     const desired = new Set([this.root, ...roots]);
     for (const [root, watcher] of this.watchers) {
       if (!desired.has(root)) {
@@ -299,8 +300,9 @@ export class Engine {
         });
     }, 100);
   }
-  async start(onUpdate: () => Promise<void>, onError: (error: unknown) => void) {
+  async start(onUpdate: () => Promise<void>, onError: (error: unknown) => void, scope: 'repository' | 'state' = 'repository') {
     if (this.timer || this.stopped) return;
+    this.observationScope = scope;
     this.onUpdate = onUpdate;
     this.onError = (error) => {
       this.log.write('error', 'engine.observer.failed', {
@@ -317,7 +319,7 @@ export class Engine {
     this.stateWatcher.on('error', this.onError);
     this.observe([this.root]);
     this.timer = setInterval(() => {
-      if (!this.ticking && this.writers === 0)
+      if (this.observationScope === 'repository' && !this.ticking && this.writers === 0)
         this.ticking = (async () => {
           if (!this.lease) {
             this.lease = (await this.store.acquirePreviewLease()) ?? undefined;
@@ -336,7 +338,7 @@ export class Engine {
       }
     }, 1000);
     this.timer.unref();
-    this.log.write('debug', 'engine.observers.started', { watchers: this.watchers.size });
+    this.log.write('debug', 'engine.observers.started', { scope, watchers: this.watchers.size });
     this.changed();
   }
   close(): Promise<void> {

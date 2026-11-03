@@ -81,8 +81,20 @@ exports.checkTaskDeletion = async (workbench, extension, fixture, eventually) =>
       before,
     );
     assert.deepEqual((await workbench.backend.execute('preview.get')).connectedIds, []);
+
+    const observedTask = await workbench.backend.execute('task.create', { title: 'Observe engine deletion' });
+    await workbench.conversations.show(fixture.root, observedTask.id);
+    const observedKey = JSON.stringify([fixture.root, observedTask.id]);
+    const observedChat = workbench.conversations.entries.get(observedKey);
+    await eventually(() => observedChat.session.snapshot().status === 'connected' && observedChat.surface?.ready, 30_000);
+    await workbench.conversations.handle(observedChat, { type: 'disconnect' });
+    const checked = await workbench.backend.execute('task.deleteCheck', { taskId: observedTask.id });
+    // Bypass the workbench deletion command so cleanup must come from the conversation's state observer.
+    await workbench.backend.execute('task.delete', { taskId: observedTask.id, confirmation: checked.confirmation });
+    await eventually(() => !workbench.conversations.entries.has(observedKey), 30_000);
+    assert.equal(observedChat.surface, undefined, 'state notifications release a deleted conversation surface');
     console.log(
-      'Packaged task deletion passed: native commands, confirmation/cancel, owned-agent disconnect, note/chat cleanup, retained folders, fresh allocation and visible retry',
+      'Packaged task deletion passed: native commands, confirmation/cancel, owned-agent disconnect, note/chat cleanup, state notifications, retained folders, fresh allocation and visible retry',
     );
   } finally {
     workbench.confirmTaskDeletion = confirm;

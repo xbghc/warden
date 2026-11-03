@@ -194,6 +194,8 @@ operations. Cover stable protocol initialization with no client filesystem/termi
 streamed updates, permission answers, cancellation, explicit authentication, automatic session restoration on opening, stale task
 bindings and cross-window connection ownership. The fixture must exercise real stdio and its own tools;
 client file callbacks or Warden-run agent commands would test an unsupported architecture.
+Conversation state observers must still clean up deleted tasks without acquiring preview ownership,
+including after workbench replacement and while state notifications are draining during shutdown.
 Also cover initial and between-turn configuration, grouped/boolean selectors, legacy mode fallback,
 complete selector replacement, command updates, thought streaming, usage and compaction patch semantics.
 Keep controls connection-scoped and exercise foreign-session updates and interrupted configuration requests.
