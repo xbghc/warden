@@ -190,6 +190,62 @@ describe('desktop engine', () => {
     expect(await readFile(path.join(next.worktree!, 'node_modules/retained'), 'utf8')).toBe('dependency cache');
   });
 
+  it('remembers explicitly selected branches without tasks and leaves unrelated checkouts untracked', async () => {
+    fixture.git('switch', '-c', 'feature/empty');
+    await engine.execute('workflow.configure', { branch: 'feature/empty' });
+    fixture.git('switch', 'main');
+    await engine.execute('workflow.configure', { branch: 'main' });
+    await engine.close();
+    const reopened = await Engine.open(fixture.root, engine.store.file);
+    engines.push(reopened);
+    fixture.git('switch', '-c', 'unrelated');
+    const state = await readFile(engine.store.file, 'utf8');
+    const result = await reopened.execute('repository.get', undefined);
+    expect(result.workflow.workflow).toMatchObject({ developmentBranch: 'main', trackedBranches: ['main', 'feature/empty'], changes: [] });
+    expect(await readFile(engine.store.file, 'utf8')).toBe(state);
+  });
+
+  it('requires explicit selection before reactivating a legacy empty branch and its preview', async () => {
+    await engine.execute('preview.refresh', undefined);
+    await engine.store.update((state) => {
+      delete state.workflow!.trackedBranches;
+    });
+    const state = await readFile(engine.store.file, 'utf8');
+    await fixture.write('later.txt', 'Primary changes after migration\n');
+    await new PreviewService(engine.repo, engine.store, 0).tick();
+    expect((await engine.execute('workflow.get', undefined)).workflow?.trackedBranches).toEqual([]);
+    expect(await readFile(engine.store.file, 'utf8')).toBe(state);
+    await engine.execute('workflow.configure', { branch: 'main' });
+    expect((await engine.execute('workflow.get', undefined)).workflow?.trackedBranches).toEqual(['main']);
+    await new PreviewService(engine.repo, engine.store, 0).tick();
+    const preview = await engine.execute('preview.get', undefined);
+    expect(await readFile(path.join(preview.worktree!, 'later.txt'), 'utf8')).toBe('Primary changes after migration\n');
+  });
+
+  it('suspends automatic preview updates away from the base branch and resumes retained connections on return', async () => {
+    const task = await engine.execute('task.create', { title: 'Retained connection' });
+    await writeFile(path.join(task.worktree!, 'connected.txt'), 'First task edit\n');
+    const preview = await engine.execute('preview.connect', { connectedIds: [task.id] });
+    const observer = new PreviewService(engine.repo, engine.store, 0);
+    const saved = await readFile(engine.store.file, 'utf8');
+    fixture.git('switch', '-c', 'unrelated');
+    await fixture.write('unrelated.txt', 'Unrelated work\n');
+    await writeFile(path.join(task.worktree!, 'connected.txt'), 'Later task edit\n');
+    await observer.tick();
+    await observer.tick();
+    expect(await readFile(engine.store.file, 'utf8')).toBe(saved);
+    expect(await readFile(path.join(preview.worktree!, 'connected.txt'), 'utf8')).toBe('First task edit\n');
+    await expect(readFile(path.join(preview.worktree!, 'unrelated.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
+    fixture.git('switch', '--detach');
+    await observer.tick();
+    expect(await readFile(engine.store.file, 'utf8')).toBe(saved);
+    await rm(path.join(fixture.root, 'unrelated.txt'));
+    fixture.git('switch', 'main');
+    await observer.tick();
+    expect(await readFile(path.join(preview.worktree!, 'connected.txt'), 'utf8')).toBe('Later task edit\n');
+    expect(await engine.execute('preview.get', undefined)).toMatchObject({ connectedIds: [task.id], syncStatus: 'synced' });
+  });
+
   it('rejects an old branch request after it waits behind another window switching requirements', async () => {
     fixture.git('branch', 'feature/other');
     let release!: () => void;

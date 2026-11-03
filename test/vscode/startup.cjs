@@ -129,38 +129,50 @@ exports.checkStartup = async (workbench, fixture, eventually) => {
     while (workbench.checkReading) await workbench.checkReading;
   }
 
-  const oldEngine = workbench.backend;
-  let observed = false;
-  let obsoleteChecks = 0;
-  let releaseRead;
-  const readGate = new Promise((resolve) => {
-    releaseRead = resolve;
-  });
-  oldEngine.execute = async function (command, ...args) {
-    // Count newly scheduled work, not an earlier check completing after the switch began.
-    if (command === 'rebase.check' && workbench.switching) obsoleteChecks++;
-    const result = await execute.call(this, command, ...args);
-    if (command === 'repository.get') {
-      observed = true;
-      await readGate;
+  for (const pausedRead of ['repository.get', 'review.files']) {
+    await workbench.getChildren({ kind: 'task', task: workbench.tasks()[0] });
+    const oldEngine = workbench.backend;
+    const start = oldEngine.start;
+    let observed = false;
+    let obsoleteChecks = 0;
+    let obsoleteStarts = 0;
+    let releaseRead;
+    const readGate = new Promise((resolve) => {
+      releaseRead = resolve;
+    });
+    oldEngine.start = function (...args) {
+      if (workbench.switching) obsoleteStarts++;
+      return start.apply(this, args);
+    };
+    oldEngine.execute = async function (command, ...args) {
+      // Count newly scheduled work, not an earlier check completing after the switch began.
+      if (command === 'rebase.check' && workbench.switching) obsoleteChecks++;
+      const result = await execute.call(this, command, ...args);
+      if (command === pausedRead) {
+        observed = true;
+        await readGate;
+      }
+      return result;
+    };
+    const reading = workbench.refresh();
+    let switching;
+    try {
+      await eventually(() => observed);
+      switching = workbench.open(fixture.unconfigured);
+      await eventually(() => workbench.switching);
+      releaseRead();
+      await switching;
+      assert.equal(obsoleteChecks, 0, 'a refresh superseded by repository switching cannot schedule old checks');
+      assert.equal(obsoleteStarts, 0, 'a late file read cannot restart a retired observer');
+      assert.equal(workbench.checks, undefined);
+      assert.equal(workbench.files.size, 0, 'old file reads cannot repopulate the replacement repository');
+    } finally {
+      oldEngine.execute = execute;
+      oldEngine.start = start;
+      releaseRead();
+      await reading;
+      await switching;
+      await workbench.open(fixture.root);
     }
-    return result;
-  };
-  const reading = workbench.refresh();
-  let switching;
-  try {
-    await eventually(() => observed);
-    switching = workbench.open(fixture.unconfigured);
-    await eventually(() => workbench.switching);
-    releaseRead();
-    await switching;
-    assert.equal(obsoleteChecks, 0, 'a refresh superseded by repository switching cannot schedule old checks');
-    assert.equal(workbench.checks, undefined);
-  } finally {
-    oldEngine.execute = execute;
-    releaseRead();
-    await reading;
-    await switching;
-    await workbench.open(fixture.root);
   }
 };

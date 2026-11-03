@@ -86,7 +86,14 @@ export class PreviewService {
   async tick() {
     return this.store.withRepositoryLock(async () => {
       const state = await this.store.load();
-      if (!state.connectionPreview) return;
+      if (!state.connectionPreview || !state.workflow?.trackedBranches?.includes(state.workflow.developmentBranch)) return;
+      // Leaving the base branch suspends its preview without turning a normal checkout
+      // into a sync failure or composing unrelated primary content into retained connections.
+      const primaryRef = (await runGit(['rev-parse', '--symbolic-full-name', 'HEAD'], { cwd: this.repo.commonRoot })).stdout.trim();
+      if (primaryRef !== `refs/heads/${state.workflow?.developmentBranch}`) {
+        this.observed = undefined;
+        return;
+      }
       if (!state.connectionPreview.directory || state.connectionPreview.pending) {
         await this.refreshLocked();
         return;

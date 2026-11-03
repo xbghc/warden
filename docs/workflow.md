@@ -47,6 +47,12 @@ Every interaction must serve something the user wants to do. Do not ask the user
 readiness, idleness or task completion just to keep Warden's records up to date. Display observable
 Git state, selected connections and operation results instead. A clean worktree is not an idle agent.
 
+Branch tracking is explicit: **Select Base Branch** opts that branch into Warden. Git checkout alone
+never tracks a new branch. Untracked branches and detached HEAD show no task, synchronization or preview
+status, and automatic preview updates pause without warnings. Returning to a tracked branch restores
+its saved context, including tasks, drafts and connections; switching between tracked requirements
+retains the existing commit-preparation and preview-connection guards.
+
 An available agent integration is a prerequisite for using the workbench. Warden automatically
 connects to the configured ACP server at startup in a trusted workspace and after profile changes.
 It initializes an empty session, keeps the connection alive and shows branch selection and task
@@ -232,13 +238,14 @@ base branch. Warden retains its task, workspace and review association. The work
 stays available for further commits without a separate “continue” or “finish” declaration. For A2,
 make clear which changes have not yet been delivered; A1 must not silently enter the delivery again.
 
-After initial branch configuration, switching the primary checkout through Git or VS Code also switches
-Warden's requirement context. The task list, selected task and synchronization checks
+Switching the primary checkout through Git or VS Code restores a previously tracked
+requirement context. The task list, selected task and synchronization checks
 belong to that branch, even when two branches point to the same commit. Returning to a branch restores
 its selected task. Task workspaces keep their original branches, baselines and files;
-existing ACP conversations keep their original task. A detached HEAD or an unfinished Git operation
-does not select a new requirement. An unfinished delivery preparation or active preview connection
-blocks the context switch with a visible explanation; return to the original branch to resolve it first.
+existing ACP conversations keep their original task. Untracked branches and detached HEAD suspend the
+workbench quietly. An unfinished Git operation does not select a new requirement. An unfinished delivery
+preparation or active preview connection blocks switching to another tracked requirement with a visible
+explanation; return to the original branch to resolve it first.
 
 When the base branch advances, Warden automatically updates synchronization indicators.
 It can check whether a workspace needs rebase and whether replay appears

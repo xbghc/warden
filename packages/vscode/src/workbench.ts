@@ -80,6 +80,8 @@ export class Workbench {
   private agentSetupRequired?: boolean;
   private readonly branchViews: BranchViews;
   private branch?: string;
+  private configuredBranch?: string;
+  private checkoutBranch?: string;
   private branchTransition = false;
   private selected?: string;
   private expanded: Record<string, boolean> = {};
@@ -299,7 +301,7 @@ export class Workbench {
       this.commitInput?.hide();
       this.taskInput?.hide();
     }
-    if (this.agentReady && this.repositoryState === 'ready' && this.data?.workflow) {
+    if (this.agentReady && this.repositoryState === 'ready' && !this.branchTransition && this.data?.workflow) {
       const preview = this.preview;
       const sync = preview?.syncStatus ?? preview?.status ?? 'disconnected';
       const problem = ['stale', 'conflict', 'error', 'paused'].includes(sync) || preview?.setup?.status === 'failed';
@@ -328,7 +330,8 @@ export class Workbench {
   }
   private api<K extends EngineCommand>(command: K, request: EngineInput<K>): Promise<EngineOutput<K>> {
     if (!this.backend) throw new Error('Run Warden: Select Repository first.');
-    return this.backend.execute(command, request, { developmentBranch: this.branch ?? null });
+    const branch = command === 'workflow.configure' || command === 'config.save' ? this.configuredBranch : this.branch;
+    return this.backend.execute(command, request, { developmentBranch: branch ?? null });
   }
   private async perform<T>(action: () => T | Promise<T>, busy?: string, scope = 'repository') {
     if (!vscode.workspace.isTrusted) {
@@ -385,10 +388,10 @@ export class Workbench {
     let outcome: PerformanceOutcome = 'error';
     try {
       this.initializing = true;
-      this.render();
       let failed = false;
       try {
         await this.updateContext(span);
+        this.render();
         const folders = vscode.workspace.workspaceFolders;
         const remembered = this.context.workspaceState.get<string>('warden.repository');
         const folder = folders?.find((candidate) => candidate.uri.fsPath === remembered) ?? (folders?.length === 1 ? folders[0] : undefined);
@@ -411,6 +414,10 @@ export class Workbench {
     return this.performance.measure('repository.open', (span) => this.openRepository(directory, span), parent);
   }
   private async openRepository(directory: string, span: PerformanceSpan) {
+    const previous = this.backend;
+    // Retire the old engine before awaiting UI work so its observer cannot start a
+    // refresh with the replacement repository's revision while it is draining.
+    this.backend = undefined;
     this.commitInput?.hide();
     this.taskInput?.hide();
     this.switching = true;
@@ -418,13 +425,15 @@ export class Workbench {
     this.session = randomUUID();
     this.invalidateChecks();
     this.status.hide();
-    this.render();
     try {
+      // Publish menu contexts while the old native tree still exists; replacing
+      // its roots first lets VS Code rerender removed rows during context updates.
       await this.updateContext(span);
+      this.render();
       await span.measure('repository.wait', async () => {
         await Promise.allSettled([...this.navigation]);
         await this.reading;
-        await this.backend?.close();
+        await previous?.close();
       });
       this.backend = await span.measure('engine.open', () => Engine.open(directory, undefined, this.log));
       // The primary path is known now; agent readiness does not depend on Git inventories
@@ -432,6 +441,8 @@ export class Workbench {
       this.agentSetup.start();
       this.selected = undefined;
       this.branch = undefined;
+      this.configuredBranch = undefined;
+      this.checkoutBranch = undefined;
       this.expanded = this.context.workspaceState.get<Record<string, boolean>>(`warden.expanded:${this.backend.root}`, {});
       this.selectedFiles = this.context.workspaceState.get<Record<string, string>>(`warden.files:${this.backend.root}`, {});
       this.rebaseSelection = undefined;
@@ -521,13 +532,14 @@ export class Workbench {
     const value = vscode.workspace.getConfiguration('warden', resource).get<unknown>('previewCommand');
     return typeof value === 'string' ? value : undefined;
   }
-  private async changeBranch(data: WorkflowResponse) {
+  private async changeBranch(data: WorkflowResponse, checkoutBranch?: string) {
     this.commitInput?.hide();
     this.taskInput?.hide();
     this.branchTransition = true;
     this.session = randomUUID();
     this.invalidateChecks();
     this.branch = data.workflow?.developmentBranch;
+    this.checkoutBranch = checkoutBranch;
     this.selected = undefined;
 
     this.checks = undefined;
@@ -539,7 +551,6 @@ export class Workbench {
     this.fileErrors.clear();
     this.taskTargets.clear();
     this.errors.clear();
-    this.render();
     try {
       const saved = await this.branchViews.load(this.backend!.root, data);
       this.selected = saved.selected;
@@ -562,12 +573,21 @@ export class Workbench {
         // Migrate the old repository-wide UI state into its original requirement before following Git.
         if (this.branch === undefined && data.workflow) await this.branchViews.load(engine.root, data);
         const primary = checkouts.worktrees.find((row) => row.isMain && !row.shared && !row.clone);
+        const tracked = !!primary?.branch && !!data.workflow?.trackedBranches?.includes(primary.branch);
         let branchProblem: WorkbenchError | undefined;
-        if (data.workflow && primary?.branch && !primary.detached && !primary.busy && !primary.foreign && primary.branch !== data.workflow.developmentBranch) {
+        if (
+          tracked &&
+          data.workflow &&
+          primary?.branch &&
+          !primary.detached &&
+          !primary.busy &&
+          !primary.foreign &&
+          primary.branch !== data.workflow.developmentBranch
+        ) {
           const previous = data.workflow.developmentBranch;
           try {
             await measure('workflow.configure', () => engine.execute('workflow.configure', { branch: primary.branch! }, { developmentBranch: previous }));
-            ({ workflow: data, preview, workspaces: checkouts } = await measure('repository.get', () => engine.execute('repository.get', undefined)));
+            continue;
           } catch (error) {
             if (error instanceof WardenError && error.code === 'requirement_changed') continue;
             if (!(error instanceof WardenError) || !['development_in_use', 'operation_locked'].includes(error.code ?? '')) throw error;
@@ -582,8 +602,14 @@ export class Workbench {
             };
           }
         }
+        const current = await measure('workflow.context', () => engine.execute('workflow.context', undefined));
+        if (!currentRepository()) return;
+        if (current.developmentBranch !== data.workflow?.developmentBranch) continue;
+        // A Git checkout is not consent to track a new requirement. Keep saved engine
+        // state for returning to its branch, but expose no task or preview state here.
+        if (!tracked || primary?.detached) data = { workflow: null, workspaceConfig: data.workspaceConfig, legacyTodos: data.legacyTodos };
         const branch = data.workflow?.developmentBranch;
-        const changedBranch = branch !== this.branch;
+        const changedBranch = branch !== this.branch || primary?.branch !== this.checkoutBranch || current.developmentBranch !== this.configuredBranch;
         const checkSignature = JSON.stringify([
           branch,
           data.developmentHead,
@@ -598,19 +624,17 @@ export class Workbench {
             task.worktree ? task.sourceBase : undefined,
           ]),
         ]);
-        const current = await measure('workflow.context', () => engine.execute('workflow.context', undefined));
-        if (!currentRepository()) return;
-        if (current.developmentBranch !== branch) continue;
-        if (this.preview?.status !== preview.status || this.preview?.syncStatus !== preview.syncStatus)
+        if (data.workflow && (this.preview?.status !== preview.status || this.preview?.syncStatus !== preview.syncStatus))
           this.log.write(preview.syncStatus === 'error' || preview.syncStatus === 'conflict' ? 'warn' : 'info', 'preview.state', {
             status: preview.status,
             syncStatus: preview.syncStatus,
             connections: preview.connectedIds.length,
           });
         this.data = data;
-        this.preview = preview;
+        this.configuredBranch = current.developmentBranch;
+        this.preview = data.workflow ? preview : undefined;
         this.checkouts = checkouts;
-        if (changedBranch) await this.changeBranch(data);
+        if (changedBranch) await this.changeBranch(data, primary?.branch);
         if (!currentRepository()) return;
 
         this.scheduleChecks(engine, checkSignature, !!trace);
@@ -620,12 +644,15 @@ export class Workbench {
           this.errors.set('branch', branchProblem);
         } else this.errors.delete('branch');
         await this.updateContext(trace);
+        if (!currentRepository()) return;
         this.render();
         for (const key of this.files.keys()) {
           try {
-            const response = await this.api('review.files', { key });
+            const response = await engine.execute('review.files', { key });
+            if (!currentRepository()) return;
             this.files.set(key, response.files);
           } catch {
+            if (!currentRepository()) return;
             this.files.delete(key);
           }
         }
@@ -636,10 +663,11 @@ export class Workbench {
               .map((task) => this.getChildren({ kind: 'task', task })),
           );
         });
+        if (!currentRepository()) return;
         this.render();
-        if (data.workflow)
+        if (current.developmentBranch)
           await measure('engine.start', () =>
-            this.backend!.start(
+            engine.start(
               () => this.refresh(),
               (error) => {
                 this.log.write('error', 'repository.refresh.failed', { diagnostic: acpErrorDiagnostic(error) });
@@ -1246,12 +1274,14 @@ export class Workbench {
       .join('\n');
   }
   private async showPreviewOutput() {
+    if (!this.data?.workflow) throw new Error('Select a base branch first.');
     const preview = await this.api('preview.get', undefined);
     this.output.appendLine(this.previewSummary(preview));
     if (preview.setup?.output) this.output.appendLine(preview.setup.output);
     this.output.show(true);
   }
   private async ensurePreview() {
+    if (!this.data?.workflow) throw new Error('Select a base branch first.');
     let preview = await this.api('preview.get', undefined);
     if (!preview.worktree) preview = await this.api('preview.refresh', undefined);
     if (!preview.worktree) throw new Error(preview.message ?? 'Select a base branch and initialize the preview first.');
@@ -1428,7 +1458,7 @@ ${text}`,
       review,
       reviewCurrent: !!task && sameReview(review, this.observedReviews.get(task.id)),
       message: task ? (this.messages[task.id] ?? task.title) : '',
-      busy: this.branchTransition ? 'Switching Base Branch…' : this.busy,
+      busy: this.branchTransition && this.data?.workflow ? 'Switching Base Branch…' : this.busy,
       errors: [...this.errors.values()],
     };
   }

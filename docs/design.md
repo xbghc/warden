@@ -161,7 +161,10 @@ changed files. An empty workbench offers **New Task**.
 **Settings** is a native view stacked below Workbench. In a healthy single-repository workbench,
 **More Actions** contains one preview execution action and Settings. Select Repository appears only
 when selection is needed or multiple roots are open. Select Base Branch remains in initial setup and
-the Command Palette; subsequent branch changes follow primary. Configure ACP remains the unavailable-agent
+the Command Palette; subsequent branch changes follow primary only for explicitly tracked branches.
+Untracked branches and detached HEAD show the Select Base Branch entry point without task rows,
+preview status, synchronization checks or recovery messages. Returning restores saved work; it does
+not require clearing preview connections merely to leave for an unrelated branch. Configure ACP remains the unavailable-agent
 welcome action and does not duplicate Settings in the menu. Preview
 synchronization is visible in the status bar; its tooltip shows the composition, directory and last
 successful sync. Clicking it opens **Show Preview Output**, including conflicts and setup logs.

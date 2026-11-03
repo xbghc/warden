@@ -253,6 +253,7 @@ packaged bytes. It never silently substitutes a source build. `WARDEN_VSCODE_VER
 host (default `1.106.0`); `VSCODE_EXECUTABLE_PATH` selects an existing executable. Linux CI uses Xvfb.
 `WARDEN_VSCODE_SUITE=chat pnpm test:vscode` runs the packaged agent-setup and task-chat flows while iterating.
 `WARDEN_VSCODE_SUITE=settings pnpm test:vscode` runs native Settings, ACP setup/recovery and script editors.
+`WARDEN_VSCODE_SUITE=branches pnpm test:vscode` runs branch tracking, inactive restoration and repository-switch observation races.
 In environments requiring an HTTP proxy, configure the test downloader's `npm_config_https_proxy`.
 
 The suite checks native tree setup with top-level tasks, tree/list layout switching and saved preference,
@@ -266,7 +267,11 @@ rejection while typing, multiline delivery, fresh workspaces, stale-session
 rejection and preservation of delivery records. History rewriting remains covered by engine tests. CI runs the same VSIX in minimum and
 stable hosts on Windows, Linux and macOS. Branch-following coverage switches the primary checkout
 through Git, including branches at the same commit, verifies per-branch task/draft restoration and
-stale action rejection, and preserves dirty task workspaces and connected-preview switch guards.
+stale action rejection, quiet untracked/detached checkouts, explicit tracking of empty branches and
+inactive reloads. It preserves dirty task workspaces and preview connections while away, as well as
+connected-preview guards when switching between tracked branches.
+On Linux with ImageMagick installed, set `WARDEN_VSCODE_BRANCH_SCREENSHOTS` to save native screenshots
+of untracked, explicitly tracked empty and restored connected branches.
 CI packages the VSIX after quality checks so browser and extension-host tests run alongside the engine
 matrix. Marketplace publication requires the entire reusable workflow to succeed, including both matrices.
 Windows and Intel macOS serialize Git integration files because each file already issues parallel Git reads.

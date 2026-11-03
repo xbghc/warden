@@ -91,6 +91,12 @@ function normalise(raw: unknown, repoRoot: string, file: string): ReviewState {
     },
   };
   migrateTodoPlans(state);
+  if (state.workflow) {
+    const workflow = state.workflow;
+    // Older versions followed every checkout, so their selected branch alone is
+    // not evidence of opting in. Task history preserves branches actually used.
+    workflow.trackedBranches = [...new Set([...(workflow.trackedBranches ?? []), ...workflow.changes.map((task) => task.developmentBranch)])];
+  }
   return state;
 }
 

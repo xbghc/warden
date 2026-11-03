@@ -100,6 +100,26 @@ describe('StateStore', () => {
     expect(JSON.parse(await readFile(file, 'utf8')).schemaVersion).toBe(1);
   });
 
+  it('derives tracked branches from legacy tasks without enrolling the last automatic checkout or changing state on read', async () => {
+    const file = path.join(dir, 'state.json');
+    const legacy: ReviewState = {
+      ...defaultState('/repo'),
+      workflow: {
+        developmentBranch: 'empty',
+        changes: [{ id: 'old', title: 'Old task', developmentBranch: 'feature/old', status: 'archived', createdAt: '' }],
+      },
+    };
+    const raw = JSON.stringify(legacy);
+    await writeFile(file, raw);
+    const store = new StateStore(file, '/repo');
+    expect((await store.load()).workflow?.trackedBranches).toEqual(['feature/old']);
+    expect(await readFile(file, 'utf8')).toBe(raw);
+    await store.update((state) => {
+      state.workflow!.trackedBranches!.push('another-empty');
+    });
+    expect((await new StateStore(file, '/repo').load()).workflow?.trackedBranches).toEqual(['feature/old', 'another-empty']);
+  });
+
   it.each([
     [{ lastArea: 'review' }, 'diff'],
     [{ lastArea: 'orchestration' }, 'orchestration'],

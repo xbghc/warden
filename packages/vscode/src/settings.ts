@@ -66,18 +66,22 @@ export class Settings implements vscode.TreeDataProvider<SettingsNode>, vscode.D
     await this.view.reveal(this.agent, { select: true, focus: true, expand: true });
   }
   getTreeItem(node: SettingsNode) {
-    return node;
+    // Menu updates can render a retained row after navigation. Keep its original
+    // session identity instead of reusing a replacement repository's tree handle.
+    return node.session ? { ...node, id: `${node.session}:${node.id}` } : node;
   }
   getParent(node: SettingsNode) {
     return node.parent;
   }
   getChildren(node?: SettingsNode): SettingsNode[] {
+    const model = this.model();
+    if (node?.session && (node.session !== model.session || model.repositoryState !== 'ready' || model.agentReadiness.status !== 'ready' || !model.workflow))
+      return [];
     if (node)
       return (node.children ?? []).map((child) => {
         child.parent = node;
         return child;
       });
-    const model = this.model();
     const { agentConfiguration: configuration, agentReadiness: readiness } = model;
     const configured = configuration.status === 'configured';
     const status = configured ? connectionLabels[readiness.status] : configuration.status === 'invalid' ? 'Invalid Configuration' : 'Not Configured';
@@ -128,6 +132,7 @@ export class Settings implements vscode.TreeDataProvider<SettingsNode>, vscode.D
     const roots = [agent];
     if (!configured || readiness.status !== 'ready' || !model.repository || !model.workflow) return roots;
     const scripts = this.row('scripts', 'Scripts', 'terminal');
+    scripts.session = model.session;
     scripts.collapsibleState = vscode.TreeItemCollapsibleState.Expanded;
     scripts.tooltip = model.repository;
     const config = model.workflow.workspaceConfig ?? { hooks: {} };
@@ -141,6 +146,7 @@ export class Settings implements vscode.TreeDataProvider<SettingsNode>, vscode.D
       return item;
     });
     scripts.children.push(this.row('preview-command', 'Preview Command', 'terminal', 'workbench.action.openSettings', ['warden.previewCommand']));
+    for (const child of scripts.children) child.session = model.session;
     roots.push(scripts);
     return roots;
   }

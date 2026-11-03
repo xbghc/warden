@@ -37,15 +37,19 @@ Repository discovery shows **Opening repository…**. Once connected, it offers 
 **Select Base Branch**. An existing branch resumes its saved workbench. Other workflow panels link to
 Settings while unavailable, and ordinary commands remain blocked until connected.
 
-After this initial choice, switching the primary checkout in Git or VS Code automatically changes
-Warden's task list, current task and synchronization checks. Selection is remembered per
+Selecting a base branch starts tracking it in Warden, including branches without tasks. Switching
+the primary checkout in Git or VS Code automatically restores previously tracked branches.
+Untracked branches and detached HEAD show no tasks, preview status, synchronization checks or recovery
+messages. Automatic preview updates pause, and **Select Base Branch** remains available to start using
+Warden there. Selection is remembered per
 repository and base branch. Existing task notes and commit drafts remain
 with their tasks. Branches at the same commit are still separate contexts; old page actions are rejected
 after a switch. Existing native diffs and ACP conversations retain their original task.
 
-Finish delivery preparation and disconnect preview connections before switching. If Git switches
-while either is still active, the sidebar explains why Warden remains on the previous branch and asks
-you to return there to resolve it. Detached HEAD and unfinished Git operations keep the current context.
+Finish delivery preparation and disconnect preview connections before switching between tracked branches.
+If Git switches to another tracked branch while either is still active, the sidebar explains why Warden
+remains on the previous branch and asks you to return there to resolve it. Untracked branches quietly
+retain that work for your return. Unfinished Git operations never select another requirement.
 
 The native workbench tree opens directly into tasks and their changed files. With no tasks, **New Task**
 is available in the empty view and heading. The heading exposes refresh, add-task and rebase; its
@@ -296,7 +300,7 @@ Clicking the preview status bar opens **Show Preview Output**: current compositi
 successful sync, conflict paths and recorded setup status, output and exit code. Reading output does
 not synchronize or run setup. **Refresh** only rereads visible state; it does not invoke **Sync Preview**.
 **Select Base Branch** remains in initial setup and the Command Palette. Later context changes follow
-the branch checked out through Git in primary. Settings is the single configuration entry in More Actions;
+tracked branches checked out through Git in primary. Settings is the single configuration entry in More Actions;
 the unavailable-agent welcome still offers **Configure ACP**.
 
 The engine combines repository-change hints, state-file notifications and periodic checks. Preview

@@ -68,7 +68,9 @@ try {
           ? 'test/vscode/tree-refresh.cjs'
           : process.env.WARDEN_VSCODE_SUITE === 'settings'
             ? 'test/vscode/settings.cjs'
-            : 'test/vscode/suite.cjs',
+            : process.env.WARDEN_VSCODE_SUITE === 'branches'
+              ? 'test/vscode/branches.cjs'
+              : 'test/vscode/suite.cjs',
     ),
     extensionTestsEnv: { XDG_DATA_HOME: process.env.XDG_DATA_HOME, WARDEN_VSCODE_FIXTURE: fixture },
     launchArgs: [

@@ -179,10 +179,18 @@ export class WorkflowService {
       if (!branch || !isValidRef(branch) || !(await refExists(this.repo.commonRoot, `refs/heads/${branch}`)))
         throw badRequest('Select an existing local base branch.', 'invalid_development_branch');
       await this.store.update((state) => {
-        if (state.workflow?.developmentBranch === branch) return;
+        if (state.workflow?.developmentBranch === branch) {
+          state.workflow.trackedBranches = [...new Set([...(state.workflow.trackedBranches ?? []), branch])];
+          return;
+        }
         if (state.workflow?.changes.some((c) => c.status === 'integrating') || state.connectionPreview?.connectedIds.length)
           fail('Finish the primary-folder commit and disconnect preview connections before switching base branches.', 'development_in_use');
-        state.workflow = { developmentBranch: branch, changes: state.workflow?.changes ?? [] };
+        state.workflow = {
+          ...state.workflow,
+          developmentBranch: branch,
+          trackedBranches: [...new Set([...(state.workflow?.trackedBranches ?? []), branch])],
+          changes: state.workflow?.changes ?? [],
+        };
         // Keep the persistent runtime directory (and its dependencies) across branch switches.
         if (state.connectionPreview?.directory) {
           state.connectionPreview.status = 'stale';

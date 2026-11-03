@@ -38,7 +38,7 @@ complete the task, recycle its workspace or prove that an agent is idle.
 
 | Interface wording | Meaning |
 | --- | --- |
-| Select Base Branch | Select the work context from the branch checked out in the primary folder. |
+| Select Base Branch | Explicitly track the branch checked out in the primary folder; later checkouts restore tracked contexts only. This is independent of Git upstream tracking. |
 | New Task | Save a task and allocate its workspace and task branch automatically. |
 | Edit Task / Reorder Tasks | Edit task notes or order without changing Git. |
 | Open Workspace | Open the assigned directory. Legacy plans are prepared automatically on use. |

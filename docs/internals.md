@@ -60,6 +60,10 @@ Listing a diff does not update persistent review state.
 `workflow.changes` holds requirement plans and their delivery records. Legacy `todos` matching the
 requirement or its task branches migrate on load with stable `todo-<id>` IDs; checked notes become
 archived plans, never accepted commits. Unrelated notes require explicit import.
+`workflow.trackedBranches` retains explicitly selected base branches, including empty ones. Older state
+derives this list from task branches on load, persisting it on the next write. Its selected branch alone
+does not prove explicit tracking because older builds followed every checkout; empty legacy branches
+require explicit selection once.
 
 Inline comment handling has been removed. Older target fields, linked-note metadata and delivery
 review records are retained as opaque historical data on unrelated writes. They are not moved,
@@ -250,8 +254,14 @@ primary HEADs and clean checkout state, then explicitly rebases selected workspa
 rebase or workspace recycling.
 
 Workflow reads share one checkout inventory per request instead of rebuilding every workspace's
-inventory for each task. The extension follows observed primary checkout branch changes through
-`workflow.configure`, retaining its existing integration and connection guards. Branch changes rotate
+inventory for each task. The extension follows observed primary checkout branch changes only for
+`workflow.trackedBranches`, through `workflow.configure` with its existing integration and connection
+guards. Untracked branches and detached HEAD project an empty workbench without changing saved workflow
+or preview state. Explicit branch selection pins the stored engine context even while the visible
+workbench is inactive. Background preview ticks read `rev-parse --symbolic-full-name HEAD` through the
+existing validated Git API and skip composition, recovery and setup whenever primary is off the selected
+base branch; no new Git write shape is introduced. Returning resumes ordinary content checks.
+Branch changes, including entering and leaving an untracked branch, rotate
 the webview session and invalidate review authorization and history/rebase results. Checkout
 observations include operation markers for primary and non-slot primary checkouts, so unfinished
 merges and cherry-picks suppress branch following until the user finishes or aborts them. History and check

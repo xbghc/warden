@@ -136,6 +136,8 @@ export interface WorkspaceHookResult {
 
 export interface DevelopmentWorkflow {
   developmentBranch: string;
+  /** Explicitly selected base branches, retained even when they have no tasks. */
+  trackedBranches?: string[];
   changes: WorkflowTask[];
 }
 

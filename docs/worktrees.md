@@ -28,16 +28,20 @@ deliveries without being recycled. There is no task-complete declaration or rele
 notes and ordering remain available while work is in progress. Historical TODO descriptions and
 historical metadata is retained; old checked items migrate as archived notes, not accepted commits.
 
-After initial configuration, switching the primary checkout branch in Git or VS Code makes Warden
-show that branch's tasks and workspaces automatically. Switching back restores the previously selected
-task. Branch names define the context even if their commits are identical. Tasks
+Selecting a base branch explicitly starts tracking it in Warden, even before it has tasks.
+Switching the primary checkout in Git or VS Code restores only previously tracked branches.
+An untracked branch or detached HEAD hides tasks, checks, preview status and preview recovery actions;
+it does not configure a requirement or update the retained preview. **Select Base Branch** is the
+explicit entry point for using Warden on another branch. Switching back restores the previously selected
+task and retained preview connections. Branch names define the context even if their commits are identical. Tasks
 remain associated with their original branch; following the primary checkout never rebases, replaces
 or recycles their workspaces, and it does not redirect existing ACP conversations.
 
-Finish any delivery preparation and disconnect the preview before switching requirements. If an
-external checkout changes while either is active, Warden retains the previous context and explains
-the mismatch. Switch back to resolve the outstanding operation first. Detached HEAD and unfinished
-Git operations do not select another requirement. The independent preview directory and its ignored
+Finish any delivery preparation and disconnect the preview before switching between tracked requirements. If an
+external checkout selects another tracked branch while either is active, Warden retains the previous context and explains
+the mismatch. Switch back to resolve the outstanding operation first. Leaving for an untracked branch
+quietly suspends the workbench without clearing either operation. Unfinished Git operations do not
+select another requirement. The independent preview directory and its ignored
 dependencies persist across switches; its synchronization status becomes pending until refreshed for
 the new branch, and the configured setup script receives the new base branch.
 

@@ -79,6 +79,8 @@ exports.checkSettings = async (workbench, extension, fixture, eventually) => {
       ['acp', 'scripts'],
     );
     const scripts = workbench.settings.getChildren(roots[1]);
+    const scriptRootId = workbench.settings.getTreeItem(roots[1]).id;
+    const scriptRowId = workbench.settings.getTreeItem(scripts[0]).id;
     assert.deepEqual(
       scripts.map((node) => node.label),
       ['Workspace Setup Script', 'Legacy Workspace Reuse Script', 'Preview Setup Script', 'Preview Command'],
@@ -133,6 +135,11 @@ exports.checkSettings = async (workbench, extension, fixture, eventually) => {
     await eventually(() => text(document) === 'echo changed-elsewhere');
 
     await workbench.open(fixture.root);
+    assert.equal(workbench.settings.getTreeItem(roots[1]).id, scriptRootId, 'retained Settings roots keep their original identity');
+    assert.equal(workbench.settings.getTreeItem(scripts[0]).id, scriptRowId, 'retained Settings rows keep their original identity');
+    assert.deepEqual(workbench.settings.getChildren(roots[1]), [], 'an obsolete Settings root cannot publish old script rows');
+    const currentScripts = workbench.settings.getChildren().find((node) => node.id === 'scripts');
+    assert.notEqual(workbench.settings.getTreeItem(currentScripts).id, scriptRootId, 'replacement repositories receive distinct native tree handles');
     const other = await config();
     await assert.rejects(workbench.scriptSettings.writeFile(document.uri, Buffer.from('wrong repository')), /repository or base branch changed/);
     await assert.rejects(workbench.scriptSettings.open('workspace', session), /repository or base branch changed/);
