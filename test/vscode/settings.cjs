@@ -4,6 +4,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const vscode = require('vscode');
 const { checkAgentSetup, checkAgentPresets, verifyAgent } = require('./agent-setup.cjs');
+const { checkRepositoryLoading } = require('./repository.cjs');
 
 exports.run = async () => {
   const fixture = JSON.parse(await fs.readFile(process.env.WARDEN_VSCODE_FIXTURE, 'utf8'));
@@ -18,6 +19,7 @@ exports.run = async () => {
   };
   try {
     await verifyAgent(workbench, fixture);
+    await checkRepositoryLoading(workbench, extension, fixture, eventually);
     await workbench.open(fixture.unconfigured);
     await checkAgentSetup(workbench, extension, fixture, eventually);
     await checkAgentPresets(workbench, fixture, eventually);
@@ -89,10 +91,7 @@ exports.checkSettings = async (workbench, extension, fixture, eventually) => {
     assert.equal(scripts[2].contextValue, 'wardenPreviewSetup');
     assert.equal(scripts[2].session, session, 'the rerun action captures its repository session');
     const rerun = extension.packageJSON.contributes.menus['view/item/context'].find((item) => item.command === 'warden.setup');
-    assert.equal(
-      rerun.when,
-      'warden.agentReady && view == warden.settings && viewItem == wardenPreviewSetup && warden.hasDevelopmentBranch && warden.hasPreviewSetup',
-    );
+    assert.equal(rerun.when, 'view == warden.settings && viewItem == wardenPreviewSetup');
     assert(rerun.group.startsWith('inline'), 'configured setup has an explicit row action even after success');
     if (process.env.WARDEN_VSCODE_AGENT_SETUP_SCREENSHOTS && process.platform === 'linux') {
       await vscode.commands.executeCommand('workbench.action.closeAllEditors');
@@ -162,6 +161,9 @@ exports.checkSettings = async (workbench, extension, fixture, eventually) => {
     await replace(cleared, '');
     assert(await cleared.save());
     assert.equal((await config()).previewSetup, undefined, 'clearing and saving disables the script');
+    const currentRoot = workbench.settings.getChildren().find((node) => node.id === 'scripts');
+    const clearedRow = workbench.settings.getChildren(currentRoot).find((node) => node.id === 'script:preview');
+    assert.equal(clearedRow.contextValue, undefined, 'clearing a script removes its inline rerun action with the row update');
     const workspace = await open('workspace');
     await replace(workspace, '');
     assert(await workspace.save());

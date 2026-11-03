@@ -12,7 +12,46 @@ async function screenshot(mode) {
   execFileSync('import', ['-display', process.env.DISPLAY, '-window', 'root', destination.replace(/\.png$/, `-${mode}.png`)]);
 }
 
+const checkFileViewContext = async (workbench, eventually) => {
+  const mode = workbench.sidebar.fileViewMode;
+  const refresh = workbench.refresh;
+  let release;
+  let changing;
+  try {
+    await workbench.sidebar.setFileViewMode('list');
+    await workbench.refresh(true);
+    await workbench.contextUpdate;
+    for (const layout of ['tree', 'list']) {
+      let waiting = false;
+      const held = new Promise((resolve) => {
+        release = resolve;
+      });
+      // Navigation may reuse a read that already published the previous layout.
+      // Hold its completion without publishing another repository snapshot.
+      workbench.refresh = () => {
+        waiting = true;
+        return held;
+      };
+      changing = vscode.commands.executeCommand(layout === 'tree' ? 'warden.viewAsTree' : 'warden.viewAsList');
+      await eventually(() => waiting);
+      release();
+      await changing;
+      assert.equal(workbench.sidebar.fileViewMode, layout);
+      assert.equal(workbench.context.workspaceState.get('warden.fileViewMode'), layout);
+      assert.equal(workbench.contextValues.get('warden.fileViewMode'), layout, 'layout commands publish their menu context even when reusing an old read');
+    }
+  } finally {
+    release?.();
+    await changing;
+    workbench.refresh = refresh;
+    await workbench.sidebar.setFileViewMode(mode);
+    await workbench.updateContext();
+  }
+};
+exports.checkFileViewContext = checkFileViewContext;
+
 exports.checkFileViews = async (workbench, extension, workspace, eventually) => {
+  await checkFileViewContext(workbench, eventually);
   const sidebar = workbench.sidebar;
   const mode = sidebar.fileViewMode;
   const root = workspace.task.worktree;

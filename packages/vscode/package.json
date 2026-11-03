@@ -127,42 +127,36 @@
         "command": "warden.startTask",
         "title": "Retry Workspace Allocation",
         "category": "Warden",
-        "icon": "$(refresh)",
-        "enablement": "warden.agentReady"
+        "icon": "$(refresh)"
       },
       {
         "command": "warden.editTask",
         "title": "Edit Task",
         "category": "Warden",
-        "icon": "$(edit)",
-        "enablement": "warden.agentReady"
+        "icon": "$(edit)"
       },
       {
         "command": "warden.deleteTask",
         "title": "Delete Task…",
         "category": "Warden",
-        "icon": "$(trash)",
-        "enablement": "warden.agentReady"
+        "icon": "$(trash)"
       },
       {
         "command": "warden.retryDeleteTask",
         "title": "Retry Delete",
         "category": "Warden",
-        "icon": "$(refresh)",
-        "enablement": "warden.agentReady"
+        "icon": "$(refresh)"
       },
       {
         "command": "warden.moveTask",
         "title": "Reorder Tasks",
-        "category": "Warden",
-        "enablement": "warden.agentReady"
+        "category": "Warden"
       },
       {
         "command": "warden.connect",
         "title": "Connect / Disconnect Preview",
         "category": "Warden",
-        "icon": "$(plug)",
-        "enablement": "warden.agentReady"
+        "icon": "$(plug)"
       },
       {
         "command": "warden.openDiff",
@@ -174,20 +168,17 @@
         "command": "warden.deliver",
         "title": "Commit to Base Branch",
         "category": "Warden",
-        "icon": "$(check)",
-        "enablement": "warden.agentReady"
+        "icon": "$(check)"
       },
       {
         "command": "warden.retryHook",
         "title": "Retry Workspace Setup",
-        "category": "Warden",
-        "enablement": "warden.agentReady"
+        "category": "Warden"
       },
       {
         "command": "warden.resumeTask",
         "title": "Finish Recovered Commit Preparation",
-        "category": "Warden",
-        "enablement": "warden.agentReady"
+        "category": "Warden"
       },
       {
         "command": "warden.previewTerminal",
@@ -217,8 +208,7 @@
         "command": "warden.setup",
         "title": "Rerun Preview Setup",
         "category": "Warden",
-        "icon": "$(debug-restart)",
-        "enablement": "warden.agentReady"
+        "icon": "$(debug-restart)"
       },
       {
         "command": "warden.configureScripts",
@@ -229,14 +219,12 @@
         "command": "warden.rebase",
         "title": "Rebase",
         "category": "Warden",
-        "icon": "$(sync)",
-        "enablement": "warden.agentReady"
+        "icon": "$(sync)"
       },
       {
         "command": "warden.copyWorkspace",
         "title": "Copy Workspace Path",
-        "category": "Warden",
-        "enablement": "warden.agentReady"
+        "category": "Warden"
       },
       {
         "command": "warden.importNotes",
@@ -266,8 +254,7 @@
         "command": "warden.chat",
         "title": "Chat with Agent",
         "category": "Warden",
-        "icon": "$(comment-discussion)",
-        "enablement": "warden.agentReady"
+        "icon": "$(comment-discussion)"
       },
       {
         "command": "warden.configureAgents",
@@ -289,8 +276,7 @@
         "command": "warden.openWorkspace",
         "title": "Open Workspace",
         "category": "Warden",
-        "icon": "$(folder-opened)",
-        "enablement": "warden.agentReady"
+        "icon": "$(folder-opened)"
       },
       {
         "command": "warden.syncTask",
@@ -324,50 +310,43 @@
         "command": "warden.taskHistory",
         "title": "Commits",
         "category": "Warden",
-        "icon": "$(history)",
-        "enablement": "warden.agentReady"
+        "icon": "$(history)"
       },
       {
         "command": "warden.taskOutput",
         "title": "Show Setup Script Output",
         "category": "Warden",
-        "icon": "$(output)",
-        "enablement": "warden.agentReady"
+        "icon": "$(output)"
       },
       {
         "command": "warden.copyBrief",
         "title": "Copy Task Notes",
         "category": "Warden",
-        "icon": "$(copy)",
-        "enablement": "warden.agentReady"
+        "icon": "$(copy)"
       },
       {
         "command": "warden.restoreTask",
         "title": "Restore Archived Task",
         "category": "Warden",
-        "icon": "$(discard)",
-        "enablement": "warden.agentReady"
+        "icon": "$(discard)"
       },
       {
         "command": "warden.recoverDelivery",
         "title": "Recover Commit Preparation",
         "category": "Warden",
-        "icon": "$(debug-restart)",
-        "enablement": "warden.agentReady"
+        "icon": "$(debug-restart)"
       },
       {
         "command": "warden.recordDelivery",
         "title": "Record Reviewed Commit",
         "category": "Warden",
-        "icon": "$(check)",
-        "enablement": "warden.agentReady"
+        "icon": "$(check)"
       },
       {
         "command": "warden.reviewTask",
         "title": "Review Current Changes",
         "category": "Warden",
-        "icon": "$(diff)",
-        "enablement": "warden.agentReady"
+        "icon": "$(diff)"
       },
       {
         "command": "warden.switchChat",
@@ -661,7 +640,7 @@
       "view/item/context": [
         {
           "command": "warden.setup",
-          "when": "warden.agentReady && view == warden.settings && viewItem == wardenPreviewSetup && warden.hasDevelopmentBranch && warden.hasPreviewSetup",
+          "when": "view == warden.settings && viewItem == wardenPreviewSetup",
           "group": "inline@1"
         },
         {

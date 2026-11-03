@@ -6,6 +6,7 @@ const { execFileSync } = require('node:child_process');
 const vscode = require('vscode');
 const { verifyAgent } = require('./agent-setup.cjs');
 const { checkStartup } = require('./startup.cjs');
+const { checkBranchChats } = require('./branch-chats.cjs');
 
 exports.run = async () => {
   const fixture = JSON.parse(await fs.readFile(process.env.WARDEN_VSCODE_FIXTURE, 'utf8'));
@@ -21,7 +22,9 @@ exports.run = async () => {
     await verifyAgent(workbench, fixture);
     await checkStartup(workbench, fixture, eventually);
     await exports.checkBranches(workbench, fixture.root, eventually);
-    console.log('Packaged branch flows passed: explicit tracking, quiet inactive branches, retained connections, reloads and obsolete observer rejection');
+    console.log(
+      'Packaged branch flows passed: explicit tracking, quiet inactive branches, retained preview and agent connections, chat recovery and obsolete observer rejection',
+    );
   } finally {
     await workbench.close();
   }
@@ -279,4 +282,5 @@ exports.checkBranches = async (workbench, root, eventually) => {
   assert.equal((await workbench.backend.execute('workflow.get')).workflow.developmentBranch, 'feature/other');
   await configure('guard/merging');
   await follow('guard/merging');
+  await checkBranchChats(workbench, root, eventually);
 };

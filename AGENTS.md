@@ -60,3 +60,4 @@ Read the relevant contract before editing. Workflow and interaction design take 
 
 - Verify native UI in the packaged extension host. For webview changes, prefer Storybook (`*.stories.tsx`) for component states and exercise affected flows in a real browser against a disposable repository per [UI verification](docs/development.md#ui-verification). Report coverage.
 - Run the relevant local checks and provide a concise change and verification summary for quick human acceptance. Push only when explicitly instructed.
+- Verification after development must cover relevant edge cases, including interrupted operations, invalid or replaced state, and context changes during in-flight work. Add regression tests for uncovered behavior and fixes, and report which boundaries were tested and any gaps.

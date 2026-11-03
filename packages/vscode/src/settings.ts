@@ -25,6 +25,7 @@ export class Settings implements vscode.TreeDataProvider<SettingsNode>, vscode.D
   readonly view: vscode.TreeView<SettingsNode>;
   private readonly agent = this.row('acp', 'ACP', 'plug');
   private signature?: string;
+  private showing?: Promise<void>;
 
   constructor(
     private readonly model: () => WorkbenchModel,
@@ -63,7 +64,13 @@ export class Settings implements vscode.TreeDataProvider<SettingsNode>, vscode.D
   async show() {
     // Focusing the view alone leaves a previously collapsed ACP section closed.
     // Reveal the provider's existing element so VS Code need not resolve a new root.
-    await this.view.reveal(this.agent, { select: true, focus: true, expand: true });
+    this.showing ??= Promise.resolve().then(() => this.view.reveal(this.agent, { select: true, focus: true, expand: true }));
+    const opening = this.showing;
+    try {
+      await opening;
+    } finally {
+      if (this.showing === opening) this.showing = undefined;
+    }
   }
   getTreeItem(node: SettingsNode) {
     // Menu updates can render a retained row after navigation. Keep its original
@@ -140,7 +147,8 @@ export class Settings implements vscode.TreeDataProvider<SettingsNode>, vscode.D
     scripts.children = kinds.map((kind) => {
       const item = this.row(`script:${kind}`, scriptLabels[kind], 'file-code', 'warden.editSetupScript', [kind, model.session]);
       item.session = model.session;
-      if (kind === 'preview') item.contextValue = 'wardenPreviewSetup';
+      // Row eligibility avoids global menu updates rerendering removed tree items during navigation.
+      if (kind === 'preview' && scriptValue(config, kind).trim()) item.contextValue = 'wardenPreviewSetup';
       item.description = scriptValue(config, kind).trim() ? 'Configured' : 'Not Set';
       item.tooltip = `${scriptLabels[kind]}\n${model.repository}\nOpen in the text editor. Save to update configuration. ${kind === 'preview' ? 'Runs on preview initialization, updates and configuration changes.' : 'Runs when a task workspace is allocated.'}`;
       return item;

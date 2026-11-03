@@ -38,6 +38,7 @@ opens or restores its native diff without replacing a pinned version or resettin
 The title bar offers **View as Tree** / **View as List**, matching Source Control's layout switch.
 List view shows file names with relative parent paths; tree view adds expandable directories.
 The choice persists in VS Code workspace state and leaves task order, expansion and open diffs intact.
+The title action follows the applied layout even while background repository reads are pending.
 Common actions (Agent, preview connection and commit) are inline tree actions. The context menu
 contains editing, opening the assigned workspace, delivery records, synchronization, copying and recovery.
 Drag tasks or use Alt+Up/Down to reorder the plan; the Command Palette offers a move picker.
@@ -45,6 +46,9 @@ The view heading places synchronization beside task creation and refresh. Its na
 menu reveals **Settings**, a native TreeView stacked beneath Workbench for workspace initialization,
 preview setup and Agent configuration. Both views appear by default and retain VS Code's native
 collapse, resize, movement and keyboard controls.
+Tree item actions derive availability from the row rather than global branch or connection keys,
+which can rerender obsolete native rows during navigation. Palette and title actions retain their
+connection gates; command handlers still validate agent readiness and the originating session.
 Background checks that find no sidebar changes leave the native tree untouched, without starting
 its loading animation. Refresh the tree when task/file content, connection state or error feedback
 changes; keep actual preview synchronization progress visible.

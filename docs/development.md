@@ -20,8 +20,10 @@ pnpm test:vscode
 
 `WARDEN_VSCODE_SUITE=tree-refresh pnpm test:vscode` runs a focused native regression for branch
 replacement while descendant reads are held and menu contexts change. It also checks hidden views,
-tree file layout and superseded expansion restores. All packaged host suites inspect the renderer
-logs after shutdown and fail on Warden tree errors (including Settings), even when the extension tests exit with 0.
+tree file layout, menu state during pending repository reads and superseded expansion restores.
+Settings coverage holds script-child reads while repository and connection contexts change, including hidden views.
+All packaged host suites inspect the renderer logs after shutdown and fail on Warden tree errors
+(including Settings), even when the extension tests exit with 0.
 Set `WARDEN_VSCODE_ARTIFACTS` to retain those renderer logs outside the disposable fixture directory.
 The packaged extension's CI matrix runs this regression before the full native suite on each platform.
 
@@ -53,6 +55,20 @@ engine and Git CLI. CI covers Windows, Linux and macOS, including x64 and arm64 
 Read-only Git operations retain their argument whitelist and environment isolation. New Git writes need
 an explanation in [State and security](internals.md). Never replace normal delivery commits with commit-tree.
 See [Git reads](git-reads.md) for status limits, query reuse and reproducible performance measurements.
+
+Verification after each behavior change includes its relevant edge cases: empty or missing state,
+interruption and recovery, stale requests, concurrent context changes and replaced resources. Add
+regression coverage for missing boundaries and reproduced defects; report the checks run and any
+remaining gaps alongside the normal flow. Use real Git fixtures, ACP subprocesses and the packaged
+extension host when the behavior crosses those boundaries.
+
+For branch changes, `test/acp-branches.test.ts` combines real task allocation, session persistence and
+agent subprocesses, including renamed or deleted base branches. The packaged regression,
+`WARDEN_VSCODE_SUITE=branches pnpm test:vscode`, also exercises running task chats
+across tracked/untracked branches and detached HEAD, permission routing, unsent drafts, reopening
+saved conversations and recovery from a task workspace switched to an unrelated branch. These cases
+run in the full packaged host suite as well. Existing ACP tests cover unsupported or failed session
+loading and cross-window ownership; an unchanged transcript alone does not prove a session resumed.
 
 The extension invokes named typed engine commands; UI and transport code never bypass the engine's
 operation validation. Engine errors retain stable codes. `Engine.close()` rejects new requests and drains

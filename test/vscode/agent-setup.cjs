@@ -89,7 +89,16 @@ exports.checkAgentSetup = async (workbench, extension, fixture, eventually) => {
     await eventually(() => !workbench.settings.view.visible);
     await vscode.commands.executeCommand('warden.configureAgents');
     const settings = workbench.settings.view;
-    await eventually(() => settings.visible);
+    await eventually(() => settings.visible && settings.selection[0]?.id === 'acp').catch((error) => {
+      throw new Error(
+        `Settings did not select ACP: ${JSON.stringify({
+          visible: settings.visible,
+          selection: settings.selection.map((node) => node.id),
+          errors: [...workbench.errors.values()],
+        })}`,
+        { cause: error },
+      );
+    });
     let acpExpanded = true;
     const expansion = settings.onDidExpandElement(({ element }) => {
       if (element.id === 'acp') acpExpanded = true;

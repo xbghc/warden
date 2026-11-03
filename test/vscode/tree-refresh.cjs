@@ -2,6 +2,9 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const vscode = require('vscode');
 const { checkReviewRaces } = require('./review-race.cjs');
+const { checkFileViewContext } = require('./file-views.cjs');
+const { verifyAgent } = require('./agent-setup.cjs');
+const { checkSettingsRefresh } = require('./settings-refresh.cjs');
 
 const eventually = async (condition) => {
   const deadline = Date.now() + 15_000;
@@ -15,7 +18,10 @@ exports.run = async () => {
   const fixture = JSON.parse(await fs.readFile(process.env.WARDEN_VSCODE_FIXTURE, 'utf8'));
   const workbench = await vscode.extensions.getExtension('xbghc.warden').activate();
   const Sidebar = workbench.sidebar.constructor;
+  const Settings = workbench.settings.constructor;
   await checkReviewRaces(workbench);
+  await verifyAgent(workbench, fixture);
+  await checkFileViewContext(workbench, eventually);
   await workbench.close();
   const task = (id) => ({ id, title: id, branch: id, developmentBranch: id, worktree: `${fixture.root}-${id}`, base: 'base', status: 'working' });
   const oldTask = task('old-branch');
@@ -128,4 +134,5 @@ exports.run = async () => {
     release?.();
     sidebar.dispose();
   }
+  await checkSettingsRefresh(Settings, workbench.context, fixture, eventually);
 };

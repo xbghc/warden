@@ -189,8 +189,8 @@ export class Workbench {
     const commands: Record<string, (node?: Node) => unknown> = {
       selectRepository: () => this.selectRepository(),
       refresh: () => this.refresh(),
-      viewAsTree: () => this.sidebar.setFileViewMode('tree'),
-      viewAsList: () => this.sidebar.setFileViewMode('list'),
+      viewAsTree: () => this.setFileViewMode('tree'),
+      viewAsList: () => this.setFileViewMode('list'),
       configure: () => this.configure(),
       createTask: () => this.createTask(),
       moveTaskUp: (node) => this.moveTaskBy(node, -1),
@@ -530,6 +530,11 @@ export class Workbench {
     // A failed publication is retried by the next update; it must not poison the queue.
     this.contextUpdate = pending.catch(() => {});
     return pending;
+  }
+  private async setFileViewMode(mode: 'list' | 'tree') {
+    await this.sidebar.setFileViewMode(mode);
+    // Navigation may reuse a repository read that already published the previous layout.
+    await this.updateContext();
   }
   private previewCommand() {
     const resource = this.backend ? vscode.Uri.file(this.backend.root) : null;
