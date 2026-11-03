@@ -6,6 +6,18 @@ const vscode = require('vscode');
 const { checkAgentPresets, checkAgentSetup } = require('./agent-setup.cjs');
 
 const checkChats = async (workbench, extension, fixture, eventually) => {
+  const connected = async (entry) => {
+    try {
+      // Session startup and restoration include Git validation and process cleanup on Windows.
+      await eventually(() => entry.session.snapshot().status === 'connected', 30_000);
+    } catch (error) {
+      const snapshot = entry.session.snapshot();
+      throw new Error(
+        `Task chat did not connect: ${JSON.stringify({ status: snapshot.status, error: entry.error ?? snapshot.error, connecting: !!entry.connecting })}`,
+        { cause: error },
+      );
+    }
+  };
   const newTask = await workbench.backend.execute('task.create', { title: 'Task chat' });
   await workbench.refresh(true);
   const preview = await workbench.backend.execute('preview.refresh', undefined);
@@ -50,7 +62,7 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
     const current = chat.draft.snapshot();
     return { text, version: current.draftVersion, revision: current.draftRevision + 1 };
   };
-  await eventually(() => chat.session.snapshot().status === 'connected');
+  await connected(chat);
   assert.equal(conversations.defaultProfileId(), 'fixture', 'new chats use the verified agent, not settings order');
   assert.equal(chat.session.snapshot().record.profileId, 'fixture');
   await assert.rejects(conversations.handle(chat, { type: 'connect', profileId: 'other', resume: false }), /The agent changed/);
@@ -95,6 +107,7 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   assert.equal(chat.session.snapshot().controls.configOptions.find((option) => option.id === 'thinking').currentValue, true);
   assert.equal(chat.session.snapshot().controls.modes, undefined, 'session config takes precedence over legacy modes');
   const asking = conversations.handle(chat, { type: 'send', profileId: 'fixture', ...edit('permission') });
+  void asking.catch(() => {});
   await eventually(() => chat.session.snapshot().permissions.length === 1);
   const permission = chat.session.snapshot().permissions[0];
   const previousPanel = chat.panelId;
@@ -122,7 +135,7 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   });
   assert.equal(chat.session.snapshot().permissions.length, 1, 'a stale view cannot answer a permission after switching');
   assert.equal(chat.draft.text, 'Keep this task draft', 'queued messages cannot overwrite the old task draft');
-  await eventually(() => otherChat.session.snapshot().status === 'connected');
+  await connected(otherChat);
   await eventually(() => otherChat.surface.ready);
   await conversations.expand();
   assert(otherChat.panel);
@@ -131,7 +144,7 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   await eventually(() => !otherChat.panel.visible);
   await conversations.handle(otherChat, { type: 'disconnect' });
   otherChat.panel.reveal(otherChat.panel.viewColumn);
-  await eventually(() => otherChat.session.snapshot().status === 'connected');
+  await connected(otherChat);
   assert.equal(otherChat.session.snapshot().record.sessionId, editorSession, 'revealing the existing editor resumes its session');
   await conversations.show(fixture.root, newTask.id);
   assert.equal(chat.draft.text, 'Keep this task draft');
@@ -171,6 +184,7 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   await assert.rejects(conversations.handle(chat, { type: 'send', profileId: 'fixture', ...typedDraft }), /The draft was updated/);
   assert.equal(chat.draft.text, 'Edited task\n\nSelected source', 'a stale send cannot erase appended context');
   const held = conversations.handle(chat, { type: 'send', profileId: 'fixture', ...edit('hold') });
+  void held.catch(() => {});
   await eventually(async () => (await journal()).some((row) => row.method === 'session/prompt' && row.params.prompt[0].text === 'hold'));
   await conversations.handle(chat, { type: 'draft', ...edit('hold') });
   await conversations.handle(chat, { type: 'cancel' });
@@ -181,7 +195,7 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   await vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
   await eventually(() => !conversations.sidebar.visible);
   await vscode.commands.executeCommand('warden.taskChat.focus');
-  await eventually(() => chat.session.snapshot().status === 'connected');
+  await connected(chat);
   assert.equal(chat.session.snapshot().record.sessionId, savedSession);
   assert.equal(chat.draft.text, 'hold', 'automatic resume preserves the unsent draft');
   assert.equal((await journal()).filter((row) => row.method === 'session/load' && row.cwd === chat.binding.workspace).length, 1);
@@ -210,7 +224,7 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   conversations.entries.delete(conversations.key(fixture.root, otherTask.id));
   await conversations.show(fixture.root, otherTask.id);
   const restoredChat = conversations.sidebarEntry;
-  await eventually(() => restoredChat.session.snapshot().status === 'connected');
+  await connected(restoredChat);
   assert.notEqual(restoredChat, otherChat, 'reopening reads a fresh conversation object from saved state');
   assert.equal(restoredChat.session.snapshot().record.sessionId, otherSession, 'saved sessions restore automatically');
   assert.equal(restoredChat.draft.text, 'Saved across reopening');
@@ -225,7 +239,7 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   await conversations.show(fixture.root, newTask.id);
   const replacement = [...conversations.entries.values()].find((entry) => entry.binding.taskId === newTask.id);
   assert.notEqual(replacement, chat, 'reopening a disconnected replaced allocation creates a fresh binding');
-  await eventually(() => replacement.session.snapshot().status === 'connected');
+  await connected(replacement);
   assert.notEqual(replacement.session.snapshot().record.sessionId, chat.session.snapshot().record.sessionId);
   const interruptedSession = replacement.session.snapshot().record.sessionId;
   const replacementDraft = replacement.draft.snapshot();
@@ -240,7 +254,7 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
     .catch(() => {});
   await eventually(() => replacement.session.snapshot().status === 'error');
   await conversations.show(fixture.root, newTask.id);
-  await eventually(() => replacement.session.snapshot().status === 'connected');
+  await connected(replacement);
   assert.equal(replacement.session.snapshot().record.sessionId, interruptedSession, 'reopening a failed session resumes without a manual disconnect');
   assert.equal(replacement.draft.text, 'crash');
   assert(
@@ -296,7 +310,7 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   const emptyTask = await workbench.backend.execute('task.create', { title: 'Unpersisted empty session' });
   await conversations.show(fixture.root, emptyTask.id);
   const emptyChat = conversations.sidebarEntry;
-  await eventually(() => emptyChat.session.snapshot().status === 'connected');
+  await connected(emptyChat);
   const emptyRecord = emptyChat.session.snapshot().record;
   const emptyDraft = emptyChat.draft.text;
   await conversations.handle(emptyChat, { type: 'disconnect' });

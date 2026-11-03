@@ -255,7 +255,11 @@ exports.run = async () => {
       return !workbench.commitInput;
     });
     await submittedInput;
-    assert.equal(primaryGit('log', '-1', '--format=%B'), 'Reviewed delivery\n\nKeep normal commit hooks');
+    assert.equal(
+      primaryGit('log', '-1', '--format=%B'),
+      'Reviewed delivery\n\nKeep normal commit hooks',
+      `native commit completes: ${JSON.stringify([...workbench.errors.values()])}`,
+    );
     const deliveredTask = (await state()).workflow.changes[0];
     assert(
       deliveredTask.deliveries?.length,

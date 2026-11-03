@@ -150,7 +150,7 @@ exports.checkSidebar = async (workbench, extension, repository, eventually) => {
     return !workbench.taskInput;
   });
   await create;
-  assert.equal(workbench.tasks().length, count + 1, 'native input creates exactly one task');
+  assert.equal(workbench.tasks().length, count + 1, `native input creates exactly one task: ${JSON.stringify([...workbench.errors.values()])}`);
   const firstId = workbench.tasks().at(-1).id;
   const firstWorkspace = workbench.tasks().at(-1).worktree;
   assert(firstWorkspace, 'native task creation automatically allocates its workspace');

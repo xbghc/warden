@@ -129,7 +129,7 @@ jobs:
     name: VS Code (${{ matrix.os }}, ${{ matrix.vscode }})
     needs: vscode
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 30 || 20 }}
     strategy:
       fail-fast: false
       matrix:
@@ -137,6 +137,7 @@ jobs:
         vscode: ['1.106.0', stable]
     env:
       WARDEN_VSCODE_VERSION: ${{ matrix.vscode }}
+      WARDEN_VSCODE_ARTIFACTS: test-results/extension-host
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -165,3 +166,9 @@ jobs:
       - name: Test the packaged extension on Windows and macOS
         if: runner.os != 'Linux'
         run: pnpm test:vscode
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: extension-host-${{ matrix.os }}-${{ matrix.vscode }}
+          path: test-results/extension-host
+          if-no-files-found: ignore

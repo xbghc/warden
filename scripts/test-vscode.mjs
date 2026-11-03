@@ -56,6 +56,7 @@ try {
     await mkdir(path.dirname(destination), { recursive: true });
     await writeFile(destination, bytes);
   }
+  let testFailure;
   await runTests({
     ...(process.env.VSCODE_EXECUTABLE_PATH
       ? { vscodeExecutablePath: process.env.VSCODE_EXECUTABLE_PATH }
@@ -88,24 +89,44 @@ try {
       path.join(directory, 'extensions'),
       ...(process.env.WARDEN_VSCODE_HEADLESS ? ['--ozone-platform=headless'] : []),
     ],
+  }).catch((error) => {
+    testFailure = error;
   });
   let rendererLogs = 0;
   const inspectLogs = async (directory) => {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
       const file = path.join(directory, entry.name);
       if (entry.isDirectory()) await inspectLogs(file);
-      else if (entry.name === 'renderer.log') {
-        rendererLogs++;
+      else if (entry.name === 'renderer.log' || entry.name === 'Warden.log') {
+        if (entry.name === 'renderer.log') rendererLogs++;
         const log = await readFile(file, 'utf8');
         if (process.env.WARDEN_VSCODE_ARTIFACTS) {
           await mkdir(process.env.WARDEN_VSCODE_ARTIFACTS, { recursive: true });
-          await writeFile(path.join(process.env.WARDEN_VSCODE_ARTIFACTS, `${path.basename(directory)}-renderer.log`), log);
+          const name = `${process.env.WARDEN_VSCODE_SUITE ?? 'full'}-${path.basename(directory)}-${entry.name}`;
+          await writeFile(path.join(process.env.WARDEN_VSCODE_ARTIFACTS, name), log);
         }
-        if (/TreeError \[warden\./.test(log)) throw new Error('Native Warden tree errors were reported in renderer.log');
+        if (testFailure && entry.name === 'Warden.log') {
+          const lines = log.trim().split('\n');
+          console.error('Warden diagnostics from the failed disposable extension host:');
+          console.error(
+            lines
+              .filter((line) => line.includes('[error]'))
+              .slice(-20)
+              .join('\n'),
+          );
+          console.error(lines.slice(-20).join('\n'));
+        }
+        if (entry.name === 'renderer.log' && /TreeError \[warden\./.test(log)) throw new Error('Native Warden tree errors were reported in renderer.log');
       }
     }
   };
-  await inspectLogs(path.join(directory, 'user', 'logs'));
+  try {
+    await inspectLogs(path.join(directory, 'user', 'logs'));
+  } catch (error) {
+    if (!testFailure) throw error;
+    console.error('Failed host log inspection:', error);
+  }
+  if (testFailure) throw testFailure;
   if (!rendererLogs) throw new Error('Renderer logs were not available for native tree verification');
 } finally {
   await backend?.close();

@@ -24,7 +24,8 @@ tree file layout, menu state during pending repository reads and superseded expa
 Settings coverage holds script-child reads while repository and connection contexts change, including hidden views.
 All packaged host suites inspect the renderer logs after shutdown and fail on Warden tree errors
 (including Settings), even when the extension tests exit with 0.
-Set `WARDEN_VSCODE_ARTIFACTS` to retain those renderer logs outside the disposable fixture directory.
+Set `WARDEN_VSCODE_ARTIFACTS` to retain renderer and Warden logs outside the disposable fixture directory,
+including after host failures. CI uploads these logs, and failed runs print recent Warden diagnostics.
 The packaged extension's CI matrix runs this regression before the full native suite on each platform.
 
 `WARDEN_VSCODE_SUITE=deletion pnpm test:vscode` runs the packaged task deletion flow: native menu
@@ -296,6 +297,8 @@ of untracked, explicitly tracked empty and restored connected branches.
 CI packages the VSIX after quality checks so browser and extension-host tests run alongside the engine
 matrix. Marketplace publication requires the entire reusable workflow to succeed, including both matrices.
 Windows and Intel macOS serialize Git integration files because each file already issues parallel Git reads.
+Native chat connection checks allow 30 seconds for Git validation and agent startup or restoration.
+The Windows packaged host job has a 30-minute budget for the complete suite.
 
 ## Release
 
