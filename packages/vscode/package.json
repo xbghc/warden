@@ -138,6 +138,20 @@
         "enablement": "warden.agentReady"
       },
       {
+        "command": "warden.deleteTask",
+        "title": "Delete Task…",
+        "category": "Warden",
+        "icon": "$(trash)",
+        "enablement": "warden.agentReady"
+      },
+      {
+        "command": "warden.retryDeleteTask",
+        "title": "Retry Delete",
+        "category": "Warden",
+        "icon": "$(refresh)",
+        "enablement": "warden.agentReady"
+      },
+      {
         "command": "warden.moveTask",
         "title": "Reorder Tasks",
         "category": "Warden",
@@ -622,6 +636,14 @@
         {
           "command": "warden.expandChat",
           "when": "warden.agentReady"
+        },
+        {
+          "command": "warden.deleteTask",
+          "when": "warden.agentReady && warden.hasDevelopmentBranch"
+        },
+        {
+          "command": "warden.retryDeleteTask",
+          "when": "false"
         }
       ],
       "editor/context": [
@@ -669,12 +691,12 @@
         },
         {
           "command": "warden.editTask",
-          "when": "view == warden.task && viewItem =~ /^wardenTask:/",
+          "when": "view == warden.task && viewItem =~ /^wardenTask:/ && !(viewItem =~ /^wardenTask:deleting/)",
           "group": "2_task@1"
         },
         {
           "command": "warden.moveTask",
-          "when": "view == warden.task && viewItem =~ /^wardenTask:/",
+          "when": "view == warden.task && viewItem =~ /^wardenTask:/ && !(viewItem =~ /^wardenTask:deleting/)",
           "group": "2_task@2"
         },
         {
@@ -731,6 +753,16 @@
           "command": "warden.reviewTask",
           "when": "view == warden.task && viewItem =~ /^wardenTask:workspace/",
           "group": "3_review@0"
+        },
+        {
+          "command": "warden.deleteTask",
+          "when": "view == warden.task && viewItem =~ /^wardenTask:/ && !(viewItem =~ /^wardenTask:deleting/)",
+          "group": "9_delete@1"
+        },
+        {
+          "command": "warden.retryDeleteTask",
+          "when": "view == warden.task && viewItem =~ /^wardenTask:deleting/",
+          "group": "9_delete@1"
         }
       ]
     },
@@ -875,7 +907,7 @@
       },
       {
         "view": "warden.task",
-        "contents": "Opening repository\u2026",
+        "contents": "Opening repository…",
         "when": "warden.repositoryState != ready && warden.repositoryState != unselected"
       },
       {

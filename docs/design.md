@@ -81,9 +81,13 @@ The task title and connection state stay above a scrolling transcript; the compo
 bottom. Task paths, agent identity and usage appear on demand under **More Chat Actions**, alongside
 disconnect. New sessions use the agent verified in the workbench; existing sessions retain their
 binding. Task Chat has no agent-profile picker, executable configuration or ACP setup guide.
-The composer follows VS Code Chat: one input surface with compact Mode and Model selectors below the
-text, additional agent options and commands on demand, and a send button that becomes Stop Turn while
-running. Enter sends, Shift+Enter inserts a line, and composition keystrokes never send. Session details
+The composer has one input surface and a single footer row ordered Mode, Model, reasoning effort,
+then Send. Show the agent's available selectors; long values truncate instead of wrapping the row.
+Additional session options live in the header. Send becomes Stop Turn while running.
+There is no permanent slash-command button: typing `/` at the beginning of the message opens a
+filtered command list above the input. Arrow keys select a command, Enter or Tab inserts it, and
+Escape dismisses the list. Completion preserves existing arguments and never submits the message.
+Outside completion, Enter sends; Shift+Enter inserts a line, and composition keystrokes never send. Session details
 scroll separately when narrow or short. Switching captures the
 current draft and reading position before replacing the view binding. Background permission requests
 and failures appear on task rows without changing focus. Users can move the view with VS Code's native
@@ -270,6 +274,21 @@ Show a hook's output and exit code. Distinguish “Workspace created; setup scri
 creation failing. Retrying a hook is explicit; do not roll back arbitrary user-script modifications.
 Allocation failure retains the task and its error with **Retry Workspace Allocation** on that row. Retry uses the
 same task. Older unallocated plans are prepared automatically on use; archived plans require restoration.
+
+## Delete a task
+
+**Delete Task…** is a native task context-menu and Command Palette action. Its modal confirmation
+names the task and workspace folder, states that pending changes will be discarded, identifies
+whether the task branch will be deleted, and explains that the directory and ignored local files
+remain. Existing base-branch commits remain. The action creates no backup. A local task connection
+changes the affirmative action to **End Agent Process and Delete**; another window's connection
+requires disconnection in that window. Unsaved workspace editors must be saved or discarded first.
+
+Deletion removes the task's preview contribution before releasing its workspace. A failed operation
+keeps the task visible with **Delete Failed** or **Deletion Pending**, its concrete error and
+**Retry Delete**. Other task operations cannot restart work in a partially released allocation.
+Successful deletion closes its note/chat editors and clears task selections and drafts. Reusable
+physical directories are internal resources and do not become new sidebar rows.
 
 ## Compose the independent preview
 

@@ -29,6 +29,7 @@ import { HistoryService } from './history.js';
 import { workspaceConfig } from './workspace.js';
 import { RepoWatcher } from './watcher.js';
 import { snapshotObjects, snapshotStore } from './snapshots.js';
+import { TaskDeletionService } from './task-deletion.js';
 
 /** The desktop product has no adoption operation: allocation always creates a new logical workspace. */
 type NewWorkspace = Pick<StartChangeRequest, 'agent'> & { kind?: 'shared' | 'clone' };
@@ -45,6 +46,7 @@ function commands(repo: RepoContext, store: StateStore) {
   const workflow = new WorkflowService(repo, store);
   const preview = new PreviewService(repo, store);
   const history = new HistoryService(repo, store);
+  const deletion = new TaskDeletionService(repo, store);
   const workspaces = async (inventory = listWorktreesDetailed(repo)): Promise<WorktreesResponse> => {
     const list = await inventory;
     return { worktrees: list, branches: await listBranches(repo, list) };
@@ -80,6 +82,14 @@ function commands(repo: RepoContext, store: StateStore) {
       'task.update': ({ taskId, ...request }: UpdateChangeRequest & { taskId: string }) => {
         id(taskId);
         return workflow.update(taskId, request);
+      },
+      'task.deleteCheck': ({ taskId }: { taskId: string }) => {
+        id(taskId);
+        return deletion.check(taskId);
+      },
+      'task.delete': ({ taskId, confirmation }: { taskId: string; confirmation: string }) => {
+        id(taskId);
+        return deletion.delete(taskId, confirmation);
       },
       'task.start': ({ taskId, ...request }: NewWorkspace & { taskId: string }) => {
         id(taskId);
@@ -172,6 +182,7 @@ const reads = new Set<EngineCommand>([
   'review.files',
   'review.file',
   'task.review',
+  'task.deleteCheck',
   'rebase.check',
 ]);
 

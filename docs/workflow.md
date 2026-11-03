@@ -105,6 +105,24 @@ acceptance templates or agent-generated reports.
 
 ## Workspaces and hooks
 
+Users may explicitly delete a task, including one with undelivered source commits or saved edits.
+One native confirmation identifies the task, workspace folder, branch treatment and discarded work.
+Deletion creates no recovery backup. It closes the task's owned agent connection, removes its preview
+contribution, releases the workspace and removes the task. Commits already contributed to the base
+branch and their minimal historical associations remain. Task notes, drafts and Warden-local chat
+records are deleted; the agent application's own history is not managed by this operation.
+
+Releasing a workspace ends its task allocation, normally retaining the physical directory, Git
+checkout and ignored environment files. A later task receives a new identity and branch from its
+own base; it never inherits the previous task's conversation. A successful commit alone still does
+not release a workspace. Pending deletion is an operation record, not a task-completion state.
+
+A connection owned by another window must be disconnected there first. A pending primary commit
+belonging to the deleted task must be finished or cancelled before deletion; ordinary primary edits
+and unrelated task conversations do not block it. Preview disconnection failure preserves the task
+and its workspace. Later cleanup failures retain an explicit retry action and report any already
+completed disconnection. Restart never silently resumes destructive cleanup.
+
 A workspace is an execution resource, normally a Git worktree of Warden's external shared repository
 on a task branch based on the base branch. The bare repository lives at
 `<primary>-warden/repo.git`, independently of task, preview and temporary operation directories.

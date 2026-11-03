@@ -250,7 +250,7 @@ export class Sidebar implements vscode.TreeDataProvider<SidebarNode>, vscode.Tre
       const connected = model.preview?.connectedIds.includes(task.id);
       const sync = model.checks?.checks.find((check) => check.changeId === task.id);
       const errors = model.errors.filter((error) => error.scope === `task:${task.id}`);
-      const flags = [task.worktree ? 'workspace' : task.status === 'archived' ? 'archived' : 'plan'];
+      const flags = [task.deletion ? 'deleting' : task.worktree ? 'workspace' : task.status === 'archived' ? 'archived' : 'plan'];
       if (task.workspaceError) flags.push('allocationFailed');
       if (connected) flags.push('connected');
       if (sync && sync.status !== 'current') flags.push(sync.status === 'conflict' ? 'conflict' : 'sync');
@@ -265,7 +265,7 @@ export class Sidebar implements vscode.TreeDataProvider<SidebarNode>, vscode.Tre
         .filter(Boolean)
         .join('\n\n');
       item.iconPath = new vscode.ThemeIcon(
-        errors.length || task.workspaceError || task.integration?.error || sync?.status === 'conflict'
+        errors.length || task.deletion || task.workspaceError || task.integration?.error || sync?.status === 'conflict'
           ? 'warning'
           : model.checkingRebase && sync
             ? 'sync~spin'

@@ -3,7 +3,7 @@ import os from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, realpath, rename, rm } from 'node:fs/promises';
-import { StateStore } from '@warden/engine';
+import { StateStore, taskConnectionPaths } from '@warden/engine';
 import type { AcpBinding, AcpMessage, AcpRecord } from '@warden/shared';
 import type { AcpStorage } from './contracts.js';
 
@@ -162,19 +162,25 @@ export class AcpSessionStorage implements AcpStorage {
   private queue: Promise<unknown> = Promise.resolve();
   private token?: string;
 
-  constructor(directory: string, expected: AcpBinding) {
+  constructor(
+    directory: string,
+    expected: AcpBinding,
+    private readonly validateClaim?: () => Promise<void>,
+    private readonly validateRecord?: () => Promise<void>,
+  ) {
     this.binding = binding(expected);
     if (!path.isAbsolute(directory)) throw new Error('The session storage folder must use an absolute path.');
     this.directory = path.resolve(directory);
     this.assertOutside(this.directory);
-    this.taskKey = digest([this.binding.repository, this.binding.taskId]);
+    const paths = taskConnectionPaths(this.directory, this.binding.repository, this.binding.taskId);
+    this.taskKey = paths.key;
     const key = digest([this.binding.repository, this.binding.taskId, this.binding.identity]);
     this.file = path.join(this.directory, `${key}.json`);
-    this.ownerFile = path.join(this.directory, `${this.taskKey}.owner.json`);
+    this.ownerFile = paths.owner;
     this.archiveDirectory = path.join(this.directory, 'archives', key);
     // This short lock only serializes metadata. Holding an ACP owner claim never holds
     // the engine's repository lock and does not supervise agent execution.
-    this.mutex = new StateStore(path.join(this.directory, `${this.taskKey}.metadata`), this.binding.repository);
+    this.mutex = new StateStore(paths.metadata, this.binding.repository);
   }
 
   load(): Promise<AcpRecord | undefined> {
@@ -189,6 +195,7 @@ export class AcpSessionStorage implements AcpStorage {
     await this.serialized(() =>
       this.locked(async () => {
         await this.assertWriteOwner();
+        await this.validateRecord?.();
         // A caller must not bypass a failed load and replace corrupt or newer metadata.
         await this.readRecord();
         await this.writeAtomic(this.file, encoded);
@@ -201,6 +208,7 @@ export class AcpSessionStorage implements AcpStorage {
     await this.serialized(() =>
       this.locked(async () => {
         await this.assertWriteOwner();
+        await this.validateRecord?.();
         await this.readRecord();
         for (const directory of [path.dirname(this.archiveDirectory), this.archiveDirectory]) {
           await mkdir(directory, { mode: 0o700 }).catch((error: NodeJS.ErrnoException) => {
@@ -221,6 +229,9 @@ export class AcpSessionStorage implements AcpStorage {
       this.locked(async () => {
         const existing = await this.readOwner();
         if (existing && !this.exited(existing)) this.busy();
+        // Deletion publishes its reservation under this same lock, closing the gap
+        // between the session's initial validation and acquisition of its connection.
+        await this.validateClaim?.();
         const token = randomUUID();
         const next: Owner = {
           schemaVersion: 1,

@@ -1,12 +1,16 @@
 # Safety backups
 
-Warden makes a verified local backup before releasing an existing slot, removing an existing
-checkout, actually rebasing a workspace, or applying a history arrangement. A missing/prunable
+Warden makes a verified local backup for legacy slot release/removal, explicit workspace rebase,
+and history arrangement. A missing/prunable
 checkout has no files to copy. A synchronization that only repairs already-completed bookkeeping
 does not execute another rebase. Failed confirmation/preflight checks do not start a destructive
 operation. A backup failure stops the operation with `backup_failed`.
 Branch switches when reusing a slot also refuse to overwrite ignored files; rebase checks ignored
 paths against its target and intermediate replay commits before execution.
+
+Explicit **Delete Task…** is a separate, confirmed discard operation and creates no backup. It
+releases the task allocation while normally retaining the physical folder and ignored environment
+files. Its retry journal stores operation identity and progress, not discarded file contents.
 
 Backups live at `backups/<timestamp>-<uuid>/` beside this repository's `state.json`; see
 [State](internals.md#state) for the data directory. Inspect each completed backup's `manifest.json`

@@ -50,6 +50,7 @@ const workflowOf = (state: ReviewState): DevelopmentWorkflow => state.workflow ?
 const changeOf = (state: ReviewState, id: string): DevelopmentChange => {
   const change = workflowOf(state).changes.find((row) => row.id === id);
   if (!change) throw notFound('Task not found.', 'unknown_change');
+  if (change.deletion) fail('Task deletion is pending. Retry deletion before using this workspace.', 'task_deleting');
   if (!change.worktree) fail('The task workspace is not ready. Retry.', 'change_not_started');
   return change;
 };
@@ -111,7 +112,7 @@ export class WorkflowService {
     try {
       const developmentHead = await this.developmentHead(workflow.developmentBranch);
       const working = workflow.changes.filter(
-        (row): row is DevelopmentChange => !!row.worktree && row.status === 'working' && row.developmentBranch === workflow.developmentBranch,
+        (row): row is DevelopmentChange => !!row.worktree && !row.deletion && row.status === 'working' && row.developmentBranch === workflow.developmentBranch,
       );
       const checkouts = working.length ? (inventory ? inventory.then((rows) => new Map(rows.map((row) => [row.path, row]))) : this.listCheckouts()) : undefined;
       for (const row of working) {
@@ -144,7 +145,7 @@ export class WorkflowService {
     const data = await this.get(inventory);
     const checkouts = await inventory;
     const task = data.workflow?.changes.find((row) => row.id === id);
-    if (!task?.worktree || task.developmentBranch !== data.workflow?.developmentBranch) return undefined;
+    if (!task?.worktree || task.deletion || task.developmentBranch !== data.workflow?.developmentBranch) return undefined;
     const checkout = checkouts.find((row) => row.path === task.worktree);
     const initial = taskReview(data, id, checkouts);
     if (initial?.preparation || !checkout || checkout.busy || checkout.foreign || checkout.prunable || checkout.branch !== task.branch) return initial;
@@ -270,6 +271,7 @@ export class WorkflowService {
       const workflow = workflowOf(await this.store.load());
       const change = workflow.changes.find((row) => row.id === id);
       if (!change) throw notFound('Task not found.', 'unknown_change');
+      if (change.deletion) fail('Task deletion is pending. Retry deletion first.', 'task_deleting');
       if (request.status && change.worktree) throw badRequest('Workspaces do not require a task-status declaration.', 'change_started');
       if (request.status !== undefined && request.status !== 'planned' && request.status !== 'archived')
         throw badRequest('Invalid plan status.', 'invalid_plan');
@@ -287,6 +289,7 @@ export class WorkflowService {
         const workflow = workflowOf(state);
         const change = workflow.changes.find((row) => row.id === id);
         if (!change) throw notFound('Task not found.', 'unknown_change');
+        if (change.deletion) fail('Task deletion is pending. Retry deletion first.', 'task_deleting');
         if (before !== null && !workflow.changes.some((row) => row.id === before && row.developmentBranch === change.developmentBranch))
           throw badRequest('Tasks must belong to the same base branch to be reordered.', 'invalid_order');
         workflow.changes = moveBefore(workflow.changes, id, before)!;
@@ -322,6 +325,7 @@ export class WorkflowService {
       const workflow = workflowOf(await this.store.load());
       const change = workflow.changes.find((row) => row.id === id);
       if (!change) throw notFound('Task not found.', 'unknown_change');
+      if (change.deletion) fail('Task deletion is pending. Retry deletion first.', 'task_deleting');
       if (change.developmentBranch !== workflow.developmentBranch) fail('Switch to the base branch for this task first.', 'requirement_changed');
       // Duplicate clicks and retries share the original allocation, including during delivery.
       if (change.worktree) return change;
@@ -353,6 +357,7 @@ export class WorkflowService {
     const list = await listWorktreesDetailed(this.repo);
     let worktree: string;
     let branch: string;
+    let ownsBranch = false;
     let fork = base;
     let hookEvent: 'create' | 'reuse' | undefined;
     if (request.worktree) {
@@ -373,16 +378,17 @@ export class WorkflowService {
           row.free &&
           !!row.clone === (kind === 'clone') &&
           !!row.shared === (kind === 'shared') &&
-          !workflow.changes.some((change) => active(change) && change.worktree === row.path),
+          !workflow.changes.some((change) => change.worktree === row.path),
       );
       const slot = free?.slot ?? (await nextSlot(this.repo, list)).slot;
       if (free?.clone || free?.shared) await this.importCommit(this.repo.commonRoot, free.path, base);
       const created = await checkoutWorktree(this.repo, { branch, base, slot, kind });
       worktree = created.worktree.path;
+      ownsBranch = !!created.branchCreated;
       hookEvent = created.reused ? 'reuse' : 'create';
       await this.store.update((state) => forgetWorktreeTargets(state, worktree));
     }
-    const change: DevelopmentChange = { ...plan, branch, worktree, base: fork, status: 'working', agent: request.agent?.trim() || undefined };
+    const change: DevelopmentChange = { ...plan, branch, ownsBranch, worktree, base: fork, status: 'working', agent: request.agent?.trim() || undefined };
     delete change.workspaceError;
     if (fork !== base) change.sync = { status: 'pending', target: base, message: 'The base branch has changed. Rebase the workspace when ready.' };
     await this.save(change);

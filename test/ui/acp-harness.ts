@@ -98,7 +98,7 @@ for (const [index, title] of ['订单筛选参数', '分页默认值'].entries()
   const task = await engine.execute('task.create', { title });
   const binding = await resolveAcpBinding(engine, task.id);
   await writeFile(path.join(binding.workspace, 'context.txt'), `task ${index + 1}\n`);
-  const profiles = ['normal', 'no-load', 'auth', 'incompatible', 'controls', 'legacy-modes', 'auth-external'].map((mode) => ({
+  const profiles = ['normal', 'no-load', 'auth', 'incompatible', 'controls', 'legacy-modes', 'auth-external', 'controls-composer'].map((mode) => ({
     id: mode,
     label: {
       normal: '测试 Agent',
@@ -108,6 +108,7 @@ for (const [index, title] of ['订单筛选参数', '分页默认值'].entries()
       controls: '支持会话配置的 Agent',
       'legacy-modes': '支持旧模式的 Agent',
       'auth-external': '外部登录的 Agent',
+      'controls-composer': '支持输入区配置的 Agent',
     }[mode]!,
     command: process.execPath,
     args: [path.resolve('test/fixtures/acp-agent.mjs'), path.join(data, `${index}-${mode}.jsonl`), mode],

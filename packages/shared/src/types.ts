@@ -139,6 +139,37 @@ export interface DevelopmentWorkflow {
   /** Explicitly selected base branches, retained even when they have no tasks. */
   trackedBranches?: string[];
   changes: WorkflowTask[];
+  /** Completed deletions keep identity and commit associations, never workspace contents. */
+  deletedTasks?: { id: string; title: string; developmentBranch: string; deletedAt: string; deliveries?: ChangeDelivery[] }[];
+}
+
+export interface TaskDeletion {
+  /** Physical checkout identity; retries must never clean a replacement at the same path. */
+  identity?: string;
+  head?: string;
+  branchTip?: string;
+  phase: 'disconnecting' | 'releasing' | 'released';
+  error?: string;
+}
+
+export interface TaskDeleteCheck {
+  taskId: string;
+  title: string;
+  developmentBranch: string;
+  worktree?: string;
+  branch?: string;
+  deleteBranch: boolean;
+  dirty: number;
+  operation?: string;
+  agentConnected: boolean;
+  confirmation: string;
+  retry: boolean;
+}
+
+export interface TaskDeleteResult {
+  taskId: string;
+  worktree?: string;
+  retainedBranch?: string;
 }
 
 export interface ChangePlan {
@@ -155,6 +186,8 @@ export interface ChangePlan {
   /** Kept when importing old checklists; a checked box is not evidence of a Git commit. */
   legacyTodo?: { branch: string; status: TodoStatus };
   createdAt: string;
+  /** An explicit deletion interrupted before all task resources were released. */
+  deletion?: TaskDeletion;
 }
 
 export interface PlannedChange extends ChangePlan {
@@ -172,6 +205,8 @@ export type WorkflowTask = PlannedChange | DevelopmentChange;
 
 export interface DevelopmentChange extends ChangePlan {
   branch: string;
+  /** True only when allocation actually created this branch, not when adopting an existing one. */
+  ownsBranch?: boolean;
   worktree: string;
   /** The exact base-branch commit this task last incorporated. */
   base: string;
@@ -446,6 +481,7 @@ export interface CreateWorktreeResponse {
   slot: number;
   /** The slot was there and was switched to the branch: its directory, dependencies included, is as it was. */
   reused: boolean;
+  branchCreated?: boolean;
 }
 
 export interface ReleaseWorktreeRequest {

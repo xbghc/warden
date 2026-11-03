@@ -57,6 +57,20 @@ export class PreviewService {
       }
     });
   }
+  /** Task deletion already holds the repository lock. Recover publication before
+   * deriving the remaining connection set, including an interrupted disconnection.
+   */
+  async disconnectTaskLocked(taskId: string) {
+    await this.recover(await this.store.load());
+    const saved = (await this.store.load()).connectionPreview;
+    if (!saved?.connectedIds.includes(taskId)) return this.get();
+    try {
+      return await this.compose(saved.connectedIds.filter((id) => id !== taskId));
+    } catch (error) {
+      await this.failed(error);
+      throw error;
+    }
+  }
   refresh() {
     return this.store.withRepositoryLock(() => this.refreshLocked());
   }
@@ -87,6 +101,7 @@ export class PreviewService {
     return this.store.withRepositoryLock(async () => {
       const state = await this.store.load();
       if (!state.connectionPreview || !state.workflow?.trackedBranches?.includes(state.workflow.developmentBranch)) return;
+      if (state.workflow.changes.some((task) => task.deletion && state.connectionPreview!.connectedIds.includes(task.id))) return;
       // Leaving the base branch suspends its preview without turning a normal checkout
       // into a sync failure or composing unrelated primary content into retained connections.
       const primaryRef = (await runGit(['rev-parse', '--symbolic-full-name', 'HEAD'], { cwd: this.repo.commonRoot })).stdout.trim();
@@ -267,6 +282,7 @@ export class PreviewService {
       const change = workflow.changes.find((c): c is DevelopmentChange => c.id === id && !!c.worktree);
       if (!change || change.developmentBranch !== workflow.developmentBranch || change.status === 'accepted')
         throw badRequest('This workspace does not belong to the current base branch.');
+      if (change.deletion) throw badRequest('Task deletion is pending. Retry deletion first.', 'task_deleting');
       const checkout = checkouts.find((w) => w.path === change.worktree && w.branch === change.branch && !w.prunable && !w.foreign && !w.busy);
       if (!checkout || checkout.path === primary.path) conflict('The workspace is unavailable or has an unfinished Git operation.', 'preview_source_busy');
       const from = await deliveryBase(change, await oid(checkout.path, 'HEAD'), head);

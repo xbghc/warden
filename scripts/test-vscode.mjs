@@ -62,15 +62,17 @@ try {
       : { version: process.env.WARDEN_VSCODE_VERSION ?? '1.106.0' }),
     extensionDevelopmentPath: path.join(unpacked, 'extension'),
     extensionTestsPath: path.resolve(
-      process.env.WARDEN_VSCODE_SUITE === 'chat'
-        ? 'test/vscode/chat.cjs'
-        : process.env.WARDEN_VSCODE_SUITE === 'tree-refresh'
-          ? 'test/vscode/tree-refresh.cjs'
-          : process.env.WARDEN_VSCODE_SUITE === 'settings'
-            ? 'test/vscode/settings.cjs'
-            : process.env.WARDEN_VSCODE_SUITE === 'branches'
-              ? 'test/vscode/branches.cjs'
-              : 'test/vscode/suite.cjs',
+      process.env.WARDEN_VSCODE_SUITE === 'deletion'
+        ? 'test/vscode/deletion.cjs'
+        : process.env.WARDEN_VSCODE_SUITE === 'chat'
+          ? 'test/vscode/chat.cjs'
+          : process.env.WARDEN_VSCODE_SUITE === 'tree-refresh'
+            ? 'test/vscode/tree-refresh.cjs'
+            : process.env.WARDEN_VSCODE_SUITE === 'settings'
+              ? 'test/vscode/settings.cjs'
+              : process.env.WARDEN_VSCODE_SUITE === 'branches'
+                ? 'test/vscode/branches.cjs'
+                : 'test/vscode/suite.cjs',
     ),
     extensionTestsEnv: { XDG_DATA_HOME: process.env.XDG_DATA_HOME, WARDEN_VSCODE_FIXTURE: fixture },
     launchArgs: [

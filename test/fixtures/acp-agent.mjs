@@ -16,6 +16,8 @@ let delayedLoad;
 let delayedConfig;
 let model = 'fast';
 let thinking = false;
+let effort = 'medium';
+let agentMode = 'code';
 const controlsMode = mode.startsWith('controls');
 const legacyMode = mode.startsWith('legacy-mode');
 const modes = {
@@ -50,6 +52,33 @@ const configOptions = () => [
           ],
   },
   { id: 'thinking', name: '显示思考', type: 'boolean', currentValue: thinking },
+  ...(mode === 'controls-composer'
+    ? [
+        {
+          id: 'effort',
+          name: 'Effort',
+          category: 'thought_level',
+          type: 'select',
+          currentValue: effort,
+          options: [
+            { value: 'low', name: 'Low' },
+            { value: 'medium', name: 'Medium' },
+            { value: 'high', name: 'High' },
+          ],
+        },
+        {
+          id: 'mode',
+          name: 'Mode',
+          category: 'mode',
+          type: 'select',
+          currentValue: agentMode,
+          options: [
+            { value: 'ask', name: 'Ask' },
+            { value: 'code', name: 'Code' },
+          ],
+        },
+      ]
+    : []),
 ];
 const requiresAuth = mode === 'auth' || mode === 'auth-delayed-load' || mode === 'auth-external';
 const write = (message) => process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`);
@@ -166,7 +195,10 @@ async function handle(message) {
       notify({ sessionUpdate: 'available_commands_update', availableCommands: [{ name: 'foreign', description: 'Foreign command' }] }, `${sessionId}-foreign`);
       notify({
         sessionUpdate: 'available_commands_update',
-        availableCommands: [{ name: 'explain', description: '解释选中内容', input: { hint: '问题或路径' } }],
+        availableCommands: [
+          { name: 'explain', description: '解释选中内容', input: { hint: '问题或路径' } },
+          ...(mode === 'controls-composer' ? [{ name: 'review', description: 'Review the current changes' }] : []),
+        ],
       });
       notify({ sessionUpdate: 'session_info_update', title: '初始会话标题' });
     }
@@ -197,6 +229,8 @@ async function handle(message) {
     }
     if (params.configId === 'model') model = params.value;
     else if (params.configId === 'thinking' && params.type === 'boolean') thinking = params.value;
+    else if (params.configId === 'effort' && mode === 'controls-composer') effort = params.value;
+    else if (params.configId === 'mode' && mode === 'controls-composer') agentMode = params.value;
     else return error(id, -32602, 'Unknown config option');
     // Changing one choice can also change another, so clients must replace the full result.
     if (model === 'deep') thinking = true;

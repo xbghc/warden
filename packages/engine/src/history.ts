@@ -31,8 +31,9 @@ export class HistoryService {
     for (let i = 0; i + 4 < fields.length; i += 5) {
       const sha = fields[i]!.trim();
       if (!gitOid(sha)) continue;
-      const owner = state.workflow!.changes.find((c) => c.worktree && c.deliveries?.some((d) => d.commit === sha));
-      const delivery = owner?.worktree ? owner.deliveries?.find((d) => d.commit === sha) : undefined;
+      const owners = [...state.workflow!.changes.filter((c) => !!c.worktree), ...(state.workflow!.deletedTasks ?? [])];
+      const owner = owners.find((c) => 'deliveries' in c && c.deliveries?.some((d) => d.commit === sha));
+      const delivery = owner && 'deliveries' in owner ? owner.deliveries?.find((d) => d.commit === sha) : undefined;
       commits.push({
         sha,
         parents: fields[i + 1]!.split(' ').filter(Boolean),
@@ -184,6 +185,12 @@ export class HistoryService {
         }
         if (c.developmentBranch === draft.branch && c.status !== 'accepted')
           c.sync = { status: 'pending', target: draft.newHead!, message: 'Commit history has changed. Rebase workspaces when ready.' };
+      }
+      for (const task of s.workflow?.deletedTasks ?? []) {
+        for (const delivery of task.deliveries ?? []) {
+          const rewritten = mapping.get(delivery.commit);
+          if (rewritten) Object.assign(delivery, { commit: rewritten.sha, message: rewritten.message, parent: parents.get(rewritten.sha)! });
+        }
       }
     });
     await retireWorkflowRefs(this.repo.commonRoot);

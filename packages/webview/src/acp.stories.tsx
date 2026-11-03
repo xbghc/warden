@@ -176,9 +176,24 @@ export const SessionControls: Story = {
               { value: 'deep', name: 'Deep', group: 'Available models' },
             ],
           },
+          {
+            id: 'effort',
+            name: 'Effort',
+            category: 'thought_level',
+            type: 'select',
+            currentValue: 'medium',
+            options: [
+              { value: 'low', name: 'Low' },
+              { value: 'medium', name: 'Medium' },
+              { value: 'high', name: 'High' },
+            ],
+          },
           { id: 'thinking', name: '显示思考', type: 'boolean', currentValue: false },
         ],
-        commands: [{ name: 'explain', description: '解释选中内容', inputHint: '问题或路径' }],
+        commands: [
+          { name: 'explain', description: '解释选中内容', inputHint: '问题或路径' },
+          { name: 'review', description: 'Review the current changes' },
+        ],
         usage: { used: 1200, size: 8000, cost: { amount: 0.02, currency: 'USD' } },
         title: '订单参数兼容性',
         notices: [{ id: 'notice', title: '当前模型使用有限上下文', severity: 'info' }],
@@ -272,6 +287,11 @@ export const SidebarCommandOutcomes: Story = {
 export const SidebarComposer: Story = {
   ...Sidebar,
   args: { model: { ...SessionControls.args!.model!, presentation: 'sidebar', draft: '' } },
+};
+
+export const SidebarSlashCommands: Story = {
+  ...SidebarComposer,
+  args: { model: { ...SidebarComposer.args!.model!, draft: '/' } },
 };
 
 export const ApplyingConfiguration: Story = {

@@ -25,6 +25,10 @@ logs after shutdown and fail on Warden tree errors (including Settings), even wh
 Set `WARDEN_VSCODE_ARTIFACTS` to retain those renderer logs outside the disposable fixture directory.
 The packaged extension's CI matrix runs this regression before the full native suite on each platform.
 
+`WARDEN_VSCODE_SUITE=deletion pnpm test:vscode` runs the packaged task deletion flow: native menu
+contributions, confirmation/cancellation, local agent disconnection, note/chat cleanup, directory
+reuse and visible retry after failed preview disconnection. The full native suite also includes it.
+
 `build` and `build:vscode` build the extension and its webviews. `build:webview` refreshes just the
 webview bundle. The VSIX contains bundled JavaScript and uses the workspace's Git CLI.
 The extension requires VS Code 1.106+ for the stable Secondary Side Bar contribution point.
@@ -194,8 +198,9 @@ prompts and recovery without losing tasks or task-note drafts. Opening Settings 
 an additional connection; startup and profile saves do. Also cover
 native Codex/OpenCode preset selection, command-input cancellation, existing and concurrently edited
 profile preservation, workbench-selected agents for new Task Chats, automatic first-session creation
-and saved-session restoration on opening, repeated opens without duplicate connections, composer mode/model controls,
-Enter/Shift+Enter and IME behavior, and the absence of agent setup inside Task Chat,
+and saved-session restoration on opening, repeated opens without duplicate connections, single-row composer
+mode/model/effort controls in narrow sidebars, slash completion with filtering, keyboard/mouse selection,
+argument preservation and no implicit submission, Enter/Shift+Enter and IME behavior, and the absence of agent setup inside Task Chat,
 per-task draft and reading-position restoration, stale view messages and concurrent background turns. Interrupted prompts must not be resent automatically, and cancel
 must not claim that all agent-owned background commands have stopped. These checks do not validate a
 third-party authenticated agent; record the exact agent/adapter version and supported features before

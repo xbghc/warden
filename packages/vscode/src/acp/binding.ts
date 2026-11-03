@@ -31,6 +31,7 @@ async function rebaseBelongsToTask(gitDir: string, branch: string): Promise<bool
 export async function resolveAcpBinding(engine: Engine, taskId: string): Promise<AcpBinding> {
   const [workflow, workspaces] = await Promise.all([engine.execute('workflow.get', undefined), engine.execute('workspaces.list', undefined)]);
   const task = workflow.workflow?.changes.find((row) => row.id === taskId);
+  if (task?.deletion) throw new Error('Task deletion is pending. Retry deletion before using this workspace.');
   if (!task?.worktree || !task.branch) throw new Error('The task workspace is not ready. Reopen the task.');
   const checkout = workspaces.worktrees.find((row) => row.path === task.worktree);
   if (!checkout || checkout.foreign || checkout.prunable) throw new Error('The task workspace changed. Confirm its task association and reconnect.');

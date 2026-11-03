@@ -4,6 +4,7 @@ const path = require('node:path');
 const vscode = require('vscode');
 const { execFileSync } = require('node:child_process');
 const { checkChats } = require('./chat.cjs');
+const { checkTaskDeletion } = require('./deletion.cjs');
 const { checkBranches } = require('./branches.cjs');
 const { checkSettings } = require('./settings.cjs');
 const { checkSidebar } = require('./sidebar.cjs');
@@ -28,6 +29,7 @@ exports.run = async () => {
   try {
     assert.equal(workbench.backend?.store.file, fixture.state, 'fixture setup and extension activation must use the same canonical state path');
     await verifyAgent(workbench, fixture);
+    await checkTaskDeletion(workbench, extension, fixture, eventually);
     console.log('Checking repository loading');
     await checkRepositoryLoading(workbench, extension, fixture, eventually);
     await workbench.open(fixture.unconfigured);

@@ -6,6 +6,7 @@ const same = (left: TaskNoteDraft | undefined, right: TaskNoteDraft) => left?.ti
 /** Keep editor drafts outside the disposable webview, without writing task records. */
 export class TaskNoteDrafts {
   private readonly values = new Map<string, TaskNoteDraft | undefined>();
+  private readonly deleted = new Set<string>();
   private pending: Promise<void> = Promise.resolve();
 
   constructor(private readonly state: Memento) {}
@@ -27,6 +28,7 @@ export class TaskNoteDrafts {
 
   private write(repository: string, taskId: string, value: TaskNoteDraft | undefined) {
     const key = this.key(repository, taskId);
+    if (this.deleted.has(key)) return Promise.resolve();
     this.values.set(key, value);
     // A slow save must not overwrite a later edit or a discard after the panel closes.
     const writing = this.pending.catch(() => {}).then(() => this.state.update(key, value));
@@ -46,5 +48,10 @@ export class TaskNoteDrafts {
 
   flush() {
     return this.pending;
+  }
+  async forget(repository: string, taskId: string) {
+    const writing = this.write(repository, taskId, undefined);
+    this.deleted.add(this.key(repository, taskId));
+    await writing;
   }
 }

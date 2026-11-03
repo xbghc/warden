@@ -14,7 +14,6 @@ import {
   PanelRight,
   ShieldQuestion,
   SlidersHorizontal,
-  Slash,
   Square,
   Unplug,
 } from 'lucide-react';
@@ -28,6 +27,7 @@ import { StatusBadge } from './components/ui/status-badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './components/ui/dropdown-menu';
 import { Popover, PopoverContent, PopoverTrigger } from './components/ui/popover';
 import { ChatMarkdown, CopyText } from './chat-markdown';
+import { completeSlashCommand, slashCommandQuery } from './chat-commands';
 
 type Props = { model: AcpModel; send(action: AcpAction): void };
 const statusLabels: Record<AcpStatus, string> = {
@@ -85,6 +85,13 @@ export function AcpApp({ model, send: dispatch }: Props) {
   const transcript = useRef<HTMLDivElement>(null);
   const transcriptContent = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
+  const commandList = useRef<HTMLDivElement>(null);
+  const commandListId = useId();
+  const [composerFocused, setComposerFocused] = useState(false);
+  const [composing, setComposing] = useState(false);
+  const [selection, setSelection] = useState({ text: '', start: 0, end: 0 });
+  const [dismissedCommand, setDismissedCommand] = useState<string>();
+  const [commandIndex, setCommandIndex] = useState(0);
   const followOutput = useRef(model.viewState?.followOutput ?? true);
   sendRef.current = dispatch;
   profileRef.current = profileId;
@@ -94,8 +101,8 @@ export function AcpApp({ model, send: dispatch }: Props) {
   const controls = hasConnection ? model.controls : undefined;
   const configOptions = controls?.configOptions ?? [];
   const selectors = configOptions.filter((option) => option.type === 'select');
-  const preferred = [...selectors.filter((option) => option.category === 'mode'), ...selectors.filter((option) => option.category === 'model')];
-  const primaryOptions = (preferred.length ? preferred : selectors).slice(0, 2);
+  const preferred = ['mode', 'model', 'thought_level'].flatMap((category) => selectors.find((option) => option.category === category) ?? []);
+  const primaryOptions = preferred.length ? preferred : selectors.slice(0, 3);
   const primaryIds = new Set(primaryOptions.map((option) => option.id));
   const extraOptions = configOptions.filter((option) => !primaryIds.has(option.id));
   const busy =
@@ -115,6 +122,17 @@ export function AcpApp({ model, send: dispatch }: Props) {
   const submitted =
     model.sending && canStop && model.submittedDraft?.version === draftVersion.current && model.submittedDraft?.revision === draftRevision.current;
   const composerText = submitted ? '' : draft;
+  const commandQuery =
+    composerFocused && !switching && !composing && selection.text === composerText
+      ? slashCommandQuery(composerText, selection.start, selection.end)
+      : undefined;
+  const commandKey = `${record.id}:${composerText}:${selection.start}`;
+  const matchingCommands =
+    commandQuery && dismissedCommand !== commandKey
+      ? (controls?.commands ?? []).filter((command) => command.name.toLowerCase().startsWith(commandQuery.query))
+      : [];
+  const activeCommandIndex = Math.min(commandIndex, matchingCommands.length - 1);
+  const activeCommand = matchingCommands[activeCommandIndex];
   const working = status === 'connecting' || status === 'running' || status === 'cancelling' || status === 'resetting';
   const lastMessage = record.messages.at(-1);
 
@@ -135,7 +153,12 @@ export function AcpApp({ model, send: dispatch }: Props) {
 
   useLayoutEffect(() => {
     if (transcript.current && !followOutput.current) transcript.current.scrollTop = model.viewState?.scrollTop ?? 0;
-    composer.current?.focus({ preventScroll: true });
+    const input = composer.current;
+    if (input) {
+      input.focus({ preventScroll: true });
+      input.setSelectionRange(input.value.length, input.value.length);
+      setSelection({ text: input.value, start: input.value.length, end: input.value.length });
+    }
   }, []);
 
   useEffect(() => {
@@ -225,6 +248,11 @@ export function AcpApp({ model, send: dispatch }: Props) {
     input.style.height = `${input.scrollHeight}px`;
   }, [composerText]);
 
+  useEffect(() => setCommandIndex(0), [commandKey]);
+  useLayoutEffect(() => {
+    commandList.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' });
+  }, [activeCommand?.name]);
+
   useEffect(() => {
     if (transcript.current && followOutput.current) transcript.current.scrollTop = transcript.current.scrollHeight;
   }, [record.id, record.messages.length, lastMessage?.id, lastMessage?.text]);
@@ -238,7 +266,19 @@ export function AcpApp({ model, send: dispatch }: Props) {
     setDraft(text);
     scheduleDraft();
   };
-  const commandDraft = (name: string, inputHint?: string) => `/${name}${draftRef.current ? ` ${draftRef.current}` : inputHint ? ' ' : ''}`;
+  const readSelection = (input: HTMLTextAreaElement) => setSelection({ text: input.value, start: input.selectionStart, end: input.selectionEnd });
+  const chooseCommand = (name: string) => {
+    if (!commandQuery) return false;
+    const completed = completeSlashCommand(composerText, commandQuery.tokenEnd, name);
+    if (!completed) return false;
+    updateDraft(completed.text);
+    requestAnimationFrame(() => {
+      if (switchingRef.current || draftRef.current !== completed.text) return;
+      composer.current?.focus({ preventScroll: true });
+      composer.current?.setSelectionRange(completed.caret, completed.caret);
+    });
+    return true;
+  };
   const submit = () => {
     if (!canSend) return;
     flushDraft();
@@ -272,6 +312,20 @@ export function AcpApp({ model, send: dispatch }: Props) {
               <IconButton label="Move Chat to Side Bar" size="icon-sm" disabled={switching} onClick={() => send({ type: 'open-sidebar' })}>
                 <PanelRight aria-hidden="true" />
               </IconButton>
+            )}
+            {!!extraOptions.length && (
+              <Popover>
+                <PopoverTrigger asChild>
+                  <IconButton label="More Session Options" size="icon-sm" disabled={switching}>
+                    <SlidersHorizontal aria-hidden="true" />
+                  </IconButton>
+                </PopoverTrigger>
+                <PopoverContent className="acp-options-popover" aria-label="More Session Options">
+                  {extraOptions.map((option) => (
+                    <ConfigOption key={option.id} option={option} disabled={busy || sending || status !== 'connected'} send={send} />
+                  ))}
+                </PopoverContent>
+              </Popover>
             )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -465,19 +519,88 @@ export function AcpApp({ model, send: dispatch }: Props) {
           submit();
         }}
       >
+        {controls?.configuring && (
+          <p className="acp-composer-status muted" role="status">
+            Applying configuration…
+          </p>
+        )}
         <div className="acp-input-box">
+          {!!matchingCommands.length && (
+            <div ref={commandList} id={commandListId} role="listbox" aria-label="Agent Commands" className="acp-command-menu">
+              {matchingCommands.map((command, index) => (
+                <Button
+                  key={command.name}
+                  id={`${commandListId}-${index}`}
+                  type="button"
+                  variant="ghost"
+                  role="option"
+                  tabIndex={-1}
+                  aria-selected={index === activeCommandIndex}
+                  disabled={!completeSlashCommand(composerText, commandQuery!.tokenEnd, command.name)}
+                  onPointerDown={(event) => event.preventDefault()}
+                  onPointerMove={() => setCommandIndex(index)}
+                  onClick={() => chooseCommand(command.name)}
+                >
+                  <span>/{command.name}</span>
+                  <span className="muted acp-control-description">
+                    {command.description}
+                    {command.inputHint ? ` · ${command.inputHint}` : ''}
+                  </span>
+                </Button>
+              ))}
+            </div>
+          )}
           <Textarea
             aria-label="Message"
+            aria-autocomplete="list"
+            aria-haspopup="listbox"
+            aria-controls={matchingCommands.length ? commandListId : undefined}
+            aria-activedescendant={activeCommand ? `${commandListId}-${activeCommandIndex}` : undefined}
             ref={composer}
             value={composerText}
             maxLength={100_000}
             rows={3}
             disabled={switching}
             placeholder={model.permissions.length ? 'Write a follow-up…' : canStop ? 'Write a follow-up while the agent works…' : 'Describe what to work on…'}
-            onChange={(event) => updateDraft(event.target.value)}
-            onBlur={flushDraft}
+            onChange={(event) => {
+              updateDraft(event.target.value);
+              readSelection(event.target);
+              setDismissedCommand(undefined);
+            }}
+            onSelect={(event) => readSelection(event.currentTarget)}
+            onFocus={(event) => {
+              readSelection(event.target);
+              setComposerFocused(true);
+            }}
+            onBlur={() => {
+              setComposerFocused(false);
+              flushDraft();
+            }}
+            onCompositionStart={() => setComposing(true)}
+            onCompositionEnd={(event) => {
+              setComposing(false);
+              readSelection(event.currentTarget);
+            }}
             onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey && !event.altKey && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
+              if (composing || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+              if (matchingCommands.length && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey) {
+                if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                  event.preventDefault();
+                  setCommandIndex((activeCommandIndex + (event.key === 'ArrowDown' ? 1 : -1) + matchingCommands.length) % matchingCommands.length);
+                  return;
+                }
+                if ((event.key === 'Enter' || event.key === 'Tab') && activeCommand) {
+                  const completed = chooseCommand(activeCommand.name);
+                  if (completed || event.key === 'Enter') event.preventDefault();
+                  return;
+                }
+                if (event.key === 'Escape') {
+                  event.preventDefault();
+                  setDismissedCommand(commandKey);
+                  return;
+                }
+              }
+              if (event.key === 'Enter' && !event.shiftKey && !event.altKey) {
                 event.preventDefault();
                 submit();
               }
@@ -518,52 +641,6 @@ export function AcpApp({ model, send: dispatch }: Props) {
                       </NativeSelect>
                     </div>
                   )}
-              {!!extraOptions.length && (
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <IconButton label="More Session Options" size="icon-sm" disabled={switching}>
-                      <SlidersHorizontal aria-hidden="true" />
-                    </IconButton>
-                  </PopoverTrigger>
-                  <PopoverContent side="top" className="acp-options-popover" aria-label="More Session Options">
-                    {extraOptions.map((option) => (
-                      <ConfigOption key={option.id} option={option} disabled={busy || sending || status !== 'connected'} send={send} />
-                    ))}
-                  </PopoverContent>
-                </Popover>
-              )}
-              {!!controls?.commands.length && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <IconButton label="Agent Commands" size="icon-sm" disabled={busy || sending}>
-                      <Slash aria-hidden="true" />
-                    </IconButton>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent
-                    side="top"
-                    align="start"
-                    className="acp-command-menu"
-                    onCloseAutoFocus={(event) => {
-                      event.preventDefault();
-                      composer.current?.focus();
-                    }}
-                  >
-                    {controls.commands.map((command) => (
-                      <DropdownMenuItem
-                        key={command.name}
-                        disabled={commandDraft(command.name, command.inputHint).length > 100_000}
-                        onSelect={() => updateDraft(commandDraft(command.name, command.inputHint))}
-                      >
-                        <span>/{command.name}</span>
-                        <span className="muted acp-control-description">
-                          {command.description}
-                          {command.inputHint ? ` · ${command.inputHint}` : ''}
-                        </span>
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
             </div>
             {canStop ? (
               <IconButton
@@ -589,16 +666,6 @@ export function AcpApp({ model, send: dispatch }: Props) {
             )}
           </div>
         </div>
-        {controls?.configuring && (
-          <p className="acp-composer-status muted" role="status">
-            Applying configuration…
-          </p>
-        )}
-        {!controls?.configuring && (
-          <p className="acp-composer-hint muted">
-            {canStop ? 'You can keep writing. Send when this turn finishes.' : 'Enter to send · Shift+Enter for a new line'}
-          </p>
-        )}
       </form>
     </main>
   );

@@ -311,13 +311,15 @@ export async function checkoutWorktree(ctx: RepoContext, req: CreateWorktreeRequ
   if (base && !isValidRef(base)) throw badRequest(`invalid base ref: ${base}`, 'invalid_ref');
   const existing = await listWorktreesDetailed(ctx);
   const target = await pickSlot(ctx, existing, req.slot, req.kind ?? 'worktree');
-  if (target.clone) await checkoutClone(ctx, existing, target, branch, base, !!req.fetch);
-  else if (target.shared) await checkoutShared(ctx, existing, target, branch, base);
-  else await checkoutLinked(ctx, existing, target, branch, base);
+  const branchCreated = target.clone
+    ? await checkoutClone(ctx, existing, target, branch, base, !!req.fetch)
+    : target.shared
+      ? await checkoutShared(ctx, existing, target, branch, base)
+      : await checkoutLinked(ctx, existing, target, branch, base);
   const real = await realpath(target.path).catch(() => target.path);
   const worktree = (await listWorktrees(ctx)).find((w) => w.path === real);
   if (!worktree) throw new WardenError(500, `git checked ${branch} out at ${target.path} but does not list it`, 'git_failed');
-  return { worktree, slot: target.slot, reused: target.reuse };
+  return { worktree, slot: target.slot, reused: target.reuse, branchCreated };
 }
 
 async function checkoutLinked(
@@ -327,7 +329,7 @@ async function checkoutLinked(
   branch: string,
   base?: string,
   repository = ctx.commonRoot,
-): Promise<void> {
+): Promise<boolean> {
   const cwd = repository;
   const create = await resolveBranch(cwd, branch, base, async () => (await detectDefaultBase(cwd)) || 'HEAD');
   assertBranchFree(existing, branch);
@@ -352,6 +354,7 @@ async function checkoutLinked(
     if (e instanceof GitError && /already (checked out|used by worktree)/.test(e.stderr)) throw new WardenError(409, e.message, 'branch_in_use');
     throw e;
   }
+  return !!create;
 }
 
 async function checkoutShared(
@@ -360,13 +363,12 @@ async function checkoutShared(
   target: WorktreeSlot & { reuse: boolean },
   branch: string,
   base?: string,
-): Promise<void> {
+): Promise<boolean> {
   assertBranchFree(existing, branch);
   const repository = await ensureSharedRepository(ctx.commonRoot);
   if (await refExists(repository, `refs/heads/${branch}`)) {
     // Existing task branches retain their history; they never resolve through primary refs.
-    await checkoutLinked(ctx, existing, target, branch, base, repository);
-    return;
+    return checkoutLinked(ctx, existing, target, branch, base, repository);
   }
   const wanted = base ?? (await detectDefaultBase(ctx.commonRoot)) ?? 'HEAD';
   // Explicit bases may name another shared task. Primary refs are the default source and are
@@ -378,7 +380,7 @@ async function checkoutShared(
     sha = (await runGit(['rev-parse', '--verify', `${wanted}^{commit}`], { cwd: ctx.commonRoot })).stdout.trim();
     await importSharedCommit(ctx.commonRoot, ctx.commonRoot, sha);
   }
-  await checkoutLinked(ctx, existing, target, branch, sha, repository);
+  return checkoutLinked(ctx, existing, target, branch, sha, repository);
 }
 
 async function checkoutClone(
@@ -388,7 +390,7 @@ async function checkoutClone(
   branch: string,
   base: string | undefined,
   fetch: boolean,
-): Promise<void> {
+): Promise<boolean> {
   // Before anything is cloned or fetched: a name some checkout has on is refused wherever it lives.
   assertBranchFree(existing, branch);
   const cwd = target.path;
@@ -412,6 +414,7 @@ async function checkoutClone(
     // A copy of the main worktree's branch as the clone found it: the main worktree still has it,
     // and a clone keeps the branches that were checked out in it, not one that never was.
     if (cloned && cloned !== branch) await runGitWrite(['branch', '-D', cloned], { cwd });
+    return !!create;
   } catch (e) {
     if (!target.reuse) await discardClone(cwd);
     throw e;

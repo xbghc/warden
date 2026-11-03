@@ -36,7 +36,7 @@ export class BranchViews {
     };
   }
 
-  async select(repository: string, branch: string, selected: string) {
+  async select(repository: string, branch: string, selected: string | undefined) {
     const key = this.key(repository, branch);
     await this.state.update(`${key}:selected`, selected);
   }

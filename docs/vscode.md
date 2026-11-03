@@ -24,8 +24,13 @@ browser-only virtual filesystems are unsupported. SSH, WSL and containers use th
 The Warden sidebar stacks two native collapsible views: **Workbench** and **Settings**. Both appear
 by default; Settings uses a native tree for ACP controls and scripts. Workbench contains ordered tasks as
 top-level items, without grouping rows. A task describes planned work; its
-**Workspace** is the directory allocated for execution. **Sync Preview** composes saved content into the
+**Workspace** is its allocated execution context, with an assigned directory and branch. **Sync Preview** composes saved content into the
 preview directory; **Rebase** brings a task workspace forward through an explicit rebase.
+
+Task context menus and the Command Palette offer **Delete Task…**. Confirmation discards the task's
+pending work and releases its workspace without a backup, normally retaining the directory and
+ignored local environment files. A local agent connection is closed as part of that confirmed action.
+Already contributed base-branch commits remain. Interrupted cleanup stays visible with **Retry Delete**.
 
 Warden's sidebar and activity-bar entry appear only when the window contains at least one workspace
 folder. An empty window or a saved workspace with no folders does not show a repository picker.
@@ -235,11 +240,13 @@ separately on the same host. There are no client-side file or terminal tool call
 Connected conversations display the agent's session configuration selectors, such as model, mode or
 reasoning level. Older agents can expose the legacy mode selector instead. Changes use only the
 agent's offered values and wait for confirmation before another prompt can be sent. Available slash
-commands can be inserted into the draft without sending it. Streamed thoughts, reported context usage
+commands appear when you type `/` at the start of the message. Type to filter, use Up/Down to choose,
+Enter or Tab to insert, and Escape to dismiss; completion does not send the draft. Streamed thoughts, reported context usage
 and cost, live notices and context-compaction updates are displayed when the agent provides them.
 These reports do not change task state or run Git operations.
-At most two compact selectors appear below the message text, favoring mode and model categories.
-Other controls live under **More Session Options**. **More Chat Actions** contains disconnect and
+Mode, Model and reasoning effort appear in one row below the message text, followed by Send.
+Only selectors provided by the agent appear; long values truncate rather than wrap. Other controls
+live under **More Session Options** in the header. **More Chat Actions** contains disconnect and
 **Task and Session Info**, which holds task paths, agent identity, session title and usage.
 Enter sends, Shift+Enter inserts a line, and the send button becomes Stop Turn while responding.
 Permission requests, live notices and connection errors remain directly visible.

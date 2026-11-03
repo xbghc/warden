@@ -219,8 +219,10 @@ provider-specific configuration. Only identifiers and values currently offered b
 Warden waits for the agent's confirmed state rather than changing selectors optimistically. A
 configuration change and a prompt cannot run concurrently in the same task conversation.
 
-Task Chat places compact mode and model selectors in the composer footer, with extra options in a
-popover. Slash commands open from the same footer and still only prepare a draft. The header menu
+Task Chat keeps mode, model and reasoning effort (`thought_level`) selectors in one composer footer
+row, in that order, followed by Send/Stop Turn. Unavailable categories are omitted; uncategorized
+selectors remain accessible. Extra options use a header popover. Long values truncate without
+wrapping the footer. The header menu
 contains task/session details and disconnect; executable profiles and setup instructions are absent.
 Enter sends, Shift+Enter inserts a line, and Ctrl/Command+Enter remains supported. IME composition
 never submits. The send control becomes Stop Turn during an active turn.
@@ -230,8 +232,12 @@ updates are also accepted between turns. These controls are live connection stat
 clears them, and restoration obtains fresh state from the agent. An agent's session title
 does not rename the Warden task or change its binding.
 
-`available_commands_update` supplies slash commands and optional input hints. Choosing a command
-adds its text to the task draft while retaining unsent text. The user still sends the prompt explicitly;
+`available_commands_update` supplies slash commands and optional input hints. There is no permanent
+command button. Typing `/` as the first message token opens a filtered list above the composer,
+without moving focus out of the input. Arrow keys change the selection; Enter or Tab completes it,
+Escape dismisses it, and Shift+Enter still inserts a newline. Composition keystrokes do not complete
+or send. Paths in prose and arguments do not open the list. Choosing a command replaces only the
+command token and retains existing arguments and other unsent text. The user still sends the prompt explicitly;
 Warden never executes command text as a shell command.
 
 Agent-provided thoughts are displayed separately from replies. Usage updates show the reported context
@@ -264,6 +270,13 @@ A cross-window owner claim prevents two extension hosts from opening executable 
 the same task. It protects connection ownership only: it is not a lock on task files, agent tools,
 Git delivery or rebase. A live owner cannot be displaced merely because its timestamp is old.
 Another window can inspect saved history and ordinary Git state without taking that connection.
+
+Confirmed task deletion closes this window's task connection before releasing its workspace.
+Another window's live owner must disconnect there first. Deletion publishes its reservation under
+the existing connection metadata lock; connection claims validate the task again while holding
+that lock. Pending/deleted tasks cannot receive new prompts or recreate saved conversation records.
+Chat draft/view capture still completes while executable actions are blocked. After release, only
+that task's Warden-local records and archives are removed; external agent histories remain external.
 
 **Stop Turn** sends `session/cancel` and cancels pending permission requests. Warden continues to
 handle the original prompt response. **Disconnect** closes the owned connection and its agent process;

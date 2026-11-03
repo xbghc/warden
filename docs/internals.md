@@ -230,7 +230,7 @@ All Git runners discard inherited repository-location, namespace, index, object-
 configuration environment variables. `cwd` and explicitly supplied snapshot locations select the
 repository; a surrounding Git hook or shell cannot redirect writes into a different repository.
 Normal user/system configuration, commit identity, hooks and signing remain enabled.
-Release/removal copies the validated checkout and its Git metadata to the external backup directory
+Legacy slot release/removal copies the validated checkout and its Git metadata to the external backup directory
 before any reset, clean, switch, branch deletion or filesystem removal. An incomplete/failed backup
 blocks the mutation. Backup creation copies files without running repository filters or hooks.
 Switching branches in a reused slot passes `--no-overwrite-ignore`, so Git refuses to overwrite
@@ -245,6 +245,29 @@ Legacy plan creation remains only for imports and the compatibility adapter; des
 prepares these plans explicitly, without allocating from a background read.
 `workflow.changes[].deliveries` stores stable delivery IDs, source ranges, primary commits and
 review records. `sourceBase` distinguishes a delivered source tip from its squash commit.
+
+`task.deleteCheck` reads task/allocation identity, Git HEAD and branch tip, index entries, status,
+ignored paths and changed-file bytes to produce a confirmation fingerprint without snapshotting
+contents. `task.delete` rechecks it under the repository lock. A task connection's existing metadata
+lock serializes connection acquisition with publishing `deletion`; new claims revalidate the task
+inside that lock. Live or uncertain owners block deletion. Session record writes also reject deleted
+or deleting tasks. The journal reserves the physical allocation throughout failures and restart.
+
+Deletion first publishes preview without the task, using preview's existing recovery journal. It
+then validates the checkout again, quits any stopped Git operation, runs `git clean -fd` under the
+original ignore rules, detaches the exact observed HEAD with `update-ref --no-deref`, and runs
+`reset --hard` at that same commit. It never uses `clean -x`, recursively deletes the workspace folder,
+or creates a backup. Submodules and ignored-file collisions are rejected. Branch removal is limited
+to allocation-proven ownership, no other registered checkout, and compare-and-delete of the observed
+tip via `update-ref -d`; unknown ownership retains the branch. Missing directories permit only exact
+stale `worktree remove --force` registration cleanup. No primary code, index or base-branch ref is changed.
+
+The task's local conversation files are removed only after validating their repository/task binding
+and hashed filenames; redirected archive directories are refused. Unrelated records and external
+agent history remain. Successful deletion atomically replaces the active task with minimal identity
+and delivery associations in `deletedTasks`, supporting idempotent completion and history mapping.
+No notes or file contents are retained there. A failure keeps `deletion.error` and a native retry
+action; startup never automatically repeats cleanup. Git checks do not stop external writers.
 
 `GET /workflow/rebase-checks` replays only in isolated worktrees under the state directory's
 `operations/`, backed by the external shared repository. Their commands disable hooks and signing.

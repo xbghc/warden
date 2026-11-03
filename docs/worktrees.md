@@ -181,7 +181,7 @@ journals remain covered by compatibility tests; see [State and security](interna
 
 ## Slots
 
-Release/removal, explicit rebase and history application require an automatic verified local backup.
+Legacy slot release/removal, explicit rebase and history application require an automatic verified local backup.
 Backup failure stops the operation. See [Safety backups](backups.md) for contents, storage costs,
 supported layouts and recovery. Successful rebase/history operations remove their temporary backups
 after persisting their results; interrupted operations keep recovery data. Rebase also refuses to
@@ -191,6 +191,19 @@ repository, without importing agent source history or retaining internal Git ref
 Numbered directories (`<repo>-1`, `<repo>-2`, ...) remain available to their tasks across deliveries.
 A reusable slot is detached, clean, valid, unassigned and not inside a Git operation; this is a Git
 fact, not an agent-idle status. Normal delivery never releases or deletes a branch.
+
+Explicit task deletion releases its allocation without a backup after user confirmation. It discards
+tracked edits and non-ignored untracked files, detaches HEAD and keeps the physical folder and its
+ignored environment files. Stopped Git operations are quit before release. It does not remove nested
+repositories or overwrite ignored files. If retained environment files are no longer ignored after
+resetting a task-edited `.gitignore`, the directory remains preserved but is not reusable until clean.
+New tasks always switch a reusable directory to a fresh task branch from their own base.
+
+Allocation records whether Warden actually created the branch. Deletion can remove that exact branch
+after release, even when squash delivery left it unmerged by ancestry. Unknown legacy ownership,
+another checkout using the branch, or a changed branch tip retains the branch and reports that fact.
+A missing checkout permits task removal and cleanup of its exact stale Git registration; a replacement
+directory is never cleaned. Interrupted deletion reserves the allocation until an explicit retry.
 
 Legacy checkout/release/remove and ready/resume HTTP adapters exist only in regression tests.
 They still refuse to release or reuse an assigned task's slot. The extension allocates workspaces with task creation and offers recovery actions; it exposes no readiness protocol.

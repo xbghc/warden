@@ -42,6 +42,7 @@ export class AcpConversations {
   private readonly entries = new Map<string, Conversation>();
   private readonly opening = new Map<string, Promise<Conversation>>();
   private readonly engines = new Map<string, Promise<Engine>>();
+  private readonly deleting = new Set<string>();
   private readonly subscriptions: vscode.Disposable[] = [];
   private closed = false;
   private sidebar?: vscode.WebviewView;
@@ -110,7 +111,10 @@ export class AcpConversations {
           await engine.close();
           throw new Error('The Warden session is closed.');
         }
-        await engine.start(async () => {}, this.report);
+        await engine.start(async () => {
+          const state = await engine.store.load();
+          for (const task of state.workflow?.deletedTasks ?? []) await this.forgetTask(repository, task.id);
+        }, this.report);
         return engine;
       });
       this.engines.set(repository, opening);
@@ -148,7 +152,15 @@ export class AcpConversations {
     } as Conversation;
     entry.session = new AcpSession({
       binding,
-      storage: new AcpSessionStorage(path.join(path.dirname(engine.store.file), 'acp'), binding),
+      storage: new AcpSessionStorage(
+        path.join(path.dirname(engine.store.file), 'acp'),
+        binding,
+        () => validateAcpBinding(engine, binding),
+        async () => {
+          const task = (await engine.store.load()).workflow?.changes.find((row) => row.id === binding.taskId);
+          if (!task || task.deletion) throw new Error('This task was deleted or is being deleted.');
+        },
+      ),
       validate: async () => {
         if (!vscode.workspace.isTrusted || this.closed) throw new Error('Agent actions are unavailable for this workspace.');
         await validateAcpBinding(engine, binding);
@@ -174,6 +186,7 @@ export class AcpConversations {
   private async ensure(repository: string, taskId: string) {
     if (this.closed || !vscode.workspace.isTrusted) throw new Error('Open and trust a workspace first.');
     const key = this.key(repository, taskId);
+    if (this.deleting.has(key)) throw new Error('This task is being deleted.');
     let opening = this.opening.get(key);
     if (!opening) {
       opening = (async () => {
@@ -211,6 +224,47 @@ export class AcpConversations {
     }
     if (this.closed) throw new Error('The Warden session is closed.');
     return entry;
+  }
+
+  hasConnection(repository: string, taskId: string) {
+    const entry = this.entries.get(this.key(repository, taskId));
+    return !!entry && (!!entry.connecting || entry.session.snapshot().status !== 'disconnected');
+  }
+
+  async prepareDeletion(repository: string, taskId: string) {
+    const key = this.key(repository, taskId);
+    if (this.deleting.has(key)) throw new Error('This task is already being deleted.');
+    this.deleting.add(key);
+    try {
+      await this.opening.get(key);
+      const entry = this.entries.get(key);
+      if (entry) {
+        await this.release(entry);
+        await entry.session.disconnect();
+        await entry.connecting?.catch(() => undefined);
+        await entry.draftSave;
+      }
+    } catch (error) {
+      this.deleting.delete(key);
+      throw error;
+    }
+    return () => this.deleting.delete(key);
+  }
+
+  async forgetTask(repository: string, taskId: string) {
+    const key = this.key(repository, taskId);
+    const entry = this.entries.get(key);
+    if (!entry) return;
+    const panel = entry.panel;
+    this.detach(entry);
+    panel?.dispose();
+    clearTimeout(entry.renderTimer);
+    await entry.session.close();
+    await entry.draftSave;
+    await this.context.workspaceState.update(entry.draftKey, undefined);
+    await this.context.workspaceState.update(`${entry.draftKey}:view`, undefined);
+    this.entries.delete(key);
+    this.changed();
   }
 
   show(repository: string, taskId: string, location: ChatSurface['location'] = 'sidebar') {
@@ -264,6 +318,7 @@ export class AcpConversations {
   }
 
   private async connect(entry: Conversation, requestedId?: string) {
+    if (this.deleting.has(this.key(entry.binding.repository, entry.binding.taskId))) throw new Error('This task is being deleted.');
     const snapshot = entry.session.snapshot();
     const profileId = requestedId ?? snapshot.record.profileId ?? this.defaultProfileId();
     if (!profileId) throw new Error('Connect an agent in Warden Settings first.');
@@ -489,6 +544,8 @@ export class AcpConversations {
   }
 
   private async handle(entry: Conversation, action: AcpAction) {
+    if (!['draft', 'view-state', 'view-ready'].includes(action.type) && this.deleting.has(this.key(entry.binding.repository, entry.binding.taskId)))
+      throw new Error('This task is being deleted.');
     if (this.closed) return;
     if (action.type === 'view-ready') {
       if (entry.surface) entry.surface.ready = true;

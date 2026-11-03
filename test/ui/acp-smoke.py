@@ -532,7 +532,7 @@ try:
         assert second.evaluate('window.__model.record.id') == external_record
         expect(second.get_by_role('textbox', name='Message', exact=True)).to_have_value('Keep this draft after external login')
         expect(second.get_by_role('region', name='Agent Authentication')).to_have_count(0)
-        external_requests = [json.loads(line) for line in inspect()['entries'][1]['journals'][-1].splitlines()]
+        external_requests = [json.loads(line) for line in inspect()['entries'][1]['journals'][6].splitlines()]
         assert not any(row.get('method') in ['authenticate', 'session/prompt'] for row in external_requests)
 
         use_agent(second, 'incompatible')
@@ -548,25 +548,82 @@ try:
         new_session(second)
         connected(second)
 
-        use_agent(first, 'controls')
+        use_agent(first, 'controls-composer')
         new_session(first)
         connected(first)
         model_selector = first.get_by_role('combobox', name='模型', exact=True)
         thinking = first.get_by_role('checkbox', name='显示思考', exact=True)
+        effort_selector = first.get_by_role('combobox', name='Effort', exact=True)
+        config_mode = first.get_by_role('combobox', name='Mode', exact=True)
         expect(model_selector).to_have_value('fast')
+        expect(effort_selector).to_have_value('medium')
+        expect(config_mode).to_have_value('code')
+        expect(first.get_by_role('button', name='Agent Commands', exact=True)).to_have_count(0)
+        for width in [320, 260]:
+            first.set_viewport_size({'width': width, 'height': 900})
+            positions = [control.bounding_box() for control in [config_mode, model_selector, effort_selector, first.get_by_role('button', name='Send', exact=True)]]
+            assert all(box and box['width'] > 20 for box in positions), positions
+            assert max(box['y'] for box in positions) - min(box['y'] for box in positions) <= 2, positions
+            assert all(left['x'] + left['width'] <= right['x'] + 1 for left, right in zip(positions, positions[1:])), positions
+            assert first.evaluate('document.documentElement.scrollWidth <= innerWidth'), positions
+        first.screenshot(path=str(artifacts / 'acp-composer-single-row.png'), full_page=True)
+        effort_selector.select_option('high')
+        first.wait_for_function("window.__model.controls.configOptions.find(option => option.id === 'effort')?.currentValue === 'high' && !window.__model.controls.configuring")
+        config_mode.select_option('ask')
+        first.wait_for_function("window.__model.controls.configOptions.find(option => option.id === 'mode')?.currentValue === 'ask' && !window.__model.controls.configuring")
         expect(thinking).not_to_be_visible()
         first.get_by_role('button', name='More Session Options', exact=True).click()
         expect(thinking).not_to_be_checked()
         expect(first.get_by_role('combobox', name='Session Mode', exact=True)).to_have_count(0)
+        thinking.press('Escape')
 
-        # Commands prepare an editable prompt, preserving chosen context as arguments.
-        composer.fill('保留的草稿')
-        first.get_by_role('button', name='Agent Commands', exact=True).click()
-        first.get_by_role('menuitem', name='/explain', exact=False).click()
+        # Typing a command opens completion without moving focus or sending a prompt.
+        command_list = first.get_by_role('listbox', name='Agent Commands', exact=True)
+        composer.fill('/')
+        expect(command_list.get_by_role('option')).to_have_count(2)
+        expect(composer).to_be_focused()
+        composer.press('ArrowDown')
+        expect(command_list.get_by_role('option', name='/review', exact=False)).to_have_attribute('aria-selected', 'true')
+        composer.press('Enter')
+        expect(composer).to_have_value('/review ')
+        expect(command_list).to_have_count(0)
+        composer.fill('/ex')
+        expect(command_list.get_by_role('option')).to_have_count(1)
+        composer.press('Tab')
+        expect(composer).to_have_value('/explain ')
+        expect(composer).to_be_focused()
+        composer.fill('/')
+        composer.press('ArrowUp')
+        expect(command_list.get_by_role('option', name='/review', exact=False)).to_have_attribute('aria-selected', 'true')
+        composer.press('Escape')
+        expect(command_list).to_have_count(0)
+        expect(composer).to_have_value('/')
+        composer.fill('/ex')
+        composer.dispatch_event('compositionstart')
+        expect(command_list).to_have_count(0)
+        composer.dispatch_event('keydown', {'key': 'Enter', 'code': 'Enter', 'isComposing': True})
+        expect(composer).to_have_value('/ex')
+        composer.dispatch_event('compositionend')
+        expect(command_list).to_be_visible()
+        composer.press('Shift+Enter')
+        expect(composer).to_have_value('/ex\n')
+        expect(command_list).to_have_count(0)
+        for text in ['Look at /src', '/unknown', '/explain arguments']:
+            composer.fill(text)
+            expect(command_list).to_have_count(0)
+        # Completing at the start preserves an existing draft as arguments.
+        composer.fill('/ 保留的草稿')
+        composer.press('Home')
+        composer.press('ArrowRight')
+        expect(command_list).to_be_visible()
+        first.screenshot(path=str(artifacts / 'acp-slash-completion.png'), full_page=True)
+        command_list.get_by_role('option', name='/explain', exact=False).click()
         expect(composer).to_have_value('/explain 保留的草稿')
+        expect(composer).to_be_focused()
         saved_draft(first, '/explain 保留的草稿')
-        controls_journal = inspect()['entries'][0]['journals'][4]
+        controls_journal = inspect()['entries'][0]['journals'][7]
         assert not any(json.loads(line).get('method') == 'session/prompt' for line in controls_journal.splitlines())
+        first.set_viewport_size({'width': 1000, 'height': 900})
         model_selector.select_option('deep')
         first.wait_for_function("window.__model.controls.configOptions.find(option => option.id === 'model')?.currentValue === 'deep' && !window.__model.controls.configuring")
         expect(model_selector).to_have_value('deep')
@@ -673,7 +730,7 @@ try:
         assert first.evaluate('window.__hostError') is None
         assert second.evaluate('window.__hostError') is None
         browser.close()
-    print('ACP browser flows passed: task isolation, parallel conversations, permissions, cancellation, delayed completion with reload and follow-up, unacknowledged completion clears, batched selection appends, in-flight drafts, stale models/sends, new-conversation edits, reopened-turn acknowledgement, restore, crash, authentication, failed-profile recovery, safe text, config and mode changes, command drafts, thought/usage updates and disconnected controls.')
+    print('ACP browser flows passed: task isolation, parallel conversations, permissions, cancellation, delayed completion with reload and follow-up, unacknowledged completion clears, batched selection appends, in-flight drafts, stale models/sends, new-conversation edits, reopened-turn acknowledgement, restore, crash, authentication, failed-profile recovery, safe text, single-row mode/model/effort controls, slash completion with keyboard/mouse/IME and no implicit send, thought/usage updates and disconnected controls.')
 finally:
     host.terminate()
     host.wait(timeout=30)

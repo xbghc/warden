@@ -45,6 +45,8 @@ code --install-extension packages/vscode/warden-0.22.0.vsix
 Edit human code in primary and agent code in task workspaces. Preview is generated runtime input.
 A failed connection preserves the previous preview; a failed commit preserves recoverable content.
 No readiness declarations, task-completion checkboxes or agent-process inference are required.
+Use **Delete Task…** to discard a task after confirmation. It releases the workspace without a
+backup, normally retaining its directory and ignored environment files for later reuse.
 
 ## Keyboard
 

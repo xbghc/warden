@@ -204,6 +204,8 @@ export class Workbench {
       selectTask: (node) => this.selectTask(node),
       startTask: (node) => this.selectTask(node, 'select'),
       editTask: (node) => this.selectTask(node, 'edit'),
+      deleteTask: (node) => this.deleteTask(node),
+      retryDeleteTask: (node) => this.deleteTask(node),
       moveTask: (node) => this.moveTask(node),
       connect: (node) => this.connect(node),
       openDiff: (node) => this.openDiff(node),
@@ -248,6 +250,8 @@ export class Workbench {
       'selectTask',
       'taskActions',
       'editTask',
+      'deleteTask',
+      'retryDeleteTask',
       'deliver',
       'recoverDelivery',
       'recordDelivery',
@@ -789,6 +793,7 @@ export class Workbench {
     const problem = source?.status === 'conflict' || source?.status === 'error';
     const activity = this.backend && this.conversations.activity(this.backend.root, task.id);
     const facts = [
+      task.deletion ? (task.deletion.error ? 'Delete Failed' : 'Deletion Pending') : '',
       activity === 'Agent: Permission Required' ? activity : '',
       task.integration?.error ? 'Commit Failed' : '',
       problem ? connection : '',
@@ -804,7 +809,15 @@ export class Workbench {
       task,
       expanded: !!this.expanded[task.id],
       description: facts.slice(0, 2).join(' · '),
-      tooltip: [task.title, task.body, task.worktree, task.workspaceError?.message, facts.join(' · '), sync?.status !== 'current' ? sync?.message : '']
+      tooltip: [
+        task.title,
+        task.body,
+        task.worktree,
+        task.deletion?.error,
+        task.workspaceError?.message,
+        facts.join(' · '),
+        sync?.status !== 'current' ? sync?.message : '',
+      ]
         .filter(Boolean)
         .join('\n\n'),
       files: target ? this.files.get(target) : undefined,
@@ -963,6 +976,78 @@ export class Workbench {
     const task = await this.pickTask(node);
     if (task) await this.handleAction({ type, taskId: task.id }, session);
   }
+  private async deleteTask(node?: Node) {
+    const session = this.session;
+    const task = await this.pickTask(node);
+    if (!task) return;
+    const repository = this.backend!.root;
+    const check = await this.api('task.deleteCheck', { taskId: task.id });
+    this.assertSession(session);
+    const ownConnection = this.conversations.hasConnection(repository, task.id);
+    if (check.agentConnected && !ownConnection)
+      throw new Error('This task has an agent connection in another Warden window. Disconnect it in that window before deleting the task.');
+    const assertSaved = () => {
+      if (!check.worktree) return;
+      const dirty = vscode.workspace.textDocuments.find((document) => {
+        if (!document.isDirty || document.uri.scheme !== 'file') return false;
+        const relative = path.relative(check.worktree!, document.uri.fsPath);
+        return relative === '' || (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`));
+      });
+      if (dirty) throw new Error(`Save or discard unsaved changes in ${dirty.uri.fsPath} before deleting this task.`);
+    };
+    assertSaved();
+    const button = ownConnection ? 'End Agent Process and Delete' : 'Delete Task';
+    const detail = [
+      `The task, its notes and local chat will be deleted. Commits already on ${check.developmentBranch} will remain.`,
+      check.worktree
+        ? `All pending task changes will be discarded. The workspace folder and ignored local environment files will be kept.\n\nWorkspace: ${check.worktree}`
+        : '',
+      check.branch ? (check.deleteBranch ? `Task branch ${check.branch} will be deleted.` : `Branch ${check.branch} will be kept.`) : '',
+      check.dirty ? `${check.dirty} file${check.dirty === 1 ? ' has' : 's have'} uncommitted changes.` : '',
+      check.operation ? `The unfinished ${check.operation} in this workspace will be discarded.` : '',
+      ownConnection ? 'The agent connection owned by this window will be closed.' : '',
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+    const answer = await this.confirmTaskDeletion(check.title, detail, button);
+    if (answer !== button) return;
+    this.assertSession(session);
+    assertSaved();
+    await this.perform(
+      async () => {
+        this.assertSession(session);
+        const finished = await this.conversations.prepareDeletion(repository, task.id);
+        try {
+          const result = await this.api('task.delete', { taskId: task.id, confirmation: check.confirmation });
+          await this.conversations.forgetTask(repository, task.id);
+          await this.views.forgetTask(repository, task.id);
+          this.reviews.delete(task.id);
+          this.observedReviews.delete(task.id);
+          this.taskTargets.delete(task.id);
+          this.fileErrors.delete(task.id);
+          this.errors.delete(`task:${task.id}`);
+          delete this.expanded[task.id];
+          delete this.selectedFiles[task.id];
+          delete this.messages[task.id];
+          if (this.selected === task.id) {
+            this.selected = this.tasks().find((row) => row.id !== task.id)?.id;
+            await this.branchViews.select(repository, task.developmentBranch, this.selected);
+          }
+          await this.context.workspaceState.update(`warden.expanded:${repository}`, this.expanded);
+          await this.context.workspaceState.update(`warden.files:${repository}`, this.selectedFiles);
+          await this.context.workspaceState.update(`warden.messages:${repository}`, this.messages);
+          if (result.retainedBranch) void vscode.window.showInformationMessage(`Task deleted. Branch ${result.retainedBranch} was retained.`);
+        } finally {
+          finished();
+        }
+      },
+      'Deleting Task…',
+      `task:${task.id}`,
+    );
+  }
+  private confirmTaskDeletion(title: string, detail: string, button: string) {
+    return vscode.window.showWarningMessage(`Delete task “${title}”?`, { modal: true, detail }, button);
+  }
   private async moveTaskBy(node: Node | undefined, direction: -1 | 1) {
     const selected = node ?? this.sidebar.view.selection[0];
     if (!selected || (selected.kind !== 'task' && selected.kind !== 'file' && selected.kind !== 'folder')) return;
@@ -984,6 +1069,7 @@ export class Workbench {
     const session = this.session;
     let task = await this.pickTask(node);
     if (!task || session !== this.session) return;
+    if (task.deletion) throw new Error('Task deletion is pending. Use Retry Delete to finish it.');
     // Older plans receive their workspace on use, never from a background refresh.
     if (!task.worktree && task.status === 'planned' && action !== 'edit') task = await this.ensureWorkspace(task);
     this.selected = task.id;

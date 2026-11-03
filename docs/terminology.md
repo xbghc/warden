@@ -18,7 +18,8 @@ operation and its scope; they do not introduce additional domain concepts.
 | Task / Tasks | One linear piece of work with a title and notes / the ordered task list. Creating a task automatically allocates its workspace. A task can contribute several commits over time; order does not establish dependencies or automatic scheduling. |
 | Workbench | Warden's native sidebar containing ordered tasks as top-level items; not an execution directory or lifecycle object. Preview controls use native menus and the status bar. |
 | Primary Folder | The user's checkout of the base branch. Human edits and final commits belong here. Switching its branch changes the work context, not the folder's role. Use “primary directory” in technical prose if needed. |
-| Workspace | A task's execution directory and branch, allocated by Warden and retained across commits. Qualify it as “task workspace” when distinguishing it from a VS Code workspace. |
+| Workspace | A task's allocated execution context, including its branch and assigned directory, retained across commits. Deleting a task releases this allocation; its physical directory can serve a new workspace later. Qualify it as “task workspace” when distinguishing it from a VS Code workspace. |
+| Workspace Folder | The physical task directory. It normally survives task deletion with its Git checkout structure and ignored local environment files. |
 | Task Branch | The branch inside a task workspace, holding source commits independently of the base branch. |
 | Preview | Saved primary content combined with connected workspaces' pending changes for testing. Connecting a workspace does not commit its changes to the base branch. |
 | Preview Folder | The separate directory containing composed files, dependencies and runtime files. User-run tests and development servers run here. |
@@ -41,6 +42,7 @@ complete the task, recycle its workspace or prove that an agent is idle.
 | Select Base Branch | Explicitly track the branch checked out in the primary folder; later checkouts restore tracked contexts only. This is independent of Git upstream tracking. |
 | New Task | Save a task and allocate its workspace and task branch automatically. |
 | Edit Task / Reorder Tasks | Edit task notes or order without changing Git. |
+| Delete Task… / Retry Delete | Confirm discarding task work and releasing its workspace while retaining the directory / explicitly finish an interrupted deletion. No recovery backup is created. Commits already on the base branch remain. |
 | Open Workspace | Open the assigned directory. Legacy plans are prepared automatically on use. |
 | Retry Workspace Allocation | Retry for the same task after a failed allocation. |
 | Connect / Disconnect Preview | Include or remove a workspace's contribution in the preview. |

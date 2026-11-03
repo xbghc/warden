@@ -111,6 +111,10 @@ export class Views implements vscode.Disposable {
     return { ...model, task, taskDraft };
   }
   render() {
+    const model = this.model('task');
+    const pinned = this.taskModel;
+    if (pinned?.task && model.repository === pinned.repository && model.workflow?.workflow?.deletedTasks?.some((task) => task.id === pinned.task!.id))
+      void this.forgetTask(pinned.repository, pinned.task.id).catch((error) => this.error(error, 'task', pinned.task?.id));
     for (const [surface, panel] of this.panels) void panel.webview.postMessage({ type: 'model', model: this.currentModel(surface) });
   }
   displaysError(scope: string): boolean {
@@ -120,6 +124,13 @@ export class Views implements vscode.Disposable {
   }
   flush() {
     return this.notes.flush();
+  }
+  async forgetTask(repository: string, taskId: string) {
+    if (this.taskModel?.repository === repository && this.taskModel.task?.id === taskId) {
+      this.taskModel = undefined;
+      this.panels.get('task')?.dispose();
+    }
+    await this.notes.forget(repository, taskId);
   }
   dispose() {
     for (const panel of this.panels.values()) panel.dispose();
