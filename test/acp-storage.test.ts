@@ -50,6 +50,12 @@ function conversation(): AcpRecord {
   };
 }
 
+/** Saved bindings omit the base branch; loading restores it from the expected binding. */
+function stored(value: AcpRecord) {
+  const { baseBranch: _baseBranch, ...saved } = value.binding;
+  return { ...value, binding: saved };
+}
+
 async function savedOwner(storage: AcpSessionStorage) {
   return JSON.parse(await readFile(storage.ownerFile, 'utf8')) as Record<string, unknown>;
 }
@@ -63,17 +69,18 @@ function signal() {
 }
 
 describe('external ACP session storage', () => {
-  it('loads legacy bindings using the validated allocation base branch and rejects a conflicting saved branch', async () => {
+  it('omits the base branch from saved bindings and loads records with or without it', async () => {
     const storage = new AcpSessionStorage(directory, binding);
     const current = conversation();
     await storage.save(current);
-    const { baseBranch: _baseBranch, ...legacy } = current.binding;
-    await writeFile(storage.file, JSON.stringify({ ...current, binding: legacy }));
+    const saved = JSON.parse(await readFile(storage.file, 'utf8'));
+    // Earlier versions reject any binding key outside this set.
+    expect(Object.keys(saved.binding).sort()).toEqual(['branch', 'identity', 'repository', 'taskId', 'title', 'workspace']);
     expect(await storage.load()).toEqual(current);
-    const conflicting = JSON.stringify({ ...current, binding: { ...current.binding, baseBranch: 'other' } });
-    await writeFile(storage.file, conflicting);
+    await writeFile(storage.file, JSON.stringify({ ...current, binding: current.binding }));
+    expect(await storage.load()).toEqual(current);
+    await writeFile(storage.file, JSON.stringify({ ...current, binding: { ...current.binding, identity: 'replaced' } }));
     await expect(storage.load()).rejects.toThrow('The original file has been preserved');
-    expect(await readFile(storage.file, 'utf8')).toBe(conflicting);
   });
 
   it('retains a bounded model selection across instances and preserves malformed records for repair', async () => {
@@ -186,7 +193,7 @@ describe('external ACP session storage', () => {
       if (target !== storage.file) return originalRename(source, target);
       temporaryFiles.add(source);
       expect(await readFile(storage.file)).toEqual(original);
-      expect(JSON.parse(await readFile(source, 'utf8'))).toEqual(replacement);
+      expect(JSON.parse(await readFile(source, 'utf8'))).toEqual(stored(replacement));
       if (++attempts <= 2) throw Object.assign(new Error('Temporary sharing violation'), { code });
       return originalRename(source, target);
     });
@@ -213,7 +220,7 @@ describe('external ACP session storage', () => {
       ++attempts;
       temporaryFiles.add(source);
       expect(await readFile(storage.file)).toEqual(original);
-      expect(JSON.parse(await readFile(source, 'utf8'))).toEqual(replacement);
+      expect(JSON.parse(await readFile(source, 'utf8'))).toEqual(stored(replacement));
       throw Object.assign(new Error('Persistent sharing violation'), { code: 'EPERM' });
     });
     syncBuiltinESMExports();
@@ -241,7 +248,7 @@ describe('external ACP session storage', () => {
       if (target !== storage.file) return originalRename(source, target);
       ++attempts;
       expect(await readFile(storage.file)).toEqual(original);
-      expect(JSON.parse(await readFile(source, 'utf8'))).toEqual(replacement);
+      expect(JSON.parse(await readFile(source, 'utf8'))).toEqual(stored(replacement));
       throw Object.assign(new Error('Unrecoverable rename failure'), { code });
     });
     syncBuiltinESMExports();
@@ -263,9 +270,9 @@ describe('external ACP session storage', () => {
     const archives = path.join(directory, 'archives', path.basename(storage.file, '.json'));
     const files = await readdir(archives);
     expect(files).toHaveLength(2);
-    for (const file of files) expect(JSON.parse(await readFile(path.join(archives, file), 'utf8'))).toEqual(first);
+    for (const file of files) expect(JSON.parse(await readFile(path.join(archives, file), 'utf8'))).toEqual(stored(first));
     await storage.save(conversation());
-    for (const file of files) expect(JSON.parse(await readFile(path.join(archives, file), 'utf8'))).toEqual(first);
+    for (const file of files) expect(JSON.parse(await readFile(path.join(archives, file), 'utf8'))).toEqual(stored(first));
   });
 
   it('preserves corrupt and unsupported records instead of replacing them on save', async () => {

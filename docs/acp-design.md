@@ -56,8 +56,9 @@ Neither task setup nor workbench initialization sends a work prompt, and the wor
 availability session receives no task instructions.
 
 The base branch is resolved from the validated task allocation, never the currently selected UI
-branch. Saved bindings include it; older records recover it from the current matching allocation
-identity, which already covered the base branch. Conflicting saved values remain invalid. Session
+branch. Saved bindings omit it because the matching allocation identity already covers it and loading
+substitutes the live binding; this keeps records readable by earlier versions' strict readers. Records
+written by 0.25.0–0.25.1 still contain the field and remain readable. Session
 creation/loading and prompt submission revalidate the binding after asynchronous setup or persistence,
 rejecting observed workspace replacement before marking a session ready or sending a pending prompt.
 

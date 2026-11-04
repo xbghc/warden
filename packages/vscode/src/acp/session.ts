@@ -15,9 +15,10 @@ import {
   type RequestPermissionRequest,
   type RequestPermissionResponse,
   type SessionNotification,
-  type SystemPrompt,
   type ToolCallUpdate,
-} from '@agentclientprotocol/sdk/unstable';
+} from '@agentclientprotocol/sdk';
+// System prompts are an opt-in draft capability; keep the rest of the client on stable types.
+import type { SessionCapabilities as DraftSessionCapabilities, SystemPrompt } from '@agentclientprotocol/sdk/unstable';
 import type { AcpControls, AcpMessage, AcpPermission, AcpRecord, AcpSnapshot, AcpStatus } from '@warden/shared';
 import { DiagnosticLog, diagnosticError, diagnosticOutcome } from '@warden/shared';
 import type { DiagnosticOutcome } from '@warden/shared';
@@ -26,6 +27,7 @@ import { availableCommands, configOptions, emptyControls, isModelOption, session
 import { AcpStderr, acpDiagnosticSecrets, acpErrorMessage, acpFailureLog } from './diagnostics.js';
 import { approveRepositoryRead, repositoryReadRequest } from './read-permissions.js';
 import { workspaceContext, workspaceContextFallback } from './workspace-context.js';
+import { sameAcpBinding } from './binding.js';
 
 declare const __WARDEN_VERSION__: string;
 const CLIENT_VERSION = typeof __WARDEN_VERSION__ === 'undefined' ? 'development' : __WARDEN_VERSION__;
@@ -166,12 +168,7 @@ export class AcpSession {
       const saved = await this.options.storage.load();
       if (saved) {
         const binding = this.options.binding;
-        if (
-          ['repository', 'taskId', 'workspace', 'branch', 'baseBranch', 'identity'].some(
-            (key) => saved.binding[key as keyof typeof binding] !== binding[key as keyof typeof binding],
-          )
-        )
-          throw new Error('The saved session does not belong to this task workspace. Reopen the task conversation.');
+        if (!sameAcpBinding(saved.binding, binding)) throw new Error('The saved session does not belong to this task workspace. Reopen the task conversation.');
         this.record = { ...saved, binding: { ...binding } };
         markUnsettledTools(this.record.messages);
         this.history = { messages: this.record.messages };
@@ -348,12 +345,7 @@ export class AcpSession {
       if (latest) {
         const previousId = this.record.id;
         const binding = this.options.binding;
-        if (
-          ['repository', 'taskId', 'workspace', 'branch', 'baseBranch', 'identity'].some(
-            (key) => latest.binding[key as keyof typeof binding] !== binding[key as keyof typeof binding],
-          )
-        )
-          throw new Error('Saved session ownership changed. Reopen the task conversation.');
+        if (!sameAcpBinding(latest.binding, binding)) throw new Error('Saved session ownership changed. Reopen the task conversation.');
         this.record = { ...latest, binding: { ...binding } };
         this.history = { messages: this.record.messages };
         if (latest.id !== previousId)
@@ -415,7 +407,7 @@ export class AcpSession {
         typeof info?.title === 'string' ? text(info.title, 1_000) : typeof info?.name === 'string' ? text(info.name, 1_000) : profile.label;
       this.record.canLoad = initialized.agentCapabilities?.loadSession === true;
       // The draft field is opt-in; an absent, null or malformed capability is not support.
-      if (object(initialized.agentCapabilities?.sessionCapabilities?.systemPrompt))
+      if (object((initialized.agentCapabilities?.sessionCapabilities as DraftSessionCapabilities | undefined)?.systemPrompt))
         runtime.systemPrompt = { mode: 'append', content: [{ type: 'text', text: this.environment }] };
       log.write('debug', 'acp.negotiated', {
         protocolVersion: initialized.protocolVersion,

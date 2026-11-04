@@ -129,8 +129,8 @@ are not promoted into system instructions. The task connection opts into the SDK
 system prompt field only after the agent advertises support, using append mode on creation and loading.
 Unsupported agents receive labelled user-level context with actual user prompts. Rejected instructions
 are not silently dropped or retried. Routine diagnostics log only the selected delivery mechanism.
-The saved binding's added base branch is checked against the current allocation; records without the
-field reuse the already-matching identity's base branch. This uses existing binding reads and adds no
+The base branch comes from the current allocation and is not persisted; the saved allocation identity
+already hashes it, so a changed base branch fails the identity check. This uses existing binding reads and adds no
 Git writes or permission grants. Bindings are revalidated after session setup and before sending a
 persisted pending prompt.
 

@@ -7,6 +7,7 @@ import { StateStore, taskConnectionPaths } from '@warden/engine';
 import type { AcpBinding, AcpMessage, AcpRecord } from '@warden/shared';
 import type { AcpStorage } from './contracts.js';
 import { modelSelection } from './model-preferences.js';
+import { sameAcpBinding } from './binding.js';
 
 const MAX_RECORD_BYTES = 8 * 1024 * 1024;
 const MAX_CLAIM_BYTES = 16 * 1024;
@@ -63,21 +64,16 @@ function binding(value: unknown, expected?: AcpBinding): AcpBinding {
     title: string(raw.title, 10_000, true),
     workspace,
     branch: string(raw.branch, 4096),
-    // Old records predate this field; the allocation identity already covers the base branch.
+    // Only 0.25.0–0.25.1 records contain this field; the allocation identity covers it either way.
     baseBranch: string(raw.baseBranch === undefined ? expected?.baseBranch : raw.baseBranch, 4096),
     identity: string(raw.identity, 4096),
   };
 }
 
-function sameBinding(a: AcpBinding, b: AcpBinding): boolean {
-  return (
-    a.repository === b.repository &&
-    a.taskId === b.taskId &&
-    a.workspace === b.workspace &&
-    a.branch === b.branch &&
-    a.baseBranch === b.baseBranch &&
-    a.identity === b.identity
-  );
+// Loading substitutes the live binding, so the base branch is not persisted and earlier
+// versions' strict readers can still open records written by this one.
+function persistedBinding({ repository, taskId, title, workspace, branch, identity }: AcpBinding) {
+  return { repository, taskId, title, workspace, branch, identity };
 }
 
 function message(value: unknown): AcpMessage {
@@ -116,7 +112,7 @@ function record(value: unknown, expected: AcpBinding): AcpRecord {
   ]);
   if (raw.schemaVersion !== 1) throw new Error('Unsupported session record version.');
   const savedBinding = binding(raw.binding, expected);
-  if (!sameBinding(savedBinding, expected)) throw new Error('The session record does not match the current workspace identity.');
+  if (!sameAcpBinding(savedBinding, expected)) throw new Error('The session record does not match the current workspace identity.');
   if (!Array.isArray(raw.messages) || raw.messages.length > MAX_MESSAGES) throw new Error('Too many messages.');
   const signature = optionalString(raw.profileSignature, 64);
   if (signature !== undefined && !HASH.test(signature)) throw new Error('Invalid profile signature.');
@@ -294,7 +290,8 @@ export class AcpSessionStorage implements AcpStorage {
   }
 
   private encode(value: AcpRecord): string {
-    const encoded = `${JSON.stringify(record(value, this.binding))}\n`;
+    const saved = record(value, this.binding);
+    const encoded = `${JSON.stringify({ ...saved, binding: persistedBinding(saved.binding) })}\n`;
     if (Buffer.byteLength(encoded) > MAX_RECORD_BYTES) throw new Error('The session record exceeds 8 MiB and cannot be saved. Start a new conversation.');
     return encoded;
   }

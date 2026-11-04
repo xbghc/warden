@@ -60,13 +60,12 @@ export async function resolveAcpBinding(engine: Engine, taskId: string): Promise
   return { repository, taskId, title: task.title, workspace, branch: task.branch, baseBranch: task.developmentBranch, identity };
 }
 
+/** The identity hashes the base branch, so saved bindings need not store it. */
+export function sameAcpBinding(a: AcpBinding, b: AcpBinding): boolean {
+  return a.repository === b.repository && a.taskId === b.taskId && a.workspace === b.workspace && a.branch === b.branch && a.identity === b.identity;
+}
+
 export async function validateAcpBinding(engine: Engine, binding: AcpBinding) {
   const current = await resolveAcpBinding(engine, binding.taskId);
-  if (
-    current.identity !== binding.identity ||
-    current.workspace !== binding.workspace ||
-    current.branch !== binding.branch ||
-    current.baseBranch !== binding.baseBranch
-  )
-    throw new Error('The workspace for this session was replaced. Reopen the task conversation.');
+  if (!sameAcpBinding(current, binding)) throw new Error('The workspace for this session was replaced. Reopen the task conversation.');
 }
