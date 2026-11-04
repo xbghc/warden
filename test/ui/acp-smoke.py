@@ -749,6 +749,9 @@ try:
         first.reload()
         connected(first)
         expect(model_selector).to_be_enabled()
+        expect(model_selector).to_have_text('深入')
+        assert first.evaluate('window.__model.record.modelSelection') == {'configId': 'model', 'value': 'deep'}
+        first.screenshot(path=str(artifacts / 'acp-restored-model.png'), full_page=True)
 
         use_agent(first, 'legacy-modes')
         new_session(first)

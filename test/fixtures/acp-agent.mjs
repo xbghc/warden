@@ -16,7 +16,8 @@ let delayedLoad;
 let delayedConfig;
 let model = 'fast';
 let thinking = false;
-let effort = 'medium';
+const customEffort = mode.startsWith('controls-effort');
+let effort = customEffort ? 'auto' : 'medium';
 let agentMode = 'code';
 const controlsMode = mode.startsWith('controls');
 const legacyMode = mode.startsWith('legacy-mode');
@@ -29,9 +30,9 @@ const modes = {
 };
 const configOptions = () => [
   {
-    id: 'model',
+    id: mode === 'controls-model-alias' ? 'provider/model' : 'model',
     name: '模型',
-    category: 'model',
+    ...(mode === 'controls-uncategorized' ? {} : { category: 'model' }),
     type: 'select',
     currentValue: model,
     options:
@@ -52,6 +53,18 @@ const configOptions = () => [
           ],
   },
   { id: 'thinking', name: '显示思考', type: 'boolean', currentValue: thinking },
+  ...(customEffort
+    ? [
+        {
+          id: 'thinking-budget',
+          name: 'Thinking budget',
+          ...(mode === 'controls-effort-uncategorized' ? {} : { category: 'thought_level' }),
+          type: 'select',
+          currentValue: effort,
+          options: (model === 'deep' ? ['disabled', 'max'] : ['auto', '1024', '8192']).map((value) => ({ value, name: value })),
+        },
+      ]
+    : []),
   ...(mode === 'controls-composer'
     ? [
         {
@@ -210,6 +223,7 @@ async function handle(message) {
     return;
   }
   if (method === 'session/set_config_option') {
+    if (mode === 'controls-reject') return error(id, -32602, 'Model is unavailable');
     if (mode === 'controls-response-race' || mode === 'controls-response-before') {
       model = 'deep';
       const response = configOptions();
@@ -227,8 +241,11 @@ async function handle(message) {
       delayedConfig = { id };
       await new Promise((resolve) => setTimeout(resolve, 30_000));
     }
-    if (params.configId === 'model') model = params.value;
-    else if (params.configId === 'thinking' && params.type === 'boolean') thinking = params.value;
+    if (params.configId === 'model' || (mode === 'controls-model-alias' && params.configId === 'provider/model')) {
+      model = params.value;
+      if (customEffort) effort = model === 'deep' ? 'disabled' : 'auto';
+    } else if (params.configId === 'thinking' && params.type === 'boolean') thinking = params.value;
+    else if (params.configId === 'thinking-budget' && customEffort) effort = params.value;
     else if (params.configId === 'effort' && mode === 'controls-composer') effort = params.value;
     else if (params.configId === 'mode' && mode === 'controls-composer') agentMode = params.value;
     else return error(id, -32602, 'Unknown config option');

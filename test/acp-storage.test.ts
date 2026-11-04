@@ -62,6 +62,26 @@ function signal() {
 }
 
 describe('external ACP session storage', () => {
+  it('retains a bounded model selection across instances and preserves malformed records for repair', async () => {
+    const storage = new AcpSessionStorage(directory, binding);
+    const record = { ...conversation(), modelSelection: { configId: 'provider/model', value: 'chosen-model' } };
+    await storage.save(record);
+    expect(await new AcpSessionStorage(directory, binding).load()).toEqual(record);
+    for (const selection of [
+      null,
+      [],
+      { configId: 'model', value: true },
+      { configId: '', value: 'deep' },
+      { configId: 'model', value: 'x'.repeat(501) },
+      { ...record.modelSelection, command: 'untrusted' },
+    ]) {
+      const corrupted = JSON.stringify({ ...record, modelSelection: selection });
+      await writeFile(storage.file, corrupted);
+      await expect(storage.load()).rejects.toThrow('The original file has been preserved');
+      expect(await readFile(storage.file, 'utf8')).toBe(corrupted);
+    }
+  });
+
   it('retains typed command outcomes and rejects malformed exit metadata', async () => {
     const storage = new AcpSessionStorage(directory, binding);
     const record = conversation();

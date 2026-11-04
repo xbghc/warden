@@ -1,4 +1,4 @@
-import type { AcpBinding, AcpRecord, DiagnosticLog } from '@warden/shared';
+import type { AcpBinding, AcpModelSelection, AcpRecord, DiagnosticLog } from '@warden/shared';
 
 export interface AcpProfile {
   id: string;
@@ -18,6 +18,10 @@ export interface AcpStorage {
 export interface AcpSessionOptions {
   binding: AcpBinding;
   storage: AcpStorage;
+  modelPreferences?: {
+    load(profileSignature: string): AcpModelSelection | undefined;
+    save(profileSignature: string, selection: AcpModelSelection): Promise<void>;
+  };
   validate(): Promise<void>;
   changed(): void;
   report?(diagnostic: string): void;

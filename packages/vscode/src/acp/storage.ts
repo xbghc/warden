@@ -6,6 +6,7 @@ import { lstat, mkdir, open, realpath, rename, rm } from 'node:fs/promises';
 import { StateStore, taskConnectionPaths } from '@warden/engine';
 import type { AcpBinding, AcpMessage, AcpRecord } from '@warden/shared';
 import type { AcpStorage } from './contracts.js';
+import { modelSelection } from './model-preferences.js';
 
 const MAX_RECORD_BYTES = 8 * 1024 * 1024;
 const MAX_CLAIM_BYTES = 16 * 1024;
@@ -98,6 +99,7 @@ function record(value: unknown, expected: AcpBinding): AcpRecord {
     'profileSignature',
     'sessionId',
     'agentName',
+    'modelSelection',
     'canLoad',
     'messages',
     'updatedAt',
@@ -109,6 +111,8 @@ function record(value: unknown, expected: AcpBinding): AcpRecord {
   if (!Array.isArray(raw.messages) || raw.messages.length > MAX_MESSAGES) throw new Error('Too many messages.');
   const signature = optionalString(raw.profileSignature, 64);
   if (signature !== undefined && !HASH.test(signature)) throw new Error('Invalid profile signature.');
+  const selection = modelSelection(raw.modelSelection);
+  if (raw.modelSelection !== undefined && !selection) throw new Error('Invalid model preference.');
   return {
     schemaVersion: 1,
     id: string(raw.id),
@@ -117,6 +121,7 @@ function record(value: unknown, expected: AcpBinding): AcpRecord {
     profileSignature: signature,
     sessionId: optionalString(raw.sessionId, 4096),
     agentName: optionalString(raw.agentName, 4096),
+    ...(selection ? { modelSelection: selection } : {}),
     canLoad: boolean(raw.canLoad),
     messages: raw.messages.map(message),
     updatedAt: timestamp(raw.updatedAt),

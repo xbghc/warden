@@ -123,6 +123,14 @@ Availability is window-local and is not stored as a persistent readiness flag. T
 their own workspace cwd and start when the user opens Task Chat or sends a message. Workbench startup
 alone never opens a task session or replays an uncertain prompt.
 
+Task Chat stores a confirmed model selection as bounded option/value IDs in its existing external
+conversation record and in a separate extension-global key for the profile signature. The signature
+contains no environment values. Other task defaults cannot override a resumed conversation's saved
+choice. Restoration revalidates the task binding and current advertised model options before an ACP
+configuration request; it sends no prompt, performs no Git operation, and does not persist or restore
+agent permission modes. Unavailable choices are skipped and timed-out restorations retire their
+connection. Stored model preferences never become executable profile settings.
+
 Single user, in the VS Code workspace extension host (local, SSH, WSL or container). There is no
 production HTTP listener. The internal engine executes Git with argument arrays,
 through Node's `execFile`, without a shell. General

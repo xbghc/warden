@@ -136,6 +136,12 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   assert.equal(chat.session.snapshot().permissions.length, 1, 'a stale view cannot answer a permission after switching');
   assert.equal(chat.draft.text, 'Keep this task draft', 'queued messages cannot overwrite the old task draft');
   await connected(otherChat);
+  assert.equal(
+    otherChat.session.snapshot().controls.configOptions.find((option) => option.id === 'model').currentValue,
+    'deep',
+    'new tasks reuse the profile model preference',
+  );
+  await conversations.handle(otherChat, { type: 'set-config', configId: 'model', value: 'fast' });
   await eventually(() => otherChat.surface.ready);
   await conversations.expand();
   assert(otherChat.panel);
@@ -197,6 +203,11 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   await vscode.commands.executeCommand('warden.taskChat.focus');
   await connected(chat);
   assert.equal(chat.session.snapshot().record.sessionId, savedSession);
+  assert.equal(
+    chat.session.snapshot().controls.configOptions.find((option) => option.id === 'model').currentValue,
+    'deep',
+    'resuming keeps this task model despite a changed profile default',
+  );
   assert.equal(chat.draft.text, 'hold', 'automatic resume preserves the unsent draft');
   assert.equal((await journal()).filter((row) => row.method === 'session/load' && row.cwd === chat.binding.workspace).length, 1);
   assert.equal((await journal()).filter((row) => row.method === 'session/prompt').length, 3, 'resume never resends a prompt');
@@ -215,6 +226,11 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   await conversations.handle(chat, { type: 'new' });
   assert.equal(chat.session.snapshot().status, 'connected', 'an explicit new conversation also connects automatically');
   assert.notEqual(chat.session.snapshot().record.sessionId, savedSession);
+  assert.equal(
+    chat.session.snapshot().controls.configOptions.find((option) => option.id === 'model').currentValue,
+    'fast',
+    'explicit new sessions use the latest profile model preference',
+  );
   await conversations.show(fixture.root, otherTask.id);
   const otherSession = otherChat.session.snapshot().record.sessionId;
   await conversations.handle(otherChat, { type: 'draft', text: 'Saved across reopening', version: 0, revision: 1 });
@@ -227,6 +243,11 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   await connected(restoredChat);
   assert.notEqual(restoredChat, otherChat, 'reopening reads a fresh conversation object from saved state');
   assert.equal(restoredChat.session.snapshot().record.sessionId, otherSession, 'saved sessions restore automatically');
+  assert.equal(
+    restoredChat.session.snapshot().controls.configOptions.find((option) => option.id === 'model').currentValue,
+    'fast',
+    'reopening restores the saved task model',
+  );
   assert.equal(restoredChat.draft.text, 'Saved across reopening');
   const gitFile = path.join(chat.binding.workspace, '.git');
   await fs.copyFile(gitFile, `${gitFile}.replacement`);

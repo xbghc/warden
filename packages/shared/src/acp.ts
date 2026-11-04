@@ -62,6 +62,10 @@ export interface AcpControls {
   configuring: boolean;
   notices: { id: string; title: string; description?: string; severity: string }[];
 }
+export interface AcpModelSelection {
+  configId: string;
+  value: string;
+}
 export interface AcpRecord {
   schemaVersion: 1;
   id: string;
@@ -70,6 +74,7 @@ export interface AcpRecord {
   profileSignature?: string;
   sessionId?: string;
   agentName?: string;
+  modelSelection?: AcpModelSelection;
   canLoad: boolean;
   messages: AcpMessage[];
   updatedAt: string;

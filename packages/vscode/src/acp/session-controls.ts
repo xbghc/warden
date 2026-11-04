@@ -9,6 +9,10 @@ export function emptyControls(): AcpControls {
   return { commands: [], configuring: false, notices: [] };
 }
 
+export function isModelOption(option: AcpConfigOption): option is Extract<AcpConfigOption, { type: 'select' }> {
+  return option.type === 'select' && (option.category === 'model' || (!option.category && option.id === 'model'));
+}
+
 /** Keep agent-provided choices bounded and display-only before exposing them to a webview. */
 export function configOptions(value: unknown): AcpConfigOption[] {
   if (!Array.isArray(value)) return [];

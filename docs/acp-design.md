@@ -66,7 +66,7 @@ conversations keep their own process and session cwd in the assigned task worksp
 of this startup connection. Shutdown also closes those connections, flushes local conversation/draft
 state and releases their claims. It does not supervise agent-owned child commands. Existing task data,
 conversations and drafts remain available for explicit recovery. Availability is held in the current
-window; only the selected profile ID is remembered, not a persistent success flag.
+window; startup remembers the selected profile ID, not a persistent success flag.
 
 Workbench connections emit local [startup performance diagnostics](development.md#startup-performance)
 for cleanup, process creation, initialization and session creation. Failed, timed-out, cancelled and
@@ -219,6 +219,30 @@ provider-specific configuration. Only identifiers and values currently offered b
 Warden waits for the agent's confirmed state rather than changing selectors optimistically. A
 configuration change and a prompt cannot run concurrently in the same task conversation.
 
+After a successful model selection, Warden saves the agent-confirmed model in the task's conversation
+record and as the default for that ACP profile in extension global state. New tasks and explicit new
+sessions inherit this default; resumed conversations restore their own saved choice. Older records
+without a saved choice keep the agent's loaded model. Opening or restoring a conversation never
+changes the profile default. Profile identity includes the executable, arguments and environment
+variable names, so changing providers does not reuse an unrelated model preference; rotating credential
+values does not discard it. Only bounded configuration and value IDs are saved, with no executable
+configuration, credentials or cached model lists.
+
+Restoration waits for fresh session controls and only applies a saved value still offered by the
+same model selector. Model selectors use category `model`, with uncategorized ID `model` also accepted.
+Missing selectors and removed values retain the agent's current model. A rejected restoration shows
+a notice; a timeout retires the connection because the model is uncertain. Restoration sends no prompt,
+and sending remains unavailable until it finishes. Failed, interrupted or stale selections do not
+replace the saved preference. Other settings, including modes and permission choices, are not copied
+between conversations.
+
+Reasoning configuration follows the agent's actual [session config options](https://agentclientprotocol.com/protocol/v1/session-config-options).
+`thought_level` identifies a semantic category, not a required option ID or a universal set of levels.
+Servers can advertise different IDs, named levels, budget values or no reasoning selector at all;
+uncategorized options remain usable. Warden sends the exact advertised ID and value, never translates
+them into fixed low/medium/high levels, and refreshes the complete option list after changing models.
+Agent-specific configuration outside ACP is not inferred or edited by Warden.
+
 Task Chat keeps mode, model and reasoning effort (`thought_level`) selectors in one composer footer
 row, in that order, followed by Send/Stop Turn. Unavailable categories are omitted; uncategorized
 selectors remain accessible. Extra options use a header popover. Footer selectors and Send/Stop Turn
@@ -239,8 +263,8 @@ Warden implements its footer with themed webview primitives and keeps provider-c
 
 `config_option_update` replaces the entire configuration list. Mode, command, usage and session-title
 updates are also accepted between turns. These controls are live connection state: disconnecting
-clears them, and restoration obtains fresh state from the agent. An agent's session title
-does not rename the Warden task or change its binding.
+clears them, and restoration obtains fresh state from the agent before applying a saved model choice.
+An agent's session title does not rename the Warden task or change its binding.
 
 `available_commands_update` supplies slash commands and optional input hints. There is no permanent
 command button. Typing `/` as the first message token opens a filtered list above the composer,

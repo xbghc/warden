@@ -3,9 +3,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mkdtemp, mkdir, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AcpBinding, AcpRecord } from '@warden/shared';
+import type { AcpBinding, AcpModelSelection, AcpRecord } from '@warden/shared';
 import { DiagnosticLog } from '@warden/shared';
-import type { AcpProfile, AcpStorage } from '../packages/vscode/src/acp/contracts.js';
+import type { AcpProfile, AcpSessionOptions, AcpStorage } from '../packages/vscode/src/acp/contracts.js';
 import { AcpSession } from '../packages/vscode/src/acp/session.js';
 import { AcpSessionStorage } from '../packages/vscode/src/acp/storage.js';
 
@@ -61,20 +61,27 @@ async function fixture(name = 'task', mode = 'normal', timeoutMs = 15_000) {
   const binding: AcpBinding = { repository: primary, taskId: name, title: name, workspace, branch: `agent/${name}`, identity: `allocation-${name}` };
   const profile: AcpProfile = { id: `fixture-${name}`, label: 'Fixture ACP agent', command: process.execPath, args: [agent, file, mode] };
   const storage = new MemoryStorage();
+  const preferences = new Map<string, AcpModelSelection>();
+  const modelPreferences = {
+    load: vi.fn((signature: string) => preferences.get(signature)),
+    save: vi.fn(async (signature: string, selection: AcpModelSelection) => {
+      preferences.set(signature, structuredClone(selection));
+    }),
+  };
   const validate = vi.fn(async () => {});
   const changed = vi.fn();
   const connectionFailed = vi.fn();
   const report = vi.fn();
   const diagnostics: Array<{ level: string; [key: string]: unknown }> = [];
   const log = new DiagnosticLog((level, line) => diagnostics.push({ level, ...JSON.parse(line.slice('[diagnostic] '.length)) }));
-  const create = (persistence: AcpStorage = storage) => {
-    const session = new AcpSession({ binding, storage: persistence, validate, changed, connectionFailed, report, timeoutMs, log });
+  const create = (persistence: AcpStorage = storage, models: AcpSessionOptions['modelPreferences'] = modelPreferences) => {
+    const session = new AcpSession({ binding, storage: persistence, modelPreferences: models, validate, changed, connectionFailed, report, timeoutMs, log });
     sessions.push(session);
     return session;
   };
   const session = create();
   await session.initialize();
-  return { session, create, profile, storage, validate, changed, connectionFailed, report, diagnostics, workspace, file, binding };
+  return { session, create, profile, storage, modelPreferences, validate, changed, connectionFailed, report, diagnostics, workspace, file, binding };
 }
 
 function transcript(session: AcpSession) {
@@ -194,6 +201,173 @@ describe('ACP subprocess conversations', () => {
     expect(f.session.snapshot().controls?.commands[0]?.name).toBe('explain');
   });
 
+  it('persists a confirmed model immediately and restores the conversation choice independently of the profile default', async () => {
+    const f = await fixture('model-memory', 'controls');
+    const storage = new AcpSessionStorage(path.join(directory, 'data'), f.binding);
+    const session = f.create(storage);
+    await session.connect(f.profile, { resume: false });
+    expect(f.modelPreferences.save).not.toHaveBeenCalled();
+    await session.setConfigOption('model', 'deep');
+    const selection = { configId: 'model', value: 'deep' };
+    expect((await storage.load())?.modelSelection).toEqual(selection);
+    expect(f.modelPreferences.save).toHaveBeenLastCalledWith(session.snapshot().record.profileSignature, selection);
+    await session.close();
+    // Another task can update the next-session default without retargeting this conversation.
+    await f.modelPreferences.save(session.snapshot().record.profileSignature!, { configId: 'model', value: 'fast' });
+    const restored = f.create(new AcpSessionStorage(path.join(directory, 'data'), f.binding));
+    await restored.connect(f.profile, { resume: true });
+    expect(restored.snapshot().controls?.configOptions?.[0]?.currentValue).toBe('deep');
+    expect(f.modelPreferences.save).toHaveBeenCalledTimes(2);
+    await restored.newConversation();
+    await restored.connect(f.profile, { resume: false });
+    expect(restored.snapshot().controls?.configOptions?.[0]?.currentValue).toBe('fast');
+    expect((await journal(f.file)).some((row) => row.method === 'session/prompt')).toBe(false);
+  });
+
+  it('reuses the last selected model for new tasks and explicit new sessions on the same profile', async () => {
+    const f = await fixture('first', 'controls');
+    await f.session.connect(f.profile, { resume: false });
+    await f.session.setConfigOption('model', 'deep');
+    const second = await fixture('second', 'controls');
+    const session = second.create(second.storage, f.modelPreferences);
+    await session.connect(f.profile, { resume: false });
+    expect(session.snapshot().controls?.configOptions?.[0]?.currentValue).toBe('deep');
+    expect(session.snapshot().record.modelSelection).toEqual({ configId: 'model', value: 'deep' });
+    await session.newConversation();
+    await session.connect(f.profile, { resume: false });
+    expect(session.snapshot().controls?.configOptions?.[0]?.currentValue).toBe('deep');
+    expect(f.modelPreferences.save).toHaveBeenCalledTimes(1);
+  });
+
+  it('isolates model defaults by profile identity while allowing credential rotation', async () => {
+    const f = await fixture('profiles', 'controls');
+    f.profile.env = { FIXTURE_CREDENTIAL: 'before' };
+    await f.session.connect(f.profile, { resume: false });
+    await f.session.setConfigOption('model', 'deep');
+    await f.session.newConversation();
+    f.profile.env.FIXTURE_CREDENTIAL = 'after';
+    await f.session.connect(f.profile, { resume: false });
+    expect(f.session.snapshot().controls?.configOptions?.[0]?.currentValue).toBe('deep');
+    for (const profile of [
+      { ...f.profile, id: 'other-profile' },
+      { ...f.profile, args: [...f.profile.args.slice(0, -1), 'controls-grouped'] },
+    ]) {
+      await f.session.newConversation();
+      await f.session.connect(profile, { resume: false });
+      expect(f.session.snapshot().controls?.configOptions?.[0]?.currentValue).toBe('fast');
+    }
+  });
+
+  it('does not apply another task default to a resumed record without a saved model', async () => {
+    const f = await fixture('older-record', 'controls');
+    await f.session.connect(f.profile, { resume: false });
+    await f.session.disconnect();
+    f.modelPreferences.load.mockReturnValue({ configId: 'model', value: 'deep' });
+    await f.session.connect(f.profile, { resume: true });
+    expect(f.session.snapshot().controls?.configOptions?.[0]?.currentValue).toBe('fast');
+    expect((await journal(f.file)).filter((row) => row.method === 'session/set_config_option')).toHaveLength(0);
+  });
+
+  it.each([
+    ['controls', 'model', 'removed-model'],
+    ['controls', 'removed-config', 'deep'],
+    ['controls', 'thinking', 'true'],
+    ['controls-empty', 'model', 'deep'],
+    ['legacy-modes', 'model', 'deep'],
+  ])('skips unavailable saved model values in %s (%s: %s)', async (mode, configId, value) => {
+    const f = await fixture('unavailable', mode);
+    f.modelPreferences.load.mockReturnValue({ configId, value });
+    await f.session.connect(f.profile, { resume: false });
+    expect(f.session.snapshot().status).toBe('connected');
+    expect((await journal(f.file)).filter((row) => row.method === 'session/set_config_option')).toHaveLength(0);
+    expect(f.modelPreferences.save).not.toHaveBeenCalled();
+  });
+
+  it('keeps a rejected preference visible and uses the current model without remembering failed choices', async () => {
+    const f = await fixture('rejected', 'controls-reject');
+    f.modelPreferences.load.mockReturnValue({ configId: 'model', value: 'deep' });
+    await f.session.connect(f.profile, { resume: false });
+    expect(f.session.snapshot()).toMatchObject({
+      status: 'connected',
+      controls: { configOptions: [{ currentValue: 'fast' }, {}], notices: [{ title: 'Unable to Restore Selected Model' }] },
+    });
+    await expect(f.session.setConfigOption('model', 'deep')).rejects.toThrow('Model is unavailable');
+    expect(f.session.snapshot().record.modelSelection).toBeUndefined();
+    expect(f.modelPreferences.save).not.toHaveBeenCalled();
+  });
+
+  it('blocks prompts while restoring and ignores a disconnected model restoration', async () => {
+    const f = await fixture('restore-interrupted', 'controls-delayed');
+    f.modelPreferences.load.mockReturnValue({ configId: 'model', value: 'deep' });
+    const connecting = f.session.connect(f.profile, { resume: false });
+    const rejected = expect(connecting).rejects.toThrow();
+    await expect.poll(async () => (await journal(f.file)).some((row) => row.method === 'session/set_config_option')).toBe(true);
+    await expect(f.session.send('must not send during restoration')).rejects.toThrow();
+    await f.session.disconnect();
+    await rejected;
+    expect(f.session.snapshot().status).toBe('disconnected');
+    expect(f.session.snapshot().record.modelSelection).toBeUndefined();
+    expect(f.modelPreferences.save).not.toHaveBeenCalled();
+  });
+
+  it('retires a timed-out model restoration before accepting a prompt', async () => {
+    const f = await fixture('restore-timeout', 'controls-timeout', 1_000);
+    f.modelPreferences.load.mockReturnValue({ configId: 'model', value: 'deep' });
+    await expect(f.session.connect(f.profile, { resume: false })).rejects.toThrow('Restoring the selected model timed out');
+    expect(f.session.snapshot().status).toBe('error');
+    expect(f.storage.claimed).toBe(false);
+    await expect(f.session.send('must not send with uncertain model')).rejects.toThrow();
+    expect(f.modelPreferences.save).not.toHaveBeenCalled();
+  });
+
+  it('does not remember a confirmed response after the workspace is replaced in flight', async () => {
+    const f = await fixture('replaced', 'controls-delayed');
+    await f.session.connect(f.profile, { resume: false });
+    const configuring = f.session.setConfigOption('model', 'deep');
+    const rejected = expect(configuring).rejects.toThrow('Workspace allocation changed');
+    await expect.poll(async () => (await journal(f.file)).some((row) => row.method === 'session/set_config_option')).toBe(true);
+    f.validate.mockRejectedValue(new Error('Workspace allocation changed'));
+    await rejected;
+    expect(f.session.snapshot().record.modelSelection).toBeUndefined();
+    expect(f.modelPreferences.save).not.toHaveBeenCalled();
+  });
+
+  it.each(['controls-uncategorized', 'controls-model-alias'])('remembers model selectors using their advertised IDs in %s', async (mode) => {
+    const f = await fixture('selectors', mode);
+    const configId = mode === 'controls-model-alias' ? 'provider/model' : 'model';
+    await f.session.connect(f.profile, { resume: false });
+    await f.session.setConfigOption(configId, 'deep');
+    await f.session.disconnect();
+    await f.session.connect(f.profile, { resume: true });
+    expect(f.session.snapshot().controls?.configOptions?.[0]?.currentValue).toBe('deep');
+    expect(f.session.snapshot().record.modelSelection).toEqual({ configId, value: 'deep' });
+  });
+
+  it.each(['controls-effort', 'controls-effort-uncategorized'])(
+    'uses provider effort IDs and values and refreshes them after model changes in %s',
+    async (mode) => {
+      const f = await fixture('effort', mode);
+      await f.session.connect(f.profile, { resume: false });
+      await expect(f.session.setConfigOption('effort', 'high')).rejects.toThrow();
+      await expect(f.session.setConfigOption('thinking-budget', 'high')).rejects.toThrow();
+      await f.session.setConfigOption('thinking-budget', '8192');
+      expect(f.modelPreferences.save).not.toHaveBeenCalled();
+      await f.session.setConfigOption('model', 'deep');
+      expect(f.session.snapshot().controls?.configOptions?.find((option) => option.id === 'thinking-budget')).toMatchObject({
+        currentValue: 'disabled',
+        options: [{ value: 'disabled' }, { value: 'max' }],
+      });
+      await expect(f.session.setConfigOption('thinking-budget', '8192')).rejects.toThrow();
+      await f.session.setConfigOption('thinking-budget', 'max');
+      expect(f.modelPreferences.save).toHaveBeenCalledTimes(1);
+      expect((await journal(f.file)).filter((row) => row.method === 'session/set_config_option').map((row) => row.params?.value)).toEqual([
+        '8192',
+        'deep',
+        'max',
+      ]);
+    },
+  );
+
   it('supports legacy modes only when config options are absent, including empty config precedence', async () => {
     const f = await fixture('task', 'legacy-modes');
     await f.session.connect(f.profile, { resume: false });
@@ -232,6 +406,7 @@ describe('ACP subprocess conversations', () => {
     await f.session.connect(f.profile, { resume: false });
     await f.session.setConfigOption('model', 'deep');
     expect(f.session.snapshot().controls?.configOptions?.[0]?.currentValue).toBe(order === 'before' ? 'deep' : 'fast');
+    expect(f.session.snapshot().record.modelSelection?.value).toBe(order === 'before' ? 'deep' : 'fast');
     const legacy = await fixture('mode', `legacy-mode-response-${order}`);
     await legacy.session.connect(legacy.profile, { resume: false });
     await legacy.session.setMode('code');
@@ -245,6 +420,8 @@ describe('ACP subprocess conversations', () => {
     expect(f.storage.claimed).toBe(false);
     expect(f.session.snapshot().status).toBe('error');
     expect(f.session.snapshot().controls).toEqual({ commands: [], configuring: false, notices: [] });
+    expect(f.session.snapshot().record.modelSelection).toBeUndefined();
+    expect(f.modelPreferences.save).not.toHaveBeenCalled();
     await f.session.connect(f.profile, { resume: true });
     expect(f.session.snapshot().controls?.configOptions?.[0]?.currentValue).toBe('fast');
     expect(JSON.stringify(f.session.snapshot())).not.toContain('LATE_TIMED_OUT_CONFIG');

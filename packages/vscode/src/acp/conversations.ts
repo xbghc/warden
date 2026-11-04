@@ -9,6 +9,7 @@ import { resolveAcpBinding, validateAcpBinding } from './binding.js';
 import { readAcpProfiles } from './setup.js';
 import { AcpSession } from './session.js';
 import { AcpSessionStorage } from './storage.js';
+import { AcpModelPreferences } from './model-preferences.js';
 import { AcpDraft } from './draft.js';
 import { acpErrorMessage } from './diagnostics.js';
 
@@ -157,6 +158,7 @@ export class AcpConversations {
     } as Conversation;
     entry.session = new AcpSession({
       binding,
+      modelPreferences: new AcpModelPreferences(this.context.globalState),
       storage: new AcpSessionStorage(
         path.join(path.dirname(engine.store.file), 'acp'),
         binding,

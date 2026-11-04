@@ -205,6 +205,12 @@ including after workbench replacement and while state notifications are draining
 Also cover initial and between-turn configuration, grouped/boolean selectors, legacy mode fallback,
 complete selector replacement, command updates, thought streaming, usage and compaction patch semantics.
 Keep controls connection-scoped and exercise foreign-session updates and interrupted configuration requests.
+Model-preference coverage includes immediate saves, new-task defaults, independent resumed choices,
+profile replacement, credential rotation, invalid stored values, unavailable choices, rejected and
+timed-out restoration, workspace replacement during selection and disconnection during restoration.
+Reasoning controls exercise arbitrary option IDs, budget values, missing categories and model-dependent
+choice replacement. The packaged chat suite checks new-task inheritance, task-specific reconnection,
+explicit new-session defaults and saved-record reopening through the shipped host.
 
 Packaged extension-host and conversation webview tests verify the shipped UI/host bridge alongside
 existing native review and Git flows. Cover sidebar/editor transfers during permission requests,

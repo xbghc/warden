@@ -21,7 +21,7 @@ import type { AcpControls, AcpMessage, AcpPermission, AcpRecord, AcpSnapshot, Ac
 import { DiagnosticLog, diagnosticError, diagnosticOutcome } from '@warden/shared';
 import type { DiagnosticOutcome } from '@warden/shared';
 import type { AcpProfile, AcpSessionOptions } from './contracts.js';
-import { availableCommands, configOptions, emptyControls, sessionModes } from './session-controls.js';
+import { availableCommands, configOptions, emptyControls, isModelOption, sessionModes } from './session-controls.js';
 import { AcpStderr, acpDiagnosticSecrets, acpErrorMessage, acpFailureLog } from './diagnostics.js';
 
 declare const __WARDEN_VERSION__: string;
@@ -587,6 +587,7 @@ export class AcpSession {
       runtime.pendingBytes = undefined;
       for (const update of pending) this.update(runtime, update);
     }
+    await this.restoreModel(runtime);
     await this.persist();
     if (!this.current(runtime)) throw new Error('Connection closed.');
     runtime.established = true;
@@ -781,27 +782,88 @@ export class AcpSession {
     const option = this.controls.configOptions?.find((item) => item.id === configId);
     if (!option || (option.type === 'boolean' ? typeof value !== 'boolean' : typeof value !== 'string' || !option.options.some((item) => item.value === value)))
       return Promise.reject(new Error('Select a configuration value currently offered by the agent.'));
-    return this.configure('session/set_config_option', (runtime) => {
-      const current = this.controls.configOptions?.find((item) => item.id === configId);
-      if (!current || (current.type === 'boolean' ? typeof value !== 'boolean' : !current.options.some((item) => item.value === value)))
-        throw new Error("The agent's configuration options changed. Select again.");
-      return runtime.connection.agent
-        .request('session/set_config_option', {
-          sessionId: runtime.sessionId!,
-          configId,
-          ...(typeof value === 'boolean' ? { type: 'boolean' as const, value } : { value }),
-        })
-        .then((result) => {
-          // Capture at the direct response continuation, before the SDK dispatches following
-          // notifications. The timeout wrapper resumes later and must not overwrite them.
-          const revision = runtime.configRevision;
-          return () => {
-            if (runtime.configRevision !== revision) return;
-            this.controls.configOptions = configOptions(result.configOptions);
-            delete this.controls.modes;
-          };
+    return this.configure(
+      'session/set_config_option',
+      (runtime) => this.requestConfigOption(runtime, configId, value),
+      isModelOption(option) ? configId : undefined,
+    );
+  }
+
+  private requestConfigOption(runtime: Runtime, configId: string, value: string | boolean): Promise<() => void> {
+    const current = this.controls.configOptions?.find((item) => item.id === configId);
+    if (!current || (current.type === 'boolean' ? typeof value !== 'boolean' : !current.options.some((item) => item.value === value)))
+      throw new Error("The agent's configuration options changed. Select again.");
+    return runtime.connection.agent
+      .request('session/set_config_option', {
+        sessionId: runtime.sessionId!,
+        configId,
+        ...(typeof value === 'boolean' ? { type: 'boolean' as const, value } : { value }),
+      })
+      .then((result) => {
+        // Capture at the direct response continuation, before the SDK dispatches following
+        // notifications. The timeout wrapper resumes later and must not overwrite them.
+        const revision = runtime.configRevision;
+        return () => {
+          if (runtime.configRevision !== revision) return;
+          this.controls.configOptions = configOptions(result.configOptions);
+          delete this.controls.modes;
+        };
+      });
+  }
+
+  private confirmedModel(configId: string) {
+    const option = this.controls.configOptions?.find((item) => item.id === configId);
+    if (option && isModelOption(option) && option.options.some((item) => item.value === option.currentValue)) return { configId, value: option.currentValue };
+  }
+
+  private async rememberModel(runtime: Runtime, configId: string) {
+    await this.options.validate();
+    if (!this.current(runtime)) throw new Error('Connection closed.');
+    const selection = this.confirmedModel(configId);
+    if (!selection) return;
+    this.record.modelSelection = selection;
+    await this.persist();
+    if (!this.current(runtime)) return;
+    await this.options.modelPreferences?.save(this.signature(runtime.profile), selection);
+  }
+
+  private async restoreModel(runtime: Runtime) {
+    // Other tasks may have changed the profile default. A resumed conversation keeps its
+    // own choice; records without a local choice retain the agent's loaded configuration.
+    const selection = this.record.modelSelection ?? (!runtime.resume ? this.options.modelPreferences?.load(this.signature(runtime.profile)) : undefined);
+    if (!selection) return;
+    await this.options.validate();
+    if (!this.current(runtime)) throw new Error('Connection closed.');
+    const option = this.controls.configOptions?.find((item) => item.id === selection.configId);
+    if (!option || !isModelOption(option) || !option.options.some((item) => item.value === selection.value)) return;
+    if (option.currentValue !== selection.value) {
+      try {
+        const apply = await this.request(
+          runtime,
+          'session/set_config_option',
+          () => this.requestConfigOption(runtime, selection.configId, selection.value),
+          'Restoring the selected model timed out. Reconnect to confirm the agent configuration.',
+        );
+        if (!this.current(runtime)) throw new Error('Connection closed.');
+        apply();
+      } catch (error) {
+        // A rejected preference can use the agent's default. A timed-out request may still
+        // apply later, so connection setup must fail instead of accepting an uncertain model.
+        if (!this.current(runtime) || runtime.exited || authRequired(error) || (error instanceof Error && error.name === 'TimeoutError')) throw error;
+        this.reportFailure('session/restore_model', error, runtime);
+        this.controls.notices.push({
+          id: randomUUID(),
+          title: 'Unable to Restore Selected Model',
+          description: `The agent's current model remains selected. ${message(error)}`,
+          severity: 'warning',
         });
-    });
+        return;
+      }
+    }
+    await this.options.validate();
+    if (!this.current(runtime)) throw new Error('Connection closed.');
+    const confirmed = this.confirmedModel(selection.configId);
+    if (confirmed) this.record.modelSelection = confirmed;
   }
 
   setMode(modeId: string): Promise<void> {
@@ -819,7 +881,7 @@ export class AcpSession {
     });
   }
 
-  private async configure(method: string, request: (runtime: Runtime) => Promise<() => void>): Promise<void> {
+  private async configure(method: string, request: (runtime: Runtime) => Promise<() => void>, modelConfigId?: string): Promise<void> {
     const runtime = this.runtime;
     if (!runtime || !this.current(runtime) || !runtime.established || this.status !== 'connected')
       throw new Error('Connect to an agent session and wait for the current request to finish.');
@@ -846,6 +908,8 @@ export class AcpSession {
       });
       if (!this.current(runtime)) throw new Error('Connection closed.');
       apply();
+      if (modelConfigId) await this.rememberModel(runtime, modelConfigId);
+      if (!this.current(runtime)) throw new Error('Connection closed.');
       this.error = undefined;
     } catch (error) {
       if (this.current(runtime)) {
