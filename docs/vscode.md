@@ -9,7 +9,7 @@ HTTP, a listening port, a browser server or an installed Warden CLI.
 ```sh
 pnpm install
 pnpm package:vscode
-code --install-extension packages/vscode/warden-0.25.1.vsix
+code --install-extension packages/vscode/warden-0.25.2.vsix
 ```
 
 Warden automatically uses the Git repository of the single open folder; there is no separate project selector.
