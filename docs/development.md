@@ -63,6 +63,12 @@ regression coverage for missing boundaries and reproduced defects; report the ch
 remaining gaps alongside the normal flow. Use real Git fixtures, ACP subprocesses and the packaged
 extension host when the behavior crosses those boundaries.
 
+The [initial test evidence baseline](qa/test-baseline-2026-11-03.md) records an exact-commit CI run,
+reviewed assertions and an open audit queue. Passing suites do not establish complete edge-case
+coverage. Future audits should inspect both changes since their last recorded revision and outstanding
+baseline items; unchanged code does not retire an unreviewed boundary. Record evidence and remaining
+limits for each item before marking it reviewed.
+
 For branch changes, `test/acp-branches.test.ts` combines real task allocation, session persistence and
 agent subprocesses, including renamed or deleted base branches. The packaged regression,
 `WARDEN_VSCODE_SUITE=branches pnpm test:vscode`, also exercises running task chats

@@ -320,8 +320,10 @@ rebases a workspace or retries a failed operation automatically.
 Users coordinate their agent's activity before requesting mutations. Warden does not infer
 idleness from clean Git status or cancellation and adds no agent-idle declaration. Existing Git
 operation locks, workspace identity checks and source/HEAD/index checks remain in force. Delivery
-still requires a clean committed source and complete review of the pinned version; changed source
-or baseline versions require fresh review. Connection previews continue to observe live content.
+still requires complete review of the pinned source HEAD, saved content tree when applicable,
+delivery boundary and primary HEAD. Saved uncommitted task content can be delivered directly;
+changed source content or baseline versions require fresh review. Connection previews continue to
+observe live content.
 
 A merge, cherry-pick or rebase conflict does not block conversation with the agent working on that
 task. A detached rebase is accepted only when its private Git metadata identifies the original task

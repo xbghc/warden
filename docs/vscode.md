@@ -278,10 +278,11 @@ Edit and save human code in primary. Agents edit task workspaces through their o
 context menu and Ctrl+Alt+C / Cmd+Alt+C, copies the original relative path and selected line range.
 Snapshots can be read after a window reload, but a restored tab does not authorize a delivery.
 
-Clean committed review pins the source commit, delivery boundary and primary HEAD. A newer source
-or baseline requires reopening the current diff. Background refresh cannot advance the version the
-user reviewed. Live uncommitted changes are readable and can be connected to preview, but must be
-committed and reopened before delivery. Binary changes identify the pinned version for external review.
+Task review pins the source HEAD, saved content tree when applicable, delivery boundary and primary
+HEAD. Changed saved content, a newer source commit or a changed baseline requires reopening the
+current diff. Background refresh cannot advance the version the user reviewed. Saved uncommitted
+changes can be connected to preview and delivered directly without a task commit. Binary changes
+identify the pinned version for external review.
 There are no read markers, staging controls or review-completion declarations.
 
 Task workspaces and preview use an external shared repository by default, at

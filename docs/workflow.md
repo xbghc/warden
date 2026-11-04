@@ -200,8 +200,10 @@ view is deliberately omitted. See [VS Code](vscode.md) for installation and runt
 
 ## Review first, then squash
 
-Live review and connection previews include uncommitted workspace content. Delivery review uses
-a pinned committed range, its delivery boundary and the primary HEAD. Review has one complete file list. Users must review all content they intend to commit.
+Live review and connection previews include uncommitted workspace content. Delivery review pins
+the source HEAD, saved content tree when applicable, delivery boundary and primary HEAD. Saved
+uncommitted changes can be delivered without first committing in the task workspace. Review has
+one complete file list. Users must review all content they intend to commit.
 Warden recommends small deliveries that the user can review in full. It does not track per-file
 read status, provide review checkpoints, or require a review-completion declaration. Staging is not
 a review status.
