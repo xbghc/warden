@@ -213,6 +213,8 @@ Browser replay checks wait for the fixture to receive a prompt before cancelling
 Stop button alone does not establish submission. New-session checks wait for the replacement record
 before testing its connected state. Startup gates bind to the replacement engine so a draining
 observer from the previous repository cannot satisfy the loading assertion.
+Browser navigation drains queued host actions before replacing the page, so it cannot cancel the
+base-branch selection that the following view is meant to verify.
 Conversation state observers must still clean up deleted tasks without acquiring preview ownership,
 including after workbench replacement and while state notifications are draining during shutdown.
 Also cover initial and between-turn configuration, grouped/boolean selectors, legacy mode fallback,

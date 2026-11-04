@@ -74,6 +74,8 @@ try:
         page.goto(origin + '?surface=task')
         expect(page.get_by_role('button', name='Select Base Branch', exact=True)).to_be_visible()
         page.get_by_role('button', name='Select Base Branch', exact=True).click()
+        # Navigation can abort the harness request before the native action is acknowledged.
+        page.evaluate("async () => { await queue; }")
         page.goto(origin + '?surface=rebase')
         expect(page.get_by_text('No workspaces', exact=True)).to_be_visible()
         # Native task creation and automatic allocation are covered in the extension host.
