@@ -21,6 +21,7 @@ import type { AcpAction, AcpConfigOption, AcpMessage, AcpModel, AcpPermission, A
 import { Button } from './components/ui/button';
 import { Checkbox } from './components/ui/checkbox';
 import { NativeSelect, NativeSelectOptGroup, NativeSelectOption } from './components/ui/native-select';
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from './components/ui/select';
 import { Textarea } from './components/ui/textarea';
 import { IconButton } from './components/ui/icon-button';
 import { StatusBadge } from './components/ui/status-badge';
@@ -622,30 +623,32 @@ export function AcpApp({ model, send: dispatch }: Props) {
               )}
               {controls?.configOptions !== undefined
                 ? primaryOptions.map((option) => (
-                    <ConfigOption key={option.id} option={option} compact disabled={busy || sending || status !== 'connected'} send={send} />
+                    <ConfigOption
+                      key={option.id}
+                      option={option}
+                      compact
+                      disabled={busy || sending || status !== 'connected'}
+                      send={send}
+                      onSelected={() => composer.current?.focus({ preventScroll: true })}
+                    />
                   ))
                 : controls?.modes && (
-                    <div className="acp-picker">
-                      <NativeSelect
-                        aria-label="Session Mode"
-                        title="Mode"
-                        value={controls.modes.currentModeId}
-                        disabled={busy || sending || status !== 'connected'}
-                        onChange={(event) => send({ type: 'set-mode', modeId: event.target.value })}
-                      >
-                        {controls.modes.availableModes.map((mode) => (
-                          <NativeSelectOption key={mode.id} value={mode.id} title={mode.description}>
-                            {mode.name}
-                          </NativeSelectOption>
-                        ))}
-                      </NativeSelect>
-                    </div>
+                    <ComposerPicker
+                      name="Session Mode"
+                      category="mode"
+                      value={controls.modes.currentModeId}
+                      options={controls.modes.availableModes.map((mode) => ({ value: mode.id, name: mode.name, description: mode.description }))}
+                      disabled={busy || sending || status !== 'connected'}
+                      onValueChange={(modeId) => send({ type: 'set-mode', modeId })}
+                      onSelected={() => composer.current?.focus({ preventScroll: true })}
+                    />
                   )}
             </div>
             {canStop ? (
               <IconButton
                 label={status === 'cancelling' ? 'Stopping…' : 'Stop Turn'}
                 size="icon-sm"
+                className="acp-submit"
                 disabled={status === 'cancelling'}
                 onClick={() => send({ type: 'cancel' })}
               >
@@ -657,6 +660,7 @@ export function AcpApp({ model, send: dispatch }: Props) {
                 type="submit"
                 variant="default"
                 size="icon-sm"
+                className="acp-submit"
                 disabled={!canSend}
                 title="Send (Enter); Shift+Enter for a new line"
                 aria-keyshortcuts="Enter Control+Enter Meta+Enter"
@@ -671,10 +675,36 @@ export function AcpApp({ model, send: dispatch }: Props) {
   );
 }
 
-function ConfigOption({ option, compact = false, disabled, send }: { option: AcpConfigOption; compact?: boolean; disabled: boolean; send: Props['send'] }) {
+function ConfigOption({
+  option,
+  compact = false,
+  disabled,
+  send,
+  onSelected,
+}: {
+  option: AcpConfigOption;
+  compact?: boolean;
+  disabled: boolean;
+  send: Props['send'];
+  onSelected?(): void;
+}) {
   const descriptionId = useId();
+  if (compact && option.type === 'select') {
+    return (
+      <ComposerPicker
+        name={option.name}
+        description={option.description}
+        category={option.category}
+        value={option.currentValue}
+        options={option.options}
+        disabled={disabled}
+        onValueChange={(value) => send({ type: 'set-config', configId: option.id, value })}
+        onSelected={onSelected}
+      />
+    );
+  }
   const description = option.description && (
-    <span id={descriptionId} className={compact ? 'sr-only' : 'muted acp-control-description'}>
+    <span id={descriptionId} className="muted acp-control-description">
       {option.description}
     </span>
   );
@@ -693,8 +723,8 @@ function ConfigOption({ option, compact = false, disabled, send }: { option: Acp
       </span>
     </label>
   ) : (
-    <label className={compact ? 'acp-picker' : 'field'}>
-      <span className={compact ? 'sr-only' : undefined}>{option.name}</span>
+    <label className="field">
+      <span>{option.name}</span>
       <NativeSelect
         aria-label={option.name}
         aria-describedby={option.description ? descriptionId : undefined}
@@ -710,14 +740,102 @@ function ConfigOption({ option, compact = false, disabled, send }: { option: Acp
   );
 }
 
-function ConfigValues({ options }: { options: Extract<AcpConfigOption, { type: 'select' }>['options'] }) {
+type SelectOptions = Extract<AcpConfigOption, { type: 'select' }>['options'];
+
+function groupConfigValues(options: SelectOptions) {
   const groups: { label?: string; options: typeof options }[] = [];
   for (const option of options) {
     const previous = groups.at(-1);
     if (previous && previous.label === option.group) previous.options.push(option);
     else groups.push({ label: option.group, options: [option] });
   }
-  return groups.map((group) => {
+  return groups;
+}
+
+function ComposerPicker({
+  name,
+  description,
+  category,
+  value,
+  options,
+  disabled,
+  onValueChange,
+  onSelected,
+}: {
+  name: string;
+  description?: string;
+  category?: string;
+  value: string;
+  options: SelectOptions;
+  disabled: boolean;
+  onValueChange(value: string): void;
+  onSelected?(): void;
+}) {
+  const [open, setOpen] = useState(false);
+  const chosen = useRef(false);
+  const descriptionId = useId();
+  const selected = options.find((option) => option.value === value);
+  // A configuration request or a new turn invalidates an already open picker.
+  useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
+  return (
+    <Select
+      value={value}
+      disabled={disabled}
+      open={open && !disabled}
+      onOpenChange={setOpen}
+      onValueChange={(value) => {
+        chosen.current = true;
+        onValueChange(value);
+      }}
+    >
+      <SelectTrigger
+        className="acp-picker"
+        data-category={category}
+        aria-label={name}
+        aria-describedby={description ? descriptionId : undefined}
+        title={`${name}: ${selected?.name ?? value}${description ? ` — ${description}` : ''}`}
+      >
+        <SelectValue>{selected?.name ?? value}</SelectValue>
+      </SelectTrigger>
+      {description && (
+        <span id={descriptionId} className="sr-only">
+          {description}
+        </span>
+      )}
+      <SelectContent
+        className="acp-picker-menu"
+        aria-label={name}
+        onCloseAutoFocus={(event) => {
+          // The trigger becomes disabled while the agent confirms the choice; keep typing reachable.
+          if (chosen.current && onSelected) {
+            event.preventDefault();
+            onSelected();
+          }
+          chosen.current = false;
+        }}
+      >
+        <SelectGroup>
+          <SelectLabel>{name}</SelectLabel>
+          {groupConfigValues(options).map((group) => (
+            <SelectGroup key={group.options[0]!.value}>
+              {group.label !== undefined && <SelectLabel>{group.label}</SelectLabel>}
+              {group.options.map((option) => (
+                <SelectItem key={option.value} value={option.value} textValue={option.name} description={option.description}>
+                  {option.name}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          ))}
+        </SelectGroup>
+      </SelectContent>
+    </Select>
+  );
+}
+
+function ConfigValues({ options }: { options: SelectOptions }) {
+  return groupConfigValues(options).map((group) => {
     const values = group.options.map((option) => (
       <NativeSelectOption key={option.value} value={option.value} title={option.description}>
         {option.name}

@@ -755,6 +755,7 @@ details[open] > summary > .acp-disclosure {
   margin-top: 8px;
 }
 .acp-composer {
+  --composer-control-size: 28px;
   flex: 0 0 auto;
   padding: 8px var(--chat-gutter) 8px;
 }
@@ -766,13 +767,12 @@ details[open] > summary > .acp-disclosure {
 }
 .acp-input-box:focus-within {
   border-color: var(--color-ring);
-  outline: 1px solid var(--color-ring);
 }
 .acp-composer-toolbar {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 2px 6px 6px;
+  padding: 4px 6px 6px;
 }
 .acp-composer-tools {
   display: flex;
@@ -784,36 +784,54 @@ details[open] > summary > .acp-disclosure {
 }
 .acp-picker {
   flex: 0 1 auto;
-  min-width: 0;
+  min-width: 42px;
   max-width: 100%;
-}
-.acp-picker [data-slot="native-select-wrapper"] {
-  max-width: 100%;
-}
-.acp-picker select {
-  field-sizing: content;
-  width: auto;
-  max-width: min(160px, 100%);
-  height: 28px;
-  padding: 3px 22px 3px 6px;
+  height: var(--composer-control-size);
+  padding: 0 6px;
   border: 0;
   border-radius: 4px;
-  box-shadow: none;
   font-size: 12px;
+  line-height: 16px;
+  text-align: left;
   color: var(--color-foreground);
-  text-overflow: ellipsis;
   background: transparent;
 }
-.acp-picker select:hover {
-  background: var(--color-accent);
+.acp-picker[data-category="mode"] {
+  flex-shrink: 0;
+  max-width: min(96px, 31%);
 }
-.acp-picker [data-slot="native-select-icon"] {
-  right: 4px;
-  width: 12px;
-  opacity: 1;
+.acp-picker[data-category="thought_level"] {
+  flex-shrink: 0;
+  max-width: min(84px, 31%);
+}
+.acp-picker[data-category="model"] {
+  max-width: 220px;
+}
+.acp-picker:not(:disabled):hover,
+.acp-picker[data-state="open"] {
+  background: var(--vscode-toolbar-hoverBackground, var(--color-accent));
+}
+.acp-picker:focus-visible {
+  outline: 1px solid var(--color-ring);
+  outline-offset: -1px;
+}
+.acp-picker-menu {
+  color: var(--vscode-editorWidget-foreground, var(--color-foreground));
+  background: var(--vscode-editorWidget-background, var(--color-background));
+  border-color: var(--vscode-contrastBorder, var(--color-border));
+}
+.acp-picker-menu [data-slot="select-item"][data-highlighted] {
+  outline: 1px solid var(--vscode-contrastActiveBorder, transparent);
+  outline-offset: -1px;
+}
+.acp-submit {
+  flex: 0 0 var(--composer-control-size);
+  width: var(--composer-control-size);
+  height: var(--composer-control-size);
+  border-radius: 5px;
 }
 .acp-connect {
-  height: 28px;
+  height: var(--composer-control-size);
   padding-inline: 6px;
   font-size: 12px;
 }

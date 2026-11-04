@@ -226,7 +226,7 @@ export const Sidebar: Story = {
   args: { model: { ...model, status: 'connected', draft: '', presentation: 'sidebar' } },
   decorators: [
     (Story) => (
-      <div style={{ width: 320 }}>
+      <div style={{ width: '100%', maxWidth: 320 }}>
         <Story />
       </div>
     ),
@@ -319,6 +319,52 @@ export const SidebarLongSelectors: Story = {
         configOptions: SessionControls.args!.model!.controls!.configOptions!.map((option) =>
           option.type === 'select'
             ? { ...option, options: option.options.map((value) => ({ ...value, name: `${value.name} with a long agent-provided label` })) }
+            : option,
+        ),
+      },
+    },
+  },
+};
+
+export const SidebarGroupedModels: Story = {
+  ...SidebarComposer,
+  args: {
+    model: {
+      ...SidebarComposer.args!.model!,
+      controls: {
+        ...SessionControls.args!.model!.controls!,
+        configOptions: SessionControls.args!.model!.controls!.configOptions!.map((option) =>
+          option.id === 'model'
+            ? {
+                ...option,
+                options: [
+                  { value: 'fast', name: 'Fast model with extended context', group: 'Recommended', description: 'For everyday changes and quick feedback.' },
+                  { value: 'deep', name: 'Reasoning model for large codebases', group: 'Other models', description: 'For longer investigations across files.' },
+                ],
+              }
+            : option,
+        ),
+      },
+    },
+  },
+};
+
+export const SidebarManyModels: Story = {
+  ...SidebarGroupedModels,
+  args: {
+    model: {
+      ...SidebarGroupedModels.args!.model!,
+      controls: {
+        ...SidebarGroupedModels.args!.model!.controls!,
+        configOptions: SidebarGroupedModels.args!.model!.controls!.configOptions!.map((option) =>
+          option.id === 'model' && option.type === 'select'
+            ? {
+                ...option,
+                options: [
+                  ...option.options,
+                  ...Array.from({ length: 30 }, (_, index) => ({ value: `model-${index}`, name: `Workspace model ${index + 1}`, group: 'More models' })),
+                ],
+              }
             : option,
         ),
       },

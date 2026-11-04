@@ -221,11 +221,21 @@ configuration change and a prompt cannot run concurrently in the same task conve
 
 Task Chat keeps mode, model and reasoning effort (`thought_level`) selectors in one composer footer
 row, in that order, followed by Send/Stop Turn. Unavailable categories are omitted; uncategorized
-selectors remain accessible. Extra options use a header popover. Long values truncate without
-wrapping the footer. The header menu
+selectors remain accessible. Extra options use a header popover. Footer selectors and Send/Stop Turn
+share one control height; labels shrink independently of their square chevrons and the fixed action.
+Long values truncate without wrapping the footer and retain their full names on hover. Keyboard-accessible
+picker menus open upward, stay within the viewport and show complete agent-provided names, groups and
+descriptions. Selecting a value returns focus to the message input while confirmation is pending;
+Escape closes a picker and restores its trigger focus without sending or changing the draft.
+A pending configuration change or active turn closes an open picker; confirmed agent state remains the
+source of displayed values. The header menu
 contains task/session details and disconnect; executable profiles and setup instructions are absent.
 Enter sends, Shift+Enter inserts a line, and Ctrl/Command+Enter remains supported. IME composition
 never submits. The send control becomes Stop Turn during an active turn.
+
+The layout draws on VS Code's [shared chat control sizing](https://github.com/microsoft/vscode/blob/9be315fcbf470a87d94d95a04e2f916d1fae5765/src/vs/workbench/contrib/chat/browser/widget/media/chat.css)
+and [responsive picker layout](https://github.com/microsoft/vscode/blob/9be315fcbf470a87d94d95a04e2f916d1fae5765/src/vs/workbench/contrib/chat/browser/widget/input/chatInputPickerResponsiveLayout.ts).
+Warden implements its footer with themed webview primitives and keeps provider-confirmed ACP state.
 
 `config_option_update` replaces the entire configuration list. Mode, command, usage and session-title
 updates are also accepted between turns. These controls are live connection state: disconnecting

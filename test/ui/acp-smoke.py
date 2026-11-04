@@ -559,22 +559,95 @@ try:
         thinking = first.get_by_role('checkbox', name='显示思考', exact=True)
         effort_selector = first.get_by_role('combobox', name='Effort', exact=True)
         config_mode = first.get_by_role('combobox', name='Mode', exact=True)
-        expect(model_selector).to_have_value('fast')
-        expect(effort_selector).to_have_value('medium')
-        expect(config_mode).to_have_value('code')
+        expect(model_selector).to_have_text('快速')
+        expect(effort_selector).to_have_text('Medium')
+        expect(config_mode).to_have_text('Code')
+        picker_draft = composer.input_value()
         expect(first.get_by_role('button', name='Agent Commands', exact=True)).to_have_count(0)
-        for width in [320, 260]:
+        for width in [520, 320, 260]:
             first.set_viewport_size({'width': width, 'height': 900})
             positions = [control.bounding_box() for control in [config_mode, model_selector, effort_selector, first.get_by_role('button', name='Send', exact=True)]]
             assert all(box and box['width'] > 20 for box in positions), positions
-            assert max(box['y'] for box in positions) - min(box['y'] for box in positions) <= 2, positions
+            assert max(box['y'] for box in positions) - min(box['y'] for box in positions) <= 1, positions
+            assert max(box['height'] for box in positions) - min(box['height'] for box in positions) <= 1, positions
             assert all(left['x'] + left['width'] <= right['x'] + 1 for left, right in zip(positions, positions[1:])), positions
             assert first.evaluate('document.documentElement.scrollWidth <= innerWidth'), positions
+            for control in [config_mode, model_selector, effort_selector]:
+                icon = control.locator('[data-slot="select-icon"]').bounding_box()
+                box = control.bounding_box()
+                assert abs(icon['width'] - icon['height']) <= 1, icon
+                assert abs(icon['y'] + icon['height'] / 2 - box['y'] - box['height'] / 2) <= 1, (icon, box)
         first.screenshot(path=str(artifacts / 'acp-composer-single-row.png'), full_page=True)
-        effort_selector.select_option('high')
+        effort_selector.click()
+        first.get_by_role('option', name='High', exact=True).click()
         first.wait_for_function("window.__model.controls.configOptions.find(option => option.id === 'effort')?.currentValue === 'high' && !window.__model.controls.configuring")
-        config_mode.select_option('ask')
+        expect(composer).to_be_focused()
+        config_mode.press('ArrowDown')
+        expect(first.get_by_role('listbox', name='Mode', exact=True)).to_be_visible()
+        expect(first.get_by_role('option', name='Code', exact=True)).to_be_focused()
+        first.keyboard.press('Home')
+        expect(first.get_by_role('option', name='Ask', exact=True)).to_be_focused()
+        first.keyboard.press('Enter')
         first.wait_for_function("window.__model.controls.configOptions.find(option => option.id === 'mode')?.currentValue === 'ask' && !window.__model.controls.configuring")
+        expect(config_mode).to_have_text('Ask')
+        expect(composer).to_be_focused()
+        expect(composer).to_have_value(picker_draft)
+
+        # Full agent labels remain readable in a bounded menu; UI state changes close an open picker.
+        first.evaluate('async () => { await queue; await window.__fixture.pauseModels(); }')
+        original_controls = first.evaluate('window.__model')
+        long_model = json.loads(json.dumps(original_controls))
+        for option in long_model['controls']['configOptions']:
+            if option['id'] == 'model':
+                for value in option['options']:
+                    value['name'] += ' with a long agent-provided label'
+        first.set_viewport_size({'width': 320, 'height': 740})
+        first.evaluate('model => window.__fixture.deliver(model)', long_model)
+        expect(model_selector).to_have_text('快速 with a long agent-provided label')
+        for control in [config_mode, effort_selector]:
+            assert control.locator('[data-slot="select-value"]').evaluate('(element) => element.scrollWidth <= element.clientWidth')
+        long_controls = json.loads(json.dumps(original_controls))
+        for option in long_controls['controls']['configOptions']:
+            if option['type'] == 'select':
+                for value in option['options']:
+                    value['name'] += ' with a long agent-provided label'
+                    if option['id'] == 'model':
+                        value['group'] = 'Available models'
+                        value['description'] = 'Description supplied by the agent for this model.'
+        first.evaluate('model => window.__fixture.deliver(model)', long_controls)
+        for width in [320, 260]:
+            first.set_viewport_size({'width': width, 'height': 740})
+            positions = [control.bounding_box() for control in [config_mode, model_selector, effort_selector, first.get_by_role('button', name='Send', exact=True)]]
+            assert all(left['x'] + left['width'] <= right['x'] + 1 for left, right in zip(positions, positions[1:])), positions
+            model_selector.click()
+            menu = first.get_by_role('listbox', name='模型', exact=True)
+            expect(menu.get_by_text('Available models', exact=True)).to_be_visible()
+            expect(menu.get_by_role('option', name='深入 with a long agent-provided label', exact=False)).to_be_visible()
+            box = menu.bounding_box()
+            assert box['x'] >= 0 and box['x'] + box['width'] <= width and box['y'] >= 0, box
+            assert menu.evaluate('(element) => element.scrollWidth <= element.clientWidth'), box
+            first.screenshot(path=str(artifacts / f'acp-composer-menu-{width}.png'), full_page=True)
+            menu.press('Escape')
+            expect(model_selector).to_be_focused()
+        model_selector.click()
+        applying = json.loads(json.dumps(long_controls))
+        applying['controls']['configuring'] = True
+        first.evaluate('model => window.__fixture.deliver(model)', applying)
+        expect(first.get_by_role('listbox', name='模型', exact=True)).to_have_count(0)
+        expect(model_selector).to_be_disabled()
+        expect(first.get_by_role('button', name='Send', exact=True)).to_be_disabled()
+        first.evaluate('model => window.__fixture.deliver(model)', original_controls)
+        expect(model_selector).to_be_enabled()
+        expect(first.get_by_role('listbox', name='模型', exact=True)).to_have_count(0)
+        model_selector.click()
+        removed = json.loads(json.dumps(original_controls))
+        removed['controls']['configOptions'] = []
+        first.evaluate('model => window.__fixture.deliver(model)', removed)
+        expect(first.get_by_role('listbox', name='模型', exact=True)).to_have_count(0)
+        expect(model_selector).to_have_count(0)
+        first.evaluate('async () => { await window.__fixture.resumeModels(); }')
+        expect(model_selector).to_have_text('快速')
+        first.set_viewport_size({'width': 260, 'height': 900})
         expect(thinking).not_to_be_visible()
         first.get_by_role('button', name='More Session Options', exact=True).click()
         expect(thinking).not_to_be_checked()
@@ -630,9 +703,10 @@ try:
         controls_journal = inspect()['entries'][0]['journals'][7]
         assert not any(json.loads(line).get('method') == 'session/prompt' for line in controls_journal.splitlines())
         first.set_viewport_size({'width': 1000, 'height': 900})
-        model_selector.select_option('deep')
+        model_selector.click()
+        first.get_by_role('option', name='深入', exact=True).click()
         first.wait_for_function("window.__model.controls.configOptions.find(option => option.id === 'model')?.currentValue === 'deep' && !window.__model.controls.configuring")
-        expect(model_selector).to_have_value('deep')
+        expect(model_selector).to_have_text('深入')
         first.get_by_role('button', name='More Session Options', exact=True).click()
         thinking.click()
         first.wait_for_function("window.__model.controls.configOptions.find(option => option.id === 'thinking')?.currentValue === true && !window.__model.controls.configuring")
@@ -680,10 +754,11 @@ try:
         new_session(first)
         connected(first)
         mode_selector = first.get_by_role('combobox', name='Session Mode', exact=True)
-        expect(mode_selector).to_have_value('ask')
-        mode_selector.select_option('code')
+        expect(mode_selector).to_have_text('询问')
+        mode_selector.click()
+        first.get_by_role('option', name='编码', exact=True).click()
         first.wait_for_function("window.__model.controls.modes.currentModeId === 'code' && !window.__model.controls.configuring")
-        expect(mode_selector).to_have_value('code')
+        expect(mode_selector).to_have_text('编码')
         expect(model_selector).to_have_count(0)
 
         send(first, 'tool-progress')
@@ -736,7 +811,7 @@ try:
         assert first.evaluate('window.__hostError') is None
         assert second.evaluate('window.__hostError') is None
         browser.close()
-    print('ACP browser flows passed: task isolation, parallel conversations, permissions, cancellation, delayed completion with reload and follow-up, unacknowledged completion clears, batched selection appends, in-flight drafts, stale models/sends, new-conversation edits, reopened-turn acknowledgement, restore, crash, authentication, failed-profile recovery, safe text, single-row mode/model/effort controls, slash completion with keyboard/mouse/IME and no implicit send, thought/usage updates and disconnected controls.')
+    print('ACP browser flows passed: task isolation, parallel conversations, permissions, cancellation, delayed completion with reload and follow-up, unacknowledged completion clears, batched selection appends, in-flight drafts, stale models/sends, new-conversation edits, reopened-turn acknowledgement, restore, crash, authentication, failed-profile recovery, safe text, aligned mode/model/effort pickers, long/grouped labels, keyboard selection and focus, invalidated menus, slash completion with keyboard/mouse/IME and no implicit send, thought/usage updates and disconnected controls.')
 finally:
     host.terminate()
     host.wait(timeout=30)
