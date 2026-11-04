@@ -5,6 +5,7 @@ const vscode = require('vscode');
 
 exports.checkStartup = async (workbench, fixture, eventually) => {
   while (workbench.checkReading) await workbench.checkReading;
+  const previous = workbench.backend;
   const prototype = workbench.backend.constructor.prototype;
   const execute = prototype.execute;
   await workbench.agentSetup.disconnect();
@@ -15,7 +16,8 @@ exports.checkStartup = async (workbench, fixture, eventually) => {
     release = resolve;
   });
   prototype.execute = async function (command, ...args) {
-    if (command === 'repository.get') {
+    // A draining observer on the previous engine is not the new startup read.
+    if (command === 'repository.get' && this === workbench.backend && this !== previous) {
       entered = true;
       await gate;
     }

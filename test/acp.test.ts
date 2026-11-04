@@ -243,6 +243,16 @@ describe('ACP subprocess conversations', () => {
     expect(f.session.snapshot().record.messages.find((message) => message.role === 'user')?.uncertain).toBe(false);
   });
 
+  it('redacts the typed message from failures when fallback context is appended', async () => {
+    const f = await fixture('echoed', 'no-system-prompt');
+    await f.session.connect(f.profile, { resume: false });
+    await expect(f.session.send('echo-error private-typed-value')).rejects.toThrow('Prompt failed');
+    expect(f.session.snapshot().record.messages.find((message) => message.role === 'user')?.text).toContain('user-level context');
+    const failure = f.diagnostics.find((row) => row.event === 'acp.failure' && row.stage === 'session/prompt');
+    expect(failure?.diagnostic).toContain('Prompt failed:');
+    expect(JSON.stringify(f.diagnostics)).not.toContain('private-typed-value');
+  });
+
   it('does not automatically resend an interrupted message with fallback context on recovery', async () => {
     const f = await fixture('interrupted-context', 'no-system-prompt');
     await f.session.connect(f.profile, { resume: false });

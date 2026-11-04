@@ -24,9 +24,20 @@ try:
         def inspect():
             return first.request.get(origin + '/inspect').json()
 
-        def send(page, text):
+        def sent_count(state, task):
+            return sum(
+                json.loads(line).get('method') == 'session/prompt'
+                for journal in state['entries'][task]['journals']
+                for line in (journal or '').splitlines()
+            )
+
+        def send(page, text, wait_sent=False):
+            task = int(page.evaluate("new URL(location.href).searchParams.get('task') || '0'"))
+            before = sent_count(inspect(), task) if wait_sent else 0
             page.get_by_role('textbox', name='Message', exact=True).fill(text)
             page.get_by_role('button', name='Send', exact=True).click()
+            if wait_sent:
+                wait_host(page, '/inspect', lambda state: sent_count(state, task) > before)
 
         def chat_action(page, name):
             page.get_by_role('button', name='More Chat Actions', exact=True).click()
@@ -328,7 +339,9 @@ try:
         expect(first.locator('.acp-message-agent').last.locator('.acp-message-text')).to_have_text('Echo: 新会话建立时输入的说明')
         expect(composer).to_have_value('')
 
-        send(first, 'hold')
+        # Replay assertions below concern delivered turns. Stop can also be enabled
+        # during persistence; pre-send cancellation is covered by subprocess tests.
+        send(first, 'hold', wait_sent=True)
         expect(first.get_by_role('button', name='Stop Turn', exact=True)).to_be_enabled()
         first.get_by_role('textbox', name='Message', exact=True).fill('稍后继续补充分页参数')
         first.wait_for_function("window.__model.draft === '稍后继续补充分页参数'")
@@ -339,7 +352,7 @@ try:
         expect(first.get_by_role('textbox', name='Message', exact=True)).to_have_value('稍后继续补充分页参数')
         expect(first.get_by_text('The previous turn was interrupted', exact=False)).to_have_count(0)
 
-        send(first, 'hold')
+        send(first, 'hold', wait_sent=True)
         expect(first.get_by_role('button', name='Stop Turn', exact=True)).to_be_enabled()
         saved_drafts = first.evaluate("window.__actions.filter(item => item.action?.type === 'draft').length")
         first.get_by_role('textbox', name='Message', exact=True).fill('')
@@ -812,7 +825,9 @@ try:
 
         # The fallback stays visible as ordinary context without changing the editable draft.
         use_agent(first, 'no-system-prompt')
+        previous_record = first.evaluate('window.__model.record.id')
         new_session(first)
+        first.wait_for_function('previous => window.__model.record.id !== previous', arg=previous_record)
         connected(first)
         expect(first.get_by_role('textbox', name='Message', exact=True)).to_have_value('')
         send(first, 'Explain this workspace')
@@ -829,6 +844,13 @@ try:
         first.screenshot(path=str(artifacts / 'acp-workspace-context-expanded.png'), full_page=True)
         fallback.get_by_role('button', name='Show Less', exact=True).click()
         first.screenshot(path=str(artifacts / 'acp-workspace-context.png'), full_page=True)
+        # The appended context must not keep the submitted draft pending.
+        send(first, 'Follow up on this workspace')
+        connected(first)
+        expect(first.locator('.acp-message-agent').last.locator('.acp-message-text')).to_have_text('Echo: Follow up on this workspace')
+        first.get_by_role('textbox', name='Message', exact=True).fill('Third message')
+        expect(first.get_by_role('button', name='Send', exact=True)).to_be_enabled()
+        first.get_by_role('textbox', name='Message', exact=True).fill('')
         saved_context = first.evaluate("window.__model.record.messages.find(message => message.role === 'user').text")
         chat_action(first, 'Disconnect')
         first.wait_for_function("window.__model.status === 'disconnected'")

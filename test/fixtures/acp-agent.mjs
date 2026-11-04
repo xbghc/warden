@@ -296,6 +296,10 @@ async function handle(message) {
   remember('user', sentText);
   if (text === 'crash') return process.exit(17);
   if (text === 'malformed') return result(id, { stopReason: 42 });
+  if (text.startsWith('echo-error ')) {
+    process.stderr.write(`Rejected prompt: ${text}\n`);
+    return error(id, -32603, `Prompt failed: ${text}`);
+  }
   if (text === 'recoverable-json') process.stdout.write('not valid JSON\n');
   if (text === 'hold' || text === 'neverfinish') return;
   if (text === 'controls-update') {

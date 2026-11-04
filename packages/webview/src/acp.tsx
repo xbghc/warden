@@ -231,7 +231,8 @@ export function AcpApp({ model, send: dispatch }: Props) {
       if (!timer.current && (savedDraft.current.version !== draftVersion.current || savedDraft.current.revision !== draftRevision.current)) scheduleDraft();
     }
     if (pending) {
-      const sent = record.messages.find((item) => item.role === 'user' && !pending.messageIds.has(item.id) && item.text === pending.text);
+      // Agents without system prompts receive visible workspace context appended to the stored text.
+      const sent = record.messages.find((item) => item.role === 'user' && !pending.messageIds.has(item.id) && item.text.startsWith(pending.text));
       if (model.error || (!busy && record.interrupted)) {
         setPending(undefined);
         setSending(false);

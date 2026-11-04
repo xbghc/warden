@@ -81,7 +81,17 @@ type Runtime = {
   modeUpdate?: string;
   stderr: AcpStderr;
 };
-type Turn = { id: string; updates: number; runtime: Runtime; record: AcpRecord; promise: Promise<void>; cancelling: boolean; sent: boolean; user?: AcpMessage };
+type Turn = {
+  id: string;
+  updates: number;
+  runtime: Runtime;
+  record: AcpRecord;
+  promise: Promise<void>;
+  cancelling: boolean;
+  sent: boolean;
+  input: string;
+  user?: AcpMessage;
+};
 
 /** A task-bound protocol client. Files, commands and any agent-owned background work remain the agent's responsibility. */
 export class AcpSession {
@@ -199,7 +209,8 @@ export class AcpSession {
         taskId: this.options.binding.taskId,
         profileId: runtime?.profile.id ?? this.record.profileId,
         stderr: runtime?.stderr.text,
-        secrets: [...acpDiagnosticSecrets(runtime?.profile), ...(this.turn?.user ? [this.turn.user.text] : [])],
+        // Errors echo the typed input, not the stored text with any appended workspace context.
+        secrets: [...acpDiagnosticSecrets(runtime?.profile), ...(this.turn ? [this.turn.input] : [])],
       });
       log.write(authRequired(error) ? 'warn' : 'error', 'acp.failure', { stage, ...diagnosticError(error), diagnostic });
       this.options.report?.(diagnostic);
@@ -619,7 +630,7 @@ export class AcpSession {
       return Promise.reject(new Error('Connect to an agent session first.'));
     if (this.turn || this.connecting || this.authenticating || this.configuration)
       return Promise.reject(new Error('A request is already running in this session. Wait or stop this turn.'));
-    const turn: Turn = { id: randomUUID(), updates: 0, runtime, record: this.record, promise: Promise.resolve(), cancelling: false, sent: false };
+    const turn: Turn = { id: randomUUID(), updates: 0, runtime, record: this.record, promise: Promise.resolve(), cancelling: false, sent: false, input: value };
     this.turn = turn;
     turn.promise = this.runPrompt(turn, value);
     return turn.promise;
