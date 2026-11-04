@@ -378,7 +378,8 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   const externalTask = await workbench.backend.execute('task.create', { title: 'External login' });
   await conversations.show(fixture.root, externalTask.id);
   const externalChat = conversations.sidebarEntry;
-  await eventually(() => externalChat.session.snapshot().status === 'error');
+  // Authentication errors follow the same Git validation and process startup as successful connections.
+  await eventually(() => externalChat.session.snapshot().status === 'error', 30_000);
   assert.equal(externalChat.session.snapshot().authMethods[0].id, 'login');
   const externalRecord = externalChat.session.snapshot().record.id;
   const externalDraft = externalChat.draft.text;

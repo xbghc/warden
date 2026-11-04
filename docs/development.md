@@ -215,6 +215,8 @@ before testing its connected state. Startup gates bind to the replacement engine
 observer from the previous repository cannot satisfy the loading assertion.
 Browser navigation drains queued host actions before replacing the page, so it cannot cancel the
 base-branch selection that the following view is meant to verify.
+Packaged authentication-state checks use the same connection wait budget as successful startup,
+including task-binding validation and process creation on Windows.
 Conversation state observers must still clean up deleted tasks without acquiring preview ownership,
 including after workbench replacement and while state notifications are draining during shutdown.
 Also cover initial and between-turn configuration, grouped/boolean selectors, legacy mode fallback,
