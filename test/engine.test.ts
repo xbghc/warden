@@ -4,6 +4,7 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Engine, PreviewService, WardenError, WorkflowService } from '@warden/engine';
 import { DiagnosticLog } from '@warden/shared';
+import type { DevelopmentChange } from '@warden/shared';
 import * as worktrees from '../packages/engine/src/worktrees.js';
 import * as git from '../packages/engine/src/git.js';
 import { checkoutWorktree } from '../packages/engine/src/worktrees.js';
@@ -341,6 +342,31 @@ describe('desktop engine', () => {
     expect(retried.worktree).toBe(task.worktree);
     expect(retried.workspaceHook?.status).toBe('succeeded');
     expect(await readFile(path.join(task.worktree, 'hook.txt'), 'utf8')).toMatch(/retained\s+retried/);
+  });
+
+  it('reports a setup script interrupted by its exited process as retryable', async () => {
+    const task = await engine.execute('task.create', { title: 'Interrupted script' });
+    const running = { event: 'create' as const, command: 'pnpm install', status: 'running' as const };
+    const exited = { pid: 2 ** 31 - 2, hostname: os.hostname() };
+    await engine.store.update((state) => {
+      const row = state.workflow!.changes.find((change): change is DevelopmentChange => change.id === task.id && !!change.worktree)!;
+      row.workspaceHook = { ...running, owner: exited };
+      // Older records without an owner, and live owners, may still be running elsewhere.
+      state.workflow!.changes.push({ ...row, id: 'live', workspaceHook: { ...running, owner: { pid: process.pid, hostname: os.hostname() } } });
+      state.workflow!.changes.push({ ...row, id: 'legacy', workspaceHook: running });
+    });
+    const rows = (await engine.execute('workflow.get', undefined)).workflow!.changes as DevelopmentChange[];
+    const interrupted = rows.find((row) => row.id === task.id)!.workspaceHook!;
+    expect(interrupted).toMatchObject({ status: 'failed', exitCode: null, command: 'pnpm install', output: expect.stringContaining('interrupted') });
+    expect(interrupted.owner).toBeUndefined();
+    expect(rows.find((row) => row.id === 'live')!.workspaceHook!.status).toBe('running');
+    expect(rows.find((row) => row.id === 'legacy')!.workspaceHook!.status).toBe('running');
+    await engine.store.update((state) => {
+      state.workflow!.changes = state.workflow!.changes.filter((change) => change.id === task.id);
+    });
+    await engine.execute('config.save', { hooks: { create: 'echo retried > hook.txt' } });
+    const retried: DevelopmentChange = await engine.execute('task.hook', { taskId: task.id });
+    expect(retried.workspaceHook).toEqual({ event: 'create', command: 'echo retried > hook.txt', status: 'succeeded', exitCode: 0, output: '' });
   });
 
   it('allocates legacy plans on demand and preserves archived plans until restoration', async () => {

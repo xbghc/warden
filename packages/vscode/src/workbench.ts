@@ -805,6 +805,7 @@ export class Workbench {
       this.reviews.has(task.id) && !sameReview(this.reviews.get(task.id), this.observedReviews.get(task.id)) ? 'Review Out of Date' : '',
       task.worktree && task.workspaceHook?.status === 'failed' ? 'Setup Failed' : '',
       activity !== 'Agent: Permission Required' ? activity : '',
+      task.worktree && task.workspaceHook?.status === 'running' ? 'Setup Running' : '',
       task.status === 'integrating' ? 'Pending Commit' : '',
       !problem ? connection : '',
       task.agent,

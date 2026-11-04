@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import os from 'node:os';
 import path from 'node:path';
 import { readFile, realpath, stat } from 'node:fs/promises';
 import type {
@@ -72,6 +73,18 @@ async function finishReads<T extends readonly unknown[]>(reads: { [K in keyof T]
   return results.map((result) => (result as PromiseFulfilledResult<unknown>).value) as unknown as T;
 }
 
+// Hooks run only under the repository lock. A record whose owner process has exited on this
+// host was interrupted, for example by a closed window; report it as retryable.
+function interruptedHook(hook: DevelopmentChange['workspaceHook']) {
+  if (hook?.status !== 'running' || !hook.owner || hook.owner.hostname !== os.hostname()) return false;
+  try {
+    process.kill(hook.owner.pid, 0);
+    return false;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ESRCH';
+  }
+}
+
 async function fileExists(file: string) {
   try {
     await stat(file);
@@ -109,6 +122,12 @@ export class WorkflowService {
     const legacyTodos = state.todos;
     const workspaceConfig = { hooks: state.workspaceConfig?.hooks ?? {}, previewSetup: state.workspaceConfig?.previewSetup };
     if (!workflow) return { workflow, workspaceConfig, legacyTodos };
+    for (const row of workflow.changes) {
+      if (row.worktree && row.workspaceHook && interruptedHook(row.workspaceHook)) {
+        const { owner: _owner, ...hook } = row.workspaceHook;
+        row.workspaceHook = { ...hook, status: 'failed', exitCode: null, output: 'The setup script was interrupted before it finished. Retry it.' };
+      }
+    }
     try {
       const developmentHead = await this.developmentHead(workflow.developmentBranch);
       const working = workflow.changes.filter(
@@ -399,7 +418,7 @@ export class WorkflowService {
   private async runHook(change: DevelopmentChange, event: 'create' | 'reuse') {
     const command = (await this.store.load()).workspaceConfig?.hooks[event];
     if (!command) return;
-    change.workspaceHook = { event, command, status: 'running' };
+    change.workspaceHook = { event, command, status: 'running', owner: { pid: process.pid, hostname: os.hostname() } };
     await this.save(change);
     change.workspaceHook = await runWorkspaceHook(this.repo.commonRoot, change, event, command);
     await this.save(change);
@@ -507,7 +526,7 @@ export class WorkflowService {
     // Git considers ignored files disposable during rebase's checkout, even with a clean
     // status. Include intermediate replay paths and file/directory collisions as well.
     if (collisions.length)
-      fail(`Rebase could overwrite ignored local files. Move or save them first: ${collisions.slice(0, 10).join('、')}`, 'rebase_ignored_collision');
+      fail(`Rebase could overwrite ignored local files. Move or save them first: ${collisions.slice(0, 10).join(', ')}`, 'rebase_ignored_collision');
   }
 
   async rebaseChecks() {
@@ -934,7 +953,7 @@ export class WorkflowService {
         );
       } catch (error) {
         fail(
-          `The changes conflict with the base branch. Resolve them in the workspace first: ${(await sandbox.conflicts()).join('、') || errorMessage(error)}`,
+          `The changes conflict with the base branch. Resolve them in the workspace first: ${(await sandbox.conflicts()).join(', ') || errorMessage(error)}`,
           'delivery_conflict',
         );
       }

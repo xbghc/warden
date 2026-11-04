@@ -132,6 +132,8 @@ export interface WorkspaceHookResult {
   status: 'running' | 'succeeded' | 'failed';
   exitCode?: number | null;
   output?: string;
+  /** Process running the script, so readers can recognize a run interrupted by a closed window. */
+  owner?: { pid: number; hostname: string };
 }
 
 export interface DevelopmentWorkflow {

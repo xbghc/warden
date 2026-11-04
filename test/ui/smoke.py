@@ -129,6 +129,18 @@ try:
         action({'type': 'task.update', 'taskId': first_id, 'title': '订单接口', 'body': '保存后的订单说明'})
         page.reload()
         expect(notes.get_by_role('textbox', name='Notes', exact=True)).to_have_value('保存后的订单说明')
+        expect(notes.get_by_role('button', name='Save Notes', exact=True)).to_be_disabled()
+        expect(notes.get_by_role('button', name='Discard Changes', exact=True)).to_be_disabled()
+        # An unedited form follows notes saved elsewhere instead of writing the old values back.
+        action({'type': 'task.update', 'taskId': first_id, 'title': '订单接口', 'body': '其他窗口的说明'})
+        page.evaluate("model => window.postMessage({type:'model', model}, '*')", page.request.get(origin + '/model?surface=task').json())
+        expect(notes.get_by_role('textbox', name='Notes', exact=True)).to_have_value('其他窗口的说明')
+        notes.get_by_role('textbox', name='Notes', exact=True).fill('本地未保存草稿')
+        action({'type': 'task.update', 'taskId': first_id, 'title': '订单接口', 'body': '保存后的订单说明'})
+        page.evaluate("model => window.postMessage({type:'model', model}, '*')", page.request.get(origin + '/model?surface=task').json())
+        expect(notes.get_by_role('textbox', name='Notes', exact=True)).to_have_value('本地未保存草稿')
+        notes.get_by_role('button', name='Discard Changes', exact=True).click()
+        expect(notes.get_by_role('textbox', name='Notes', exact=True)).to_have_value('保存后的订单说明')
 
         page.set_viewport_size({'width': 320, 'height': 700})
         assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')

@@ -64,18 +64,12 @@ export async function runWorkspaceHook(root: string, change: DevelopmentChange, 
   return {
     event,
     command,
-    ...(await runSetupCommand(
-      root,
-      change.worktree,
-      command,
-      {
-        WARDEN_BRANCH: change.branch,
-        WARDEN_DEVELOPMENT_BRANCH: change.developmentBranch,
-        WARDEN_TASK_ID: change.id,
-        WARDEN_HOOK_EVENT: event,
-      },
-      60000,
-    )),
+    ...(await runSetupCommand(root, change.worktree, command, {
+      WARDEN_BRANCH: change.branch,
+      WARDEN_DEVELOPMENT_BRANCH: change.developmentBranch,
+      WARDEN_TASK_ID: change.id,
+      WARDEN_HOOK_EVENT: event,
+    })),
   };
 }
 

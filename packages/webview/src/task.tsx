@@ -20,6 +20,18 @@ export function Task({ model, send, state }: { model: WorkbenchModel; send(actio
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const latest = useRef(draft);
+  const persisted = useRef({ title: task?.title ?? '', body: task?.body ?? '' });
+  // Follow edits saved elsewhere (another window or the sidebar) while this form has no
+  // local changes, so a later save cannot write the previous values back.
+  useEffect(() => {
+    const next = { title: task?.title ?? '', body: task?.body ?? '' };
+    const previous = persisted.current;
+    persisted.current = next;
+    if (latest.current.title === previous.title && latest.current.body === previous.body && (next.title !== previous.title || next.body !== previous.body)) {
+      latest.current = next;
+      setDraft(next);
+    }
+  }, [task?.title, task?.body]);
   const update = (patch: Partial<Draft>) => {
     const value = { ...latest.current, ...patch };
     latest.current = value;
@@ -37,6 +49,7 @@ export function Task({ model, send, state }: { model: WorkbenchModel; send(actio
     }
   }, [task?.title, task?.body, saving]);
   if (!task) return <p className="muted">Choose Edit Task from the task menu.</p>;
+  const changed = draft.title !== task.title || draft.body !== (task.body ?? '');
   return (
     <section className="task-inline" aria-label="Edit Notes">
       <div className="task-section-heading">
@@ -72,12 +85,12 @@ export function Task({ model, send, state }: { model: WorkbenchModel; send(actio
           />
         </div>
         <div className="actions">
-          <IconButton label="Save Notes" variant="default" type="submit" disabled={!!model.busy || !draft.title.trim()}>
+          <IconButton label="Save Notes" variant="default" type="submit" disabled={!!model.busy || !changed || !draft.title.trim()}>
             <Check aria-hidden="true" />
           </IconButton>
           <IconButton
             label="Discard Changes"
-            disabled={!!model.busy}
+            disabled={!!model.busy || !changed}
             onClick={() => {
               setSaving(false);
               update({ title: task.title, body: task.body ?? '' });

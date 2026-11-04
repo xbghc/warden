@@ -173,7 +173,7 @@ function Rebase({ model, send }: Props) {
                 <strong>{model.workflow?.workflow?.changes.find((task) => task.id === result.changeId)?.title ?? result.changeId}</strong>
                 <StatusBadge status={result.status}>{rebaseResultLabels[result.status]}</StatusBadge>
               </div>
-              <p>{result.message}</p>
+              {result.message && <p>{result.message}</p>}
             </div>
           ))}
         </section>

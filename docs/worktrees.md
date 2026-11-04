@@ -81,6 +81,8 @@ These legacy fields are optional POSIX shell commands executed after the assignm
 saved, with the workspace as cwd. Linux and macOS use `/bin/sh -c`; native Windows uses Git for
 Windows' bundled `sh.exe -c`. They expose stdout/stderr, exit code and failure. A failed hook
 leaves the workspace intact; retry it explicitly. Hooks have a ten-minute timeout and bounded output.
+A run interrupted by a closed window or host restart is reported as failed once its recorded owner
+process has exited on this host, so it can be retried; the task row shows **Setup Running** meanwhile.
 Warden does not provide a dependency installer or supervise agent-started commands. Its ACP client
 owns only the process carrying its stdio connection; agents execute their own tools.
 
