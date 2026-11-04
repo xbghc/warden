@@ -57,11 +57,16 @@ export async function resolveAcpBinding(engine: Engine, taskId: string): Promise
   const identity = createHash('sha256')
     .update(JSON.stringify([repository, task.id, task.createdAt, task.branch, task.developmentBranch, identities]))
     .digest('hex');
-  return { repository, taskId, title: task.title, workspace, branch: task.branch, identity };
+  return { repository, taskId, title: task.title, workspace, branch: task.branch, baseBranch: task.developmentBranch, identity };
 }
 
 export async function validateAcpBinding(engine: Engine, binding: AcpBinding) {
   const current = await resolveAcpBinding(engine, binding.taskId);
-  if (current.identity !== binding.identity || current.workspace !== binding.workspace || current.branch !== binding.branch)
+  if (
+    current.identity !== binding.identity ||
+    current.workspace !== binding.workspace ||
+    current.branch !== binding.branch ||
+    current.baseBranch !== binding.baseBranch
+  )
     throw new Error('The workspace for this session was replaced. Reopen the task conversation.');
 }

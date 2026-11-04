@@ -55,7 +55,7 @@ it('keeps the initialized ACP connection alive without a prompt until Warden clo
   expect(wire.map((row) => row.method)).toEqual(['initialize', 'session/new']);
   expect(wire[0].params.clientCapabilities.fs).toEqual({ readTextFile: false, writeTextFile: false });
   expect(wire[0].params.clientCapabilities.terminal).toBe(false);
-  expect(wire[1].params.cwd).toBe(directory);
+  expect(wire[1].params).toEqual({ cwd: directory, mcpServers: [] });
   const connection = completed('acp.connect')[0]!;
   expect(connection.outcome).toBe('ok');
   for (const stage of ['acp.cleanup', 'acp.spawn', 'acp.initialize', 'acp.session.new'] as const) {

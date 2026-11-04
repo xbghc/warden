@@ -18,7 +18,7 @@ async function fixture() {
   await mkdir(workspace);
   const repository = path.join(directory, 'primary');
   await mkdir(repository);
-  const binding: AcpBinding = { repository, taskId: 'output', title: 'Output', workspace, branch: 'agent/output', identity: 'output' };
+  const binding: AcpBinding = { repository, taskId: 'output', title: 'Output', workspace, branch: 'agent/output', baseBranch: 'main', identity: 'output' };
   const storage = new AcpSessionStorage(path.join(directory, 'data'), binding);
   const journal = path.join(directory, 'wire.jsonl');
   const profile = {

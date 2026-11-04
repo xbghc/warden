@@ -8,8 +8,10 @@ product entry point; native Git review and delivery keep their existing rules.
 
 ## Responsibility boundary
 
-Warden connects to a configured ACP agent or adapter over stdio using the official SDK's stable
-protocol v1 API. The supported agents execute their own tools: they read and write files, run
+Warden connects to a configured ACP agent or adapter over stdio using the official SDK's
+protocol v1 API. Task connections use its unstable v1 entry point for the capability-gated
+client system prompt described below; the workbench startup connection uses stable v1.
+The supported agents execute their own tools: they read and write files, run
 commands, manage child processes and enforce their own execution policies.
 
 Warden owns the agent process that carries its stdio connection, session routing, text prompts,
@@ -23,6 +25,41 @@ For task conversations, the task workspace is the process and session cwd. This 
 confine a local agent's filesystem or process privileges. Agent permissions and execution policies
 remain the agent's responsibility. Existing workspace initialization hooks and user-run preview
 terminals are separate facilities, not ACP tool implementations.
+
+## Task environment instructions
+
+Every task conversation receives Warden-generated environment instructions describing its assigned
+workspace, task branch, base branch and primary folder. These explain source-editing locations,
+the generated preview and its shared validation environment, saved uncommitted changes, ordinary
+commit hooks, user-initiated integration and rebase, and the conversation's fixed assignment.
+Read-only reference to other allocated directories remains subject to the agent's permissions.
+Directory and branch values are quoted as data. Task titles, notes, acceptance criteria, credentials,
+preview paths, connection/sync state and current revisions are not included in system instructions.
+Live preview facts need current verification; this context neither authorizes tools nor supplies a sandbox.
+
+If `initialize` advertises an object at `agentCapabilities.sessionCapabilities.systemPrompt`,
+the task client sends `systemPrompt: { mode: "append", content: [{ type: "text", text: ... }] }`
+with both `session/new` and `session/load`. This uses the
+[Preview client system prompt feature](https://agentclientprotocol.com/rfds/client-system-prompt),
+which is not part of the stable schema. It preserves the agent's default instructions, never requests
+`override`, and renegotiates support for each connection. An agent may defer changes to instructions
+on restoration until compaction. Rejection remains a visible connection error, without retrying the
+request with the instructions removed.
+
+An absent, null or malformed capability selects the ordinary-message fallback. Each user-triggered
+`session/prompt` keeps the user's text in its first text block and appends a second block labelled
+**Warden workspace context — provided by Warden as user-level context**. Repeating this small, stable
+context avoids relying on retained history after restoration or compaction. The transcript includes
+the complete sent text and its label; the composer draft remains the user's original input. The
+existing long-message control reveals the full context. This fallback does not claim system priority.
+Neither task setup nor workbench initialization sends a work prompt, and the workbench's empty
+availability session receives no task instructions.
+
+The base branch is resolved from the validated task allocation, never the currently selected UI
+branch. Saved bindings include it; older records recover it from the current matching allocation
+identity, which already covered the base branch. Conflicting saved values remain invalid. Session
+creation/loading and prompt submission revalidate the binding after asynchronous setup or persistence,
+rejecting observed workspace replacement before marking a session ready or sending a pending prompt.
 
 ## Profiles and authentication
 

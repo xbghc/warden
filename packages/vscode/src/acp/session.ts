@@ -15,8 +15,9 @@ import {
   type RequestPermissionRequest,
   type RequestPermissionResponse,
   type SessionNotification,
+  type SystemPrompt,
   type ToolCallUpdate,
-} from '@agentclientprotocol/sdk';
+} from '@agentclientprotocol/sdk/unstable';
 import type { AcpControls, AcpMessage, AcpPermission, AcpRecord, AcpSnapshot, AcpStatus } from '@warden/shared';
 import { DiagnosticLog, diagnosticError, diagnosticOutcome } from '@warden/shared';
 import type { DiagnosticOutcome } from '@warden/shared';
@@ -24,6 +25,7 @@ import type { AcpProfile, AcpSessionOptions } from './contracts.js';
 import { availableCommands, configOptions, emptyControls, isModelOption, sessionModes } from './session-controls.js';
 import { AcpStderr, acpDiagnosticSecrets, acpErrorMessage, acpFailureLog } from './diagnostics.js';
 import { approveRepositoryRead, repositoryReadRequest } from './read-permissions.js';
+import { workspaceContext, workspaceContextFallback } from './workspace-context.js';
 
 declare const __WARDEN_VERSION__: string;
 const CLIENT_VERSION = typeof __WARDEN_VERSION__ === 'undefined' ? 'development' : __WARDEN_VERSION__;
@@ -69,6 +71,7 @@ type Runtime = {
   authenticationRequired?: boolean;
   resume: boolean;
   sessionId?: string;
+  systemPrompt?: SystemPrompt;
   replay?: History;
   pendingUpdates?: SessionNotification[];
   pendingBytes?: number;
@@ -83,6 +86,7 @@ type Turn = { id: string; updates: number; runtime: Runtime; record: AcpRecord; 
 /** A task-bound protocol client. Files, commands and any agent-owned background work remain the agent's responsibility. */
 export class AcpSession {
   private readonly log: DiagnosticLog;
+  private readonly environment: string;
   private loggedStatus: AcpStatus = 'disconnected';
   private record: AcpRecord;
   private status: AcpStatus = 'disconnected';
@@ -108,6 +112,7 @@ export class AcpSession {
 
   constructor(private readonly options: AcpSessionOptions) {
     this.log = (options.log ?? new DiagnosticLog()).child({ component: 'acp.task', task: options.binding.taskId, conversation: randomUUID() });
+    this.environment = workspaceContext(options.binding);
     this.record = this.emptyRecord();
     this.history = { messages: this.record.messages };
   }
@@ -152,7 +157,7 @@ export class AcpSession {
       if (saved) {
         const binding = this.options.binding;
         if (
-          ['repository', 'taskId', 'workspace', 'branch', 'identity'].some(
+          ['repository', 'taskId', 'workspace', 'branch', 'baseBranch', 'identity'].some(
             (key) => saved.binding[key as keyof typeof binding] !== binding[key as keyof typeof binding],
           )
         )
@@ -333,7 +338,7 @@ export class AcpSession {
         const previousId = this.record.id;
         const binding = this.options.binding;
         if (
-          ['repository', 'taskId', 'workspace', 'branch', 'identity'].some(
+          ['repository', 'taskId', 'workspace', 'branch', 'baseBranch', 'identity'].some(
             (key) => latest.binding[key as keyof typeof binding] !== binding[key as keyof typeof binding],
           )
         )
@@ -398,11 +403,15 @@ export class AcpSession {
       this.record.agentName =
         typeof info?.title === 'string' ? text(info.title, 1_000) : typeof info?.name === 'string' ? text(info.name, 1_000) : profile.label;
       this.record.canLoad = initialized.agentCapabilities?.loadSession === true;
+      // The draft field is opt-in; an absent, null or malformed capability is not support.
+      if (object(initialized.agentCapabilities?.sessionCapabilities?.systemPrompt))
+        runtime.systemPrompt = { mode: 'append', content: [{ type: 'text', text: this.environment }] };
       log.write('debug', 'acp.negotiated', {
         protocolVersion: initialized.protocolVersion,
         loadSession: this.record.canLoad,
         authMethods: this.authMethods.length,
         agentVersion: initialized.agentInfo?.version,
+        workspaceContext: runtime.systemPrompt ? 'system' : 'user',
       });
       stage = options.resume ? 'session/load' : 'session/new';
       await this.openSession(runtime);
@@ -519,6 +528,7 @@ export class AcpSession {
   private async openSession(runtime: Runtime) {
     await this.options.validate();
     if (!this.current(runtime)) throw new Error('Connection closed.');
+    const environment = runtime.systemPrompt ? { systemPrompt: runtime.systemPrompt } : {};
     if (runtime.resume) {
       if (!this.record.canLoad) throw new Error('This agent cannot resume sessions. Start a new session explicitly; the previous record will be preserved.');
       const sessionId = this.record.sessionId!;
@@ -528,12 +538,13 @@ export class AcpSession {
         const session = await this.request(
           runtime,
           'session/load',
-          () => runtime.connection.agent.request('session/load', { sessionId, cwd: this.options.binding.workspace, mcpServers: [] }),
+          () => runtime.connection.agent.request('session/load', { sessionId, cwd: this.options.binding.workspace, mcpServers: [], ...environment }),
           'Resuming the session timed out. Reconnect; Warden will not resend messages automatically.',
         ).catch((error) => {
           if (authRequired(error)) this.options.connectionFailed?.(runtime.profile, message(error));
           throw error;
         });
+        await this.options.validate();
         if (!this.current(runtime)) throw new Error('Connection closed.');
         this.initialControls(runtime, session);
         const uncertain = this.record.messages.filter((item) => item.role === 'user' && item.uncertain);
@@ -569,12 +580,13 @@ export class AcpSession {
       const session = await this.request(
         runtime,
         'session/new',
-        () => runtime.connection.agent.request('session/new', { cwd: this.options.binding.workspace, mcpServers: [] }),
+        () => runtime.connection.agent.request('session/new', { cwd: this.options.binding.workspace, mcpServers: [], ...environment }),
         'Creating the agent session timed out. Check the agent and reconnect.',
       ).catch((error) => {
         this.options.connectionFailed?.(runtime.profile, message(error));
         throw error;
       });
+      await this.options.validate();
       if (!this.current(runtime)) throw new Error('Connection closed.');
       if (!object(session) || typeof session.sessionId !== 'string' || !session.sessionId || session.sessionId.length > 500) {
         const error = new Error('The agent returned an invalid session ID. Check ACP compatibility.');
@@ -615,13 +627,18 @@ export class AcpSession {
 
   private async runPrompt(turn: Turn, value: string) {
     const runtime = turn.runtime;
+    const wasInterrupted = this.record.interrupted;
     const span = runtime.log.start('acp.turn', { turn: turn.id, characters: value.length }, 'info');
     let outcome: DiagnosticOutcome = 'error';
     let completed = false;
     try {
       await this.options.validate();
       if (!this.current(runtime) || turn.cancelling) throw new Error('Send cancelled.');
-      turn.user = { id: randomUUID(), role: 'user', text: value, status: 'Sending', uncertain: true };
+      const context = runtime.systemPrompt ? '' : workspaceContextFallback(this.environment);
+      const prompt: ContentBlock[] = [{ type: 'text', text: value }];
+      if (context) prompt.push({ type: 'text', text: context });
+      // Record exactly the text sent, including the visible fallback, so replay needs no hidden-message rewriting.
+      turn.user = { id: randomUUID(), role: 'user', text: value + context, status: 'Sending', uncertain: true };
       this.record.messages.push(turn.user);
       this.record.interrupted = true;
       this.history.lastChunk = undefined;
@@ -629,6 +646,7 @@ export class AcpSession {
       this.error = undefined;
       await this.persist();
       this.notify();
+      await this.options.validate();
       if (!this.current(runtime) || turn.cancelling) {
         turn.user.uncertain = false;
         turn.user.status = 'Cancelled before sending';
@@ -638,7 +656,7 @@ export class AcpSession {
       }
       turn.sent = true;
       const result = await this.request(runtime, 'session/prompt', () =>
-        runtime.connection.agent.request('session/prompt', { sessionId: runtime.sessionId!, prompt: [{ type: 'text', text: value }] }),
+        runtime.connection.agent.request('session/prompt', { sessionId: runtime.sessionId!, prompt }),
       );
       if (this.record !== turn.record) return;
       if (!object(result) || typeof result.stopReason !== 'string' || !STOP_REASONS.has(result.stopReason))
@@ -651,7 +669,14 @@ export class AcpSession {
       runtime.log.write('debug', 'acp.turn.response', { turn: turn.id, stopReason: result.stopReason });
     } catch (error) {
       outcome = diagnosticOutcome(error);
-      if (this.record === turn.record && turn.sent) this.record.interrupted = true;
+      if (this.record === turn.record) {
+        if (turn.sent) this.record.interrupted = true;
+        else if (turn.user) {
+          turn.user.uncertain = false;
+          turn.user.status = 'Not sent';
+          this.record.interrupted = wasInterrupted;
+        }
+      }
       if (this.current(runtime)) {
         this.reportFailure('session/prompt', error, runtime);
         runtime.authenticationRequired = authRequired(error);

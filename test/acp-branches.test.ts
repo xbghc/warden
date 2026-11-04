@@ -58,7 +58,15 @@ async function conversation(binding: AcpBinding, owner = engine) {
     (await readFile(file, 'utf8'))
       .trim()
       .split('\n')
-      .map((line) => JSON.parse(line) as { pid: number; cwd: string; method?: string; params?: { sessionId?: string; cwd?: string } });
+      .map(
+        (line) =>
+          JSON.parse(line) as {
+            pid: number;
+            cwd: string;
+            method?: string;
+            params?: { sessionId?: string; cwd?: string; systemPrompt?: { content: { text: string }[] } };
+          },
+      );
   sessions.push(session);
   await session.initialize();
   return { session, storage, profile, journal };
@@ -75,6 +83,7 @@ describe('task conversations across primary branch changes', () => {
       const binding = await resolveAcpBinding(engine, task.id);
       const chat = await conversation(binding);
       await chat.session.connect(chat.profile, { resume: false });
+      const environment = (await chat.journal()).find((row) => row.method === 'session/new')!.params!.systemPrompt;
       await chat.session.send('Remember the original requirement');
       const before = chat.session.snapshot().record;
       const turn = chat.session.send('permission');
@@ -128,10 +137,12 @@ describe('task conversations across primary branch changes', () => {
       expect(restored.session.snapshot().record.sessionId).toBe(before.sessionId);
       expect(transcript(restored.session)).toEqual(history);
       const requests = await restored.journal();
+      expect(requests.find((row) => row.method === 'session/load')!.params!.systemPrompt).toEqual(environment);
+      expect(environment?.content[0]?.text).toContain('Base branch: "main"');
       expect(requests.filter((row) => row.method === 'session/new')).toHaveLength(1);
       expect(requests.filter((row) => row.method === 'session/prompt')).toHaveLength(2);
       expect(requests.filter((row) => row.method === 'session/load')).toEqual([
-        expect.objectContaining({ cwd: task.worktree, params: { sessionId: before.sessionId, cwd: task.worktree, mcpServers: [] } }),
+        expect.objectContaining({ cwd: task.worktree, params: expect.objectContaining({ sessionId: before.sessionId, cwd: task.worktree, mcpServers: [] }) }),
       ]);
       expect(requests.every((row) => row.cwd === task.worktree)).toBe(true);
 

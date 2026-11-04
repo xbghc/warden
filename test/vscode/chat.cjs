@@ -67,6 +67,13 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   assert.equal(chat.session.snapshot().record.profileId, 'fixture');
   await assert.rejects(conversations.handle(chat, { type: 'connect', profileId: 'other', resume: false }), /The agent changed/);
   assert.equal((await journal()).filter((row) => row.method === 'session/new').length, 1, 'repeated opens create only one session');
+  const environment = (await journal()).find((row) => row.method === 'session/new').params.systemPrompt;
+  assert.equal(environment.mode, 'append', 'task context preserves the agent default instructions');
+  assert.equal(environment.content.length, 1);
+  assert.equal(chat.binding.baseBranch, newTask.developmentBranch);
+  for (const value of [chat.binding.workspace, fixture.root, chat.binding.branch, newTask.developmentBranch])
+    assert(environment.content[0].text.includes(JSON.stringify(value)), 'the shipped host supplies the task assignment');
+  assert(!environment.content[0].text.includes('Task chat'), 'user-authored task text is not promoted to system instructions');
   assert.equal((await journal()).filter((row) => row.method === 'session/prompt').length, 0, 'opening a panel never sends its draft');
   await fs.writeFile(path.join(chat.binding.workspace, 'context.txt'), 'Task context\n');
   await conversations.handle(chat, { type: 'send', profileId: 'fixture', ...edit('own-edit') });
@@ -326,6 +333,40 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
     0,
     'ACP responses never deliver code',
   );
+
+  console.log('Checking visible workspace context with an agent without system prompt support');
+  const fallbackJournal = `${fixture.journal}.context-fallback`;
+  const fallbackAgent = { ...selectedAgent, id: 'context-fallback', args: [fixture.agent, fallbackJournal, 'no-system-prompt'] };
+  await configuration.update('acpAgents', [selectedAgent, otherAgent, fallbackAgent], vscode.ConfigurationTarget.Global);
+  await workbench.agentSetup.check(fallbackAgent.id);
+  const fallbackTask = await workbench.backend.execute('task.create', { title: 'Context fallback' });
+  await conversations.show(fixture.root, fallbackTask.id);
+  const fallbackChat = conversations.sidebarEntry;
+  await connected(fallbackChat);
+  const fallbackWire = () => fs.readFile(fallbackJournal, 'utf8').then((text) => text.trim().split('\n').map(JSON.parse));
+  assert(!(await fallbackWire()).some((row) => row.method === 'session/prompt'), 'fallback setup sends no work prompt');
+  const fallbackDraft = fallbackChat.draft.snapshot();
+  await conversations.handle(fallbackChat, {
+    type: 'send',
+    profileId: fallbackAgent.id,
+    text: 'Explain this workspace',
+    version: fallbackDraft.draftVersion,
+    revision: fallbackDraft.draftRevision + 1,
+  });
+  const fallbackPrompt = (await fallbackWire()).find((row) => row.method === 'session/prompt').params.prompt;
+  assert.equal(fallbackPrompt[0].text, 'Explain this workspace');
+  assert.match(fallbackPrompt[1].text, /provided by Warden as user-level context/);
+  assert(fallbackPrompt[1].text.includes(JSON.stringify(fallbackChat.binding.workspace)));
+  const fallbackText = fallbackPrompt.map((block) => block.text).join('');
+  assert.equal(fallbackChat.session.snapshot().record.messages.find((message) => message.role === 'user').text, fallbackText);
+  assert.equal(fallbackChat.draft.text, '', 'automatic context does not alter the composer draft');
+  await conversations.handle(fallbackChat, { type: 'disconnect' });
+  await conversations.show(fixture.root, fallbackTask.id);
+  await connected(fallbackChat);
+  assert.equal(fallbackChat.session.snapshot().record.messages.find((message) => message.role === 'user').text, fallbackText);
+  for (const row of (await fallbackWire()).filter((row) => row.method === 'session/new' || row.method === 'session/load'))
+    assert.equal(row.params.systemPrompt, undefined, 'unsupported agents never receive the draft field');
+  assert.equal((await fallbackWire()).filter((row) => row.method === 'session/prompt').length, 1, 'restoration does not replay work');
 
   const externalJournal = `${fixture.journal}.external`;
   const externalAgent = { ...selectedAgent, id: 'external', args: [fixture.agent, externalJournal, 'auth-external'] };

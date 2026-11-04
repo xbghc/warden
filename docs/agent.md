@@ -146,6 +146,13 @@ commit, deliver or rebase. See the [ACP boundary](acp-design.md) for ownership a
 
 ## Task briefs
 
+Task Chat automatically supplies [task environment instructions](acp-design.md#task-environment-instructions)
+with the workspace and branch assignment and Warden's primary/preview workflow. Agents advertising
+client system prompt support receive these as appended system instructions on creation and restoration.
+Other agents receive a labelled ordinary-context block with each user message, visible through
+**Show Full Message**. Opening a chat sends no work prompt. Task text stays user content, and current
+preview connection/synchronization state is not inferred from these instructions.
+
 Add and order small tasks in the left navigation. Warden automatically assigns each task a workspace.
 In Task Chat, **Use Task Brief** or **Insert Task Brief** appends the task title, goal, acceptance notes,
 base branch and workflow boundaries without sending them. The brief omits the workspace path and

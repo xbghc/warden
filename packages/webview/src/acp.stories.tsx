@@ -13,6 +13,7 @@ const model: AcpModel = {
       title: '订单筛选参数',
       workspace: '/projects/orders-2',
       branch: 'warden/orders-filter',
+      baseBranch: 'feature/orders',
       identity: 'orders-filter-allocation',
     },
     canLoad: false,

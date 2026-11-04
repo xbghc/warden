@@ -21,6 +21,7 @@ beforeEach(async () => {
     taskId: 'task-one',
     title: 'Task one',
     branch: 'warden/task-one',
+    baseBranch: 'main',
     identity: 'checkout-one',
   };
   await mkdir(binding.repository);
@@ -62,6 +63,19 @@ function signal() {
 }
 
 describe('external ACP session storage', () => {
+  it('loads legacy bindings using the validated allocation base branch and rejects a conflicting saved branch', async () => {
+    const storage = new AcpSessionStorage(directory, binding);
+    const current = conversation();
+    await storage.save(current);
+    const { baseBranch: _baseBranch, ...legacy } = current.binding;
+    await writeFile(storage.file, JSON.stringify({ ...current, binding: legacy }));
+    expect(await storage.load()).toEqual(current);
+    const conflicting = JSON.stringify({ ...current, binding: { ...current.binding, baseBranch: 'other' } });
+    await writeFile(storage.file, conflicting);
+    await expect(storage.load()).rejects.toThrow('The original file has been preserved');
+    expect(await readFile(storage.file, 'utf8')).toBe(conflicting);
+  });
+
   it('retains a bounded model selection across instances and preserves malformed records for repair', async () => {
     const storage = new AcpSessionStorage(directory, binding);
     const record = { ...conversation(), modelSelection: { configId: 'provider/model', value: 'chosen-model' } };

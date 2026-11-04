@@ -123,6 +123,17 @@ Availability is window-local and is not stored as a persistent readiness flag. T
 their own workspace cwd and start when the user opens Task Chat or sends a message. Workbench startup
 alone never opens a task session or replays an uncertain prompt.
 
+Task environment instructions use only the existing validated allocation's primary/workspace paths,
+task branch and base branch. Values are JSON-quoted data; user task text and executable configuration
+are not promoted into system instructions. The task connection opts into the SDK's unstable v1
+system prompt field only after the agent advertises support, using append mode on creation and loading.
+Unsupported agents receive labelled user-level context with actual user prompts. Rejected instructions
+are not silently dropped or retried. Routine diagnostics log only the selected delivery mechanism.
+The saved binding's added base branch is checked against the current allocation; records without the
+field reuse the already-matching identity's base branch. This uses existing binding reads and adds no
+Git writes or permission grants. Bindings are revalidated after session setup and before sending a
+persisted pending prompt.
+
 Task Chat stores a confirmed model selection as bounded option/value IDs in its existing external
 conversation record and in a separate extension-global key for the profile signature. The signature
 contains no environment values. Other task defaults cannot override a resumed conversation's saved

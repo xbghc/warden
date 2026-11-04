@@ -809,12 +809,38 @@ try:
         assert first.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
         expect(first.get_by_role('textbox', name='Message', exact=True)).to_have_css('color', 'rgb(204, 204, 204)')
         first.screenshot(path=str(artifacts / 'acp-dark-mobile.png'), full_page=True)
+
+        # The fallback stays visible as ordinary context without changing the editable draft.
+        use_agent(first, 'no-system-prompt')
+        new_session(first)
+        connected(first)
+        expect(first.get_by_role('textbox', name='Message', exact=True)).to_have_value('')
+        send(first, 'Explain this workspace')
+        connected(first)
+        fallback = first.locator('.acp-message-user').last
+        expect(fallback).to_contain_text('Explain this workspace')
+        expect(fallback.get_by_role('button', name='Show Full Message', exact=True)).to_be_visible()
+        fallback.get_by_role('button', name='Show Full Message', exact=True).click()
+        expect(fallback).to_contain_text('provided by Warden as user-level context')
+        expected_workspace = first.evaluate('window.__model.record.binding.workspace')
+        expect(fallback).to_contain_text(expected_workspace)
+        expect(first.get_by_role('textbox', name='Message', exact=True)).to_have_value('')
+        assert first.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
+        first.screenshot(path=str(artifacts / 'acp-workspace-context-expanded.png'), full_page=True)
+        fallback.get_by_role('button', name='Show Less', exact=True).click()
+        first.screenshot(path=str(artifacts / 'acp-workspace-context.png'), full_page=True)
+        saved_context = first.evaluate("window.__model.record.messages.find(message => message.role === 'user').text")
+        chat_action(first, 'Disconnect')
+        first.wait_for_function("window.__model.status === 'disconnected'")
+        first.reload()
+        connected(first)
+        assert first.evaluate("window.__model.record.messages.find(message => message.role === 'user').text") == saved_context
         assert inspect()['primaryStatus'] == ''
         assert not errors, errors
         assert first.evaluate('window.__hostError') is None
         assert second.evaluate('window.__hostError') is None
         browser.close()
-    print('ACP browser flows passed: task isolation, parallel conversations, permissions, cancellation, delayed completion with reload and follow-up, unacknowledged completion clears, batched selection appends, in-flight drafts, stale models/sends, new-conversation edits, reopened-turn acknowledgement, restore, crash, authentication, failed-profile recovery, safe text, aligned mode/model/effort pickers, long/grouped labels, keyboard selection and focus, invalidated menus, slash completion with keyboard/mouse/IME and no implicit send, thought/usage updates and disconnected controls.')
+    print('ACP browser flows passed: task isolation, parallel conversations, permissions, cancellation, delayed completion with reload and follow-up, unacknowledged completion clears, batched selection appends, in-flight drafts, stale models/sends, new-conversation edits, reopened-turn acknowledgement, restore, crash, authentication, failed-profile recovery, safe text, aligned mode/model/effort pickers, long/grouped labels, keyboard selection and focus, invalidated menus, slash completion with keyboard/mouse/IME and no implicit send, thought/usage updates, disconnected controls, visible workspace context fallback and replay.')
 finally:
     host.terminate()
     host.wait(timeout=30)

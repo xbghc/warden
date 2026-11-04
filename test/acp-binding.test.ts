@@ -85,7 +85,14 @@ describe('ACP task binding', () => {
     async (kind) => {
       const task = await allocate('Original title', kind);
       const binding = await resolveAcpBinding(engine, task.id);
-      expect(binding).toMatchObject({ repository: fixture.root, taskId: task.id, title: task.title, workspace: task.worktree, branch: task.branch });
+      expect(binding).toMatchObject({
+        repository: fixture.root,
+        taskId: task.id,
+        title: task.title,
+        workspace: task.worktree,
+        branch: task.branch,
+        baseBranch: 'main',
+      });
       expect(binding.workspace).not.toBe(binding.repository);
       expect(binding.identity).toMatch(/^[0-9a-f]{64}$/);
       await writeFile(path.join(task.worktree, 'agent.txt'), 'Agent work\n');

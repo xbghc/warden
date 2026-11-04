@@ -137,7 +137,14 @@ async function handle(message) {
     ];
     result(id, {
       protocolVersion: mode === 'incompatible' ? 999 : 1,
-      agentCapabilities: { loadSession: mode !== 'no-load' },
+      agentCapabilities: {
+        loadSession: mode !== 'no-load',
+        sessionCapabilities: {
+          ...(mode === 'no-system-prompt' || process.env.WARDEN_FIXTURE_SYSTEM_PROMPT === 'unsupported'
+            ? {}
+            : { systemPrompt: mode === 'null-system-prompt' ? null : mode === 'invalid-system-prompt' ? true : mode === 'array-system-prompt' ? [] : {} }),
+        },
+      },
       agentInfo: { name: 'warden-fixture-agent', version: '1.0.0' },
       authMethods,
     });
@@ -150,6 +157,8 @@ async function handle(message) {
     return;
   }
   if (method === 'session/new' || method === 'session/load') {
+    if (params.systemPrompt && (mode === 'reject-system-prompt' || (mode === 'reject-loaded-system-prompt' && method === 'session/load')))
+      return error(id, -32602, 'System instructions could not be applied');
     if (requiresAuth && !authenticated) return error(id, -32000, 'Authentication required');
     if (mode === 'session-new-fails') return error(id, -32603, 'Provider is unavailable');
     if (mode === 'diagnostics-fails') {
@@ -277,12 +286,14 @@ async function handle(message) {
     return;
   }
   if (method !== 'session/prompt') return error(id, -32601, 'Unsupported fixture method');
-  const text = params.prompt
+  const sentText = params.prompt
     .filter((part) => part.type === 'text')
     .map((part) => part.text)
     .join('');
+  // Fixture commands occupy the first block. Retain all supplied context in replay.
+  const text = params.prompt[0]?.type === 'text' ? params.prompt[0].text : sentText;
   turn = { id, text, cancelled: false };
-  remember('user', text);
+  remember('user', sentText);
   if (text === 'crash') return process.exit(17);
   if (text === 'malformed') return result(id, { stopReason: 42 });
   if (text === 'recoverable-json') process.stdout.write('not valid JSON\n');

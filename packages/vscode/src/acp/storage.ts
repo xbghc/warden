@@ -52,8 +52,8 @@ function timestamp(value: unknown): string {
   return text;
 }
 
-function binding(value: unknown): AcpBinding {
-  const raw = object(value, ['repository', 'taskId', 'title', 'workspace', 'branch', 'identity']);
+function binding(value: unknown, expected?: AcpBinding): AcpBinding {
+  const raw = object(value, ['repository', 'taskId', 'title', 'workspace', 'branch', 'baseBranch', 'identity']);
   const repository = string(raw.repository, 32_768);
   const workspace = string(raw.workspace, 32_768);
   if (!path.isAbsolute(repository) || !path.isAbsolute(workspace)) throw new Error('Working directories must use absolute paths.');
@@ -63,12 +63,21 @@ function binding(value: unknown): AcpBinding {
     title: string(raw.title, 10_000, true),
     workspace,
     branch: string(raw.branch, 4096),
+    // Old records predate this field; the allocation identity already covers the base branch.
+    baseBranch: string(raw.baseBranch === undefined ? expected?.baseBranch : raw.baseBranch, 4096),
     identity: string(raw.identity, 4096),
   };
 }
 
 function sameBinding(a: AcpBinding, b: AcpBinding): boolean {
-  return a.repository === b.repository && a.taskId === b.taskId && a.workspace === b.workspace && a.branch === b.branch && a.identity === b.identity;
+  return (
+    a.repository === b.repository &&
+    a.taskId === b.taskId &&
+    a.workspace === b.workspace &&
+    a.branch === b.branch &&
+    a.baseBranch === b.baseBranch &&
+    a.identity === b.identity
+  );
 }
 
 function message(value: unknown): AcpMessage {
@@ -106,7 +115,7 @@ function record(value: unknown, expected: AcpBinding): AcpRecord {
     'interrupted',
   ]);
   if (raw.schemaVersion !== 1) throw new Error('Unsupported session record version.');
-  const savedBinding = binding(raw.binding);
+  const savedBinding = binding(raw.binding, expected);
   if (!sameBinding(savedBinding, expected)) throw new Error('The session record does not match the current workspace identity.');
   if (!Array.isArray(raw.messages) || raw.messages.length > MAX_MESSAGES) throw new Error('Too many messages.');
   const signature = optionalString(raw.profileSignature, 64);

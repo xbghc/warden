@@ -8,6 +8,7 @@ export interface AcpBinding {
   title: string;
   workspace: string;
   branch: string;
+  baseBranch: string;
   identity: string;
 }
 

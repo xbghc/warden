@@ -204,6 +204,11 @@ Automatic read approvals cover primary/task/preview files, manual fallback for a
 targets, replaced roots and files, user-policy changes, cancellation during ownership checks and late
 results after reconnect. The packaged chat suite verifies the real engine scope and rejects workspace
 settings that attempt to override the User read policy.
+Workspace-context coverage includes negotiated append instructions, absent/null/malformed capabilities,
+visible ordinary-message fallback and replay, reconnect capability changes, instruction rejection,
+old saved bindings, interrupted prompts, replaced workspaces during session setup/persistence and
+primary branch changes without retargeting instructions. The packaged chat suite checks the shipped
+system prompt and fallback paths, intact composer drafts and restoration without sending work.
 Conversation state observers must still clean up deleted tasks without acquiring preview ownership,
 including after workbench replacement and while state notifications are draining during shutdown.
 Also cover initial and between-turn configuration, grouped/boolean selectors, legacy mode fallback,
