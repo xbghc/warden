@@ -118,7 +118,7 @@ describe('workspace hook process contract', () => {
     expect(invocation[1]).toEqual(['-c', command]);
     expect(invocation[2]).toMatchObject({
       cwd: change.worktree,
-      timeout: 60000,
+      timeout: 600000,
       maxBuffer: 128 * 1024,
       windowsHide: true,
       env: {
