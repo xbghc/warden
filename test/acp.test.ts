@@ -69,19 +69,31 @@ async function fixture(name = 'task', mode = 'normal', timeoutMs = 15_000) {
     }),
   };
   const validate = vi.fn(async () => {});
+  const readRoots = vi.fn<NonNullable<AcpSessionOptions['readRoots']>>(async () => []);
   const changed = vi.fn();
   const connectionFailed = vi.fn();
   const report = vi.fn();
   const diagnostics: Array<{ level: string; [key: string]: unknown }> = [];
   const log = new DiagnosticLog((level, line) => diagnostics.push({ level, ...JSON.parse(line.slice('[diagnostic] '.length)) }));
   const create = (persistence: AcpStorage = storage, models: AcpSessionOptions['modelPreferences'] = modelPreferences) => {
-    const session = new AcpSession({ binding, storage: persistence, modelPreferences: models, validate, changed, connectionFailed, report, timeoutMs, log });
+    const session = new AcpSession({
+      binding,
+      storage: persistence,
+      modelPreferences: models,
+      validate,
+      readRoots,
+      changed,
+      connectionFailed,
+      report,
+      timeoutMs,
+      log,
+    });
     sessions.push(session);
     return session;
   };
   const session = create();
   await session.initialize();
-  return { session, create, profile, storage, modelPreferences, validate, changed, connectionFailed, report, diagnostics, workspace, file, binding };
+  return { session, create, profile, storage, modelPreferences, validate, readRoots, changed, connectionFailed, report, diagnostics, workspace, file, binding };
 }
 
 function transcript(session: AcpSession) {
@@ -104,6 +116,111 @@ afterEach(async () => {
 });
 
 describe('ACP subprocess conversations', () => {
+  it('approves explicit source reads once across repository directories without showing a permission prompt', async () => {
+    const f = await fixture();
+    const other = await fixture('other');
+    const preview = await fixture('preview');
+    f.readRoots.mockResolvedValue([primary, f.workspace, other.workspace, preview.workspace].map((path) => ({ path, identity: path })));
+    const displayed: number[] = [];
+    f.changed.mockImplementation(() => displayed.push(f.session.snapshot().permissions.length));
+    await f.session.connect(f.profile, { resume: false });
+    for (const file of [path.join(primary, 'human.txt'), ...[f, other, preview].map((row) => path.join(row.workspace, 'context.txt'))]) {
+      await f.session.send(`read-permission ${JSON.stringify({ path: file })}`);
+      expect(transcript(f.session).at(-1)?.text).toContain('"optionId":"read-once"');
+      expect(transcript(f.session).at(-1)?.text).toContain(await readFile(file, 'utf8'));
+    }
+    expect(displayed.every((count) => count === 0)).toBe(true);
+    expect(f.diagnostics.filter((row) => row.event === 'acp.permission.auto_read')).toHaveLength(4);
+    expect(JSON.stringify(f.diagnostics)).not.toContain(f.workspace);
+    expect(await readdir(primary)).toEqual(['human.txt']);
+  });
+
+  it('leaves disabled, ambiguous, directory and persistent-only reads for an explicit choice', async () => {
+    const f = await fixture();
+    const file = path.join(f.workspace, 'context.txt');
+    await f.session.connect(f.profile, { resume: false });
+    const cases = [
+      { path: file },
+      { path: file, toolCall: { rawInput: { command: `cat ${file}` } } },
+      { path: f.workspace },
+      { path: file, options: [{ optionId: 'all', name: 'Allow once', kind: 'allow_always' }] },
+    ];
+    for (const [index, input] of cases.entries()) {
+      if (index) f.readRoots.mockResolvedValue([{ path: f.workspace, identity: 'task' }]);
+      const turn = f.session.send(`read-permission ${JSON.stringify(input)}`);
+      await expect.poll(() => f.session.snapshot().permissions.length).toBe(1);
+      await f.session.cancel();
+      await turn;
+    }
+    expect(f.diagnostics.some((row) => row.event === 'acp.permission.auto_read')).toBe(false);
+  });
+
+  it('cancels an in-flight read check promptly and ignores its late result after reconnect', async () => {
+    const f = await fixture();
+    let release!: (value: { path: string; identity: string }[]) => void;
+    f.readRoots.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+    await f.session.connect(f.profile, { resume: false });
+    const turn = f.session.send(`read-permission ${JSON.stringify({ path: path.join(f.workspace, 'context.txt') })}`);
+    await expect.poll(() => !!release).toBe(true);
+    expect(f.session.snapshot().permissions).toEqual([]);
+    await f.session.cancel();
+    await turn;
+    await f.session.disconnect();
+    await f.session.connect(f.profile, { resume: true });
+    release([{ path: f.workspace, identity: 'task' }]);
+    await f.session.send('next turn');
+    expect(f.session.snapshot().status).toBe('connected');
+    expect(f.diagnostics.some((row) => row.event === 'acp.permission.auto_read')).toBe(false);
+    expect((await journal(f.file)).filter((row) => row.result?.outcome).map((row) => row.result?.outcome)).toEqual([{ outcome: 'cancelled' }]);
+  });
+
+  it('falls back to a choice when read roots change or validation fails during approval', async () => {
+    const f = await fixture();
+    const roots = [{ path: f.workspace, identity: 'task' }];
+    await f.session.connect(f.profile, { resume: false });
+    f.readRoots.mockResolvedValueOnce(roots).mockResolvedValueOnce([{ ...roots[0]!, identity: 'replacement' }]);
+    const turn = f.session.send(`read-permission ${JSON.stringify({ path: path.join(f.workspace, 'context.txt') })}`);
+    await expect.poll(() => f.session.snapshot().permissions.length).toBe(1);
+    f.validate.mockRejectedValue(new Error('Workspace replaced'));
+    await expect(f.session.respondPermission(f.session.snapshot().permissions[0]!.id, 'read-once')).rejects.toThrow('Workspace replaced');
+    await turn;
+    expect(f.diagnostics.some((row) => row.event === 'acp.permission.auto_read')).toBe(false);
+  });
+
+  it('rejects foreign-session reads before inspecting repository scope', async () => {
+    const f = await fixture();
+    f.readRoots.mockResolvedValue([{ path: f.workspace, identity: 'task' }]);
+    await f.session.connect(f.profile, { resume: false });
+    await f.session.send(`read-permission ${JSON.stringify({ path: path.join(f.workspace, 'context.txt'), foreign: true })}`);
+    expect(transcript(f.session).at(-1)?.text).toContain('"outcome":"cancelled"');
+    expect(f.readRoots).not.toHaveBeenCalled();
+  });
+
+  it('exposes a stalled read check for a manual choice and ignores its later approval', async () => {
+    const f = await fixture('task', 'normal', 500);
+    let release!: (value: { path: string; identity: string }[]) => void;
+    f.readRoots.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+    await f.session.connect(f.profile, { resume: false });
+    const turn = f.session.send(`read-permission ${JSON.stringify({ path: path.join(f.workspace, 'context.txt') })}`);
+    await expect.poll(() => f.session.snapshot().permissions.length).toBe(1);
+    await f.session.respondPermission(f.session.snapshot().permissions[0]!.id, 'reject-read');
+    await turn;
+    release([{ path: f.workspace, identity: 'task' }]);
+    await f.session.send('continue');
+    expect(f.session.snapshot().permissions).toEqual([]);
+    expect(f.diagnostics.some((row) => row.event === 'acp.permission.auto_read')).toBe(false);
+  });
+
   it('correlates reconnects, turns, streaming and cancellation without logging prompt or tool contents', async () => {
     const f = await fixture();
     await f.session.connect(f.profile, { resume: false });

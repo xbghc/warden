@@ -148,6 +148,15 @@ sharing a detailed checkout inventory only within that observation. It introduce
 Git command shapes or writes. Background rebase checks keep fresh reads; their results are accepted
 only for the current repository, task binding and observed version. Actual mutations never use a
 UI observation as authority and retain their repository locks and fresh validation.
+The read-only `repository.readRoots` command observes primary, currently allocated task checkouts and
+the validated persistent preview. It reuses the guarded inventory, `rev-parse --absolute-git-dir` and
+preview ownership checks, plus filesystem identity reads; it introduces no Git writes. Deleting,
+unassigned, foreign or redirected workspaces and invalid previews are excluded. ACP reads check this
+scope twice around task-binding validation and compare root/allocation and resolved file identities.
+Only explicit regular-file reads qualify; directory/search/command requests, sensitive path names and
+hardlinks remain interactive. This is an approval policy for agent-reported operations, not a sandbox
+or an atomic filesystem lease. Agents remain responsible for executing only the approved operation
+and asking again if its resolved target changes. Policy changes during validation revoke automatic approval.
 Formal delivery still prepares the primary index and commits through its validated workflow.
 Review reads `ls-tree -z <revision> -- <literal-path>` to identify submodule gitlinks without loading
 their commits from the parent repository; index comparisons use the existing `ls-files --stage` read.

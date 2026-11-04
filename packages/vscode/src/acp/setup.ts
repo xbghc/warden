@@ -16,6 +16,12 @@ export function readAcpProfiles() {
   return parseAcpProfiles(profileValue());
 }
 
+export function autoApproveRepositoryReads() {
+  const inspected = vscode.workspace.getConfiguration('warden').inspect<boolean>('acpAutoApproveReads');
+  // Repository content cannot enable approvals that the User or Remote User profile disabled.
+  return (inspected?.globalValue ?? inspected?.defaultValue) === true;
+}
+
 type Choice = vscode.QuickPickItem & { presetId?: string };
 
 /** Presets become executable configuration only after the user confirms the command. */

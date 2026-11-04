@@ -31,6 +31,35 @@ async function allocate(title = 'Task', kind: 'shared' | 'clone' = 'shared') {
 }
 
 describe('ACP task binding', () => {
+  it('observes only primary, allocated task and validated preview read roots without changing Git state', { timeout }, async () => {
+    const a = await allocate('A');
+    const b = await allocate('B', 'clone');
+    const preview = await engine.execute('preview.connect', { connectedIds: [a.id] });
+    const primaryHead = fixture.git('rev-parse', 'HEAD');
+    const roots = await engine.execute('repository.readRoots', undefined);
+    expect(roots.map((row) => row.path).sort()).toEqual([fixture.root, a.worktree, b.worktree, preview.worktree!].sort());
+    expect(roots.every((row) => /^[a-f0-9]{64}$/.test(row.identity))).toBe(true);
+    expect(await engine.execute('repository.readRoots', undefined)).toEqual(roots);
+    await engine.store.update((state) => {
+      state.workflow!.changes = state.workflow!.changes.filter((task) => task.id !== b.id);
+      state.connectionPreview!.directory = fixture.root;
+      state.connectionPreview!.worktree = fixture.root;
+    });
+    expect((await engine.execute('repository.readRoots', undefined)).map((row) => row.path)).toEqual([fixture.root, a.worktree]);
+    expect(fixture.git('rev-parse', 'HEAD')).toBe(primaryHead);
+    expect(fixture.git('status', '--porcelain')).toBe('');
+  });
+
+  it('removes deleting and reassigned task directories from automatic read scope', { timeout }, async () => {
+    const a = await allocate('A');
+    const b = await allocate('B');
+    await engine.store.update((state) => {
+      state.workflow!.changes.find((task) => task.id === a.id)!.deletion = { phase: 'disconnecting' };
+    });
+    fixture.git('-C', b.worktree, 'switch', '-qc', 'unrelated');
+    expect((await engine.execute('repository.readRoots', undefined)).map((row) => row.path)).toEqual([fixture.root]);
+  });
+
   it.each(['shared', 'clone'] as const)(
     'binds an allocated %s task and preserves its identity across ordinary commits and note edits',
     { timeout },

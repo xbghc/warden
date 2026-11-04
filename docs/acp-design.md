@@ -176,10 +176,15 @@ running, the composer displays an empty input for a follow-up; the host retains 
 until completion. A failed turn restores that text only if the user has not edited the draft. View
 moves remap the submission revision so neither a sent draft nor newer typing is lost or resurrected.
 
-Permission requests show the agent's supplied description and choices. Warden returns only the
-selected option identifier or the protocol's cancelled outcome. It does not invent approval options
-or add a global automatic approval policy. A late click cannot answer a request from an old
-connection, another panel or another window.
+Permission requests retain the agent's supplied description and choices. With the User or Remote User
+`warden.acpAutoApproveReads` policy enabled (the default), Warden automatically selects an offered
+`allow_once` for an explicit structured file read inside the same repository's validated primary,
+allocated task workspaces or preview. It uses the operation kind and every reported path, never the
+title or option label. Commands, directories, known sensitive paths and ambiguous or unverifiable
+requests remain interactive. See [repository read access](agent.md#reading-repository-context).
+Warden returns only an offered option identifier or the protocol's cancelled outcome; it never
+selects persistent approval automatically. Pending scope checks are bounded and cancel immediately
+with the turn. A late check or click cannot answer a request from an old connection, turn, panel or window.
 Long agent-provided permission labels, including commands and paths without spaces, wrap inside
 the available sidebar width. A single request reserves space for its complete choice list while
 command context scrolls separately. Short windows use a compact follow-up input without clearing

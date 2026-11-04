@@ -16,6 +16,31 @@ code in preview. Ordinary agent commits retain their Git hooks and signing; Ward
 composition commands do not change that configuration. Independent clones remain available for
 tools that cannot use linked worktrees.
 
+## Reading repository context
+
+Agents may read source files in primary, other allocated task workspaces and preview in the same
+repository. Edits and commits belong to the assigned task workspace. Other tasks' undelivered changes
+are reference material, not the current task's baseline. Preview may retain the last successful
+composition; check its synchronization status and connected tasks before relying on its contents.
+Read access does not automatically attach those directories or files to a prompt.
+
+The ACP client automatically selects an offered `allow_once` option for a structured `read` request
+whose explicit file paths resolve inside validated repository directories. It checks the current task
+binding, directory ownership and file identity again before answering. Reads do not change connections,
+deliveries or Git state. Set `warden.acpAutoApproveReads` to `false` in User or Remote User settings to
+retain a permission choice for every request; workspace settings cannot override this policy.
+
+Directory reads, searches, commands, writes, missing files, paths outside those roots, known credential
+paths, hardlinks and ambiguous requests retain the agent's permission choices. Known sensitive names
+include `.env` files, Git metadata, credential directories, `secrets`/`credentials` files and private-key
+extensions; arbitrary source files are not scanned for secrets. Symlinks must resolve to eligible files
+inside the same root. Persistent permission options are never selected automatically.
+
+This answers requests made by the agent; it does not supply file tools or confine the agent process.
+Agent sandbox policies still apply, and agents must request approval again if the operation or resolved
+target changes. The shared Git store is outside this automatic read policy. Agent writes to its metadata
+remain subject to the agent's own execution policy, including ordinary commit hooks and signing.
+
 ## Minimum integration contract
 
 An agent integration must provide two capabilities:

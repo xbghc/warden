@@ -23,6 +23,7 @@ import type { DiagnosticOutcome } from '@warden/shared';
 import type { AcpProfile, AcpSessionOptions } from './contracts.js';
 import { availableCommands, configOptions, emptyControls, isModelOption, sessionModes } from './session-controls.js';
 import { AcpStderr, acpDiagnosticSecrets, acpErrorMessage, acpFailureLog } from './diagnostics.js';
+import { approveRepositoryRead, repositoryReadRequest } from './read-permissions.js';
 
 declare const __WARDEN_VERSION__: string;
 const CLIENT_VERSION = typeof __WARDEN_VERSION__ === 'undefined' ? 'development' : __WARDEN_VERSION__;
@@ -47,6 +48,7 @@ const missingRollout = (error: unknown, sessionId: string) => {
 type Permission = {
   view: AcpPermission;
   runtime: Runtime;
+  checking: boolean;
   finish(value: RequestPermissionResponse): void;
 };
 type History = { messages: AcpMessage[]; lastChunk?: { key: string; id: string } };
@@ -129,7 +131,7 @@ export class AcpSession {
       record: this.record,
       status: this.resetting ? 'resetting' : this.status,
       ...(this.error ? { error: this.error } : {}),
-      permissions: [...this.permissions.values()].map((permission) => permission.view),
+      permissions: [...this.permissions.values()].filter((permission) => !permission.checking).map((permission) => permission.view),
       authMethods: (needsAuthentication ? this.authMethods : [])
         .filter((method) => !('type' in method && method.type === 'terminal'))
         .map((method) => ({
@@ -1108,6 +1110,8 @@ export class AcpSession {
       return Promise.resolve({ outcome: { outcome: 'cancelled' } });
     }
     const id = randomUUID();
+    const turn = this.turn;
+    const read = this.options.readRoots && repositoryReadRequest(request, this.options.binding.workspace);
     const span = runtime.log.start('acp.permission', { permission: id, turn: this.turn.id, options: request.options.length }, 'info');
     const raw = request.toolCall.rawInput;
     const input = object(raw) ? raw : undefined;
@@ -1133,21 +1137,52 @@ export class AcpSession {
           choice: answer.outcome === 'selected' ? view.options.find((option) => option.id === answer.optionId)?.kind : undefined,
         });
         signal.removeEventListener('abort', cancelled);
-        if (this.current(runtime) && this.turn?.runtime === runtime && !this.turn.cancelling)
-          this.status = this.permissions.size ? 'waiting_permission' : 'running';
+        if (this.current(runtime) && this.turn === turn && !turn.cancelling)
+          this.status = [...this.permissions.values()].some((permission) => !permission.checking) ? 'waiting_permission' : 'running';
         resolve(response);
         this.notify();
       };
-      this.permissions.set(id, { view, runtime, finish });
+      const permission: Permission = { view, runtime, finish, checking: !!read };
+      this.permissions.set(id, permission);
       signal.addEventListener('abort', cancelled, { once: true });
-      this.status = 'waiting_permission';
-      this.notify();
+      const active = () => this.permissions.get(id) === permission && this.current(runtime) && this.turn === turn && !turn.cancelling && !signal.aborted;
+      const reveal = () => {
+        if (!active()) return cancelled();
+        permission.checking = false;
+        this.status = 'waiting_permission';
+        this.notify();
+      };
+      if (!read) return reveal();
+      // Register before checking so cancellation promptly answers even a stalled ownership read.
+      void this.timeout(
+        (async () => {
+          await this.options.validate();
+          if (!active()) return false;
+          return approveRepositoryRead(
+            read.paths,
+            () => (active() ? this.options.readRoots!() : Promise.resolve([])),
+            async () => {
+              if (!active()) throw new Error('Read approval cancelled.');
+              await this.options.validate();
+            },
+          );
+        })(),
+        'Automatic read approval timed out.',
+      ).then(
+        (approved) => {
+          if (!active()) return cancelled();
+          if (!approved) return reveal();
+          runtime.log.write('debug', 'acp.permission.auto_read', { permission: id, turn: turn.id, files: read.paths.length });
+          finish({ outcome: { outcome: 'selected', optionId: read.optionId } });
+        },
+        () => reveal(),
+      );
     });
   }
 
   async respondPermission(requestId: string, optionId: string): Promise<void> {
     const permission = this.permissions.get(requestId);
-    if (!permission || !this.current(permission.runtime) || this.turn?.cancelling)
+    if (!permission || permission.checking || !this.current(permission.runtime) || this.turn?.cancelling)
       throw new Error('This permission request has ended. Check the current session.');
     if (!permission.view.options.some((option) => option.id === optionId)) throw new Error('Select a permission option actually offered by the agent.');
     return this.options.validate().then(

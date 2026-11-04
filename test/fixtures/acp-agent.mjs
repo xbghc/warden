@@ -425,6 +425,30 @@ async function handle(message) {
     answer(id, `Edited ${process.cwd()}`);
     return;
   }
+  if (text.startsWith('read-permission ')) {
+    const input = JSON.parse(text.slice('read-permission '.length));
+    const permission = await request('session/request_permission', {
+      sessionId: input.foreign ? `${sessionId}-foreign` : sessionId,
+      toolCall: {
+        toolCallId: 'read-source',
+        title: 'Read source',
+        kind: 'read',
+        locations: [{ path: input.path }],
+        rawInput: { path: input.path },
+        ...input.toolCall,
+      },
+      options: input.options ?? [
+        { optionId: 'remember-read', name: 'Always allow', kind: 'allow_always' },
+        { optionId: 'read-once', name: 'Allow this read', kind: 'allow_once' },
+        { optionId: 'reject-read', name: 'Reject', kind: 'reject_once' },
+      ],
+    });
+    let contents = '';
+    if (permission.result?.outcome?.outcome === 'selected' && permission.result.outcome.optionId === 'read-once' && !turn?.cancelled)
+      contents = readFileSync(input.path, 'utf8');
+    answer(id, `Read permission: ${JSON.stringify(permission.result)} ${contents}`);
+    return;
+  }
   if (text === 'permission' || text === 'permission-long' || text === 'permission-command' || text === 'foreign-permission') {
     const permission = await request('session/request_permission', {
       sessionId: text === 'foreign-permission' ? `${sessionId}-foreign` : sessionId,

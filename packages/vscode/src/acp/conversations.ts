@@ -6,7 +6,7 @@ import { DiagnosticLog, diagnosticError, parseAcpAction } from '@warden/shared';
 import type { AcpAction, AcpBinding, AcpConfiguration, AcpModel, AcpViewState, WorkflowTask } from '@warden/shared';
 import type { AcpProfile } from './contracts.js';
 import { resolveAcpBinding, validateAcpBinding } from './binding.js';
-import { readAcpProfiles } from './setup.js';
+import { autoApproveRepositoryReads, readAcpProfiles } from './setup.js';
 import { AcpSession } from './session.js';
 import { AcpSessionStorage } from './storage.js';
 import { AcpModelPreferences } from './model-preferences.js';
@@ -171,6 +171,11 @@ export class AcpConversations {
       validate: async () => {
         if (!vscode.workspace.isTrusted || this.closed) throw new Error('Agent actions are unavailable for this workspace.');
         await validateAcpBinding(engine, binding);
+      },
+      readRoots: async () => {
+        if (!autoApproveRepositoryReads()) return [];
+        const roots = await engine.execute('repository.readRoots', undefined);
+        return autoApproveRepositoryReads() ? roots : [];
       },
       changed: () => {
         this.changed();

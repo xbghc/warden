@@ -30,6 +30,7 @@ import { workspaceConfig } from './workspace.js';
 import { RepoWatcher } from './watcher.js';
 import { snapshotObjects, snapshotStore } from './snapshots.js';
 import { TaskDeletionService } from './task-deletion.js';
+import { repositoryReadRoots } from './read-roots.js';
 
 /** The desktop product has no adoption operation: allocation always creates a new logical workspace. */
 type NewWorkspace = Pick<StartChangeRequest, 'agent'> & { kind?: 'shared' | 'clone' };
@@ -60,6 +61,7 @@ function commands(repo: RepoContext, store: StateStore) {
   return {
     previewService: preview,
     handlers: {
+      'repository.readRoots': () => repositoryReadRoots(repo, store),
       'repository.get': async () => {
         // Share only this observation's inventory. Later reads and every mutation obtain
         // fresh checkout state, including changes made by tools outside Warden.
@@ -173,6 +175,7 @@ export type EngineCommand = keyof EngineCommands;
 export type EngineInput<K extends EngineCommand> = Parameters<EngineCommands[K]> extends [] ? undefined : Parameters<EngineCommands[K]>[0];
 export type EngineOutput<K extends EngineCommand> = Awaited<ReturnType<EngineCommands[K]>>;
 const reads = new Set<EngineCommand>([
+  'repository.readRoots',
   'repository.get',
   'workflow.get',
   'workflow.context',

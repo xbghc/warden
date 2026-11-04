@@ -1,4 +1,5 @@
 import type { AcpBinding, AcpModelSelection, AcpRecord, DiagnosticLog } from '@warden/shared';
+import type { EngineOutput } from '@warden/engine';
 
 export interface AcpProfile {
   id: string;
@@ -23,6 +24,7 @@ export interface AcpSessionOptions {
     save(profileSignature: string, selection: AcpModelSelection): Promise<void>;
   };
   validate(): Promise<void>;
+  readRoots?(): Promise<EngineOutput<'repository.readRoots'>>;
   changed(): void;
   report?(diagnostic: string): void;
   log?: DiagnosticLog;

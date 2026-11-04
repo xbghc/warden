@@ -748,6 +748,12 @@
     "configuration": {
       "title": "Warden",
       "properties": {
+        "warden.acpAutoApproveReads": {
+          "type": "boolean",
+          "default": true,
+          "scope": "machine",
+          "markdownDescription": "Automatically approve explicit ACP reads of existing files in this repository's primary, allocated task workspaces and preview. Directory reads, known credential files and ambiguous requests still require a choice. Uses only the agent's allow-once option; agent sandbox policies still apply. Configure in User or Remote User settings."
+        },
         "warden.previewCommand": {
           "type": "string",
           "default": "",

@@ -106,6 +106,31 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   assert.equal(chat.session.snapshot().controls.configOptions.find((option) => option.id === 'model').currentValue, 'deep');
   assert.equal(chat.session.snapshot().controls.configOptions.find((option) => option.id === 'thinking').currentValue, true);
   assert.equal(chat.session.snapshot().controls.modes, undefined, 'session config takes precedence over legacy modes');
+  console.log('Checking automatic repository read approvals');
+  const readRoots = await workbench.backend.execute('repository.readRoots', undefined);
+  assert(readRoots.some((root) => root.path === fixture.root));
+  assert(readRoots.some((root) => root.path === chat.binding.workspace));
+  assert(readRoots.some((root) => root.path === preview.worktree));
+  assert(readRoots.length >= 4, 'the scope includes another allocated task');
+  let readPrompts = 0;
+  for (const root of readRoots) {
+    await chat.session.send(`read-permission ${JSON.stringify({ path: path.join(root.path, 'README.md') })}`);
+    ++readPrompts;
+    assert.match(chat.session.snapshot().record.messages.at(-1).text, /"optionId":"read-once"/);
+    assert.equal(chat.session.snapshot().permissions.length, 0);
+  }
+  await configuration.update('acpAutoApproveReads', false, vscode.ConfigurationTarget.Global);
+  await assert.rejects(configuration.update('acpAutoApproveReads', true, vscode.ConfigurationTarget.Workspace), /only into User settings/);
+  try {
+    const read = chat.session.send(`read-permission ${JSON.stringify({ path: path.join(fixture.root, 'README.md') })}`);
+    ++readPrompts;
+    await eventually(() => chat.session.snapshot().permissions.length === 1);
+    assert.equal(chat.session.snapshot().status, 'waiting_permission', 'workspace settings cannot override the user read policy');
+    await chat.session.respondPermission(chat.session.snapshot().permissions[0].id, 'reject-read');
+    await read;
+  } finally {
+    await configuration.update('acpAutoApproveReads', undefined, vscode.ConfigurationTarget.Global);
+  }
   const asking = conversations.handle(chat, { type: 'send', profileId: 'fixture', ...edit('permission') });
   void asking.catch(() => {});
   await eventually(() => chat.session.snapshot().permissions.length === 1);
@@ -210,7 +235,7 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   );
   assert.equal(chat.draft.text, 'hold', 'automatic resume preserves the unsent draft');
   assert.equal((await journal()).filter((row) => row.method === 'session/load' && row.cwd === chat.binding.workspace).length, 1);
-  assert.equal((await journal()).filter((row) => row.method === 'session/prompt').length, 3, 'resume never resends a prompt');
+  assert.equal((await journal()).filter((row) => row.method === 'session/prompt').length, 3 + readPrompts, 'resume never resends a prompt');
   await conversations.handle(chat, { type: 'disconnect' });
   await conversations.handle(chat, { type: 'send', profileId: 'fixture', ...edit('session-updates') });
   assert.equal(chat.session.snapshot().record.sessionId, savedSession, 'sending after disconnect resumes the original session');
