@@ -57,16 +57,17 @@ function relativeSource(root: string, file: string) {
 }
 
 async function observe(paths: string[], roots: EngineOutput<'repository.readRoots'>) {
+  const resolvedRoots = await Promise.all(roots.map(async (root) => ({ ...root, canonical: await realpath(root.path) })));
   const observations = [];
   for (const file of paths) {
-    const root = roots.find((candidate) => relativeSource(candidate.path, file));
+    const root = resolvedRoots.find((candidate) => relativeSource(candidate.path, file) || relativeSource(candidate.canonical, file));
     if (!root) return;
     const resolved = await realpath(file);
-    if (!relativeSource(root.path, resolved)) return;
+    if (!relativeSource(root.canonical, resolved)) return;
     const info = await stat(resolved);
     // A directory approval can include recursive reads of credentials. Hardlinks can alias files outside the root.
     if (!info.isFile() || info.nlink !== 1) return;
-    observations.push([root.path, root.identity, resolved, info.dev, info.ino, info.birthtimeMs]);
+    observations.push([root.path, root.canonical, root.identity, resolved, info.dev, info.ino, info.birthtimeMs]);
   }
   return JSON.stringify([roots, observations]);
 }

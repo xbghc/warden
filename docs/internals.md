@@ -153,6 +153,8 @@ the validated persistent preview. It reuses the guarded inventory, `rev-parse --
 preview ownership checks, plus filesystem identity reads; it introduces no Git writes. Deleting,
 unassigned, foreign or redirected workspaces and invalid previews are excluded. ACP reads check this
 scope twice around task-binding validation and compare root/allocation and resolved file identities.
+Registered parent-directory aliases, including macOS `/var`, retain their canonical identity; a
+symlink replacing the checkout itself or a file escaping that canonical root remains ineligible.
 Only explicit regular-file reads qualify; directory/search/command requests, sensitive path names and
 hardlinks remain interactive. This is an approval policy for agent-reported operations, not a sandbox
 or an atomic filesystem lease. Agents remain responsible for executing only the approved operation

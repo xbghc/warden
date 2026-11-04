@@ -38,7 +38,10 @@ export async function repositoryReadRoots(repo: RepoContext, store: StateStore):
   for (const candidate of candidates) {
     try {
       const root = await realpath(candidate.path);
-      if (root !== path.resolve(candidate.path)) continue;
+      // macOS /var and configured storage parents can be aliases. Reject a redirected
+      // checkout itself, while retaining its registered spelling and canonical identity.
+      const directory = await lstat(candidate.path);
+      if (!directory.isDirectory() || directory.isSymbolicLink()) continue;
       const gitDir = (await runGit(['rev-parse', '--absolute-git-dir'], { cwd: root })).stdout.trim();
       const identities = [];
       for (const file of [root, path.join(root, '.git'), gitDir]) {
@@ -47,7 +50,7 @@ export async function repositoryReadRoots(repo: RepoContext, store: StateStore):
         identities.push([await realpath(file), info.dev, info.ino, info.birthtimeMs, info.isFile() ? await readFile(file, 'utf8') : null]);
       }
       roots.push({
-        path: root,
+        path: path.resolve(candidate.path),
         identity: createHash('sha256')
           .update(JSON.stringify([candidate.allocation, identities]))
           .digest('hex'),

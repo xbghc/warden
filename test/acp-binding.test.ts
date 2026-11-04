@@ -1,9 +1,10 @@
 import os from 'node:os';
 import path from 'node:path';
-import { mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, open, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Engine, WorkflowService } from '@warden/engine';
 import { resolveAcpBinding, validateAcpBinding } from '../packages/vscode/src/acp/binding.js';
+import { approveRepositoryRead } from '../packages/vscode/src/acp/read-permissions.js';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
 let fixture: FixtureRepo;
@@ -31,6 +32,24 @@ async function allocate(title = 'Task', kind: 'shared' | 'clone' = 'shared') {
 }
 
 describe('ACP task binding', () => {
+  it('allows registered preview paths through parent directory aliases while checking canonical file ownership', { timeout }, async () => {
+    await engine.close();
+    const actual = path.join(directory, 'data');
+    const alias = path.join(directory, 'alias');
+    await mkdir(actual);
+    await symlink(actual, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    engine = await Engine.open(fixture.root, path.join(alias, 'state.json'));
+    await engine.execute('workflow.configure', { branch: 'main' });
+    const task = await allocate();
+    const binding = await resolveAcpBinding(engine, task.id);
+    const preview = await engine.execute('preview.refresh', undefined);
+    const roots = () => engine.execute('repository.readRoots', undefined);
+    expect((await roots()).some((root) => root.path === preview.worktree)).toBe(true);
+    const source = path.join(preview.worktree!, 'README.md');
+    for (const file of [source, await realpath(source)])
+      expect(await approveRepositoryRead([file], roots, () => validateAcpBinding(engine, binding))).toBe(true);
+  });
+
   it('observes only primary, allocated task and validated preview read roots without changing Git state', { timeout }, async () => {
     const a = await allocate('A');
     const b = await allocate('B', 'clone');
