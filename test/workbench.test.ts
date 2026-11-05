@@ -24,7 +24,8 @@ const head = () => fx.git('rev-parse', 'HEAD').trim();
 const file = (root: string, name: string) => readFile(path.join(root, name), 'utf8');
 // Complete delivery and replay scenarios repeatedly start Git in several repositories.
 // Keep their Windows startup allowance local so other failures are still detected quickly.
-const longGitTimeout = process.platform === 'win32' ? 90_000 : 30_000;
+// Independent clone allocation pushes multi-task delivery past 30 seconds on Intel macOS runners.
+const longGitTimeout = process.platform === 'win32' ? 90_000 : process.platform === 'darwin' ? 60_000 : 30_000;
 // History replay and recovery, including a subsequent rebase, exceed 30 seconds on Intel macOS runners.
 const historyReplayTimeout = process.platform === 'darwin' ? 60_000 : longGitTimeout;
 
