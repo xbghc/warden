@@ -108,7 +108,9 @@ exports.run = async () => {
     assert.notEqual(preview.worktree, fixture.root);
     const commonGit = async (cwd) =>
       fs.realpath(path.resolve(cwd, execFileSync('git', ['-C', cwd, 'rev-parse', '--git-common-dir'], { encoding: 'utf8' }).trim()));
-    assert.equal(await commonGit(preview.worktree), await commonGit(tasks[0].task.worktree), 'task and preview share the external Git repository');
+    const taskGit = await commonGit(tasks[0].task.worktree);
+    assert.equal(taskGit, await fs.realpath(path.join(tasks[0].task.worktree, '.git')), 'tasks are independent clones with their own Git directory');
+    assert.notEqual(await commonGit(preview.worktree), taskGit, 'preview uses the external shared repository');
     assert.notEqual(await commonGit(preview.worktree), await commonGit(fixture.root), 'primary Git storage stays independent');
     assert.equal(textLines(await fs.readFile(path.join(preview.worktree, 'agent.txt'), 'utf8')), 'Agent addition\n');
     await assert.rejects(fs.access(path.join(fixture.root, 'agent.txt')));

@@ -282,7 +282,9 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   );
   assert.equal(restoredChat.draft.text, 'Saved across reopening');
   const gitFile = path.join(chat.binding.workspace, '.git');
-  await fs.copyFile(gitFile, `${gitFile}.replacement`);
+  // Clone workspaces hold a `.git` directory, linked worktrees a `.git` file; both get a new identity.
+  await fs.cp(gitFile, `${gitFile}.replacement`, { recursive: true });
+  await fs.rm(gitFile, { recursive: true, force: true });
   await fs.rename(`${gitFile}.replacement`, gitFile);
   await conversations.show(fixture.root, newTask.id);
   assert.equal(chat.surface.location, 'sidebar', 'a replaced checkout still allows reopening the original connection to stop it');

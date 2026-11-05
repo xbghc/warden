@@ -66,7 +66,7 @@ never advance an opened comparison, retry a delivery, or authorize newer content
 
 Refs accept anything git can resolve (`main`, `v1.2`, `HEAD~3`, a sha). `@` is `HEAD`.
 Worktrees are discovered with `git worktree list`, and clone slots beside the main worktree (see
-[Clone slots](worktrees.md#clone-slots)); new tasks receive a shared workspace automatically; existing clone tasks share the review
+[Clone slots](worktrees.md#clone-slots)); new tasks receive a clone workspace automatically; clone tasks share the review
 state of the main repository.
 One whose directory is gone (git lists it as *prunable*) is not offered, and a remembered target
 inside a removed worktree falls back to the working tree on the next load. Reusing a slot for another

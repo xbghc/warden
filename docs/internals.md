@@ -214,7 +214,7 @@ New clone workspaces copy the primary repository's effective `user.name` and `us
 fixed `git config` writes only when they differ from the clone's inherited defaults. This preserves
 repository-local commit identity without overriding matching global defaults.
 
-Default task creation uses `kind: shared`. `shared-repository.ts` owns the separate bare repository
+Default task creation uses `kind: clone`; `kind: shared` remains available internally. `shared-repository.ts` owns the separate bare repository
 at `<primary>-warden/repo.git`: fixed `git init --bare`, ownership configuration, local fetches of
 validated exact commits, and `git worktree add` / `remove` for generated paths. Numbered task paths
 stay beside primary. The repository owns task branches and objects; it is never the primary Git
@@ -426,8 +426,8 @@ older versions' exact generated `refs/warden/changes/<id>/{source,accepted}`,
 `refs/warden/deliveries/<id>/{source,commit}` and `refs/warden/history/<id>` refs with
 `update-ref -d <ref> <observed-old-value>`. Other refs and user reflogs are preserved; ordinary Git
 maintenance decides when previously retained, now-unreachable objects can be collected. Default
-shared workspaces keep agent objects outside primary and share them with preview and composition.
-Clone workspaces retain separate object stores; legacy primary-linked worktrees share the primary
+clone workspaces retain separate object stores outside primary; shared workspaces keep agent objects
+in the shared repository with preview and composition; legacy primary-linked worktrees share the primary
 object store by Git's design. Workflow writes share
 a cross-process repository-operation lock; short JSON updates have their own lock. Stale-heartbeat
 recovery also requires the recorded owner process to be gone. A live owner, incomplete owner record,
@@ -462,5 +462,5 @@ history drafts remain untouched; Git operation journals stay in the existing
 Warden state location. Old HTTP host/origin checks remain only in `test/compat`, which is not bundled.
 
 Updates are managed by VS Code and the Marketplace. There is no npm update request or CLI launcher.
-Workspace allocation and preview composition use local Git operations. Legacy clone-fetch code is
-retained for regression coverage and is not exposed in the task-creation flow.
+Workspace allocation and preview composition use local Git operations. Clone fetch from
+remotes is retained for regression coverage and is not exposed in the task-creation flow.

@@ -391,7 +391,7 @@ export class WorkflowService {
       fork = (await runGit(['merge-base', base, 'HEAD'], { cwd: worktree })).stdout.trim();
     } else {
       branch = `warden/change-${plan.id.replace(/^todo-/, '').slice(0, 8)}`;
-      const kind = request.kind ?? 'shared';
+      const kind = request.kind ?? 'clone';
       const free = list.find(
         (row) =>
           row.free &&

@@ -262,8 +262,8 @@ Not in Preview
 [Chat with Agent] [Connect Preview] [Open Workspace]
 ```
 
-Task creation allocates a fresh shared Git workspace without a separate setup action or storage,
-directory, branch or executor inputs. Existing independent clones remain supported. Numbered
+Task creation allocates a fresh independent clone without a separate setup action or storage,
+directory, branch or executor inputs. Existing shared-repository workspaces remain supported. Numbered
 task paths remain stable across deliveries. The task expands into its native changed-file list;
 selecting a file opens the read-only diff editor.
 
@@ -491,8 +491,8 @@ The implementation follows these bounded choices:
 3. The page creates the primary commit with ordinary Git hooks. No terminal-only commit requirement.
 4. Rebase checks run in isolated temporary worktrees; explicit execution leaves actual
    conflicts for manual handling. Batch results are per workspace.
-5. The Git mechanism remains an internal engine package. Warden's external shared Git repository
-   backs task, preview and operation worktrees; primary remains separate. External backups and
+5. The Git mechanism remains an internal engine package. Tasks are independent clones; Warden's external shared Git repository
+   backs preview and operation worktrees; primary remains separate. External backups and
    operation journals support interrupted operations, not undo UI.
 
 Do not add task branching, dependency scheduling, completion declarations, vendor-specific agent SDKs,

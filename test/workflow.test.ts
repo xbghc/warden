@@ -430,13 +430,42 @@ describe('requirement development workflow', () => {
     expect(gitAt(next, 'rev-parse', 'HEAD')).toBe(accepted.deliveries!.at(-1)!.commit);
   });
 
-  it('allocates default task worktrees in one external repository while preserving primary isolation', async () => {
+  it('allocates default tasks as independent clones while preserving primary isolation', async () => {
     const primaryHead = fx.git('rev-parse', 'HEAD');
     const primaryRefs = fx.git('show-ref');
     const primaryIndex = await readFile(path.join(fx.root, '.git', 'index'));
-    const planned = await workflow.create({ title: 'Isolated default' });
-    const change = await workflow.start(planned.id);
-    const sibling = await workflow.start((await workflow.create({ title: 'Shared sibling' })).id);
+    const change = await workflow.start((await workflow.create({ title: 'Isolated default' })).id);
+    const sibling = await workflow.start((await workflow.create({ title: 'Clone sibling' })).id);
+    const rows = await listWorktreesDetailed(await resolveRepo(fx.root));
+    for (const task of [change, sibling]) {
+      const checkout = rows.find((row) => row.path === task.worktree);
+      expect(checkout?.clone).toBe(true);
+      expect(checkout?.shared).not.toBe(true);
+      // Tools that reject linked worktrees need a real `.git` directory inside the workspace.
+      expect(path.resolve(task.worktree, gitAt(task, 'rev-parse', '--git-common-dir'))).toBe(path.join(task.worktree, '.git'));
+      expect(gitAt(task, 'rev-parse', '--git-dir')).toBe('.git');
+    }
+    expect(gitAt(change, 'config', '--get', 'user.name')).toBe(fx.git('config', '--get', 'user.name').trim());
+    expect(gitAt(change, 'config', '--get', 'user.email')).toBe(fx.git('config', '--get', 'user.email').trim());
+    expect(fx.git('for-each-ref', '--format=%(refname)', `refs/heads/${change.branch}`).trim()).toBe('');
+    const siblingHead = gitAt(sibling, 'rev-parse', 'HEAD');
+    await commit(change);
+    const source = gitAt(change, 'rev-parse', 'HEAD');
+    expect(() => gitAt(sibling, 'cat-file', '-e', source)).toThrow();
+    expect(gitAt(sibling, 'rev-parse', 'HEAD')).toBe(siblingHead);
+    expect(() => fx.git('cat-file', '-e', source)).toThrow();
+    expect(fx.git('rev-parse', 'HEAD')).toBe(primaryHead);
+    expect(fx.git('show-ref')).toBe(primaryRefs);
+    expect(await readFile(path.join(fx.root, '.git', 'index'))).toEqual(primaryIndex);
+  });
+
+  it('keeps shared task worktrees in one external repository while preserving primary isolation', async () => {
+    const primaryHead = fx.git('rev-parse', 'HEAD');
+    const primaryRefs = fx.git('show-ref');
+    const primaryIndex = await readFile(path.join(fx.root, '.git', 'index'));
+    const planned = await workflow.create({ title: 'Isolated shared' });
+    const change = await workflow.start(planned.id, { kind: 'shared' });
+    const sibling = await workflow.start((await workflow.create({ title: 'Shared sibling' })).id, { kind: 'shared' });
     const checkout = (await listWorktreesDetailed(await resolveRepo(fx.root))).find((row) => row.path === change.worktree);
     expect(checkout?.shared).toBe(true);
     expect(checkout?.clone).not.toBe(true);

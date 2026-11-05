@@ -88,9 +88,9 @@ Agent source history, trial commits and recovery copies belong to task workspace
 external shared repository or data directory. Deliveries apply the reviewed final patch without importing the source
 commit graph. Successful operations retire their temporary worktrees and recovery backups;
 interrupted operations retain the data their recovery journals still need. User branches and
-reflogs are never expired automatically. Default tasks and preview share a Warden-owned Git object
-store outside primary, with independent working files, HEADs and indexes. Clone workspaces remain
-a compatibility option. Existing primary-linked worktrees deliberately share primary's objects.
+reflogs are never expired automatically. Default tasks are independent clones with their own object
+stores; preview and composition use a Warden-owned shared Git repository outside primary. Existing
+shared-repository task worktrees remain supported, and primary-linked worktrees deliberately share primary's objects.
 
 The list's order expresses the user's intended work sequence. It does **not** assert that each
 item depends on the previous one. Users decide dependencies, parallelism and when to begin a
@@ -123,9 +123,9 @@ and unrelated task conversations do not block it. Preview disconnection failure 
 and its workspace. Later cleanup failures retain an explicit retry action and report any already
 completed disconnection. Restart never silently resumes destructive cleanup.
 
-A workspace is an execution resource, normally a Git worktree of Warden's external shared repository
-on a task branch based on the base branch. The bare repository lives at
-`<primary>-warden/repo.git`, independently of task, preview and temporary operation directories.
+A workspace is an execution resource, normally an independent clone of primary with its own `.git`
+directory, on a task branch based on the base branch. Preview and temporary operations use Warden's
+external shared bare repository at `<primary>-warden/repo.git`.
 Task paths remain `<primary>-<n>`. Task creation allocates fresh logical workspaces and runs configured initialization hooks. Reusing a free physical directory is an internal implementation detail; users never select or adopt an old workspace.
 Workspace creation does not launch an agent. Opening Task Chat connects its agent session; users can also run
 external tools in that directory. In the current ACP integration, Warden owns only the agent process

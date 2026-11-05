@@ -78,9 +78,9 @@ describe('desktop engine', () => {
   });
 
   it('reads workspace safety and rebase state without retired management-page graph comparisons', async () => {
-    const shared = await engine.execute('task.create', { title: 'Shared task' });
     const workflow = new WorkflowService(engine.repo, engine.store);
-    const clone = await workflow.start((await workflow.create({ title: 'Clone task' })).id, { kind: 'clone' });
+    const shared = await workflow.start((await workflow.create({ title: 'Shared task' })).id, { kind: 'shared' });
+    const clone = await engine.execute('task.create', { title: 'Clone task' });
     await writeFile(path.join(shared.worktree!, 'pending.txt'), 'Pending edit\n');
     const reads = vi.spyOn(git, 'runGit');
     const list = await engine.execute('workspaces.list', undefined);
@@ -101,6 +101,41 @@ describe('desktop engine', () => {
     expect(
       reads.mock.calls.filter(([args]) => args.some((arg) => arg.includes('%(upstream:track)')) || (args[0] === 'rev-list' && args.includes('--left-right'))),
     ).toEqual([]);
+  });
+
+  it('composes default clone tasks into preview and follows their later commits without touching primary', async () => {
+    const primaryHead = fixture.git('rev-parse', 'HEAD').trim();
+    const primaryRefs = fixture.git('show-ref');
+    const a = await engine.execute('task.create', { title: 'Clone A' });
+    const b = await engine.execute('task.create', { title: 'Clone B' });
+    for (const task of [a, b]) expect(fixture.git('-C', task.worktree!, 'rev-parse', '--git-dir').trim()).toBe('.git');
+    await writeFile(path.join(a.worktree!, 'a.txt'), 'Committed A\n');
+    fixture.git('-C', a.worktree!, 'add', 'a.txt');
+    fixture.git('-C', a.worktree!, 'commit', '-qm', 'Add A');
+    await writeFile(path.join(a.worktree!, 'draft.txt'), 'Uncommitted A\n');
+    await writeFile(path.join(b.worktree!, 'b.txt'), 'Uncommitted B\n');
+    const preview = await engine.execute('preview.connect', { connectedIds: [a.id, b.id] });
+    expect(preview).toMatchObject({ connectedIds: [a.id, b.id], syncStatus: 'synced' });
+    expect(await readFile(path.join(preview.worktree!, 'a.txt'), 'utf8')).toBe('Committed A\n');
+    expect(await readFile(path.join(preview.worktree!, 'draft.txt'), 'utf8')).toBe('Uncommitted A\n');
+    expect(await readFile(path.join(preview.worktree!, 'b.txt'), 'utf8')).toBe('Uncommitted B\n');
+
+    // A later agent commit in one clone replaces its earlier contribution on the next refresh.
+    await writeFile(path.join(a.worktree!, 'a.txt'), 'Second A\n');
+    fixture.git('-C', a.worktree!, 'add', '.');
+    fixture.git('-C', a.worktree!, 'commit', '-qm', 'Revise A');
+    const later = fixture.git('-C', a.worktree!, 'rev-parse', 'HEAD').trim();
+    expect(await engine.execute('preview.refresh', undefined)).toMatchObject({ worktree: preview.worktree, syncStatus: 'synced' });
+    expect(await readFile(path.join(preview.worktree!, 'a.txt'), 'utf8')).toBe('Second A\n');
+    expect(await readFile(path.join(preview.worktree!, 'b.txt'), 'utf8')).toBe('Uncommitted B\n');
+
+    const disconnected = await engine.execute('preview.connect', { connectedIds: [b.id] });
+    expect(await readdir(disconnected.worktree!)).not.toContain('a.txt');
+    expect(await readFile(path.join(disconnected.worktree!, 'b.txt'), 'utf8')).toBe('Uncommitted B\n');
+    expect(() => fixture.git('cat-file', '-e', later)).toThrow();
+    expect(fixture.git('rev-parse', 'HEAD').trim()).toBe(primaryHead);
+    expect(fixture.git('show-ref')).toBe(primaryRefs);
+    expect(fixture.git('status', '--porcelain')).toBe('');
   });
 
   it('initializes and recovers a CRLF preview while protecting real preview edits', async () => {
@@ -292,7 +327,7 @@ describe('desktop engine', () => {
 
   it('allocates a fresh logical workspace in a clean free directory without inheriting an old branch', async () => {
     const base = fixture.git('rev-parse', 'HEAD').trim();
-    const old = await checkoutWorktree(engine.repo, { slot: 1, branch: 'old-task', base, kind: 'shared' });
+    const old = await checkoutWorktree(engine.repo, { slot: 1, branch: 'old-task', base, kind: 'clone' });
     await writeFile(path.join(old.worktree.path, 'old.txt'), 'Old work\n');
     fixture.git('-C', old.worktree.path, 'add', '.');
     fixture.git('-C', old.worktree.path, 'commit', '-qm', 'Old task');

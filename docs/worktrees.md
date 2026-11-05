@@ -18,10 +18,10 @@ Allocation failure preserves the task and its error for retry. Repeated requests
 workspace. Legacy plans receive a workspace when used; archived plans require restoration first.
 Read-only refresh never allocates workspaces. Script failure retains the assigned workspace and
 script output, with a separate script retry action.
-The default is a worktree of Warden's external shared repository. Agent development objects stay
-outside the primary repository while tasks and preview can read the same Git objects directly.
-Independent clones remain a compatibility option for tooling that requires its own `.git` directory.
-Existing primary-linked worktrees remain usable. Ordering never enforces dependencies.
+The default is an independent clone with its own `.git` directory, because many tools and build
+systems do not support linked worktrees. Agent development objects stay outside the primary
+repository; preview composition imports the task commits it needs into Warden's external shared
+repository. Existing shared-repository worktrees and primary-linked worktrees remain usable. Ordering never enforces dependencies.
 
 A workspace corresponds to one linear task. It can contain multiple local commits and make multiple
 deliveries without being recycled. There is no task-complete declaration or release step. Editing
@@ -48,9 +48,10 @@ the new branch, and the configured setup script receives the new base branch.
 ## Shared repository
 
 The primary checkout retains its own Git repository. Warden creates a separate bare repository at
-`<primary>-warden/repo.git`; default task directories remain numbered siblings such as
-`<primary>-1` and `<primary>-2`. Newly created preview and temporary composition worktrees live in Warden's
-external data directory and use the same shared repository. Each worktree has independent files,
+`<primary>-warden/repo.git` for preview and composition. Task directories remain numbered siblings
+such as `<primary>-1` and `<primary>-2`; new ones are independent clones, while tasks created by
+earlier versions may still be worktrees of the shared repository. Newly created preview and temporary composition worktrees live in Warden's
+external data directory and use the shared repository. Each worktree has independent files,
 HEAD and index. Branch references and Git objects are shared among these Warden worktrees.
 
 Primary commits are imported locally when needed. Saved uncommitted primary and task content is
@@ -212,7 +213,7 @@ They still refuse to release or reuse an assigned task's slot. The extension all
 
 ## Clone slots
 
-Independent clones are a compatibility option, providing their own `.git` directories and branch refs.
+New tasks use independent clones, providing their own `.git` directories and branch refs.
 Preview and replay import the required clone commits into the external shared repository; primary
 still receives only the final reviewed patch. Explicit rebase
 imports exact primary commits into the clone from validated local repositories, without remote

@@ -285,7 +285,7 @@ changes can be connected to preview and delivered directly without a task commit
 identify the pinned version for external review.
 There are no read markers, staging controls or review-completion declarations.
 
-Task workspaces and preview use an external shared repository by default, at
+Task workspaces are independent clones beside primary. Preview uses an external shared repository at
 `<primary>-warden/repo.git`; primary remains independent. Preview is never added as a workspace root.
 Its directory retains ignored dependencies and caches. Unexpected source edits there stop publication
 and remain available for manual handling. A conflicting initial connection fails without changing the
