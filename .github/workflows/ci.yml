@@ -129,7 +129,7 @@ jobs:
     name: VS Code (${{ matrix.os }}, ${{ matrix.vscode }})
     needs: vscode
     runs-on: ${{ matrix.os }}
-    timeout-minutes: ${{ matrix.os == 'windows-latest' && 30 || 20 }}
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 45 || 20 }}
     strategy:
       fail-fast: false
       matrix:
