@@ -6,14 +6,11 @@ const actions: AcpAction[] = [
   { type: 'connect', profileId: 'local-agent', resume: false },
   { type: 'connect', profileId: 'local-agent', resume: true },
   { type: 'cancel' },
-  { type: 'disconnect' },
   { type: 'new' },
   { type: 'configure' },
-  { type: 'review' },
   { type: 'open-file', reference: 'src/example.ts#L12' },
   { type: 'open-sidebar' },
   { type: 'view-ready' },
-  { type: 'insert-brief' },
   { type: 'view-state', scrollTop: 120.5, followOutput: false, profileId: 'agent', requestId: 'capture-1' },
   { type: 'draft', text: '', version: 2, revision: 3 },
   { type: 'permission', requestId: 'request-2', optionId: 'reject-once' },
@@ -51,9 +48,12 @@ describe('ACP panel action validation', () => {
     expect(() => parseAcpAction(value)).toThrow();
   });
 
-  it.each([undefined, null, 1, 'execute', 'session/prompt', 'accept', 'rebase', 'connectPreview'])('rejects an unknown action: %j', (type) => {
-    expect(() => parseAcpAction({ type })).toThrow();
-  });
+  it.each([undefined, null, 1, 'execute', 'session/prompt', 'accept', 'rebase', 'connectPreview', 'disconnect', 'review'])(
+    'rejects an unknown action: %j',
+    (type) => {
+      expect(() => parseAcpAction({ type })).toThrow();
+    },
+  );
 
   it.each([undefined, null, 0, 1, 'false', 'true'])('requires an explicit boolean restore choice: %j', (resume) => {
     expect(() => parseAcpAction({ type: 'connect', profileId: 'local-agent', resume })).toThrow();

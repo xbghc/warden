@@ -22,7 +22,7 @@ import { Views } from './views.js';
 import { Sidebar } from './sidebar.js';
 import type { SidebarNode } from './sidebar.js';
 import { Settings } from './settings.js';
-import type { SettingsNode } from './settings.js';
+import type { AgentProcess, SettingsNode } from './settings.js';
 import { ScriptSettings, scriptValue } from './script-settings.js';
 import type { ScriptBinding, ScriptKind } from './script-settings.js';
 
@@ -152,7 +152,11 @@ export class Workbench {
       context.workspaceState,
       (error) => this.report(error),
     );
-    this.settings = new Settings(() => this.model('settings'), context.extensionUri);
+    this.settings = new Settings(
+      () => this.model('settings'),
+      context.extensionUri,
+      () => this.agentProcesses(),
+    );
     this.scriptSettings = new ScriptSettings(
       () => this.model('settings'),
       (binding, value) => this.saveScript(binding, value),
@@ -236,6 +240,8 @@ export class Workbench {
       chooseAgentPreset: () => this.agentSetup.configure(),
       checkAgent: () => (this.conversations.configuration().status === 'configured' ? this.agentSetup.check() : this.settings.show()),
       cancelAgentCheck: () => this.agentSetup.disconnect(),
+      endAgentProcess: (node) => this.endAgentProcess(node),
+      openAgentProcessChat: (node) => this.openAgentProcessChat(node),
       sendSelectionToAgent: () => this.sendSelectionToAgent(),
     };
     const navigation = new Set([
@@ -267,6 +273,8 @@ export class Workbench {
       'expandChat',
       'configureAgents',
       'sendSelectionToAgent',
+      'endAgentProcess',
+      'openAgentProcessChat',
     ]);
     for (const [name, action] of Object.entries(commands))
       context.subscriptions.push(
@@ -1051,6 +1059,10 @@ export class Workbench {
       `task:${task.id}`,
     );
   }
+  private confirmProcessEnd(title: string, button: string) {
+    const detail = 'The current response is cancelled. File changes the agent already made stay in the task workspace.';
+    return vscode.window.showWarningMessage(`End the agent process for “${title}”?`, { modal: true, detail }, button);
+  }
   private confirmTaskDeletion(title: string, detail: string, button: string) {
     return vscode.window.showWarningMessage(`Delete task “${title}”?`, { modal: true, detail }, button);
   }
@@ -1451,31 +1463,58 @@ export class Workbench {
     const task = await this.ensureWorkspace(selected);
     await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(task.worktree), { forceNewWindow: true });
   }
+  private agentProcesses(): AgentProcess[] {
+    const workbench = this.agentSetup.readiness.process();
+    const tasks = this.conversations.processes().sort((a, b) => a.startedAt.localeCompare(b.startedAt));
+    return [
+      ...(workbench ? [{ ...workbench, kind: 'workbench' as const, status: this.agentSetup.readiness.snapshot().status }] : []),
+      ...tasks.map((process) => ({ ...process, kind: 'task' as const })),
+    ];
+  }
+  private async endAgentProcess(node?: Node) {
+    const process = node?.kind === 'setting' ? node.process : undefined;
+    if (!process) return;
+    if (process.kind === 'workbench') {
+      if (this.agentSetup.readiness.process()?.pid === process.pid) await this.agentSetup.disconnect();
+      return;
+    }
+    const { binding, pid } = process;
+    const live = () => this.conversations.processes().find((row) => row.binding.identity === binding.identity && row.pid === pid);
+    // A replaced or finished row must not end a newer process for the same task.
+    if (!live()) return;
+    if (['running', 'waiting_permission', 'cancelling'].includes(live()!.status)) {
+      const end = 'End Agent Process';
+      if ((await this.confirmProcessEnd(binding.title, end)) !== end || !live()) return;
+    }
+    await this.conversations.endProcess(binding.repository, binding.taskId, pid);
+  }
+  private async openAgentProcessChat(node?: Node) {
+    const process = node?.kind === 'setting' ? node.process : undefined;
+    if (process?.kind === 'task') await this.conversations.show(process.binding.repository, process.binding.taskId);
+  }
   private async openConversation(node?: Node) {
     const selected = await this.pickTask(node);
     if (!selected || !this.backend) return;
     const task = await this.ensureWorkspace(selected);
     await this.conversations.show(this.backend.root, task.id);
   }
-  private async reviewConversation(binding: AcpBinding, reference?: string) {
-    const file = reference === undefined ? undefined : await readWorkspaceReference(binding.workspace, reference);
+  private async reviewConversation(binding: AcpBinding, reference: string) {
+    const file = await readWorkspaceReference(binding.workspace, reference);
     await this.perform(
       async () => {
         if (this.backend?.root !== binding.repository) await this.open(binding.repository);
         await this.refresh();
         const task = this.tasks().find((row) => row.id === binding.taskId && row.worktree === binding.workspace);
         if (!task) throw new Error('This task does not belong to the current base branch. Switch back to its base branch first.');
-        if (file) {
-          const line = (file.line ?? 1) - 1;
-          const column = (file.column ?? 1) - 1;
-          const selection = new vscode.Range(line, column, line, column);
-          const changed = (await this.getChildren({ kind: 'task', task })).find((node) => node.kind === 'file' && node.file.path === file.path);
-          if (changed) await this.openDiff(changed, selection);
-          else {
-            const uri = await this.documents.add(path.basename(file.path), file.content, binding.repository, file.path);
-            await vscode.window.showTextDocument(uri, { preview: true, selection });
-          }
-        } else await this.selectTask({ kind: 'task', task });
+        const line = (file.line ?? 1) - 1;
+        const column = (file.column ?? 1) - 1;
+        const selection = new vscode.Range(line, column, line, column);
+        const changed = (await this.getChildren({ kind: 'task', task })).find((node) => node.kind === 'file' && node.file.path === file.path);
+        if (changed) await this.openDiff(changed, selection);
+        else {
+          const uri = await this.documents.add(path.basename(file.path), file.content, binding.repository, file.path);
+          await vscode.window.showTextDocument(uri, { preview: true, selection });
+        }
       },
       'Opening Task Review…',
       `task:${binding.taskId}`,

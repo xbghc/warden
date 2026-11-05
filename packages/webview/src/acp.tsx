@@ -4,29 +4,21 @@ import {
   ArrowUp,
   Check,
   ChevronRight,
-  FileDiff,
-  FileText,
   Info,
   LoaderCircle,
-  MessageSquare,
   MessageSquarePlus,
   MoreHorizontal,
   PanelRight,
   ShieldQuestion,
-  SlidersHorizontal,
   Square,
-  Unplug,
 } from 'lucide-react';
 import type { AcpAction, AcpConfigOption, AcpMessage, AcpModel, AcpPermission, AcpStatus } from '@warden/shared';
 import { Button } from './components/ui/button';
-import { Checkbox } from './components/ui/checkbox';
-import { NativeSelect, NativeSelectOptGroup, NativeSelectOption } from './components/ui/native-select';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from './components/ui/select';
 import { Textarea } from './components/ui/textarea';
 import { IconButton } from './components/ui/icon-button';
 import { StatusBadge } from './components/ui/status-badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './components/ui/dropdown-menu';
-import { Popover, PopoverContent, PopoverTrigger } from './components/ui/popover';
 import { ChatMarkdown, CopyText } from './chat-markdown';
 import { completeSlashCommand, slashCommandQuery } from './chat-commands';
 
@@ -97,15 +89,13 @@ export function AcpApp({ model, send: dispatch }: Props) {
   sendRef.current = dispatch;
   profileRef.current = profileId;
 
-  // An error may leave an agent waiting for login or cancellation. Keep disconnect reachable.
+  // Errors can leave an agent process alive; Settings › Agent Processes ends it outside the chat.
   const hasConnection = status !== 'disconnected' && status !== 'resetting';
   const controls = hasConnection ? model.controls : undefined;
   const configOptions = controls?.configOptions ?? [];
   const selectors = configOptions.filter((option) => option.type === 'select');
   const preferred = ['mode', 'model', 'thought_level'].flatMap((category) => selectors.find((option) => option.category === category) ?? []);
   const primaryOptions = preferred.length ? preferred : selectors.slice(0, 3);
-  const primaryIds = new Set(primaryOptions.map((option) => option.id));
-  const extraOptions = configOptions.filter((option) => !primaryIds.has(option.id));
   const busy =
     switching ||
     model.sending ||
@@ -116,6 +106,20 @@ export function AcpApp({ model, send: dispatch }: Props) {
     status === 'cancelling' ||
     status === 'resetting';
   const availableProfile = model.profiles.some((profile) => profile.id === profileId);
+  const configMode = controls?.configOptions !== undefined ? primaryOptions.find((option) => option.category === 'mode') : undefined;
+  // Mirror the footer: config options replace legacy modes whenever the agent advertises them.
+  const modeValues =
+    configMode?.type === 'select'
+      ? { current: configMode.currentValue, values: configMode.options.map((option) => option.value) }
+      : controls?.configOptions === undefined && controls?.modes
+        ? { current: controls.modes.currentModeId, values: controls.modes.availableModes.map((mode) => mode.id) }
+        : undefined;
+  const cycleMode = () => {
+    if (!modeValues || modeValues.values.length < 2 || busy || sending || status !== 'connected') return;
+    const next = modeValues.values[(modeValues.values.indexOf(modeValues.current) + 1) % modeValues.values.length]!;
+    if (configMode) send({ type: 'set-config', configId: configMode.id, value: next });
+    else send({ type: 'set-mode', modeId: next });
+  };
   const needsRestore = !!record.sessionId && status === 'disconnected';
   const canSend = !!draft.trim() && availableProfile && !busy && !sending && !pending && !(needsRestore && !record.canLoad) && status !== 'error';
   const canStop = status === 'running' || status === 'waiting_permission' || status === 'cancelling';
@@ -307,27 +311,10 @@ export function AcpApp({ model, send: dispatch }: Props) {
               {working && <LoaderCircle className="acp-spinner" aria-hidden="true" />}
               <StatusBadge status={status}>{statusLabels[status]}</StatusBadge>
             </span>
-            <IconButton label="View Task Diff" size="icon-sm" disabled={switching} onClick={() => send({ type: 'review' })}>
-              <FileDiff aria-hidden="true" />
-            </IconButton>
             {model.presentation === 'editor' && (
               <IconButton label="Move Chat to Side Bar" size="icon-sm" disabled={switching} onClick={() => send({ type: 'open-sidebar' })}>
                 <PanelRight aria-hidden="true" />
               </IconButton>
-            )}
-            {!!extraOptions.length && (
-              <Popover>
-                <PopoverTrigger asChild>
-                  <IconButton label="More Session Options" size="icon-sm" disabled={switching}>
-                    <SlidersHorizontal aria-hidden="true" />
-                  </IconButton>
-                </PopoverTrigger>
-                <PopoverContent className="acp-options-popover" aria-label="More Session Options">
-                  {extraOptions.map((option) => (
-                    <ConfigOption key={option.id} option={option} disabled={busy || sending || status !== 'connected'} send={send} />
-                  ))}
-                </PopoverContent>
-              </Popover>
             )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -336,24 +323,14 @@ export function AcpApp({ model, send: dispatch }: Props) {
                 </IconButton>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem disabled={switching} onSelect={() => send({ type: 'insert-brief' })}>
-                  <FileText aria-hidden="true" />
-                  Insert Task Brief
-                </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => setShowInfo(!showInfo)}>
                   <Info aria-hidden="true" />
-                  {showInfo ? 'Hide Task and Session Info' : 'Task and Session Info'}
+                  {showInfo ? 'Info: Hide' : 'Info: Show'}
                 </DropdownMenuItem>
                 {(record.profileId || record.sessionId || record.messages.length > 0) && (
                   <DropdownMenuItem disabled={busy || sending} onSelect={() => send({ type: 'new' })}>
                     <MessageSquarePlus aria-hidden="true" />
                     New Session
-                  </DropdownMenuItem>
-                )}
-                {hasConnection && (
-                  <DropdownMenuItem onSelect={() => send({ type: 'disconnect' })}>
-                    <Unplug aria-hidden="true" />
-                    {busy || status === 'error' ? 'End Agent Process' : 'Disconnect'}
                   </DropdownMenuItem>
                 )}
               </DropdownMenuContent>
@@ -450,43 +427,25 @@ export function AcpApp({ model, send: dispatch }: Props) {
           }}
         >
           <div className="acp-transcript-content" ref={transcriptContent}>
-            {record.messages.length ? (
-              activityRows(record.messages).map((messages) =>
-                messages.length >= 3 ? (
-                  <details className="acp-activity-group" key={messages[0]!.id}>
-                    <summary>
-                      <ChevronRight className="acp-disclosure" aria-hidden="true" />
-                      {messages.length} earlier activities
-                    </summary>
-                    {messages.map((message) => (
-                      <Message key={message.id} message={message} active={false} openFile={openFile} />
-                    ))}
-                  </details>
-                ) : (
-                  messages.map((message) => (
-                    <Message key={message.id} message={message} active={model.sending && message.id === lastUser?.id} openFile={openFile} />
-                  ))
-                ),
-              )
-            ) : (
-              <div className="acp-empty muted">
-                <MessageSquare aria-hidden="true" />
-                <h2>Work on this task</h2>
-                <p>Describe the next step, or use the saved task brief.</p>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={switching}
-                  onClick={() => {
-                    send({ type: 'insert-brief' });
-                    composer.current?.focus();
-                  }}
-                >
-                  <FileText aria-hidden="true" />
-                  Use Task Brief
-                </Button>
-              </div>
-            )}
+            {record.messages.length
+              ? activityRows(record.messages).map((messages) =>
+                  messages.length >= 3 ? (
+                    <details className="acp-activity-group" key={messages[0]!.id}>
+                      <summary>
+                        <ChevronRight className="acp-disclosure" aria-hidden="true" />
+                        {messages.length} earlier activities
+                      </summary>
+                      {messages.map((message) => (
+                        <Message key={message.id} message={message} active={false} openFile={openFile} />
+                      ))}
+                    </details>
+                  ) : (
+                    messages.map((message) => (
+                      <Message key={message.id} message={message} active={model.sending && message.id === lastUser?.id} openFile={openFile} />
+                    ))
+                  ),
+                )
+              : null}
           </div>
         </div>
         {showLatest && (
@@ -602,6 +561,13 @@ export function AcpApp({ model, send: dispatch }: Props) {
                   return;
                 }
               }
+              // Tab stays inside the composer while a mode selector exists, even when a pending change
+              // ignores it, so repeated presses never jump focus. Shift+Tab keeps native focus navigation.
+              if (event.key === 'Tab' && modeValues && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey) {
+                event.preventDefault();
+                cycleMode();
+                return;
+              }
               if (event.key === 'Enter' && !event.shiftKey && !event.altKey) {
                 event.preventDefault();
                 submit();
@@ -624,12 +590,15 @@ export function AcpApp({ model, send: dispatch }: Props) {
               )}
               {controls?.configOptions !== undefined
                 ? primaryOptions.map((option) => (
-                    <ConfigOption
+                    <ComposerPicker
                       key={option.id}
-                      option={option}
-                      compact
+                      name={option.name}
+                      description={option.description}
+                      category={option.category}
+                      value={option.currentValue}
+                      options={option.options}
                       disabled={busy || sending || status !== 'connected'}
-                      send={send}
+                      onValueChange={(value) => send({ type: 'set-config', configId: option.id, value })}
                       onSelected={() => composer.current?.focus({ preventScroll: true })}
                     />
                   ))
@@ -673,71 +642,6 @@ export function AcpApp({ model, send: dispatch }: Props) {
         </div>
       </form>
     </main>
-  );
-}
-
-function ConfigOption({
-  option,
-  compact = false,
-  disabled,
-  send,
-  onSelected,
-}: {
-  option: AcpConfigOption;
-  compact?: boolean;
-  disabled: boolean;
-  send: Props['send'];
-  onSelected?(): void;
-}) {
-  const descriptionId = useId();
-  if (compact && option.type === 'select') {
-    return (
-      <ComposerPicker
-        name={option.name}
-        description={option.description}
-        category={option.category}
-        value={option.currentValue}
-        options={option.options}
-        disabled={disabled}
-        onValueChange={(value) => send({ type: 'set-config', configId: option.id, value })}
-        onSelected={onSelected}
-      />
-    );
-  }
-  const description = option.description && (
-    <span id={descriptionId} className="muted acp-control-description">
-      {option.description}
-    </span>
-  );
-  return option.type === 'boolean' ? (
-    <label className="acp-config-toggle">
-      <Checkbox
-        aria-label={option.name}
-        aria-describedby={option.description ? descriptionId : undefined}
-        checked={option.currentValue}
-        disabled={disabled}
-        onCheckedChange={(checked) => send({ type: 'set-config', configId: option.id, value: checked === true })}
-      />
-      <span>
-        {option.name}
-        {description}
-      </span>
-    </label>
-  ) : (
-    <label className="field">
-      <span>{option.name}</span>
-      <NativeSelect
-        aria-label={option.name}
-        aria-describedby={option.description ? descriptionId : undefined}
-        title={option.description ? `${option.name}: ${option.description}` : option.name}
-        value={option.currentValue}
-        disabled={disabled}
-        onChange={(event) => send({ type: 'set-config', configId: option.id, value: event.target.value })}
-      >
-        <ConfigValues options={option.options} />
-      </NativeSelect>
-      {description}
-    </label>
   );
 }
 
@@ -835,23 +739,6 @@ function ComposerPicker({
   );
 }
 
-function ConfigValues({ options }: { options: SelectOptions }) {
-  return groupConfigValues(options).map((group) => {
-    const values = group.options.map((option) => (
-      <NativeSelectOption key={option.value} value={option.value} title={option.description}>
-        {option.name}
-      </NativeSelectOption>
-    ));
-    return group.label === undefined ? (
-      values
-    ) : (
-      <NativeSelectOptGroup key={group.options[0]!.value} label={group.label}>
-        {values}
-      </NativeSelectOptGroup>
-    );
-  });
-}
-
 function ChatError({ error, canRetry, retry }: { error: string; canRetry: boolean; retry(): void }) {
   const summary = error.split('\n')[0]!.slice(0, 220);
   return (
@@ -936,9 +823,10 @@ const Message = memo(
     }
     const longPrompt = message.role === 'user' && (message.text.length > 500 || message.text.split('\n').length > 8);
     return (
-      <article className={`acp-message acp-message-${message.role}`}>
+      // Alignment and styling distinguish user and agent messages; only notices keep a visible label.
+      <article className={`acp-message acp-message-${message.role}`} aria-label={role}>
         <div className="acp-message-heading">
-          <strong>{role}</strong>
+          {message.role === 'notice' && <strong>{role}</strong>}
           {active ? (
             <span className="muted">In progress</span>
           ) : message.uncertain ? (

@@ -22,7 +22,7 @@ import type { SessionCapabilities as DraftSessionCapabilities, SystemPrompt } fr
 import type { AcpControls, AcpMessage, AcpPermission, AcpRecord, AcpSnapshot, AcpStatus } from '@warden/shared';
 import { DiagnosticLog, diagnosticError, diagnosticOutcome } from '@warden/shared';
 import type { DiagnosticOutcome } from '@warden/shared';
-import type { AcpProfile, AcpSessionOptions } from './contracts.js';
+import type { AcpProfile, AcpSessionOptions, AgentProcessInfo } from './contracts.js';
 import { availableCommands, configOptions, emptyControls, isModelOption, sessionModes } from './session-controls.js';
 import { AcpStderr, acpDiagnosticSecrets, acpErrorMessage, acpFailureLog } from './diagnostics.js';
 import { approveRepositoryRead, repositoryReadRequest } from './read-permissions.js';
@@ -61,6 +61,7 @@ type Runtime = {
   profile: AcpProfile;
   generation: number;
   child: ChildProcessWithoutNullStreams;
+  startedAt: string;
   started: Promise<void>;
   connection: ClientConnection;
   exit: Promise<void>;
@@ -138,6 +139,18 @@ export class AcpSession {
       messages: [],
       updatedAt: new Date().toISOString(),
     };
+  }
+
+  /** Cheap status for process listings; snapshot() clones the whole transcript. */
+  currentStatus(): AcpStatus {
+    return this.resetting ? 'resetting' : this.status;
+  }
+
+  /** The agent process this conversation still owns. A stopping process is already being ended. */
+  process(): AgentProcessInfo | undefined {
+    const runtime = this.runtime;
+    if (!runtime || runtime.exited || runtime.stopping || !runtime.child.pid) return undefined;
+    return { pid: runtime.child.pid, profile: runtime.profile, startedAt: runtime.startedAt };
   }
 
   snapshot(): AcpSnapshot {
@@ -460,6 +473,7 @@ export class AcpSession {
       profile,
       generation,
       child,
+      startedAt: new Date().toISOString(),
       started: once(child, 'spawn').then(() => undefined),
       exit,
       release,

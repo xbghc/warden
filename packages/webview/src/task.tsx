@@ -48,7 +48,7 @@ export function Task({ model, send, state }: { model: WorkbenchModel; send(actio
       state.save(key, undefined);
     }
   }, [task?.title, task?.body, saving]);
-  if (!task) return <p className="muted">Choose Edit Task from the task menu.</p>;
+  if (!task) return null;
   const changed = draft.title !== task.title || draft.body !== (task.body ?? '');
   return (
     <section className="task-inline" aria-label="Edit Notes">

@@ -208,8 +208,7 @@ Sending from a panel that has not yet received appended context requires reviewi
 A newer local edit can be sent across a delayed acknowledgement that only clears the previous draft;
 it cannot bypass unseen appended context. Sending stays unavailable until the completed transcript
 is persisted and its draft acknowledgement is settled, including when a panel is reopened mid-turn.
-New chats start with an empty composer. **Use Task Brief** or **Insert Task Brief** explicitly appends
-the task's saved context without sending it. While a submitted draft is unchanged and its turn is
+New chats start with an empty composer and Warden inserts no task text into it. While a submitted draft is unchanged and its turn is
 running, the composer displays an empty input for a follow-up; the host retains the original draft
 until completion. A failed turn restores that text only if the user has not edited the draft. View
 moves remap the submission revision so neither a sent draft nor newer typing is lost or resurrected.
@@ -296,9 +295,11 @@ descriptions. Selecting a value returns focus to the message input while confirm
 Escape closes a picker and restores its trigger focus without sending or changing the draft.
 A pending configuration change or active turn closes an open picker; confirmed agent state remains the
 source of displayed values. The header menu
-contains task/session details and disconnect; executable profiles and setup instructions are absent.
+contains task/session details and **New Session**; executable profiles, setup instructions and
+process controls are absent.
 Enter sends, Shift+Enter inserts a line, and Ctrl/Command+Enter remains supported. IME composition
-never submits. The send control becomes Stop Turn during an active turn.
+never submits. Outside slash completion, Tab cycles the displayed mode selector (`mode` config option,
+otherwise legacy `modes`) in agent order through the same `set-config` or `set-mode` action as the picker. The send control becomes Stop Turn during an active turn.
 
 The layout draws on VS Code's [shared chat control sizing](https://github.com/microsoft/vscode/blob/9be315fcbf470a87d94d95a04e2f916d1fae5765/src/vs/workbench/contrib/chat/browser/widget/media/chat.css)
 and [responsive picker layout](https://github.com/microsoft/vscode/blob/9be315fcbf470a87d94d95a04e2f916d1fae5765/src/vs/workbench/contrib/chat/browser/widget/input/chatInputPickerResponsiveLayout.ts).
@@ -359,8 +360,10 @@ watchers or preview synchronization. Task Chat cannot take over the workbench's 
 when the repository is reopened or selected elsewhere.
 
 **Stop Turn** sends `session/cancel` and cancels pending permission requests. Warden continues to
-handle the original prompt response. **Disconnect** closes the owned connection and its agent process;
-an active connection may expose this as **End Agent Process**. Neither a cancelled response, a completed
+handle the original prompt response. **End Agent Process** in **Settings › ACP › Agent Processes**
+closes the owned connection and its agent process. The list holds only this window's live processes
+(the workbench connection and task conversations), excluding retiring ones. Ending is bound to the
+listed PID, so a stale row cannot end a replacement process. Neither a cancelled response, a completed
 prompt nor an exited stdio process proves that all agent-started background commands have stopped.
 Warden does not supervise those commands or kill unrelated terminals and preview servers.
 Stopping never resets, cleans or rolls back task files.

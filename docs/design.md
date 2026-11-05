@@ -71,7 +71,7 @@ The view title offers **Switch Task Chat** and **Open Chat in Editor**. An expan
 Different tasks may be expanded side by side. Hiding or switching the view does not disconnect agents.
 Opening Task Chat automatically resumes its saved session or creates the first session. Repeated
 opens reuse an active connection or its pending attempt; opening never sends the draft.
-New chats offer **Use Task Brief** beside an empty composer. The conversation is the main scrolling
+New chats show an empty conversation and composer without instructional copy. The conversation is the main scrolling
 region, with a **Jump to Latest** control when the user reads older messages. Replies render Markdown
 and copyable code blocks; tool activity and thoughts are compact disclosures. Permission requests
 keep their action, a detail preview and the agent's choices visible, with full details on demand.
@@ -82,16 +82,20 @@ Errors show a short explanation and recovery action, with technical details behi
 **New Session** lives in **More Chat Actions** to keep routine conversation controls focused.
 
 The task title and connection state stay above a scrolling transcript; the composer stays at the
-bottom. Task paths, agent identity and usage appear on demand under **More Chat Actions**, alongside
-disconnect. New sessions use the agent verified in the workbench; existing sessions retain their
+bottom. Task paths, agent identity and usage appear on demand under **More Chat Actions**; agent
+processes are ended from **Settings › ACP › Agent Processes**, not from the chat. Messages have no
+sender labels. New sessions use the agent verified in the workbench; existing sessions retain their
 binding. Task Chat has no agent-profile picker, executable configuration or ACP setup guide.
 The composer has one input surface and a single footer row ordered Mode, Model, reasoning effort,
 then Send. Show the agent's available selectors; long values truncate instead of wrapping the row.
-Additional session options live in the header. Send becomes Stop Turn while running.
+Other agent options are not shown, and the header has no diff shortcut. Send becomes Stop Turn while running.
 There is no permanent slash-command button: typing `/` at the beginning of the message opens a
 filtered command list above the input. Arrow keys select a command, Enter or Tab inserts it, and
 Escape dismisses the list. Completion preserves existing arguments and never submits the message.
-Outside completion, Enter sends; Shift+Enter inserts a line, and composition keystrokes never send. Session details
+Outside completion, Enter sends; Shift+Enter inserts a line, and composition keystrokes never send.
+When a Mode selector is shown, Tab in the input cycles to the next agent-advertised mode without
+moving focus or changing the draft; it is ignored while the selector is disabled. Shift+Tab keeps
+native focus navigation. Session details
 scroll separately when narrow or short. Switching captures the
 current draft and reading position before replacing the view binding. Background permission requests
 and failures appear on task rows without changing focus. Users can move the view with VS Code's native
@@ -137,8 +141,9 @@ Git rebase replays task commits onto the base branch.
   native notifications draw attention to errors whose form is not visible.
 - Task copy actions use the more-actions menu; workspace storage, directory and branch choices
   stay internal. Hiding a task editor preserves its unsaved notes.
-- Workspaces with no changes have no child rows or placeholder message. Other empty states give
-  one next step or a short fact, such as **Select a task**. Loading, unavailable data, stale checks
+- Warden implements the workflow and does not teach it. Empty states stay blank: workspaces with no
+  changes have no child rows or placeholder message, and empty chats or editors add no instructional
+  copy. Native pickers keep their prompt, such as **Select a task**. Loading, unavailable data, stale checks
   and empty results are distinct; do not turn unknown data into a zero count or claim successful
   synchronization before it runs.
 - State operation consequences once, beside the relevant action. Keep normal commit hooks, recovery after failure, rebase semantics
@@ -220,7 +225,8 @@ contains only **Configure ACP** when ACP is missing, invalid, disconnected or ne
 error recovery; it has no setup text or duplicate toolbar
 entry. The button reveals the native **Settings** view stacked below Workbench and expands, selects
 and focuses the ACP section, including when it was previously collapsed. Its ACP tree owns
-preset selection, configuration, connection progress, errors, authentication and reconnect controls.
+preset selection, configuration, connection progress, errors, authentication and reconnect controls,
+plus **Agent Processes**, which lists this window's live agent processes and ends one on request.
 Repeated entry actions reveal the same view. Other workflow panels offer that same link rather than another setup
 or check page. Opening Settings does not create an additional connection.
 

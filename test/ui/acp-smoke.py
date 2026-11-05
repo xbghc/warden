@@ -43,6 +43,10 @@ try:
             page.get_by_role('button', name='More Chat Actions', exact=True).click()
             page.get_by_role('menuitem', name=name, exact=True).click()
 
+        def end_process(page):
+            task = page.evaluate("new URL(location.href).searchParams.get('task') || '0'")
+            assert page.request.post(origin + '/end-process?task=' + task).ok
+
         def new_session(page):
             chat_action(page, 'New Session')
 
@@ -89,21 +93,27 @@ try:
         connected(second)
         expect(first.get_by_role('region', name='Agent Authentication')).to_have_count(0)
         expect(first.get_by_role('textbox', name='Message', exact=True)).to_have_value('')
-        first.get_by_role('button', name='Use Task Brief', exact=True).click()
-        first.wait_for_function("window.__model.draft.includes('订单筛选参数')")
-        expect(first.get_by_role('textbox', name='Message', exact=True)).to_be_focused()
+        # New chats carry no instructional copy or task-brief shortcut.
+        expect(first.get_by_role('log', name='Conversation History')).to_have_text('')
+        first.get_by_role('button', name='More Chat Actions', exact=True).click()
+        expect(first.get_by_role('menuitem', name='Info: Show')).to_be_visible()
+        expect(first.get_by_role('menuitem', name='Insert Task Brief')).to_have_count(0)
+        # Agent processes are ended from Settings › Agent Processes, not from the chat menu.
+        expect(first.get_by_role('menuitem', name='Disconnect')).to_have_count(0)
+        expect(first.get_by_role('menuitem', name='End Agent Process')).to_have_count(0)
+        first.keyboard.press('Escape')
         for entry in inspect()['entries']:
             journal = [json.loads(line) for line in entry['journals'][0].splitlines()]
             assert sum(row.get('method') == 'session/new' for row in journal) == 1
             assert not any(row.get('method') == 'session/prompt' for row in journal)
         expect(first.get_by_role('button', name='Resume Session', exact=True)).to_have_count(0)
         expect(first.get_by_role('button', name='Connect Agent', exact=True)).to_have_count(0)
-        review = first.get_by_role('button', name='View Task Diff', exact=True)
-        review.focus()
-        expect(first.get_by_role('tooltip', name='View Task Diff', exact=True)).to_be_visible()
-        review.press('Escape')
-        review.click()
-        first.wait_for_function("window.__actions.some(message => message.action?.type === 'review')")
+        # The native task tree owns diff navigation; the chat header keeps only chat controls.
+        expect(first.get_by_role('button', name='View Task Diff', exact=True)).to_have_count(0)
+        actions = first.get_by_role('button', name='More Chat Actions', exact=True)
+        actions.focus()
+        expect(first.get_by_role('tooltip', name='More Chat Actions', exact=True)).to_be_visible()
+        actions.press('Escape')
 
         # Capturing a view flushes a debounced edit before the host changes its routing token.
         composer = first.get_by_role('textbox', name='Message', exact=True)
@@ -477,7 +487,7 @@ try:
         first.set_viewport_size({'width': 1000, 'height': 900})
 
 
-        chat_action(first, 'Disconnect')
+        end_process(first)
         first.wait_for_function("window.__model.status === 'disconnected'")
         history = conversation(inspect()['entries'][0]['model']['record']['messages'])
         first.reload()
@@ -505,7 +515,7 @@ try:
         second.wait_for_function("window.__model.status === 'connected' && window.__model.record.profileId === 'no-load'")
         send(second, 'no-load turn')
         expect(second.locator('.acp-message-agent')).to_contain_text('Echo: no-load turn')
-        chat_action(second, 'Disconnect')
+        end_process(second)
         second.wait_for_function("window.__model.status === 'disconnected'")
         expect(second.get_by_role('button', name='Reconnect', exact=True)).to_be_disabled()
         expect(second.get_by_text('This agent does not advertise session restoration', exact=False)).to_be_visible()
@@ -557,8 +567,9 @@ try:
         second.wait_for_function("window.__model.status === 'error'")
         second.get_by_role('button', name='More Chat Actions', exact=True).click()
         expect(second.get_by_role('menuitem', name='New Session', exact=True)).to_be_enabled()
+        expect(second.get_by_role('menuitem', name='End Agent Process', exact=True)).to_have_count(0)
         second.get_by_role('menuitem', name='New Session', exact=True).press('Escape')
-        chat_action(second, 'End Agent Process')
+        end_process(second)
         second.wait_for_function("window.__model.status === 'disconnected'")
         expect(second.get_by_role('combobox', name='Agent Profile', exact=True)).to_have_count(0)
         use_agent(second, 'normal')
@@ -605,6 +616,18 @@ try:
         expect(config_mode).to_have_text('Ask')
         expect(composer).to_be_focused()
         expect(composer).to_have_value(picker_draft)
+        # Tab cycles modes from the composer without moving focus or editing the draft.
+        composer.press('Tab')
+        first.wait_for_function("window.__model.controls.configOptions.find(option => option.id === 'mode')?.currentValue === 'code' && !window.__model.controls.configuring")
+        expect(config_mode).to_have_text('Code')
+        expect(composer).to_be_focused()
+        expect(composer).to_have_value(picker_draft)
+        composer.press('Tab')
+        first.wait_for_function("window.__model.controls.configOptions.find(option => option.id === 'mode')?.currentValue === 'ask' && !window.__model.controls.configuring")
+        expect(config_mode).to_have_text('Ask')
+        composer.press('Shift+Tab')
+        expect(composer).not_to_be_focused()
+        composer.focus()
 
         # Full agent labels remain readable in a bounded menu; UI state changes close an open picker.
         first.evaluate('async () => { await queue; await window.__fixture.pauseModels(); }')
@@ -661,13 +684,10 @@ try:
         first.evaluate('async () => { await window.__fixture.resumeModels(); }')
         expect(model_selector).to_have_text('快速')
         first.set_viewport_size({'width': 260, 'height': 900})
-        expect(thinking).not_to_be_visible()
-        first.get_by_role('button', name='More Session Options', exact=True).click()
-        expect(thinking).not_to_be_checked()
+        # Only the composer selectors are shown; other agent options have no header entry point.
+        expect(thinking).to_have_count(0)
+        expect(first.get_by_role('button', name='More Session Options', exact=True)).to_have_count(0)
         expect(first.get_by_role('combobox', name='Session Mode', exact=True)).to_have_count(0)
-        thinking.press('Escape')
-        # Let the popover restore its trigger focus before moving into the composer.
-        expect(first.get_by_role('button', name='More Session Options', exact=True)).to_be_focused()
 
         # Typing a command opens completion without moving focus or sending a prompt.
         command_list = first.get_by_role('listbox', name='Agent Commands', exact=True)
@@ -720,18 +740,16 @@ try:
         first.get_by_role('option', name='深入', exact=True).click()
         first.wait_for_function("window.__model.controls.configOptions.find(option => option.id === 'model')?.currentValue === 'deep' && !window.__model.controls.configuring")
         expect(model_selector).to_have_text('深入')
-        first.get_by_role('button', name='More Session Options', exact=True).click()
-        thinking.click()
-        first.wait_for_function("window.__model.controls.configOptions.find(option => option.id === 'thinking')?.currentValue === true && !window.__model.controls.configuring")
-        expect(thinking).to_be_checked()
         expect(composer).to_have_value('/explain 保留的草稿')
-        thinking.press('Escape')
 
         send(first, 'session-updates')
         connected(first)
         expect(first.get_by_text('Agent session: 测试会话标题', exact=True)).not_to_be_visible()
-        chat_action(first, 'Task and Session Info')
+        chat_action(first, 'Info: Show')
         expect(first.get_by_text('Agent session: 测试会话标题', exact=True)).to_be_visible()
+        first.get_by_role('button', name='More Chat Actions', exact=True).click()
+        expect(first.get_by_role('menuitem', name='Info: Hide', exact=True)).to_be_visible()
+        first.keyboard.press('Escape')
         expect(first.get_by_label('Session Usage', exact=True)).to_contain_text('1,200 / 8,000 tokens')
         expect(first.get_by_label('Session Usage', exact=True)).to_contain_text('0.02 USD')
         expect(first.get_by_text('会话更新提示', exact=True)).to_be_visible()
@@ -747,12 +765,9 @@ try:
         send(first, 'hold')
         first.wait_for_function("window.__model.status === 'running'")
         expect(model_selector).to_be_disabled()
-        first.get_by_role('button', name='More Session Options', exact=True).click()
-        expect(thinking).to_be_disabled()
-        first.get_by_role('dialog', name='More Session Options', exact=True).press('Escape')
         first.get_by_role('button', name='Stop Turn', exact=True).click()
         connected(first)
-        chat_action(first, 'Disconnect')
+        end_process(first)
         first.wait_for_function("window.__model.status === 'disconnected'")
         expect(model_selector).to_have_count(0)
         expect(thinking).to_have_count(0)
@@ -776,6 +791,10 @@ try:
         first.wait_for_function("window.__model.controls.modes.currentModeId === 'code' && !window.__model.controls.configuring")
         expect(mode_selector).to_have_text('编码')
         expect(model_selector).to_have_count(0)
+        composer.press('Tab')
+        first.wait_for_function("window.__model.controls.modes.currentModeId === 'ask' && !window.__model.controls.configuring")
+        expect(mode_selector).to_have_text('询问')
+        expect(composer).to_be_focused()
 
         send(first, 'tool-progress')
         expect(first.locator('.acp-message-agent').last.locator('.acp-message-text')).to_have_text('Tool progress completed')
@@ -848,11 +867,14 @@ try:
         send(first, 'Follow up on this workspace')
         connected(first)
         expect(first.locator('.acp-message-agent').last.locator('.acp-message-text')).to_have_text('Echo: Follow up on this workspace')
+        # Messages carry no You/Agent sender label; the role stays available to assistive technology.
+        expect(first.locator('.acp-message-user .acp-message-heading strong, .acp-message-agent .acp-message-heading strong')).to_have_count(0)
+        expect(first.locator('.acp-message-agent').last).to_have_attribute('aria-label', 'Agent')
         first.get_by_role('textbox', name='Message', exact=True).fill('Third message')
         expect(first.get_by_role('button', name='Send', exact=True)).to_be_enabled()
         first.get_by_role('textbox', name='Message', exact=True).fill('')
         saved_context = first.evaluate("window.__model.record.messages.find(message => message.role === 'user').text")
-        chat_action(first, 'Disconnect')
+        end_process(first)
         first.wait_for_function("window.__model.status === 'disconnected'")
         first.reload()
         connected(first)
@@ -862,7 +884,7 @@ try:
         assert first.evaluate('window.__hostError') is None
         assert second.evaluate('window.__hostError') is None
         browser.close()
-    print('ACP browser flows passed: task isolation, parallel conversations, permissions, cancellation, delayed completion with reload and follow-up, unacknowledged completion clears, batched selection appends, in-flight drafts, stale models/sends, new-conversation edits, reopened-turn acknowledgement, restore, crash, authentication, failed-profile recovery, safe text, aligned mode/model/effort pickers, long/grouped labels, keyboard selection and focus, invalidated menus, slash completion with keyboard/mouse/IME and no implicit send, thought/usage updates, disconnected controls, visible workspace context fallback and replay.')
+    print('ACP browser flows passed: task isolation, parallel conversations, permissions, cancellation, delayed completion with reload and follow-up, unacknowledged completion clears, batched selection appends, in-flight drafts, stale models/sends, new-conversation edits, reopened-turn acknowledgement, restore, crash, authentication, failed-profile recovery, safe text, aligned mode/model/effort pickers, long/grouped labels, keyboard selection and focus, Tab mode cycling, invalidated menus, slash completion with keyboard/mouse/IME and no implicit send, thought/usage updates, disconnected controls, visible workspace context fallback and replay.')
 finally:
     host.terminate()
     host.wait(timeout=30)

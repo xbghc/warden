@@ -55,11 +55,12 @@ complete the task, recycle its workspace or prove that an agent is idle.
 | Check Again | Repeat read-only rebase checks; do not execute a rebase. |
 | Rebase Selected | Run Git rebase in the selected workspaces, targeting the base branch. |
 | Commit to Base Branch | Commit the reviewed increment. When the destination is known, show **Commit to <branch>**, such as **Commit to feature/order**. |
-| Chat with Agent / Reconnect / Disconnect | Open the task chat and prepare its session automatically / retry the task's agent connection / close it. Outside a task chat, qualify the connection as an agent connection. |
+| Chat with Agent / Reconnect | Open the task chat and prepare its session automatically / retry the task's agent connection. Outside a task chat, qualify the connection as an agent connection. |
+| Agent Processes / End Agent Process | The Settings list of agent processes Warden started in this window / close one listed connection and its process. |
 | Configure ACP | Reveal the native Settings view stacked below Workbench. Shown when an unavailable agent needs user action; hidden during workspace loading and pending connections. |
 | Choose Agent Preset | Open the preset picker from Settings. A preset has one stable profile ID; selecting an existing one edits its settings instead of adding a duplicate. |
 | Connect ACP / Reconnect ACP / Cancel Connection | Explicitly connect or retry from Settings / replace the connection / stop a pending connection attempt. Startup and profile changes connect automatically. Initialization creates no Warden task or work prompt. |
-| Disconnect ACP | Close the workbench ACP connection and its owned process. Task conversations retain their own connections and stop controls. |
+| Disconnect ACP | Close the workbench ACP connection and its owned process. Task conversations retain their own connections, ended from Agent Processes. |
 | Workspace Setup Script | The user script run on task workspace allocation; distinct from Git commit hooks. |
 | Preview Setup Script | The user script preparing the preview environment; distinct from the command running a development server. |
 

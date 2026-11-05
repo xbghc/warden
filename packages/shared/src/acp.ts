@@ -123,7 +123,7 @@ export interface AcpModel extends AcpSnapshot {
 export type AcpAction =
   | ({ type: 'send'; profileId: string } & AcpDraftEdit)
   | { type: 'connect'; profileId: string; resume: boolean }
-  | { type: 'cancel' | 'disconnect' | 'new' | 'configure' | 'review' | 'open-sidebar' | 'view-ready' | 'insert-brief' }
+  | { type: 'cancel' | 'new' | 'configure' | 'open-sidebar' | 'view-ready' }
   | ({ type: 'view-state'; requestId?: string } & AcpViewState)
   | ({ type: 'draft' } & AcpDraftEdit)
   | { type: 'permission'; requestId: string; optionId: string }
@@ -158,13 +158,10 @@ export function parseAcpAction(value: unknown): AcpAction {
       if (typeof action.resume !== 'boolean') throw new Error('Invalid session resume option.');
       return { type: 'connect', profileId: id('profileId'), resume: action.resume };
     case 'cancel':
-    case 'disconnect':
     case 'new':
     case 'configure':
-    case 'review':
     case 'open-sidebar':
     case 'view-ready':
-    case 'insert-brief':
       return { type: action.type };
     case 'view-state':
       if (

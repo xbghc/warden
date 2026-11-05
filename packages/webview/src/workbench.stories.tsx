@@ -28,7 +28,7 @@ const task = {
   workspaceHook: { event: 'create' as const, command: 'pnpm install', status: 'failed' as const, exitCode: 1, output: '依赖安装失败，请检查仓库配置后重试。' },
 };
 const meta = {
-  title: 'Workbench/Forms',
+  title: 'Workbench/Task and Rebase Panels',
   component: WorkbenchApp,
   args: { model: base, send: () => {} },
 } satisfies Meta<typeof WorkbenchApp>;
@@ -36,39 +36,16 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const TaskNotes: Story = { args: { model: { ...base, task } } };
-export const OpeningRepository: Story = { args: { model: { ...base, repository: '', repositoryState: 'loading', workflow: undefined } } };
-export const ChooseRepository: Story = { args: { model: { ...base, repository: '', repositoryState: 'unselected', workflow: undefined } } };
-export const ChooseBranch: Story = { args: { model: { ...base, workflow: { workflow: null } } } };
-export const MissingAgent: Story = { args: { model: { ...base, agentConfiguration: { status: 'missing' }, agentReadiness: { status: 'unchecked' } } } };
-export const UncheckedAgent: Story = { args: { model: { ...base, agentReadiness: { status: 'unchecked' } } } };
+// Panels stay open across agent disconnects and fall back to the Configure ACP entry point.
 export const UnavailableAgent: Story = {
   args: {
     model: {
       ...base,
+      task,
       agentReadiness: { status: 'error', message: 'Unable to start the agent. Check its executable path on the workspace host.' },
     },
   },
 };
-export const AgentAuthentication: Story = {
-  args: {
-    model: {
-      ...base,
-      agentReadiness: { status: 'authentication_required', message: 'Sign in to continue.', authMethods: [{ id: 'login', name: 'Sign In' }] },
-    },
-  },
-};
-export const ConnectingAgent: Story = {
-  args: { model: { ...base, agentReadiness: { status: 'checking', message: 'Connecting to ACP…' } } },
-};
-export const InvalidAgentConfiguration: Story = {
-  args: {
-    model: { ...base, workflow: { workflow: null }, agentConfiguration: { status: 'invalid', message: 'Agent profiles require a valid label and command.' } },
-  },
-};
-export const ChooseBranchWithAgent: Story = {
-  args: { model: { ...base, workflow: { workflow: null }, agentConfiguration: { status: 'configured', count: 1 } } },
-};
-export const Loading: Story = { args: { model: { ...base, workflow: undefined } } };
 export const TaskSaveFailure: Story = {
   args: {
     model: {

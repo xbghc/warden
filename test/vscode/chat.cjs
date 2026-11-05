@@ -18,6 +18,16 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
       );
     }
   };
+  // Task processes are ended from Settings › Agent Processes; the chat webview has no disconnect action.
+  const processRows = () => workbench.settings.getChildren()[0].children.find((row) => row.id === 'agent-processes').children ?? [];
+  const processRow = (entry) => processRows().find((row) => row.process?.kind === 'task' && row.process.binding.identity === entry.binding.identity);
+  const endProcess = async (entry) => {
+    const row = processRow(entry);
+    assert(row, 'a live task chat appears under Settings › Agent Processes');
+    await vscode.commands.executeCommand('warden.endAgentProcess', row);
+    assert.equal(entry.session.snapshot().status, 'disconnected');
+    assert.equal(processRow(entry), undefined, 'an ended process leaves the list');
+  };
   const newTask = await workbench.backend.execute('task.create', { title: 'Task chat' });
   await workbench.refresh(true);
   const preview = await workbench.backend.execute('preview.refresh', undefined);
@@ -48,9 +58,6 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   assert(conversations.sidebar.visible, 'task chat is visible without opening an editor');
   assert.equal(chat.panel, undefined);
   assert.equal(chat.draft.text, '', 'new task chats start with an empty composer');
-  await conversations.handle(chat, { type: 'insert-brief' });
-  assert.match(chat.draft.text, /# Task chat/);
-  assert(!chat.draft.text.includes(chat.binding.workspace), 'task context omits the workspace path already bound to the session');
   await eventually(() => chat.surface.ready);
   const settingsOpening = conversations.handle(chat, { type: 'configure' });
   await settingsOpening;
@@ -180,7 +187,7 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   const editorSession = otherChat.session.snapshot().record.sessionId;
   await vscode.window.showTextDocument(vscode.Uri.file(path.join(fixture.root, 'README.md')), { viewColumn: otherChat.panel.viewColumn });
   await eventually(() => !otherChat.panel.visible);
-  await conversations.handle(otherChat, { type: 'disconnect' });
+  await endProcess(otherChat);
   otherChat.panel.reveal(otherChat.panel.viewColumn);
   await connected(otherChat);
   assert.equal(otherChat.session.snapshot().record.sessionId, editorSession, 'revealing the existing editor resumes its session');
@@ -229,7 +236,7 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   await held;
   assert.equal(chat.draft.text, 'hold', 'cancelling preserves a new draft even when its text is identical to the submitted prompt');
   const savedSession = chat.session.snapshot().record.sessionId;
-  await conversations.handle(chat, { type: 'disconnect' });
+  await endProcess(chat);
   await vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
   await eventually(() => !conversations.sidebar.visible);
   await vscode.commands.executeCommand('warden.taskChat.focus');
@@ -243,7 +250,7 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   assert.equal(chat.draft.text, 'hold', 'automatic resume preserves the unsent draft');
   assert.equal((await journal()).filter((row) => row.method === 'session/load' && row.cwd === chat.binding.workspace).length, 1);
   assert.equal((await journal()).filter((row) => row.method === 'session/prompt').length, 3 + readPrompts, 'resume never resends a prompt');
-  await conversations.handle(chat, { type: 'disconnect' });
+  await endProcess(chat);
   await conversations.handle(chat, { type: 'send', profileId: 'fixture', ...edit('session-updates') });
   assert.equal(chat.session.snapshot().record.sessionId, savedSession, 'sending after disconnect resumes the original session');
   assert.equal(chat.session.snapshot().controls.title, '测试会话标题');
@@ -290,7 +297,7 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   assert.equal(chat.surface.location, 'sidebar', 'a replaced checkout still allows reopening the original connection to stop it');
   assert.equal(chat.session.snapshot().status, 'connected');
   await assert.rejects(conversations.handle(chat, { type: 'send', profileId: 'fixture', ...edit('wrong allocation') }), /was replaced/);
-  await conversations.handle(chat, { type: 'disconnect' });
+  await endProcess(chat);
   await conversations.show(fixture.root, newTask.id);
   const replacement = [...conversations.entries.values()].find((entry) => entry.binding.taskId === newTask.id);
   assert.notEqual(replacement, chat, 'reopening a disconnected replaced allocation creates a fresh binding');
@@ -362,7 +369,7 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   const fallbackText = fallbackPrompt.map((block) => block.text).join('');
   assert.equal(fallbackChat.session.snapshot().record.messages.find((message) => message.role === 'user').text, fallbackText);
   assert.equal(fallbackChat.draft.text, '', 'automatic context does not alter the composer draft');
-  await conversations.handle(fallbackChat, { type: 'disconnect' });
+  await endProcess(fallbackChat);
   await conversations.show(fixture.root, fallbackTask.id);
   await connected(fallbackChat);
   assert.equal(fallbackChat.session.snapshot().record.messages.find((message) => message.role === 'user').text, fallbackText);
@@ -403,7 +410,7 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   await connected(emptyChat);
   const emptyRecord = emptyChat.session.snapshot().record;
   const emptyDraft = emptyChat.draft.text;
-  await conversations.handle(emptyChat, { type: 'disconnect' });
+  await endProcess(emptyChat);
   await conversations.show(fixture.root, emptyTask.id);
   assert(conversations.sidebarEntry === emptyChat, 'reopening an unchanged allocation keeps its conversation entry');
   try {
@@ -422,6 +429,54 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   assert.deepEqual(emptyChat.session.snapshot().authMethods, []);
   const emptyRequests = (await fs.readFile(missingJournal, 'utf8')).trim().split('\n').map(JSON.parse);
   assert(!emptyRequests.some((row) => ['authenticate', 'session/prompt'].includes(row.method)), 'empty-session recovery starts no login flow or prompt');
+
+  const workbenchProcess = processRows().find((row) => row.process?.kind === 'workbench');
+  assert.equal(workbenchProcess?.process.pid, workbench.agentSetup.readiness.process().pid, 'the workbench connection is listed with its PID');
+  const emptyProcess = processRow(emptyChat);
+  assert.equal(emptyProcess.label, 'Unpersisted empty session');
+  assert.match(emptyProcess.description, / · Idle · PID \d+$/);
+  assert.equal(emptyProcess.contextValue, 'wardenAgentProcess');
+  const confirmEnd = workbench.confirmProcessEnd;
+  const confirmations = [];
+  let acceptEnd = false;
+  workbench.confirmProcessEnd = async (title, button) => {
+    confirmations.push(title);
+    return acceptEnd ? button : undefined;
+  };
+  try {
+    const draft = emptyChat.draft.snapshot();
+    const holding = conversations.handle(emptyChat, {
+      type: 'send',
+      profileId: emptyChat.session.snapshot().record.profileId,
+      text: 'hold',
+      version: draft.draftVersion,
+      revision: draft.draftRevision + 1,
+    });
+    void holding.catch(() => {});
+    await eventually(async () => (await fs.readFile(missingJournal, 'utf8')).includes('"session/prompt"'));
+    await eventually(() => processRow(emptyChat)?.description.includes('Responding'));
+    await vscode.commands.executeCommand('warden.endAgentProcess', processRow(emptyChat));
+    assert.deepEqual(confirmations, ['Unpersisted empty session'], 'ending a responding process asks first');
+    assert.equal(emptyChat.session.snapshot().status, 'running', 'declining keeps the responding process');
+    acceptEnd = true;
+    const ending = processRow(emptyChat);
+    await vscode.commands.executeCommand('warden.endAgentProcess', ending);
+    await holding.catch(() => {});
+    assert.equal(emptyChat.session.snapshot().status, 'disconnected');
+    assert.equal(emptyChat.session.snapshot().record.interrupted, true, 'ending mid-response marks the turn interrupted');
+    assert.equal(processRow(emptyChat), undefined);
+    // This fixture cannot load a prompted session, so a new session starts the replacement process.
+    await conversations.handle(emptyChat, { type: 'new' });
+    await connected(emptyChat);
+    // A row captured before reconnecting must not end the replacement process.
+    await vscode.commands.executeCommand('warden.endAgentProcess', ending);
+    assert.equal(emptyChat.session.snapshot().status, 'connected', 'a stale row cannot end a newer process');
+    assert.notEqual(processRow(emptyChat).process.pid, ending.process.pid);
+    await endProcess(emptyChat);
+    assert.equal(confirmations.length, 2, 'idle processes end without confirmation');
+  } finally {
+    workbench.confirmProcessEnd = confirmEnd;
+  }
   workbench.output.error = report;
 };
 exports.checkChats = checkChats;

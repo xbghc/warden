@@ -5,7 +5,7 @@ import { Readable, Writable } from 'node:stream';
 import { client, ndJsonStream, PROTOCOL_VERSION, type ClientConnection } from '@agentclientprotocol/sdk';
 import type { AcpAuthMethod, AcpReadiness } from '@warden/shared';
 import { DiagnosticLog, diagnosticError } from '@warden/shared';
-import type { AcpProfile } from './contracts.js';
+import type { AcpProfile, AgentProcessInfo } from './contracts.js';
 import type { PerformanceLog, PerformanceOutcome, PerformanceSpan, PerformanceStage } from '../performance.js';
 import { AcpStderr, acpDiagnosticSecrets, acpErrorDiagnostic, redactAcpDiagnostic } from './diagnostics.js';
 
@@ -14,6 +14,7 @@ const clientVersion = typeof __WARDEN_VERSION__ === 'undefined' ? 'development' 
 
 type Runtime = {
   child: ChildProcessWithoutNullStreams;
+  startedAt: string;
   started: Promise<void>;
   connection: ClientConnection;
   ended: Promise<void>;
@@ -48,6 +49,13 @@ export class AcpReadinessCheck {
 
   snapshot(): AcpReadiness {
     return structuredClone(this.state);
+  }
+
+  /** The workbench connection's live process; a retiring process is already being ended. */
+  process(): AgentProcessInfo | undefined {
+    const runtime = this.runtime;
+    if (!runtime || runtime.exited || runtime.stopping || !runtime.child.pid || !this.profile) return undefined;
+    return { pid: runtime.child.pid, profile: this.profile, startedAt: runtime.startedAt };
   }
 
   private publish(state: AcpReadiness) {
@@ -124,6 +132,7 @@ export class AcpReadinessCheck {
     let reject!: (error: Error) => void;
     const runtime: Runtime = {
       child,
+      startedAt: new Date().toISOString(),
       started: once(child, 'spawn').then(() => undefined),
       connection,
       cwd,

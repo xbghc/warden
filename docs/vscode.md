@@ -245,9 +245,11 @@ Enter or Tab to insert, and Escape to dismiss; completion does not send the draf
 and cost, live notices and context-compaction updates are displayed when the agent provides them.
 These reports do not change task state or run Git operations.
 Mode, Model and reasoning effort appear in one row below the message text, followed by Send.
-Only selectors provided by the agent appear; long values truncate rather than wrap. Other controls
-live under **More Session Options** in the header. **More Chat Actions** contains disconnect and
-**Task and Session Info**, which holds task paths, agent identity, session title and usage.
+Only selectors provided by the agent appear; long values truncate rather than wrap. Other agent
+configuration options are not displayed. Task diffs open from the task in the native sidebar, not
+from the chat header. **More Chat Actions** contains **New Session** and **Info: Show** /
+**Info: Hide**, which toggles task paths, agent identity, session title and usage. Messages carry no
+You/Agent sender label; user messages are set apart by their background.
 Enter sends, Shift+Enter inserts a line, and the send button becomes Stop Turn while responding.
 Permission requests, live notices and connection errors remain directly visible.
 
@@ -261,8 +263,12 @@ the source repository. Reopening a disconnected chat loads the original session 
 it. Otherwise **New Session** starts again while retaining previous history. Warden never
 silently resends a prompt whose outcome is uncertain.
 
-**Stop Turn** requests cancellation. **Disconnect** closes Warden's connection and its agent process; an
-active connection can expose this as **End Agent Process**. These actions do not promise that every command
+**Stop Turn** requests cancellation. **Settings › ACP › Agent Processes** lists the agent processes
+Warden started in this window: the workbench connection and each live task conversation, with its
+agent, status and PID. The tooltip shows the workspace, repository, start time and executable. Selecting
+a task row opens its chat. **End Agent Process** closes that connection and its process; a responding or
+permission-waiting process asks for confirmation first, and a row whose process was already replaced
+does nothing. Other windows list their own processes. These actions do not promise that every command
 started by the agent has stopped. The agent owns its child commands and execution policies; coordinate
 ongoing work before Git mutations. A turn ending never connects preview, commits, delivers or rebases.
 Native review and its source/baseline pins remain unchanged.

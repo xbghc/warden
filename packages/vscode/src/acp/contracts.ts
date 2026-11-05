@@ -9,6 +9,13 @@ export interface AcpProfile {
   env?: Record<string, string>;
 }
 
+/** A live agent process started by this window's Warden. */
+export interface AgentProcessInfo {
+  pid: number;
+  profile: AcpProfile;
+  startedAt: string;
+}
+
 export interface AcpStorage {
   load(): Promise<AcpRecord | undefined>;
   save(record: AcpRecord): Promise<void>;

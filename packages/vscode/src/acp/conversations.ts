@@ -3,8 +3,8 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { Engine } from '@warden/engine';
 import { DiagnosticLog, diagnosticError, parseAcpAction } from '@warden/shared';
-import type { AcpAction, AcpBinding, AcpConfiguration, AcpModel, AcpViewState, WorkflowTask } from '@warden/shared';
-import type { AcpProfile } from './contracts.js';
+import type { AcpAction, AcpBinding, AcpConfiguration, AcpModel, AcpStatus, AcpViewState } from '@warden/shared';
+import type { AcpProfile, AgentProcessInfo } from './contracts.js';
 import { resolveAcpBinding, validateAcpBinding } from './binding.js';
 import { autoApproveRepositoryReads, readAcpProfiles } from './setup.js';
 import { AcpSession } from './session.js';
@@ -38,6 +38,11 @@ interface Conversation {
   renderTimer?: ReturnType<typeof setTimeout>;
 }
 
+export interface TaskAgentProcess extends AgentProcessInfo {
+  binding: AcpBinding;
+  status: AcpStatus;
+}
+
 /** Conversation routing never depends on the workbench's currently selected repository. */
 export class AcpConversations {
   private readonly entries = new Map<string, Conversation>();
@@ -53,7 +58,7 @@ export class AcpConversations {
 
   constructor(
     private readonly context: vscode.ExtensionContext,
-    private readonly review: (binding: AcpBinding, reference?: string) => Promise<void>,
+    private readonly review: (binding: AcpBinding, reference: string) => Promise<void>,
     private readonly changed: () => void,
     private readonly report: (error: unknown) => void,
     private readonly configureAgents: () => Promise<void>,
@@ -128,18 +133,6 @@ export class AcpConversations {
     }
     return opening;
   }
-  private brief(task: WorkflowTask) {
-    return [
-      `# ${task.title}`,
-      task.body,
-      task.acceptance && `Acceptance criteria: ${task.acceptance}`,
-      `Base branch: ${task.developmentBranch}`,
-      'The user edits the primary folder; Warden generates the separate preview folder. The user reviews the full changes before committing them to the base branch.',
-    ]
-      .filter(Boolean)
-      .join('\n\n');
-  }
-
   private async create(repository: string, taskId: string) {
     const engine = await this.engine(repository);
     const binding = await resolveAcpBinding(engine, taskId);
@@ -214,7 +207,8 @@ export class AcpConversations {
           }
           if (binding.identity === previous.binding.identity) return previous;
           if (previous.session.snapshot().status !== 'disconnected') {
-            previous.error = 'The task workspace was replaced. Disconnect the original session, then reopen the task conversation.';
+            previous.error =
+              'The task workspace was replaced. End the original agent process in Settings › Agent Processes, then reopen the task conversation.';
             return previous;
           }
           // Old transcripts remain under their original allocation identity.
@@ -236,6 +230,23 @@ export class AcpConversations {
     }
     if (this.closed) throw new Error('The Warden session is closed.');
     return entry;
+  }
+
+  /** Live task agent processes in this window, across every repository with an open conversation. */
+  processes(): TaskAgentProcess[] {
+    return [...this.entries.values()].flatMap((entry) => {
+      const process = entry.session.process();
+      return process ? [{ ...process, binding: entry.binding, status: entry.session.currentStatus() }] : [];
+    });
+  }
+
+  async endProcess(repository: string, taskId: string, pid: number) {
+    const entry = this.entries.get(this.key(repository, taskId));
+    if (!entry || this.closed || entry.session.process()?.pid !== pid) return;
+    entry.error = undefined;
+    await entry.session.disconnect();
+    this.render(entry);
+    this.changed();
   }
 
   hasConnection(repository: string, taskId: string) {
@@ -589,14 +600,6 @@ export class AcpConversations {
     this.changed();
     const session = entry.session;
     switch (action.type) {
-      case 'insert-brief': {
-        await validateAcpBinding(entry.engine, entry.binding);
-        const task = (await entry.engine.execute('workflow.get', undefined)).workflow?.changes.find((row) => row.id === entry.binding.taskId);
-        if (!task) throw new Error('This task is no longer available.');
-        entry.draft.append(this.brief(task));
-        this.saveDraft(entry);
-        break;
-      }
       case 'send': {
         if (entry.sending || !action.text.trim()) throw new Error('Wait for the current response or stop this turn first.');
         const submission = entry.draft.begin(action);
@@ -621,9 +624,6 @@ export class AcpConversations {
       case 'cancel':
         await session.cancel();
         break;
-      case 'disconnect':
-        await session.disconnect();
-        break;
       case 'new':
         if (entry.sending || ['connecting', 'running', 'waiting_permission', 'cancelling', 'resetting'].includes(session.snapshot().status))
           throw new Error('Stop and disconnect the current session first.');
@@ -643,10 +643,6 @@ export class AcpConversations {
         break;
       case 'set-mode':
         await session.setMode(action.modeId);
-        break;
-      case 'review':
-        await validateAcpBinding(entry.engine, entry.binding);
-        await this.review(entry.binding);
         break;
       case 'open-file':
         await validateAcpBinding(entry.engine, entry.binding);

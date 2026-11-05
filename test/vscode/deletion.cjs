@@ -87,7 +87,12 @@ exports.checkTaskDeletion = async (workbench, extension, fixture, eventually) =>
     const observedKey = JSON.stringify([fixture.root, observedTask.id]);
     const observedChat = workbench.conversations.entries.get(observedKey);
     await eventually(() => observedChat.session.snapshot().status === 'connected' && observedChat.surface?.ready, 30_000);
-    await workbench.conversations.handle(observedChat, { type: 'disconnect' });
+    const observedProcess = workbench.settings
+      .getChildren()[0]
+      .children.find((row) => row.id === 'agent-processes')
+      .children.find((row) => row.process?.binding?.identity === observedChat.binding.identity);
+    await vscode.commands.executeCommand('warden.endAgentProcess', observedProcess);
+    assert.equal(observedChat.session.snapshot().status, 'disconnected');
     const checked = await workbench.backend.execute('task.deleteCheck', { taskId: observedTask.id });
     // Bypass the workbench deletion command so cleanup must come from the conversation's state observer.
     await workbench.backend.execute('task.delete', { taskId: observedTask.id, confirmation: checked.confirmation });

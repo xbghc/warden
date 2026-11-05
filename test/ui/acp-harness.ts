@@ -185,9 +185,6 @@ async function act(entry: Entry, action: AcpAction) {
   if (['view-ready', 'open-sidebar'].includes(action.type)) return;
   entry.error = undefined;
   switch (action.type) {
-    case 'insert-brief':
-      entry.draft.append(`# ${entry.binding.title}`);
-      break;
     case 'send': {
       if (entry.sending) throw new Error('A prompt is already running');
       const submitted = entry.draft.begin(action);
@@ -205,9 +202,6 @@ async function act(entry: Entry, action: AcpAction) {
     }
     case 'connect':
       await connect(entry, action.profileId);
-      break;
-    case 'disconnect':
-      await entry.session.disconnect();
       break;
     case 'cancel':
       await entry.session.cancel();
@@ -230,7 +224,6 @@ async function act(entry: Entry, action: AcpAction) {
       await entry.session.setMode(action.modeId);
       break;
     case 'configure':
-    case 'review':
       break;
   }
 }
@@ -265,6 +258,13 @@ const server = createServer(async (request, response) => {
     if (url.pathname === '/reset-release') {
       if (request.method === 'POST') entry.storage.holdResetRelease();
       if (request.method === 'DELETE') entry.storage.releaseReset();
+      response.end('{}');
+      return;
+    }
+    // Settings › Agent Processes ends a task process from the native host, outside the chat webview.
+    if (url.pathname === '/end-process' && request.method === 'POST') {
+      entry.error = undefined;
+      await entry.session.disconnect();
       response.end('{}');
       return;
     }

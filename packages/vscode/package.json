@@ -373,6 +373,17 @@
         "title": "Disconnect ACP",
         "category": "Warden",
         "enablement": "warden.agentReadiness == checking || warden.agentReadiness == authentication_required || warden.agentReadiness == ready"
+      },
+      {
+        "command": "warden.endAgentProcess",
+        "title": "End Agent Process",
+        "category": "Warden",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "warden.openAgentProcessChat",
+        "title": "Open Task Chat",
+        "category": "Warden"
       }
     ],
     "menus": {
@@ -444,6 +455,14 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "warden.endAgentProcess",
+          "when": "false"
+        },
+        {
+          "command": "warden.openAgentProcessChat",
+          "when": "false"
+        },
         {
           "command": "warden.chooseAgentPreset",
           "when": "false"
@@ -638,6 +657,16 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "warden.endAgentProcess",
+          "when": "view == warden.settings && viewItem == wardenAgentProcess",
+          "group": "inline@1"
+        },
+        {
+          "command": "warden.endAgentProcess",
+          "when": "view == warden.settings && viewItem == wardenAgentProcess",
+          "group": "1_process@1"
+        },
         {
           "command": "warden.setup",
           "when": "view == warden.settings && viewItem == wardenPreviewSetup",

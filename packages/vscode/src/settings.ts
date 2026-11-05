@@ -1,11 +1,17 @@
 import * as vscode from 'vscode';
-import type { AgentReadiness, WorkbenchModel } from '@warden/shared';
+import type { AcpBinding, AcpStatus, AgentReadiness, WorkbenchModel } from '@warden/shared';
+import type { AgentProcessInfo } from './acp/contracts.js';
 import { scriptLabels, scriptValue } from './script-settings.js';
 import type { ScriptKind } from './script-settings.js';
+
+export type AgentProcess =
+  | (AgentProcessInfo & { kind: 'workbench'; status: AgentReadiness['status'] })
+  | (AgentProcessInfo & { kind: 'task'; binding: AcpBinding; status: AcpStatus });
 
 export class SettingsNode extends vscode.TreeItem {
   readonly kind = 'setting';
   session?: string;
+  process?: AgentProcess;
   children?: SettingsNode[];
   parent?: SettingsNode;
 }
@@ -17,6 +23,29 @@ const connectionLabels: Record<AgentReadiness['status'], string> = {
   ready: 'Connected',
   error: 'Connection Failed',
 };
+
+const processLabels: Record<AgentReadiness['status'] | AcpStatus, string> = {
+  unchecked: 'Disconnected',
+  disconnected: 'Disconnected',
+  checking: 'Connecting',
+  connecting: 'Connecting',
+  authentication_required: 'Authentication Required',
+  ready: 'Idle',
+  connected: 'Idle',
+  running: 'Responding',
+  waiting_permission: 'Permission Required',
+  cancelling: 'Stopping Turn',
+  resetting: 'Starting New Session',
+  error: 'Failed',
+};
+const processIcon = (status: AgentProcess['status']) =>
+  status === 'error'
+    ? 'warning'
+    : status === 'waiting_permission' || status === 'authentication_required'
+      ? 'bell'
+      : ['checking', 'connecting', 'running', 'cancelling', 'resetting'].includes(status)
+        ? 'loading~spin'
+        : 'plug';
 
 /** The view container supplies stacking, resizing, collapse and keyboard navigation. */
 export class Settings implements vscode.TreeDataProvider<SettingsNode>, vscode.Disposable {
@@ -30,6 +59,7 @@ export class Settings implements vscode.TreeDataProvider<SettingsNode>, vscode.D
   constructor(
     private readonly model: () => WorkbenchModel,
     private readonly extensionUri: vscode.Uri,
+    private readonly processes: () => AgentProcess[] = () => [],
   ) {
     this.view = vscode.window.createTreeView('warden.settings', { treeDataProvider: this });
   }
@@ -55,6 +85,7 @@ export class Settings implements vscode.TreeDataProvider<SettingsNode>, vscode.D
       config: model.workflow?.workspaceConfig,
       hasPreviewCommand: model.hasPreviewCommand,
       busy: model.busy,
+      processes: this.processes().map((row) => [row.kind, row.pid, row.status, row.profile.label, row.kind === 'task' ? row.binding : undefined]),
     });
     if (this.signature === signature) return;
     this.signature = signature;
@@ -122,6 +153,7 @@ export class Settings implements vscode.TreeDataProvider<SettingsNode>, vscode.D
       if (readiness.status === 'ready' || readiness.status === 'authentication_required')
         agent.children.push(this.row('disconnect', 'Disconnect ACP', 'debug-disconnect', 'warden.cancelAgentCheck'));
     }
+    agent.children.push(this.processGroup());
     agent.children.push(
       this.row('preset', configuration.status === 'invalid' ? 'Fix Agent Configuration' : 'Choose Agent Preset', 'list-selection', 'warden.chooseAgentPreset'),
       this.row('profiles', 'Agent Profiles', 'settings-gear', 'workbench.action.openSettings', ['warden.acpAgents']),
@@ -157,6 +189,36 @@ export class Settings implements vscode.TreeDataProvider<SettingsNode>, vscode.D
     for (const child of scripts.children) child.session = model.session;
     roots.push(scripts);
     return roots;
+  }
+
+  /** Lists only this window's live processes; other windows own and end their own agents. */
+  private processGroup() {
+    const processes = this.processes();
+    const group = this.row('agent-processes', 'Agent Processes', 'server-process');
+    group.description = processes.length ? `${processes.length} running` : 'None';
+    group.tooltip = 'Agent processes started by Warden in this window. Other windows list their own.';
+    group.collapsibleState = processes.length ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.None;
+    group.children = processes.map((process) => {
+      const task = process.kind === 'task' ? process.binding : undefined;
+      const id = task ? `process:task:${JSON.stringify([task.repository, task.taskId])}` : 'process:workbench';
+      const item = task
+        ? this.row(id, task.title, processIcon(process.status), 'warden.openAgentProcessChat')
+        : this.row(id, 'Workbench', processIcon(process.status), 'warden.configureAgents');
+      if (task) item.command!.arguments = [item];
+      item.process = process;
+      item.contextValue = 'wardenAgentProcess';
+      item.description = `${process.profile.label} · ${processLabels[process.status]} · PID ${process.pid}`;
+      item.tooltip = [
+        task ? `Workspace: ${task.workspace}` : 'Workbench ACP connection',
+        task && `Repository: ${task.repository}`,
+        `Started: ${new Date(process.startedAt).toLocaleString()}`,
+        `Executable: ${process.profile.command}`,
+      ]
+        .filter(Boolean)
+        .join('\n');
+      return item;
+    });
+    return group;
   }
 
   private row(id: string, label: string, icon: string, command?: string, args?: unknown[]): SettingsNode {
