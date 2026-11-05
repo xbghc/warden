@@ -210,9 +210,17 @@ are never passed to Git during that expansion, because even reading one refreshe
 Snapshot commands disable split-index creation, filesystem-monitor shortcuts and index-change hooks;
 the final `add` still uses the source repository's attributes, filters and ignore rules.
 
-New clone workspaces copy the primary repository's effective `user.name` and `user.email` with
-fixed `git config` writes only when they differ from the clone's inherited defaults. This preserves
-repository-local commit identity without overriding matching global defaults.
+New clone workspaces receive the local Git setup a primary-linked worktree would share. A
+`git config --null --get-regexp` read in each repository resolves a fixed set of keys: `user.name`,
+`user.email`, `user.signingkey`, `commit.gpgsign`, `tag.gpgsign`, `gpg.*`, `core.autocrlf`,
+`core.eol`, `core.safecrlf`, `core.hooksPath` and `filter.*.*`, `merge.*.*` and `diff.*.*` drivers. Keys
+whose values differ from the clone's inherited ones are written with `git config --replace-all` /
+`--add`, so local values and path-conditional includes carry over while matching global defaults stay
+unpinned. Remotes, credentials, URL rewrites and repository-relative paths such as
+`commit.template` are not copied. Warden also copies primary's `info/exclude`, `info/attributes` and,
+unless `core.hooksPath` is set, the non-sample entries in its default hooks directory into the new
+clone's `.git`, following symlinks. These are file copies made once at creation; a relative or
+external `core.hooksPath` stays live through the copied setting.
 
 Default task creation uses `kind: clone`; `kind: shared` remains available internally. `shared-repository.ts` owns the separate bare repository
 at `<primary>-warden/repo.git`: fixed `git init --bare`, ownership configuration, local fetches of

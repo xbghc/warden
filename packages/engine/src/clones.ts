@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { rm } from 'node:fs/promises';
+import { cp, mkdir, readdir, rm } from 'node:fs/promises';
 import type { RemoveWorktreeResponse, SafetyBackup, WorktreeInfo } from '@warden/shared';
 import { assertSafetyBackupCurrent, createSafetyBackup } from './backups.js';
 import type { StateStore } from './state.js';
@@ -39,15 +39,7 @@ export async function makeClone(ctx: RepoContext, dir: string): Promise<void> {
   // From here on the directory is the clone just made; one that `clone` itself refused — something
   // appeared there since the slot was picked — is left alone.
   try {
-    // A linked worktree inherited repository-local identity. Preserve that identity in a
-    // new independent workspace, while leaving matching global defaults unpinned.
-    for (const key of ['user.name', 'user.email']) {
-      const [source, cloned] = await Promise.all([
-        runGit(['config', '--get', key], { cwd: ctx.commonRoot, okCodes: [0, 1] }),
-        runGit(['config', '--get', key], { cwd: dir, okCodes: [0, 1] }),
-      ]);
-      if (source.code === 0 && (cloned.code !== 0 || cloned.stdout !== source.stdout)) await runGitWrite(['config', key, source.stdout.trim()], { cwd: dir });
-    }
+    await copyLocalSetup(ctx.commonRoot, dir);
     if (!remotes.length) return;
     // Removing it takes the main worktree's branches, which `clone` filed under `origin/`, with it.
     await runGitWrite(['remote', 'remove', 'origin'], { cwd: dir });
@@ -69,6 +61,60 @@ export async function makeClone(ctx: RepoContext, dir: string): Promise<void> {
   } catch (e) {
     await discardClone(dir);
     throw e;
+  }
+}
+
+/**
+ * Repository settings a linked worktree would share with the main worktree and a clone copies
+ * when it is made: commit identity and signing, line endings, the hooks location, and the filter,
+ * merge and diff drivers that attributes name. Remotes, credentials and URL rewrites are Warden's
+ * or the server's business, and paths such as `commit.template` would mean something else here.
+ */
+const COPIED_CONFIG =
+  '^(user\\.(name|email|signingkey)|(commit|tag)\\.gpgsign|gpg\\..+|core\\.(autocrlf|eol|safecrlf|hookspath)|(filter|merge|diff)\\..+\\..+)$';
+
+/** Every value per key of the copied settings `cwd` sees, in Git's order. */
+async function copiedConfig(cwd: string): Promise<Map<string, string[]>> {
+  const r = await runGit(['config', '--null', '--get-regexp', COPIED_CONFIG], { cwd, okCodes: [0, 1] });
+  const values = new Map<string, string[]>();
+  for (const entry of r.stdout.split('\0')) {
+    if (!entry) continue;
+    const split = entry.indexOf('\n');
+    // A key written without `=` is a boolean true.
+    const [key, value] = split < 0 ? [entry, 'true'] : [entry.slice(0, split), entry.slice(split + 1)];
+    values.set(key, [...(values.get(key) ?? []), value]);
+  }
+  return values;
+}
+
+/**
+ * Gives a new clone the local setup a linked worktree would have shared with the main worktree.
+ * Settings are compared as each repository resolves them, so global defaults stay unpinned while
+ * local values and path-conditional includes that match only the main worktree are written. Hooks
+ * in the default directory, local excludes and local attributes are copied as they are now; a
+ * `core.hooksPath` is copied as a setting, so a tracked or external hooks directory stays live.
+ */
+async function copyLocalSetup(main: string, dir: string): Promise<void> {
+  const [source, cloned] = await Promise.all([copiedConfig(main), copiedConfig(dir)]);
+  for (const [key, values] of source) {
+    if (cloned.get(key)?.join('\0') === values.join('\0')) continue;
+    await runGitWrite(['config', '--replace-all', key, values[0]!], { cwd: dir });
+    for (const value of values.slice(1)) await runGitWrite(['config', '--add', key, value], { cwd: dir });
+  }
+  const common = path.resolve(main, (await runGit(['rev-parse', '--git-common-dir'], { cwd: main })).stdout.trim());
+  const target = path.join(dir, '.git');
+  const files = ['exclude', 'attributes'].map((name) => [path.join(common, 'info', name), path.join(target, 'info', name)] as const);
+  if (!source.has('core.hookspath')) {
+    const hooks = await readdir(path.join(common, 'hooks')).catch(() => []);
+    for (const name of hooks) if (!name.endsWith('.sample')) files.push([path.join(common, 'hooks', name), path.join(target, 'hooks', name)]);
+  }
+  for (const [from, to] of files) {
+    await mkdir(path.dirname(to), { recursive: true });
+    // Hook managers may install symlinks or helper directories; the clone gets their content. A
+    // file the main worktree does not have, or a dangling link, is simply not copied.
+    await cp(from, to, { recursive: true, dereference: true, force: true }).catch((e: NodeJS.ErrnoException) => {
+      if (e.code !== 'ENOENT') throw e;
+    });
   }
 }
 
@@ -147,7 +193,8 @@ async function wouldLose(dir: string, dirty: number, busy: string | undefined): 
 
 /**
  * Deletes a clone slot's directory, dependencies and all — there is no `git worktree remove` for a
- * clone, and this is the one write warden makes outside git. Only a directory listed as one of this
+ * clone, and besides the local setup copied into a new clone (see `copyLocalSetup`), this is the one
+ * write warden makes outside git. Only a directory listed as one of this
  * repository's clone slots gets here, and it is checked again right before: never one that is not
  * a clone of this repository, forced or not. Anything it alone holds is put to the reviewer first as
  * a 409 — `worktree_dirty` when uncommitted changes are all of it, `needs_force` naming everything

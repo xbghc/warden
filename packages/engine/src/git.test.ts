@@ -33,6 +33,7 @@ describe('git whitelist', () => {
   it('lets config look a key up and nothing else', () => {
     expect(() => assertAllowedGitArgs(['config', '--get', 'warden.main'])).not.toThrow();
     expect(() => assertAllowedGitArgs(['config', '--get-regexp', '^remote\\..*\\.url$'])).not.toThrow();
+    expect(() => assertAllowedGitArgs(['config', '--null', '--get-regexp', '^core\\.eol$'])).not.toThrow();
     for (const args of [
       ['config', 'core.hooksPath', '/tmp/evil'],
       ['config', '--get', 'a', 'b'],
@@ -40,6 +41,8 @@ describe('git whitelist', () => {
       ['config', '--get', '--file=/etc/passwd'],
       ['config', '--global', '--get', 'user.name'],
       ['config', '--edit'],
+      ['config', '--null', 'core.hooksPath', '/tmp/evil'],
+      ['config', '--null', '--null', '--get', 'a'],
       ['config'],
     ]) {
       expect(() => assertAllowedGitArgs(args)).toThrow(GitError);

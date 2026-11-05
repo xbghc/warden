@@ -150,7 +150,9 @@ export function assertAllowedGitArgs(args: readonly string[]): void {
   }
   // One read and one name or pattern, nothing else: `--file`, `--global` or a second argument
   // (the value to set) would each turn it into something other than a lookup in this repository.
-  if (sub === 'config' && (!CONFIG_READS.has(args[1] ?? '') || args.length !== 3 || args[2]!.startsWith('-'))) {
+  // `--null` only changes how the lookup prints, so values holding newlines stay unambiguous.
+  const config = sub === 'config' && args[1] === '--null' ? args.slice(1) : args;
+  if (sub === 'config' && (!CONFIG_READS.has(config[1] ?? '') || config.length !== 3 || config[2]!.startsWith('-'))) {
     throw new GitError(`git config ${args.slice(1).join(' ')} is not allowed`, null, '', 400, 'git_subcommand_forbidden');
   }
   // These two variables only resolve attribute-file paths, used to decide whether an isolated

@@ -219,3 +219,11 @@ still receives only the final reviewed patch. Explicit rebase
 imports exact primary commits into the clone from validated local repositories, without remote
 fetches or remote-tracking ref updates. Clone ownership and branch
 validation use the same rules as other task workspaces.
+
+A new clone starts with primary's local Git setup, as a linked worktree would: commit identity and
+signing, line-ending settings, filter/merge/diff drivers, local excludes and attributes, and hooks.
+A `core.hooksPath`, such as a tracked hooks directory, is copied as a setting and stays current.
+Hooks in primary's default `.git/hooks` directory, local excludes and attributes are copied when
+the clone is made; changes made in primary afterwards reach only clones made later. Remotes,
+credentials and other local settings are not copied, and clone branches stay out of primary.
+Existing workspaces are not changed.
