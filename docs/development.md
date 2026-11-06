@@ -39,6 +39,8 @@ reuse and visible retry after failed preview disconnection. The full native suit
 Can Rebase tasks only, busy tasks resuming after their turn, one attempt per check and the setting
 turned off. The launcher writes `"warden.autoRebase": false` to the disposable user settings so other
 suites see exact workspace heads; this suite and the full native suite enable it explicitly.
+Automatic rebase uses a separate disposable primary even inside the full suite, so earlier branch
+and chat cases cannot change its allocation count or connection workload.
 It also exercises cancellation timeout with a real ACP turn, reservations of unopened tasks and
 blocked prompts while an idle connection's rebase is queued. Engine tests separately verify foreign
 owners, replaced/removed claims and connection acquisition during a replay. Task Chat checks the

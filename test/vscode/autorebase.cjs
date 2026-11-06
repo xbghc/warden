@@ -28,6 +28,30 @@ exports.run = async () => {
 
 /** Automatic rebase in the packaged host: idle Can Rebase tasks only, once per check, off by setting. */
 exports.checkAutoRebase = async (workbench, root, eventually) => {
+  const previous = workbench.backend.root;
+  // Earlier full-suite cases deliberately leave branches, allocations and live chats.
+  // Keep this scenario's workload and connection ownership independent of that history.
+  const isolated = await fs.mkdtemp(path.join(path.dirname(root), 'automatic-rebase-'));
+  const git = (...args) => execFileSync('git', ['-C', isolated, ...args], { encoding: 'utf8', stdio: 'pipe' });
+  git('init', '-q', '-b', 'main');
+  git('config', 'user.name', 'Test');
+  git('config', 'user.email', 'test@example.com');
+  await fs.writeFile(path.join(isolated, 'README.md'), 'Automatic rebase fixture\n');
+  git('add', '.');
+  git('commit', '-qm', 'Initial');
+  try {
+    await workbench.open(isolated);
+    await workbench.backend.execute('workflow.configure', { branch: 'main' });
+    await workbench.refresh(true);
+    await eventually(() => workbench.agentReady, 30_000);
+    await checkAutoRebase(workbench, isolated, eventually);
+  } finally {
+    // The launcher removes this fixture and its numbered siblings after all engines close.
+    await workbench.open(previous);
+  }
+};
+
+const checkAutoRebase = async (workbench, root, eventually) => {
   const git = (cwd, ...args) =>
     execFileSync('git', ['-C', cwd, '-c', 'user.name=Test', '-c', 'user.email=test@example.com', ...args], { encoding: 'utf8', stdio: 'pipe' }).trim();
   const configuration = vscode.workspace.getConfiguration('warden');
@@ -127,20 +151,31 @@ exports.checkAutoRebase = async (workbench, root, eventually) => {
     const live = await task('Uncertain agent turn', 'live.txt');
     liveChat = await workbench.conversations.ensure(root, live.id);
     await workbench.conversations.connect(liveChat);
-    liveChat.session.options.timeoutMs = 1000;
+    const wire = liveChat.session.process().profile.args[1];
+    const liveSession = liveChat.session.snapshot().record.sessionId;
     let turnSettled = false;
+    let turnError;
     const turn = liveChat.session
       .send('neverfinish')
-      .catch(() => {})
+      .catch((error) => {
+        turnError = error;
+      })
       .finally(() => {
         turnSettled = true;
       });
-    await eventually(() => liveChat.session.turn?.sent);
+    // Binding validation precedes submission and uses the normal connection budget.
+    await eventually(async () => {
+      if (turnError) throw turnError;
+      assert.equal(turnSettled, false, 'the fixture turn must remain pending');
+      const messages = (await fs.readFile(wire, 'utf8')).trim().split('\n').map(JSON.parse);
+      return messages.some((row) => row.method === 'session/prompt' && row.params.sessionId === liveSession && row.params.prompt[0].text === 'neverfinish');
+    }, 30_000);
     const third = await advance('auto-3.txt');
     await eventually(() => checked(third), 60_000);
     await configuration.update('autoRebase', true, vscode.ConfigurationTarget.Global);
     await workbench.autoRebase(workbench.session, workbench.checks);
     assert.notEqual(parent(live), third, 'a live turn cannot be rebased');
+    liveChat.session.options.timeoutMs = 1000;
     await assert.rejects(liveChat.session.cancel(), /has not ended this turn/);
     await workbench.autoRebasing;
     assert.equal(liveChat.session.currentStatus(), 'error');
