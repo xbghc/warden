@@ -45,6 +45,30 @@ export class Documents implements vscode.TextDocumentContentProvider {
     this.contents.set(key, snapshot);
     return vscode.Uri.from({ scheme: 'warden-review', path: `/${key}/${name}` });
   }
+  /**
+   * Snapshots persist only so restored editors keep their exact review content. At startup, files
+   * that no open tab references are removed, so copies of repository content do not accumulate.
+   */
+  async prune() {
+    const live = new Set(this.contents.keys());
+    for (const group of vscode.window.tabGroups.all)
+      for (const tab of group.tabs) {
+        const input = tab.input;
+        const uris = input instanceof vscode.TabInputTextDiff ? [input.original, input.modified] : input instanceof vscode.TabInputText ? [input.uri] : [];
+        for (const uri of uris) if (uri.scheme === 'warden-review') live.add(uri.path.split('/')[1] ?? '');
+      }
+    let entries: [string, vscode.FileType][];
+    try {
+      entries = await vscode.workspace.fs.readDirectory(this.directory());
+    } catch {
+      return;
+    }
+    await Promise.all(
+      entries
+        .filter(([name, type]) => type === vscode.FileType.File && /^[a-f0-9-]{36}\.json$/.test(name) && !live.has(name.slice(0, -'.json'.length)))
+        .map(([name]) => Promise.resolve(vscode.workspace.fs.delete(vscode.Uri.joinPath(this.directory(), name))).catch(() => undefined)),
+    );
+  }
   remove(uri: vscode.Uri) {
     if (uri.scheme === 'warden-review') this.contents.delete(this.key(uri));
   }

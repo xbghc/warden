@@ -652,7 +652,7 @@
         },
         {
           "command": "warden.sendSelectionToAgent",
-          "when": "editorHasSelection",
+          "when": "editorHasSelection && warden.agentReady",
           "group": "navigation"
         }
       ],

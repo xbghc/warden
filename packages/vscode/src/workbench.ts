@@ -73,6 +73,7 @@ export class Workbench {
   private taskInput?: vscode.InputBox;
   private commitInput?: vscode.InputBox;
   private renameInput?: vscode.InputBox;
+  private backgroundError?: WorkbenchError;
   private fileErrors = new Map<string, string>();
   private readonly conversations: AcpConversations;
   private readonly agentSetup: AcpAgentSetup;
@@ -126,6 +127,7 @@ export class Workbench {
     // Tasks are title-only; unsaved note drafts from earlier versions have no editor left to restore them.
     for (const key of context.workspaceState.keys()) if (key.startsWith('warden.task-note-draft:')) void context.workspaceState.update(key, undefined);
     this.documents = new Documents(context);
+    void this.documents.prune().catch((error) => this.log.write('warn', 'review.snapshots.prune.failed', { diagnostic: acpErrorDiagnostic(error) }));
     this.conversations = new AcpConversations(
       context,
       (binding, reference) => this.reviewConversation(binding, reference),
@@ -276,13 +278,15 @@ export class Workbench {
       'expandChat',
       'configureAgents',
       'sendSelectionToAgent',
-      'endAgentProcess',
-      'openAgentProcessChat',
     ]);
     for (const [name, action] of Object.entries(commands))
       context.subscriptions.push(
         vscode.commands.registerCommand(`warden.${name}`, (node?: Node) =>
-          ['configureScripts', 'configureAgents', 'chooseAgentPreset', 'checkAgent', 'cancelAgentCheck'].includes(name)
+          // Task conversations keep their own connections, so their process controls must work
+          // while the Workbench connection is disconnected or failed.
+          ['configureScripts', 'configureAgents', 'chooseAgentPreset', 'checkAgent', 'cancelAgentCheck', 'endAgentProcess', 'openAgentProcessChat'].includes(
+            name,
+          )
             ? this.agentAction(() => action(node))
             : this.perform(
                 () => {
@@ -410,7 +414,9 @@ export class Workbench {
         this.render();
         const folders = vscode.workspace.workspaceFolders;
         const remembered = this.context.workspaceState.get<string>('warden.repository');
-        const folder = folders?.find((candidate) => candidate.uri.fsPath === remembered) ?? (folders?.length === 1 ? folders[0] : undefined);
+        const same = (a: string, b?: string) =>
+          !!b && (process.platform === 'win32' ? path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase() : path.resolve(a) === path.resolve(b));
+        const folder = folders?.find((candidate) => same(candidate.uri.fsPath, remembered)) ?? (folders?.length === 1 ? folders[0] : undefined);
         if (folder) await this.open(folder.uri.fsPath, span);
       } catch (error) {
         failed = true;
@@ -468,7 +474,9 @@ export class Workbench {
       this.errors.clear();
       this.checkSignature = undefined;
       this.rebaseResult = undefined;
-      await this.context.workspaceState.update('warden.repository', this.backend.root);
+      // Remember the folder as VS Code reports it; the resolved root can differ by drive-letter case,
+      // symlinks or a subfolder, and would then never match a workspace folder on reload.
+      await this.context.workspaceState.update('warden.repository', directory);
       this.data = undefined;
       this.preview = undefined;
 
@@ -666,6 +674,8 @@ export class Workbench {
             this.log.write('warn', 'repository.branch.blocked', { code: branchProblem.code, diagnostic: branchProblem.message });
           this.errors.set('branch', branchProblem);
         } else this.errors.delete('branch');
+        if (this.backgroundError && this.errors.get('repository') === this.backgroundError) this.errors.delete('repository');
+        this.backgroundError = undefined;
         await this.updateContext(trace);
         if (!currentRepository()) return;
         this.render();
@@ -695,7 +705,14 @@ export class Workbench {
               (error) => {
                 this.log.write('error', 'repository.refresh.failed', { diagnostic: acpErrorDiagnostic(error) });
                 if (!(error instanceof WardenError && error.code === 'operation_locked')) {
-                  this.errors.set('repository', { scope: 'repository', message: String(error) });
+                  // Keep the engine code like reported actions, and remember the entry so the next
+                  // successful refresh can clear a transient background failure.
+                  this.backgroundError = {
+                    scope: 'repository',
+                    message: error instanceof Error ? error.message : String(error),
+                    code: error instanceof WardenError ? error.code : undefined,
+                  };
+                  this.errors.set('repository', this.backgroundError);
                   this.render();
                 }
               },

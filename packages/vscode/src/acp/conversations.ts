@@ -206,7 +206,9 @@ export class AcpConversations {
             return previous;
           }
           if (binding.identity === previous.binding.identity) return previous;
-          if (previous.session.snapshot().status !== 'disconnected') {
+          // Only a live process or attempt can still act in the old workspace. An error status
+          // after a crash or failed connect has nothing left to end, so it is replaced too.
+          if (previous.connecting || previous.session.process() || ['connecting', 'resetting'].includes(previous.session.snapshot().status)) {
             previous.error =
               'The task workspace was replaced. End the original agent process in Settings › Agent Processes, then reopen the task conversation.';
             return previous;

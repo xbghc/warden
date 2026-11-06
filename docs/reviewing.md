@@ -133,4 +133,5 @@ changed source, delivery boundary or primary HEAD invalidates delivery from the 
 
 Each native document has a persisted immutable snapshot, so reopening an editor after an extension
 reload cannot silently display a newer file under the old review identity. A missing snapshot asks
-the user to reopen the comparison. No local server, SSE stream or browser polling is involved.
+the user to reopen the comparison. At startup, snapshots that no open editor tab references are
+deleted, so copies of repository content do not accumulate in workspace storage. No local server, SSE stream or browser polling is involved.

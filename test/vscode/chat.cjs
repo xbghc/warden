@@ -489,8 +489,14 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
     await vscode.commands.executeCommand('warden.endAgentProcess', ending);
     assert.equal(emptyChat.session.snapshot().status, 'connected', 'a stale row cannot end a newer process');
     assert.notEqual(processRow(emptyChat).process.pid, ending.process.pid);
+    // Task processes keep their own connections, so they stay controllable after Disconnect ACP.
+    const workbenchProfile = workbench.agentSetup.readiness.snapshot().profile?.id;
+    await workbench.agentSetup.disconnect();
+    assert.notEqual(workbench.agentSetup.readiness.snapshot().status, 'ready');
     await endProcess(emptyChat);
     assert.equal(confirmations.length, 2, 'idle processes end without confirmation');
+    await workbench.agentSetup.check(workbenchProfile);
+    assert.equal(workbench.agentSetup.readiness.snapshot().status, 'ready');
   } finally {
     workbench.confirmProcessEnd = confirmEnd;
   }
