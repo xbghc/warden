@@ -286,8 +286,8 @@ them into fixed low/medium/high levels, and refreshes the complete option list a
 Agent-specific configuration outside ACP is not inferred or edited by Warden.
 
 Task Chat keeps mode, model and reasoning effort (`thought_level`) selectors in one composer footer
-row, in that order, followed by Send/Stop Turn. Unavailable categories are omitted; uncategorized
-selectors remain accessible. Extra options use a header popover. Footer selectors and Send/Stop Turn
+row, in that order, followed by Send/Stop Turn. Unavailable categories are omitted; an agent with
+none of them shows its first three selectors instead. Other options are not shown. Footer selectors and Send/Stop Turn
 share one control height; labels shrink independently of their square chevrons and the fixed action.
 Long values truncate without wrapping the footer and retain their full names on hover. Keyboard-accessible
 picker menus open upward, stay within the viewport and show complete agent-provided names, groups and

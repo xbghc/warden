@@ -205,15 +205,6 @@ summary {
 .setup p {
   margin: 0 0 12px;
 }
-[data-slot="native-select"] {
-  color: var(--vscode-dropdown-foreground, inherit);
-  background: var(--vscode-dropdown-background, transparent);
-}
-.field [data-slot="native-select-wrapper"] {
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
-}
 .check {
   display: flex;
   gap: 10px;
