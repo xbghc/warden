@@ -14,7 +14,15 @@ export function taskConnectionPaths(directory: string, repository: string, taskI
 }
 
 async function prepare(store: StateStore, taskId: string, create = true) {
-  const directory = path.join(path.dirname(store.file), 'acp');
+  const parent = path.dirname(store.file);
+  if (create) await mkdir(parent, { recursive: true, mode: 0o700 });
+  // State directories can have legitimate aliases, including macOS /var. Resolve only
+  // that parent; the ACP directory itself must still be an ordinary, unredirected directory.
+  const canonicalParent = await realpath(parent).catch((error: NodeJS.ErrnoException) => {
+    if (create || error.code !== 'ENOENT') throw error;
+    return parent;
+  });
+  const directory = path.join(canonicalParent, 'acp');
   if (create) await mkdir(directory, { recursive: true, mode: 0o700 });
   const info = await lstat(directory).catch((error: NodeJS.ErrnoException) => {
     if (error.code !== 'ENOENT') throw error;
@@ -22,7 +30,7 @@ async function prepare(store: StateStore, taskId: string, create = true) {
   });
   if (info && (!info.isDirectory() || info.isSymbolicLink() || (await realpath(directory)) !== directory))
     throw new WardenError(409, 'The conversation storage folder changed. Inspect it before changing the task workspace.', 'task_connection_invalid');
-  return taskConnectionPaths(directory, store.repoRoot, taskId);
+  return { ...taskConnectionPaths(directory, store.repoRoot, taskId), directory };
 }
 
 async function connectionOwner(paths: ReturnType<typeof taskConnectionPaths>) {
@@ -67,12 +75,12 @@ export async function withIdleTaskConnection<T>(store: StateStore, taskId: strin
 /** Publish the deletion journal under the same short lock that grants an executable connection.
  * New connections revalidate their task under this lock before claiming it.
  */
-export async function withoutTaskConnection<T>(store: StateStore, taskId: string, action: () => Promise<T>): Promise<T> {
+export async function withoutTaskConnection<T>(store: StateStore, taskId: string, action: (directory: string) => Promise<T>): Promise<T> {
   const paths = await prepare(store, taskId);
   return new StateStore(paths.metadata, store.repoRoot).withRepositoryLock(async () => {
     if (await connectionOwner(paths))
       throw new WardenError(409, 'This task still has an agent connection. Disconnect it in its Warden window, then retry deletion.', 'task_agent_connected');
-    return action();
+    return action(paths.directory);
   });
 }
 
@@ -80,8 +88,7 @@ export async function withoutTaskConnection<T>(store: StateStore, taskId: string
  * Third-party agent histories and other tasks' records are outside this namespace.
  */
 export async function deleteTaskConversations(store: StateStore, taskId: string) {
-  await withoutTaskConnection(store, taskId, async () => {
-    const directory = path.join(path.dirname(store.file), 'acp');
+  await withoutTaskConnection(store, taskId, async (directory) => {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
       if (!/^[a-f0-9]{64}\.json$/.test(entry.name) || !entry.isFile()) continue;
       const file = path.join(directory, entry.name);

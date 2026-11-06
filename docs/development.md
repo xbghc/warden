@@ -27,6 +27,9 @@ All packaged host suites inspect the renderer logs after shutdown and fail on Wa
 Set `WARDEN_VSCODE_ARTIFACTS` to retain renderer and Warden logs outside the disposable fixture directory,
 including after host failures. CI uploads these logs, and failed runs print recent Warden diagnostics.
 The packaged extension's CI matrix runs this regression before the full native suite on each platform.
+Every disposable primary clone has explicit local Git identity so rebase tests do not depend on
+runner-wide configuration. Branch-chat permission tests first allow the normal connection budget
+for Git binding validation and observed prompt submission, then start the permission-response budget.
 
 `WARDEN_VSCODE_SUITE=deletion pnpm test:vscode` runs the packaged task deletion flow: native menu
 contributions, confirmation/cancellation, local agent disconnection, chat cleanup, directory

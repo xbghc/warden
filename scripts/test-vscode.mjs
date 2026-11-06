@@ -24,6 +24,10 @@ try {
   git('commit', '-qm', 'Initial');
   const unconfigured = path.join(directory, 'unconfigured');
   git('clone', '--no-hardlinks', root, unconfigured);
+  // Clone does not inherit local identity. Real task rebases must use the fixture's
+  // normal Git configuration, including when the full suite selects this primary.
+  git('-C', unconfigured, 'config', 'user.name', 'Test');
+  git('-C', unconfigured, 'config', 'user.email', 'test@example.com');
   process.env.XDG_DATA_HOME = path.join(directory, 'data');
   const state = stateFilePath(root);
   backend = await Engine.open(root, state);

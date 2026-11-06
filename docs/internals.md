@@ -342,6 +342,11 @@ only if HEAD is the recorded pre-rebase commit, the tree is clean and no Git ope
 Otherwise the conflict record and safety backup are kept as for an explicit request. There is no
 workspace recycling.
 
+Connection metadata resolves the state directory's parent before validating its `acp` child, so
+system aliases such as macOS `/var` share the same claims and locks. The ACP directory itself must
+remain an ordinary, unredirected directory. Conversation archive cleanup uses that same validated
+canonical directory; allowing a parent alias does not permit an ACP-directory symlink.
+
 Workflow reads share one checkout inventory per request instead of rebuilding every workspace's
 inventory for each task. The extension follows observed primary checkout branch changes only for
 `workflow.trackedBranches`, through `workflow.configure` with its existing integration and connection

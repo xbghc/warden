@@ -1,6 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AcpBinding, DevelopmentChange, RebaseBatchRequest } from '@warden/shared';
 import { Engine } from '../packages/engine/src/engine.js';
@@ -19,6 +19,14 @@ let request: RebaseBatchRequest;
 let original: string;
 const head = () => fx.git('-C', task.worktree, 'rev-parse', 'HEAD').trim();
 const storage = (validateClaim?: () => Promise<void>) => new AcpSessionStorage(path.join(directory, 'acp'), binding, validateClaim);
+
+async function useAliasedStateParent() {
+  const alias = path.join(directory, 'state-alias');
+  await symlink(await realpath(directory), alias, process.platform === 'win32' ? 'junction' : 'dir');
+  expect(await realpath(alias)).not.toBe(alias);
+  await engine.close();
+  engine = await Engine.open(fx.root, path.join(alias, 'state.json'));
+}
 
 beforeEach(async () => {
   fx = await makeFixtureRepo('warden-automatic-rebase-');
@@ -74,7 +82,8 @@ describe('automatic rebase connection ownership', () => {
     }
   });
 
-  it('rebases an idle connection reserved by the owning host without releasing its claim', async () => {
+  it.each(['direct', 'aliased'] as const)('preserves a reserved idle connection while rebasing through a %s state parent', async (parent) => {
+    if (parent === 'aliased') await useAliasedStateParent();
     const record = storage();
     const release = await record.claim();
     const owner = JSON.parse(await readFile(record.ownerFile, 'utf8'));
@@ -88,6 +97,40 @@ describe('automatic rebase connection ownership', () => {
     } finally {
       await release();
     }
+  });
+
+  it('rejects a redirected ACP directory even when the state parent has a valid alias', async () => {
+    await useAliasedStateParent();
+    const redirected = path.join(directory, 'redirected-acp');
+    await mkdir(redirected);
+    await writeFile(path.join(redirected, 'preserve.txt'), 'Keep redirected data\n');
+    await symlink(await realpath(redirected), path.join(directory, 'acp'), process.platform === 'win32' ? 'junction' : 'dir');
+    const backup = vi.spyOn(backups, 'createSafetyBackup');
+    await expect(engine.execute('task.deleteCheck', { taskId: task.id })).rejects.toMatchObject({ code: 'task_connection_invalid' });
+    expect((await engine.execute('rebase.run', request)).results[0]).toMatchObject({
+      status: 'failed',
+      message: expect.stringContaining('conversation storage folder changed'),
+    });
+    expect(head()).toBe(original);
+    expect(backup).not.toHaveBeenCalled();
+    expect(await readdir(redirected)).toEqual(['preserve.txt']);
+    expect(await readFile(path.join(redirected, 'preserve.txt'), 'utf8')).toBe('Keep redirected data\n');
+  });
+
+  it('removes only the deleted task conversation and archive through an aliased state parent', async () => {
+    const record = storage();
+    const conversation = { schemaVersion: 1 as const, id: 'conversation', binding, canLoad: false, messages: [], updatedAt: new Date().toISOString() };
+    await record.save(conversation);
+    await record.archive(conversation);
+    const archives = path.join(directory, 'acp', 'archives');
+    expect(await readdir(archives)).toHaveLength(1);
+    await writeFile(path.join(directory, 'acp', 'unrelated.txt'), 'Keep unrelated data\n');
+    await useAliasedStateParent();
+    const check = await engine.execute('task.deleteCheck', { taskId: task.id });
+    await engine.execute('task.delete', { taskId: task.id, confirmation: check.confirmation });
+    await expect(readFile(record.file)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await readdir(archives)).toEqual([]);
+    expect(await readFile(path.join(directory, 'acp', 'unrelated.txt'), 'utf8')).toBe('Keep unrelated data\n');
   });
 
   it.each(['replaced', 'removed'] as const)('rejects a %s claim after an automatic request has queued for the repository lock', async (change) => {
@@ -131,7 +174,8 @@ describe('automatic rebase connection ownership', () => {
     expect(head()).toBe(original);
   });
 
-  it('keeps new connection claims outside an automatic rebase until Git has finished', async () => {
+  it.each(['direct', 'aliased'] as const)('keeps new claims outside automatic rebase through a %s state parent until Git finishes', async (parent) => {
+    if (parent === 'aliased') await useAliasedStateParent();
     const createBackup = backups.createSafetyBackup;
     let resume!: () => void;
     let entered!: () => void;

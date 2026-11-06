@@ -39,6 +39,60 @@ exports.checkBranchChats = async (workbench, root, eventually) => {
       );
     }
   };
+  const permissionRequested = async (request, expectedPrompts) => {
+    const entry = chat;
+    let settled = false;
+    let failed = false;
+    let failure;
+    void request.then(
+      () => {
+        settled = true;
+      },
+      (error) => {
+        settled = true;
+        failed = true;
+        failure = error;
+      },
+    );
+    const pending = () => {
+      if (failed) throw failure;
+      assert.equal(settled, false, 'the turn ended before the expected permission request');
+    };
+    let stage = 'task binding validation and prompt submission';
+    let receivedPrompts;
+    try {
+      // Sending revalidates the task's Git allocation twice. Windows fixture inventories
+      // can take longer than the permission-response budget before ACP receives anything.
+      await eventually(async () => {
+        pending();
+        receivedPrompts = (await journal()).filter((row) => row.method === 'session/prompt').length;
+        assert(receivedPrompts <= expectedPrompts, 'the fixture received an unexpected extra prompt');
+        return receivedPrompts === expectedPrompts;
+      }, 30_000);
+      stage = 'agent permission response';
+      await eventually(() => {
+        pending();
+        return entry.session.snapshot().permissions.length === 1;
+      }, 10_000);
+      return entry.session.snapshot().permissions[0];
+    } catch (error) {
+      const snapshot = entry.session.snapshot();
+      throw new Error(
+        `Branch chat permission failed during ${stage}: ${JSON.stringify({
+          status: snapshot.status,
+          error: entry.error ?? snapshot.error,
+          connecting: !!entry.connecting,
+          sending: entry.sending,
+          receivedPrompts,
+          expectedPrompts,
+          turnSent: entry.session.turn?.sent,
+          turnEnded: entry.session.turn?.ended,
+          permissions: snapshot.permissions.length,
+        })}`,
+        { cause: error },
+      );
+    }
+  };
   console.log('Checking running task conversations across primary branch changes');
   try {
     await configuration.update('acpAgents', [profile], vscode.ConfigurationTarget.Global);
@@ -55,9 +109,7 @@ exports.checkBranchChats = async (workbench, root, eventually) => {
     const sessionId = chat.session.snapshot().record.sessionId;
     const identity = chat.binding.identity;
     const asking = conversations.handle(chat, { type: 'send', profileId: profile.id, ...edit(chat, 'permission') });
-    void asking.catch(() => {});
-    await eventually(() => chat.session.snapshot().permissions.length === 1);
-    const permission = chat.session.snapshot().permissions[0];
+    const permission = await permissionRequested(asking, 1);
     await conversations.handle(chat, { type: 'draft', ...edit(chat, 'Unsent original-branch follow-up') });
 
     git('switch', '-c', 'chat/other');
@@ -114,9 +166,7 @@ exports.checkBranchChats = async (workbench, root, eventually) => {
     assert.equal(workbench.selected, task.id, 'returning restores the selected task independently of the chat');
 
     const waiting = conversations.handle(chat, { type: 'send', profileId: profile.id, ...edit(chat, 'permission') });
-    void waiting.catch(() => {});
-    await eventually(() => chat.session.snapshot().permissions.length === 1);
-    const invalidPermission = chat.session.snapshot().permissions[0];
+    const invalidPermission = await permissionRequested(waiting, 2);
     git('-C', task.worktree, 'switch', '-c', 'chat/wrong-task');
     await conversations.show(root, task.id);
     assert.equal(conversations.sidebarEntry, chat, 'an invalid workspace retains the original chat and its stop controls');
