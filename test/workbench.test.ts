@@ -123,6 +123,53 @@ describe('continuous workspace delivery and passive synchronization', () => {
     await expect(file(fx.root, 'feature.txt')).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it('undoes an automatic rebase that conflicts and leaves a manual conflict for the user', { timeout: longGitTimeout }, async () => {
+    const auto = await task('Automatic');
+    const manual = await task('Manual');
+    await edit(auto, 'shared.txt', 'Automatic change\n', true);
+    await edit(manual, 'shared.txt', 'Manual change\n', true);
+    await fx.write('shared.txt', 'Primary change\n');
+    fx.git('add', 'shared.txt');
+    fx.git('commit', '-qm', 'Primary change');
+    const target = head();
+    const before = sourceHead(auto);
+    // An automatic request trusts a check that predicted no conflict; the real replay conflicts.
+    const response = await workflow.rebaseBatch({ items: [{ changeId: auto.id, sourceHead: before, developmentHead: target }], automatic: true });
+    expect(response.results).toEqual([
+      { changeId: auto.id, status: 'failed', message: expect.stringContaining('Automatic rebase stopped at a conflict and was undone') },
+    ]);
+    expect(sourceHead(auto)).toBe(before);
+    expect(fx.git('-C', auto.worktree, 'status', '--porcelain')).toBe('');
+    expect((await listWorktreesDetailed(await resolveRepo(fx.root))).find((row) => row.path === auto.worktree)?.busy).toBeUndefined();
+    expect(await file(auto.worktree, 'shared.txt')).toBe('Automatic change\n');
+    const saved = (await workflow.get()).workflow!.changes.find((row) => row.id === auto.id) as DevelopmentChange;
+    expect(saved.sync?.status).not.toBe('conflict');
+    expect(saved.rebaseBackups).toBeUndefined();
+    expect(await listSafetyBackups(store)).toEqual([]);
+
+    // The same conflict from an explicit request stays in the workspace with its backup.
+    const manualResult = await workflow.rebaseBatch({ items: [{ changeId: manual.id, sourceHead: sourceHead(manual), developmentHead: target }] });
+    expect(manualResult.results[0]?.status).toBe('failed');
+    expect((await listWorktreesDetailed(await resolveRepo(fx.root))).find((row) => row.path === manual.worktree)?.busy).toBe('rebase');
+    expect((await workflow.get()).workflow!.changes.find((row) => row.id === manual.id)?.sync?.status).toBe('conflict');
+    fx.git('-C', manual.worktree, 'rebase', '--abort');
+
+    // A replayable automatic request rebases like an explicit one.
+    await fx.write('shared.txt', 'Automatic change\n');
+    fx.git('add', 'shared.txt');
+    fx.git('commit', '-qm', 'Match the automatic change');
+    const other = await task('Other');
+    await edit(other, 'other.txt', 'Other change\n', true);
+    await fx.write('primary.txt', 'Primary follow-up\n');
+    fx.git('add', 'primary.txt');
+    fx.git('commit', '-qm', 'Primary follow-up');
+    const check = (await workflow.rebaseChecks()).checks.find((row) => row.changeId === other.id)!;
+    expect(check.status).toBe('ready');
+    expect((await workflow.rebaseBatch({ items: [check], automatic: true })).results).toEqual([{ changeId: other.id, status: 'updated' }]);
+    expect(fx.git('-C', other.worktree, 'rev-parse', 'HEAD^').trim()).toBe(head());
+    expect(() => workflow.rebaseBatch({ items: [check], automatic: 'yes' as unknown as boolean })).toThrow(expect.objectContaining({ status: 400 }));
+  });
+
   it('delivers nested additions without stripping their directory when diff.noprefix is enabled', async () => {
     const a = await task('Nested addition');
     fx.git('-C', a.worktree, 'config', 'diff.noprefix', 'true');

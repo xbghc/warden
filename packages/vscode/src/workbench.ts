@@ -91,6 +91,9 @@ export class Workbench {
   private session = randomUUID();
   private busy?: string;
   private errors = new Map<string, WorkbenchError>();
+  /** Check results automatic rebase already acted on, so an undone conflict is not retried. */
+  private readonly autoRebased = new Set<string>();
+  private autoRebasing?: Promise<void>;
   private messages: Record<string, string> = {};
   private rebaseResult?: RebaseBatchResponse;
   private rebaseSelection?: WorkbenchModel['rebaseSelection'];
@@ -131,7 +134,10 @@ export class Workbench {
     this.conversations = new AcpConversations(
       context,
       (binding, reference) => this.reviewConversation(binding, reference),
-      () => this.render(),
+      () => {
+        this.render();
+        this.resumeAutoRebase();
+      },
       (error) => this.log.write('error', 'conversation.failed', { diagnostic: acpErrorDiagnostic(error) }),
       async () => {
         await vscode.commands.executeCommand('warden.configureAgents');
@@ -557,6 +563,67 @@ export class Workbench {
     // Navigation may reuse a repository read that already published the previous layout.
     await this.updateContext();
   }
+  /** A task skipped while its agent was busy qualifies once the turn ends, without a new check. */
+  private resumeAutoRebase() {
+    const checks = this.checks;
+    if (!checks || this.checkingRebase || this.closing || !this.agentReady) return;
+    const session = this.session;
+    this.autoRebasing ??= this.autoRebase(session, checks).finally(() => (this.autoRebasing = undefined));
+  }
+  private autoRebaseEnabled() {
+    const resource = this.backend ? vscode.Uri.file(this.backend.root) : null;
+    return vscode.workspace.getConfiguration('warden', resource).get<unknown>('autoRebase') !== false;
+  }
+  /**
+   * Rebases workspaces the isolated check found replayable without conflicts. Only idle tasks
+   * qualify: no agent turn, permission wait or connection in progress in Task Chat, no running
+   * setup script and no deletion. The engine re-verifies both heads and the clean checkout, and
+   * undoes a conflict the check did not predict. Each check result is acted on once.
+   */
+  private async autoRebase(session: string, result: RebaseResponse) {
+    // Never surface the gates of an explicit action: no focus change, busy or switching error.
+    if (!this.autoRebaseEnabled() || this.closing || session !== this.session || !this.backend) return;
+    if (!vscode.workspace.isTrusted || !this.agentReady || this.initializing || this.switching || this.branchTransition) return;
+    const repository = this.backend.root;
+    const eligible = () =>
+      result.checks.filter((check) => {
+        const task = this.tasks().find((row) => row.id === check.changeId);
+        return (
+          check.status === 'ready' &&
+          !!check.sourceHead &&
+          !this.autoRebased.has(`${check.changeId}:${check.sourceHead}:${check.developmentHead}`) &&
+          !!task &&
+          task.status === 'working' &&
+          !task.deletion &&
+          task.workspaceHook?.status !== 'running' &&
+          !this.conversations.isBusy(repository, task.id)
+        );
+      });
+    if (!eligible().length) return;
+    const outcome = await this.perform(
+      async () => {
+        this.assertSession(session);
+        // Agent state can change while earlier operations finish; decide again right before running.
+        const items = eligible().map(({ changeId, sourceHead, developmentHead }) => ({ changeId, sourceHead, developmentHead }));
+        for (const item of items) this.autoRebased.add(`${item.changeId}:${item.sourceHead}:${item.developmentHead}`);
+        if (!items.length) return undefined;
+        this.log.write('info', 'workbench.autoRebase.start', { tasks: items.length });
+        return this.api('rebase.run', { items, automatic: true });
+      },
+      undefined,
+      'rebase',
+    );
+    if (!outcome || session !== this.session) return;
+    const title = (id: string) => this.tasks().find((task) => task.id === id)?.title ?? id;
+    const updated = outcome.results.filter((row) => row.status === 'updated');
+    const failed = outcome.results.filter((row) => row.status !== 'updated');
+    this.log.write(failed.length ? 'warn' : 'info', 'workbench.autoRebase.end', { updated: updated.length, failed: failed.length });
+    if (updated.length)
+      void vscode.window.showInformationMessage(
+        updated.length === 1 ? `Rebased ${title(updated[0]!.changeId)} onto ${this.branch}` : `Rebased ${updated.length} tasks onto ${this.branch}`,
+      );
+    for (const row of failed) void vscode.window.showWarningMessage(`Automatic rebase skipped ${title(row.changeId)}: ${row.message ?? 'Unknown error.'}`);
+  }
   private previewCommand() {
     const resource = this.backend ? vscode.Uri.file(this.backend.root) : null;
     const value = vscode.workspace.getConfiguration('warden', resource).get<unknown>('previewCommand');
@@ -798,6 +865,7 @@ export class Workbench {
         } else {
           this.checks = result;
           this.errors.delete('rebase');
+          this.autoRebasing ??= this.autoRebase(request.session, result).finally(() => (this.autoRebasing = undefined));
         }
       } catch (error) {
         if (current()) {
@@ -1893,7 +1961,7 @@ ${text}`,
     const closed = await Promise.allSettled([this.agentSetup.close(), this.conversations.close()]);
     for (const result of closed)
       if (result.status === 'rejected') this.log.write('error', 'extension.agent.cleanup.failed', { diagnostic: acpErrorDiagnostic(result.reason) });
-    await Promise.allSettled([this.active, ...this.navigation, this.reading, this.checkReading, this.contextUpdate]);
+    await Promise.allSettled([this.active, ...this.navigation, this.reading, this.checkReading, this.autoRebasing, this.contextUpdate]);
     await this.backend?.close();
     this.log.write('info', 'extension.close.end');
   }

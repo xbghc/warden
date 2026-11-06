@@ -783,6 +783,12 @@
           "scope": "machine",
           "markdownDescription": "Automatically approve explicit ACP reads of existing files in this repository's primary, allocated task workspaces and preview. Directory reads, known credential files and ambiguous requests still require a choice. Uses only the agent's allow-once option; agent sandbox policies still apply. Configure in User or Remote User settings."
         },
+        "warden.autoRebase": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource",
+          "markdownDescription": "Rebase task workspaces automatically when the base branch advances and the synchronization check finds no conflicts. Skips workspaces with uncommitted changes, an unfinished Git operation or an agent turn in progress; a conflict the check did not predict is undone. Agents running outside Task Chat are not detected."
+        },
         "warden.previewCommand": {
           "type": "string",
           "default": "",

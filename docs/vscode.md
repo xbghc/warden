@@ -353,7 +353,9 @@ failure are separate results.
 
 **Rebase** displays checks with their revisions and times. Select one, several or all, then request
 rebase. Every result is displayed, including skipped and failed items. Checks never mutate active files;
-Git cleanliness does not establish agent idleness.
+Git cleanliness does not establish agent idleness. With `warden.autoRebase` on (the default), idle
+workspaces that check as **Can Rebase** are rebased automatically and a notification names them; a
+skipped automatic rebase shows a warning. See [Automatic rebase](worktrees.md#automatic-rebase).
 
 Use VS Code's native Source Control Graph to browse base-branch commit history. Warden's
 history browser and arrangement interface are deferred. Existing history drafts and engine journals

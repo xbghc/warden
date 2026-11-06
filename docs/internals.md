@@ -323,8 +323,12 @@ action; startup never automatically repeats cleanup. Git checks do not stop exte
 `operations/`, backed by the external shared repository. Their commands disable hooks and signing.
 `POST /workflow/rebase` validates source and
 primary HEADs and clean checkout state, then explicitly rebases selected workspaces with
-`rebase --no-autostash --onto`. Actual conflicts remain for manual handling. There is no background
-rebase or workspace recycling.
+`rebase --no-autostash --onto`. Actual conflicts from an explicit request remain for manual handling.
+A request marked `automatic` comes only from the host's automatic rebase of idle workspaces; when its
+replay stops at a conflict, the engine runs `rebase --abort` in that workspace and accepts the undo
+only if HEAD is the recorded pre-rebase commit, the tree is clean and no Git operation remains.
+Otherwise the conflict record and safety backup are kept as for an explicit request. There is no
+workspace recycling.
 
 Workflow reads share one checkout inventory per request instead of rebuilding every workspace's
 inventory for each task. The extension follows observed primary checkout branch changes only for

@@ -273,6 +273,11 @@ export interface RebaseResponse {
 
 export interface RebaseBatchRequest {
   items: { changeId: string; sourceHead: string; developmentHead: string }[];
+  /**
+   * Set by Warden's own automatic rebase. A conflict the isolated check did not predict is undone
+   * with `git rebase --abort`, so no workspace is left mid-rebase by an operation nobody requested.
+   */
+  automatic?: boolean;
 }
 
 export interface RebaseBatchResponse {

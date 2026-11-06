@@ -8,6 +8,7 @@ const { checkTaskDeletion } = require('./deletion.cjs');
 const { checkBranches } = require('./branches.cjs');
 const { checkSettings } = require('./settings.cjs');
 const { checkSidebar } = require('./sidebar.cjs');
+const { checkAutoRebase } = require('./autorebase.cjs');
 const { checkPreviewLineEndings, checkPreviewActions, checkPreviewTerminals } = require('./preview.cjs');
 const { checkRepositoryLoading } = require('./repository.cjs');
 const { checkAgentSetup, checkAgentPresets, verifyAgent } = require('./agent-setup.cjs');
@@ -74,6 +75,8 @@ exports.run = async () => {
     await checkBranches(workbench, fixture.unconfigured, eventually);
     console.log('Checking native task sidebar');
     await checkSidebar(workbench, extension, fixture.unconfigured, eventually);
+    console.log('Checking automatic rebase');
+    await checkAutoRebase(workbench, workbench.backend.root, eventually);
     await workbench.open(fixture.root);
     assert.equal(workbench.backend.store.file, fixture.state);
     console.log('Checking preview terminal reuse');

@@ -89,6 +89,7 @@ The same protocol value can have different meanings by context. Keep the shared 
 | Rebase check | Up to Date / Can Rebase / Conflicts Expected / Blocked / Unknown |
 | Missing check | Not Checked |
 | Rebase execution result | Rebased / Skipped / Failed, with per-workspace details |
+| Automatic rebase | Rebased <task> onto <branch> / Automatic rebase skipped <task>: <reason>; setting `warden.autoRebase` |
 | Script execution | Pending / Running / Succeeded / Failed |
 | Agent activity without a final report | Outcome Unknown; preserve the last reported status and output without claiming that its command stopped |
 | Agent-reported command result | `Exit <code>` / `Signal <name>`; shown beside the agent's tool status without reclassifying it |

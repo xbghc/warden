@@ -9,7 +9,8 @@ Wireframes describe intent rather than exact labels.
 
 Warden is a passive tool. Users operate through it rather than reporting readiness, idleness or
 task completion. It shows Git facts, connections and operation results. One workspace corresponds
-to one linear task, can deliver several commits and remains available. Rebase is user-triggered.
+to one linear task, can deliver several commits and remains available. Rebase is user-triggered, except that idle
+workspaces whose check found no conflicts rebase automatically unless `warden.autoRebase` is off.
 The component and visual language is shadcn/ui.
 
 ## Compact VS Code layout
@@ -500,7 +501,7 @@ The implementation follows these bounded choices:
    operation journals support interrupted operations, not undo UI.
 
 Do not add task branching, dependency scheduling, completion declarations, vendor-specific agent SDKs,
-ACP client file/terminal tools, default dependency installation, test gates, automatic rebase/stash/recycling,
+ACP client file/terminal tools, default dependency installation, test gates, automatic stash/recycling, automatic rebase beyond idle conflict-free workspaces,
 automatic force-push or general project management.
 
 ## Design review

@@ -176,8 +176,21 @@ failed result without preventing other selected workspaces from running. If it b
 again, a new check must observe its source HEAD before it can run. Explicit execution
 uses `rebase --no-autostash --onto <primary> <last-delivered-source-or-base>`, avoiding duplicate
 squashed work. Each workspace has its own result. An actual conflict remains in that workspace for
-the user to resolve manually. There is no automatic stash, background rebase or forced continuation.
+the user to resolve manually. There is no automatic stash or forced continuation.
 Manual synchronization that incorporates newer primary commits is recognized on refresh.
+
+### Automatic rebase
+
+With `warden.autoRebase` on (the default), Warden rebases a workspace by itself after a check
+reports **Can Rebase**, using the same engine path and guards as an explicit rebase. Only idle tasks
+qualify: the workspace is clean with no Git operation in progress, no setup script or deletion is
+running, and its Task Chat has no turn, permission wait, cancellation, reset or connection in
+progress. A task skipped while its agent was busy qualifies once the turn ends. Each check result is
+acted on at most once. If the real replay stops at a conflict the isolated check did not predict,
+Warden runs `git rebase --abort`, confirms the workspace is back on its previous commit, clean and
+without a Git operation, discards the safety backup and reports the task as skipped; the check still
+offers a manual rebase. Agents working in the workspace outside Task Chat are not detected, so turn
+the setting off when such agents commit or edit there.
 
 ## History arrangement
 

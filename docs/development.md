@@ -32,6 +32,11 @@ The packaged extension's CI matrix runs this regression before the full native s
 contributions, confirmation/cancellation, local agent disconnection, chat cleanup, directory
 reuse and visible retry after failed preview disconnection. The full native suite also includes it.
 
+`WARDEN_VSCODE_SUITE=autorebase pnpm test:vscode` runs automatic rebase in the packaged host: idle
+Can Rebase tasks only, busy tasks resuming after their turn, one attempt per check and the setting
+turned off. The launcher writes `"warden.autoRebase": false` to the disposable user settings so other
+suites see exact workspace heads; this suite and the full native suite enable it explicitly.
+
 `build` and `build:vscode` build the extension and its webviews. `build:webview` refreshes just the
 webview bundle. The VSIX contains bundled JavaScript and uses the workspace's Git CLI.
 The extension requires VS Code 1.106+ for the stable Secondary Side Bar contribution point.

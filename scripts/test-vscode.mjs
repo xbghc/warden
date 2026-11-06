@@ -56,6 +56,10 @@ try {
     await mkdir(path.dirname(destination), { recursive: true });
     await writeFile(destination, bytes);
   }
+  // Automatic rebase defaults on for users. Suites assert exact workspace heads, so they opt in
+  // explicitly where that behavior is under test.
+  await mkdir(path.join(directory, 'user', 'User'), { recursive: true });
+  await writeFile(path.join(directory, 'user', 'User', 'settings.json'), JSON.stringify({ 'warden.autoRebase': false }));
   let testFailure;
   await runTests({
     ...(process.env.VSCODE_EXECUTABLE_PATH
@@ -73,7 +77,9 @@ try {
               ? 'test/vscode/settings.cjs'
               : process.env.WARDEN_VSCODE_SUITE === 'branches'
                 ? 'test/vscode/branches.cjs'
-                : 'test/vscode/suite.cjs',
+                : process.env.WARDEN_VSCODE_SUITE === 'autorebase'
+                  ? 'test/vscode/autorebase.cjs'
+                  : 'test/vscode/suite.cjs',
     ),
     extensionTestsEnv: { XDG_DATA_HOME: process.env.XDG_DATA_HOME, WARDEN_VSCODE_FIXTURE: fixture },
     launchArgs: [

@@ -251,6 +251,17 @@ export class AcpConversations {
     this.changed();
   }
 
+  /**
+   * Whether the task's agent may be writing: a turn, permission wait, cancellation, session reset
+   * or connection in progress. Automatic rebase skips such tasks; an idle connection does not count.
+   */
+  isBusy(repository: string, taskId: string) {
+    const key = this.key(repository, taskId);
+    const entry = this.entries.get(key);
+    if (this.deleting.has(key) || this.opening.has(key) || entry?.connecting) return true;
+    return !!entry && ['connecting', 'running', 'waiting_permission', 'cancelling', 'resetting'].includes(entry.session.currentStatus());
+  }
+
   /** Titles are not part of a binding's identity, so a rename updates live conversations in place. */
   retitle(repository: string, taskId: string, title: string) {
     const entry = this.entries.get(this.key(repository, taskId));

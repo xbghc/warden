@@ -457,7 +457,7 @@ export class WorkflowService {
     return this.store.withRepositoryLock(() => this.syncLocked(id, sourceHead, developmentHead));
   }
 
-  private async syncLocked(id: string, sourceHead: string, developmentHead?: string) {
+  private async syncLocked(id: string, sourceHead: string, developmentHead?: string, automatic = false) {
     const state = await this.store.load();
     const change = changeOf(state, id);
     if (change.developmentBranch !== state.workflow!.developmentBranch) fail('Switch to the base branch for this workspace first.', 'requirement_changed');
@@ -490,6 +490,13 @@ export class WorkflowService {
           timeoutMs: LONG_GIT_TIMEOUT_MS,
         });
       } catch (error) {
+        if (automatic && (await this.abortAutomaticRebase(checkout.path, before))) {
+          change.rebaseBackups = change.rebaseBackups?.filter((row) => row !== backup);
+          if (!change.rebaseBackups?.length) delete change.rebaseBackups;
+          await this.save(change);
+          await discardOperationBackup(this.store, backup);
+          fail('Automatic rebase stopped at a conflict and was undone. Rebase this workspace manually when ready.', 'rebase_conflict_aborted');
+        }
         change.sync = {
           status: 'conflict',
           target,
@@ -513,6 +520,22 @@ export class WorkflowService {
       await this.save(change);
     }
     return change;
+  }
+
+  /**
+   * Undoes an automatic rebase that stopped. It counts as undone only when the workspace is back
+   * on its previous commit, clean and without a Git operation; anything else keeps the manual
+   * conflict record and backup, as an explicit rebase would.
+   */
+  private async abortAutomaticRebase(cwd: string, before: string) {
+    try {
+      await runGitWrite(['rebase', '--abort'], { cwd, timeoutMs: LONG_GIT_TIMEOUT_MS });
+      const [head, state] = await Promise.all([revParse(cwd, 'HEAD'), readWorktreeState(cwd)]);
+      const busy = (await this.listCheckouts()).get(cwd)?.busy;
+      return head === before && !state.dirtyCount && !busy;
+    } catch {
+      return false;
+    }
   }
 
   private async assertRebaseIgnoredFiles(cwd: string, boundary: string, source: string, target: string) {
@@ -774,7 +797,8 @@ export class WorkflowService {
     if (
       !Array.isArray(request?.items) ||
       request.items.length > 100 ||
-      request.items.some((i) => !i || typeof i.changeId !== 'string' || (i.sourceHead !== '' && !gitOid(i.sourceHead)) || !gitOid(i.developmentHead))
+      request.items.some((i) => !i || typeof i.changeId !== 'string' || (i.sourceHead !== '' && !gitOid(i.sourceHead)) || !gitOid(i.developmentHead)) ||
+      (request.automatic !== undefined && typeof request.automatic !== 'boolean')
     )
       throw badRequest('Invalid rebase request.');
     return this.store.withRepositoryLock(async () => {
@@ -783,7 +807,7 @@ export class WorkflowService {
         try {
           // Unavailable checks have no source head. Report their checkout failure per item;
           // if the checkout has returned, syncLocked still rejects the unreviewed head.
-          await this.syncLocked(item.changeId, item.sourceHead, item.developmentHead);
+          await this.syncLocked(item.changeId, item.sourceHead, item.developmentHead, request.automatic === true);
           results.push({ changeId: item.changeId, status: 'updated' });
         } catch (error) {
           results.push({ changeId: item.changeId, status: 'failed', message: errorMessage(error) });

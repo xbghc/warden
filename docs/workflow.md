@@ -15,7 +15,8 @@ working copy; [Implementation alignment](#implementation-alignment) identifies f
 boundaries. The [interaction design](design.md) defines the workbench layout and interaction contracts.
 The [terminology contract](terminology.md) defines the names used across documentation and the interface.
 Earlier proposals for enforced dependencies, agent-owned delivery, task completion declarations,
-automatic workspace recycling and automatic rebase are superseded by the decisions below.
+automatic workspace recycling and unconditional automatic rebase are superseded by the decisions below;
+automatic rebase is limited to idle, conflict-free workspaces as described in [Worktrees](worktrees.md#automatic-rebase).
 
 ## Scope and responsibilities
 
