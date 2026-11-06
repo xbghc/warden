@@ -81,7 +81,11 @@ export class GitSandbox {
     }
     const sandbox = new GitSandbox(await mkdtemp(path.join(root, 'git-')), store, identity);
     try {
-      await runGitWrite([...sandbox.options(), 'worktree', 'add', '--quiet', '--detach', '--', sandbox.path, head], { cwd: repository });
+      // Checking out a whole tree, like writing a new clone, can exceed the default on large repositories.
+      await runGitWrite([...sandbox.options(), 'worktree', 'add', '--quiet', '--detach', '--', sandbox.path, head], {
+        cwd: repository,
+        timeoutMs: LONG_GIT_TIMEOUT_MS,
+      });
       return sandbox;
     } catch (error) {
       await sandbox.dispose();
@@ -146,7 +150,8 @@ export class GitSandbox {
 
   async write(args: string[]) {
     await this.repository();
-    return runGitWrite([...this.options(), ...args], { cwd: this.path });
+    // Apply, commit and trial rebases rewrite the sandbox's whole working tree.
+    return runGitWrite([...this.options(), ...args], { cwd: this.path, timeoutMs: LONG_GIT_TIMEOUT_MS });
   }
 
   async validate() {

@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { access, copyFile, mkdir, mkdtemp, open, rm, utimes, writeFile } from 'node:fs/promises';
-import { runGit, runGitBuffer, runGitSnapshot, type SnapshotEnv } from './git.js';
+import { LONG_GIT_TIMEOUT_MS, runGit, runGitBuffer, runGitSnapshot, type SnapshotEnv } from './git.js';
 import { WardenError } from './errors.js';
 
 /**
@@ -163,7 +163,8 @@ async function seedIndexedBlobs(cwd: string, snapshot: Required<SnapshotEnv>) {
 export async function snapshotWorktree(cwd: string, store: string): Promise<string> {
   return withIndexCopy(cwd, store, async (snapshot) => {
     await seedIndexedBlobs(cwd, snapshot);
-    await runGitSnapshot(['add', '--all'], { cwd, ...snapshot });
+    // Hashing every new or changed file scales with the workspace, not with Git's startup cost.
+    await runGitSnapshot(['add', '--all'], { cwd, ...snapshot, timeoutMs: LONG_GIT_TIMEOUT_MS });
     const r = await runGitSnapshot(['write-tree', '--missing-ok'], { cwd, ...snapshot });
     return r.stdout.trim();
   });
