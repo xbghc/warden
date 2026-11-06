@@ -285,7 +285,7 @@ export class PreviewService {
       if (change.deletion) throw badRequest('Task deletion is pending. Retry deletion first.', 'task_deleting');
       const checkout = checkouts.find((w) => w.path === change.worktree && w.branch === change.branch && !w.prunable && !w.foreign && !w.busy);
       if (!checkout || checkout.path === primary.path) conflict('The workspace is unavailable or has an unfinished Git operation.', 'preview_source_busy');
-      const from = await deliveryBase(change, await oid(checkout.path, 'HEAD'), head);
+      const from = await deliveryBase(change, await oid(checkout.path, 'HEAD'), head, this.repo.commonRoot);
       const tree = await snapshotWorktree(checkout.path, snapshotStore(this.store.file));
       sources.push({ change, from, tree });
     }

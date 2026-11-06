@@ -137,8 +137,10 @@ export class WorkflowService {
       for (const row of working) {
         try {
           const checkout = await this.checkout(row, checkouts);
-          if ((await deliveryBase(row, await revParse(checkout.path, 'HEAD'), developmentHead)) === developmentHead) {
-            row.base = developmentHead;
+          // The effective boundary is what review, delivery, rebase and preview all compare from.
+          const boundary = await deliveryBase(row, await revParse(checkout.path, 'HEAD'), developmentHead, this.repo.commonRoot);
+          if (boundary !== (row.sourceBase ?? row.base)) {
+            row.base = boundary;
             delete row.sourceBase;
             delete row.sourceTree;
             delete row.sync;
@@ -445,7 +447,7 @@ export class WorkflowService {
     await this.assertClean(checkout.path);
     const before = await revParse(checkout.path, 'HEAD');
     if (before !== sourceHead) fail('The workspace has new commits. Run the check again.', 'review_changed');
-    const boundary = await deliveryBase(change, before, target);
+    const boundary = await deliveryBase(change, before, target, this.repo.commonRoot);
     if (!(await this.ancestor(checkout.path, boundary, before))) fail('Workspace history changed. Check the rebase boundary manually.', 'base_changed');
     await this.importCommit(this.repo.commonRoot, checkout.path, target);
     // A completed rebase can outlive its state write. An explicit retry only repairs the
@@ -548,7 +550,7 @@ export class WorkflowService {
           check.message = 'The workspace has uncommitted changes or a commit is being prepared.';
           continue;
         }
-        const boundary = await deliveryBase(row, check.sourceHead, target);
+        const boundary = await deliveryBase(row, check.sourceHead, target, this.repo.commonRoot);
         if (boundary === target) {
           // This ancestry result is computed from this request's fresh source read. It does
           // not reuse an isolated verdict; actual synchronization has its own mutation guards.
@@ -915,7 +917,7 @@ export class WorkflowService {
     const source = await revParse(checkout.path, 'HEAD');
     if (source !== request?.sourceHead || target !== request?.developmentHead)
       fail('Code or the base branch changed. Refresh and review the current changes.', 'review_changed');
-    const boundary = await deliveryBase(change, source, target);
+    const boundary = await deliveryBase(change, source, target, this.repo.commonRoot);
     // Refresh recognizes manual rebases without writing state. Validate the same effective
     // boundary shown in that review, including when the persisted sourceBase is older.
     if (request.sourceBase !== undefined && request.sourceBase !== boundary) fail('The source boundary changed. Review the changes again.', 'review_changed');

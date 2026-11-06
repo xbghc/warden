@@ -96,6 +96,33 @@ describe('continuous workspace delivery and passive synchronization', () => {
     expect(() => fx.git('cat-file', '-e', review.sourceHead!)).toThrow();
   });
 
+  it('keeps primary commits a manual rebase incorporated out of delivery, rebase and preview after primary moves on', { timeout: longGitTimeout }, async () => {
+    const a = await task('Rebased before a revert');
+    await edit(a, 'task.txt', 'Task change\n', true);
+    await fx.write('feature.txt', 'Feature\n');
+    fx.git('add', 'feature.txt');
+    fx.git('commit', '-qm', 'Add feature');
+    const feature = head();
+    fx.git('-C', a.worktree, 'fetch', '--quiet', fx.root, feature);
+    fx.git('-C', a.worktree, 'rebase', '--quiet', feature);
+    // Primary moves past the incorporated commit by reverting it.
+    fx.git('revert', '--no-edit', 'HEAD');
+    const target = head();
+
+    const review = taskReview(await workflow.get(), a.id, await listWorktreesDetailed(await resolveRepo(fx.root)))!;
+    expect(review.sourceBase).toBe(feature);
+    const check = (await workflow.rebaseChecks()).checks.find((row) => row.changeId === a.id)!;
+    expect(check.status).toBe('ready');
+    expect((await workflow.rebaseBatch({ items: [check] })).results).toEqual([{ changeId: a.id, status: 'updated' }]);
+    // Only the task commit is replayed; the reverted primary commit stays reverted.
+    expect(fx.git('-C', a.worktree, 'rev-parse', 'HEAD^').trim()).toBe(target);
+    await expect(file(a.worktree, 'feature.txt')).rejects.toMatchObject({ code: 'ENOENT' });
+
+    await deliver((await workflow.get()).workflow!.changes.find((row) => row.id === a.id) as DevelopmentChange, 'Deliver after revert');
+    expect(fx.git('show', '--format=', '--name-only', 'HEAD').trim()).toBe('task.txt');
+    await expect(file(fx.root, 'feature.txt')).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('delivers nested additions without stripping their directory when diff.noprefix is enabled', async () => {
     const a = await task('Nested addition');
     fx.git('-C', a.worktree, 'config', 'diff.noprefix', 'true');

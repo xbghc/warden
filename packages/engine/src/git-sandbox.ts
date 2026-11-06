@@ -11,9 +11,24 @@ export async function oid(cwd: string, ref: string) {
   return (await runGit(['rev-parse', '--verify', ref], { cwd })).stdout.trim();
 }
 /** A manual rebase/merge may already have incorporated the new primary baseline. */
-export async function deliveryBase(change: DevelopmentChange, head: string, target: string) {
-  const contains = await runGit(['merge-base', '--is-ancestor', target, head], { cwd: change.worktree, okCodes: [0, 1, 128] });
-  return contains.code === 0 ? target : (change.sourceBase ?? change.base);
+export async function deliveryBase(change: DevelopmentChange, head: string, target: string, primary: string) {
+  const cwd = change.worktree;
+  const contains = await runGit(['merge-base', '--is-ancestor', target, head], { cwd, okCodes: [0, 1, 128] });
+  if (contains.code === 0) return target;
+  const stored = change.sourceBase ?? change.base;
+  // A manual rebase or merge can incorporate primary commits newer than the stored boundary before
+  // primary moves on again, for example by reverting one of them. The newest primary commit in the
+  // task is then the boundary, so those commits are never delivered, replayed or previewed as task
+  // changes. The task clone may lack newer primary commits, so each side lists its own history. A
+  // delivered source tip is not on primary, so it lists nothing there and keeps precedence.
+  const since = async (repository: string, tip: string) => {
+    const result = await runGit(['rev-list', '--topo-order', tip, '--not', stored, '--'], { cwd: repository, okCodes: [0, 128] });
+    return result.code === 0 ? result.stdout.split('\n').filter(Boolean) : [];
+  };
+  const onPrimary = await since(primary, target);
+  if (!onPrimary.length) return stored;
+  const inTask = new Set(await since(cwd, head));
+  return onPrimary.find((commit) => inTask.has(commit)) ?? stored;
 }
 export async function patchBetween(cwd: string, from: string, to: string, snapshot?: SnapshotEnv) {
   const args = ['diff', ...DIFF_OUTPUT_ARGS, '--binary', '--full-index', '--no-renames', from, to, '--'];

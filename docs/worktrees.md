@@ -129,9 +129,10 @@ a saved workspace snapshot, including staged, unstaged and non-ignored untracked
 is required. The source HEAD, saved content, delivery boundary and primary HEAD are pinned by review. Source commits may
 continue from the previous delivery without first rebasing. `sourceBase` records that previous
 source tip, and `sourceTree` records delivered saved content, so A1 is excluded when delivering A2 even
-without a new task commit. Delivery leaves the task files, index and branch unchanged. After a manual rebase incorporates the current
-primary HEAD, both refreshed review and delivery use that HEAD as the effective boundary; a request
-with the previous boundary requires a new review.
+without a new task commit. Delivery leaves the task files, index and branch unchanged. After a manual rebase or merge incorporates
+primary commits newer than the recorded boundary, refreshed review, delivery, rebase and preview use
+the newest incorporated primary commit as the effective boundary, even after primary moves on or
+reverts one of them; a request with the previous boundary requires a new review.
 
 Preparation first composes the delivery in an isolated worktree. It leaves the independent preview running and stages only that delivery in the checked-out
 base branch. Existing primary user edits must be handled first.
@@ -174,7 +175,7 @@ again, a new check must observe its source HEAD before it can run. Explicit exec
 uses `rebase --no-autostash --onto <primary> <last-delivered-source-or-base>`, avoiding duplicate
 squashed work. Each workspace has its own result. An actual conflict remains in that workspace for
 the user to resolve manually. There is no automatic stash, background rebase or forced continuation.
-Manual synchronization that incorporates the current primary HEAD is recognized on refresh.
+Manual synchronization that incorporates newer primary commits is recognized on refresh.
 
 ## History arrangement
 
