@@ -64,10 +64,20 @@ export const Controls: Story = {
       <div className="field">
         <Textarea aria-label="Notes" placeholder="Additional notes (optional)" rows={4} />
       </div>
-      <label className="selection-toggle">
-        <Checkbox aria-label="Select All" defaultChecked />
-        Select all
-      </label>
+      <div className="flex flex-wrap gap-4">
+        <label className="selection-toggle">
+          <Checkbox aria-label="Select All" defaultChecked="indeterminate" />
+          Select all
+        </label>
+        <label className="selection-toggle">
+          <Checkbox aria-label="Selected" defaultChecked />
+          Selected
+        </label>
+        <label className="selection-toggle">
+          <Checkbox aria-label="Not selected" />
+          Not selected
+        </label>
+      </div>
       <Select defaultValue="default">
         <SelectTrigger className="acp-picker" aria-label="Model">
           <SelectValue />
