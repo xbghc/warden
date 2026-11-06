@@ -100,8 +100,8 @@ an earlier item to be accepted before a later one can start.
 Task decomposition is the user's work. There is no dedicated feature for an agent to discover
 an oversized task, split it, propose a new task hierarchy or request scope approval. A user may
 ask an agent to help with planning through a task conversation or external tools; that requires no
-special product workflow. Task notes can hold the detail the user finds useful, without mandatory
-acceptance templates or agent-generated reports.
+special product workflow. A task is only its title; detail belongs in the task conversation, without
+mandatory acceptance templates or agent-generated reports.
 
 ## Workspaces and hooks
 
@@ -109,7 +109,7 @@ Users may explicitly delete a task, including one with undelivered source commit
 One native confirmation identifies the task, workspace folder, branch treatment and discarded work.
 Deletion creates no recovery backup. It closes the task's owned agent connection, removes its preview
 contribution, releases the workspace and removes the task. Commits already contributed to the base
-branch and their minimal historical associations remain. Task notes, drafts and Warden-local chat
+branch and their minimal historical associations remain. Task drafts and Warden-local chat
 records are deleted; the agent application's own history is not managed by this operation.
 
 Releasing a workspace ends its task allocation, normally retaining the physical directory, Git
@@ -137,10 +137,10 @@ Workspace hooks are a thin interface for user scripts: execute the configured cr
 command with the workspace directory and context, then expose output and exit status. Scripts
 may prepare local configuration or invoke user tools; their internals have no special meaning to
 Warden. A failed hook leaves the workspace available and can be retried explicitly. Adding a task
-runs its configured hook; editing notes and ordering never run hooks. Creation/reuse hooks do not
+runs its configured hook; renaming and ordering never run hooks. Creation/reuse hooks do not
 imply recycling a workspace after delivery.
 
-If allocation fails, the saved task retains its title, notes and failure reason. Retry prepares that
+If allocation fails, the saved task retains its title and failure reason. Retry prepares that
 same task. Legacy unallocated plans are prepared automatically when selected, opened or used for
 a conversation; background reads do not allocate them. Archived plans wait for explicit restoration.
 
@@ -322,7 +322,7 @@ The working copy implements the workflow above. It has not been published as a r
 
 | Operation | Current boundary |
 |---|---|
-| Plan and workspace | Ordered task notes, automatic allocation on creation, persistent workspaces and repeated deliveries. No completion declaration or automatic recycling. |
+| Plan and workspace | Ordered task titles, automatic allocation on creation, persistent workspaces and repeated deliveries. No completion declaration or automatic recycling. |
 | Workspace hooks | Generic creation/reuse scripts with cwd, environment, output and status. Allocation does not launch an agent. |
 | ACP conversation | Explicit task-bound text prompts, updates, permissions, authentication, cancel, disconnect and supported session loading. One executable connection per task; agents execute their own tools. |
 | Connection | Live committed/uncommitted changes composed in an isolated worktree of the external shared Git repository, then published only to the persistent preview directory. Failed initial connections preserve the prior set and files. |

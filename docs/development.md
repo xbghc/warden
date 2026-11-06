@@ -29,7 +29,7 @@ including after host failures. CI uploads these logs, and failed runs print rece
 The packaged extension's CI matrix runs this regression before the full native suite on each platform.
 
 `WARDEN_VSCODE_SUITE=deletion pnpm test:vscode` runs the packaged task deletion flow: native menu
-contributions, confirmation/cancellation, local agent disconnection, note/chat cleanup, directory
+contributions, confirmation/cancellation, local agent disconnection, chat cleanup, directory
 reuse and visible retry after failed preview disconnection. The full native suite also includes it.
 
 `build` and `build:vscode` build the extension and its webviews. `build:webview` refreshes just the
@@ -242,7 +242,7 @@ automatic startup/reconfiguration connections, and gated workflow surfaces and a
 for unchecked, missing-executable, incompatible-protocol, session-setup and authentication failures.
 Verify that successful initialization leaves the connection alive, unexpected exits revoke availability,
 and replacement/shutdown stop owned processes and cancel pending startup. Cover stale results, no work
-prompts and recovery without losing tasks or task-note drafts. Opening Settings alone does not start
+prompts and recovery without losing tasks or drafts. Opening Settings alone does not start
 an additional connection; startup and profile saves do. Also cover
 native Codex/OpenCode preset selection, command-input cancellation, existing and concurrently edited
 profile preservation, workbench-selected agents for new Task Chats, automatic first-session creation
@@ -269,11 +269,11 @@ pnpm test:vscode
 ```
 
 `test/ui/smoke.py` starts and closes `test/ui/harness.ts`, exercises initialization, empty states,
-multiline task-note drafts after discarding webview-local state, save/discard behavior, native Settings links and rebase selection, and saves screenshots under
+title-only task creation and renaming, native Settings links, rebase selection and partial selection, and saves screenshots under
 `WARDEN_UI_ARTIFACTS` (default `/tmp/warden-ui-artifacts`). The harness is test-only and is not shipped.
 Inspect screenshots and console errors. Preserve intentional error cases in native-host tests as well.
 For manual verification, run `node --import tsx test/ui/harness.ts` and open its reported port. `/inspect`
-embeds the task-note editor at 320 pixels in light, dark and high-contrast themes. `WARDEN_UI_PORT` and
+embeds the rebase panel at 320 pixels in light, dark and high-contrast themes. `WARDEN_UI_PORT` and
 `WARDEN_UI_HOST` optionally select the local test binding; defaults remain an ephemeral loopback port.
 `test/ui/acp-smoke.py` uses the same packaged assets with real ACP subprocesses to exercise concurrent
 task conversations, permission choices, cancellation, automatic restoration on opening and draft preservation.

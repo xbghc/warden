@@ -2,7 +2,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { DevelopmentChange, SlotKind, WorkflowResponse } from '@warden/shared';
+import type { CreateChangeRequest, DevelopmentChange, SlotKind, UpdateChangeRequest, WorkflowResponse } from '@warden/shared';
 import { createApp, resolveRepo, StateStore, WorkflowService } from './compat/index.js';
 import { listWorktreesDetailed } from '../packages/engine/src/worktrees.js';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
@@ -198,13 +198,20 @@ describe('requirement development workflow', () => {
 
   it('plans and edits commits without allocating a checkout or pinning an old baseline', async () => {
     const branches = fx.git('branch', '--format=%(refname)');
-    const planned = await workflow.create({ title: 'Plan validation', body: 'Handle empty orders', acceptance: 'Tests cover empty input' });
-    expect(planned).toMatchObject({ status: 'planned', body: 'Handle empty orders', acceptance: 'Tests cover empty input' });
+    // Tasks are titles only; notes an older client still sends are not stored.
+    const planned = await workflow.create({
+      title: 'Plan validation',
+      body: 'Handle empty orders',
+      acceptance: 'Tests cover empty input',
+    } as CreateChangeRequest);
+    expect(planned).toMatchObject({ status: 'planned', title: 'Plan validation' });
+    expect(planned).not.toHaveProperty('body');
+    expect(planned).not.toHaveProperty('acceptance');
     expect(planned.worktree).toBeUndefined();
     expect(planned.base).toBeUndefined();
     expect(await listWorktreesDetailed(await resolveRepo(fx.root))).toHaveLength(1);
     expect(fx.git('branch', '--format=%(refname)')).toBe(branches);
-    await workflow.update(planned.id, { title: 'Validate orders', acceptance: 'Reject negative values' });
+    await workflow.update(planned.id, { title: 'Validate orders', acceptance: 'Reject negative values' } as UpdateChangeRequest);
     await expect(workflow.ready(planned.id)).rejects.toMatchObject({ code: 'change_not_started' });
     await expect(workflow.resume(planned.id)).rejects.toMatchObject({ code: 'change_not_started' });
     await fx.write('foundation.txt', 'new baseline');
@@ -219,8 +226,8 @@ describe('requirement development workflow', () => {
       agent: 'Codex',
       base: head,
       title: 'Validate orders',
-      acceptance: 'Reject negative values',
     });
+    expect(first).not.toHaveProperty('acceptance');
     expect(duplicate.worktree).toBe(first.worktree);
     expect(await listWorktreesDetailed(await resolveRepo(fx.root))).toHaveLength(2);
     await expect(workflow.update(first.id, { status: 'archived' })).rejects.toMatchObject({ code: 'change_started' });
@@ -264,10 +271,10 @@ describe('requirement development workflow', () => {
     await workflow.update(a.id, { status: 'planned' });
     await workflow.start(a.id);
     await workflow.move(a.id, b.id);
-    expect((await workflow.update(a.id, { body: 'Updated while working' })).body).toBe('Updated while working');
+    expect((await workflow.update(a.id, { title: 'Updated while working' })).title).toBe('Updated while working');
   });
 
-  it('migrates matching todos once, keeps descriptions and comments, and archives old checkmarks', async () => {
+  it('migrates matching todos once as titled tasks, keeps comments and old descriptions, and archives old checkmarks', async () => {
     const running = await task('Existing task');
     const todo = (id: string, branch: string, status: 'open' | 'done' = 'open') => ({
       id,
@@ -285,12 +292,13 @@ describe('requirement development workflow', () => {
     const response = await workflow.get();
     expect(response.workflow!.changes.find((row) => row.id === 'todo-open')).toMatchObject({
       status: 'planned',
-      body: 'Preserve this note',
+      title: 'open',
       commentIds: ['review-1'],
     });
+    expect(response.workflow!.changes.find((row) => row.id === 'todo-open')).not.toHaveProperty('body');
     expect(response.workflow!.changes.find((row) => row.id === 'todo-done')).toMatchObject({
       status: 'archived',
-      legacyTodo: { branch: running.branch, status: 'done' },
+      legacyTodo: { branch: running.branch, status: 'done', body: 'Preserve this note' },
     });
     expect(response.workflow!.changes.find((row) => row.id === 'todo-done')?.integration).toBeUndefined();
     expect(response.legacyTodos?.map((row) => row.id)).toEqual(['other']);
@@ -299,6 +307,12 @@ describe('requirement development workflow', () => {
     const reloaded = await new StateStore(path.join(data, 'state.json'), fx.root).load();
     expect(reloaded.todos).toEqual([]);
     expect(reloaded.workflow!.changes.filter((row) => row.id.startsWith('todo-'))).toHaveLength(3);
+    // Tasks are title-only, but migration and import never discard the old description text.
+    expect(reloaded.workflow!.changes.filter((row) => row.id.startsWith('todo-')).map((row) => row.legacyTodo?.body)).toEqual([
+      'Preserve this note',
+      'Preserve this note',
+      'Preserve this note',
+    ]);
     await workflow.get();
     expect((await store.load()).workflow!.changes).toHaveLength(4);
   });
@@ -307,15 +321,15 @@ describe('requirement development workflow', () => {
     const app = createApp({ repo: await resolveRepo(fx.root), store });
     const send = (method: string, url: string, body: unknown) =>
       app.request(`/api/workflow${url}`, { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-    const created = await send('POST', '/changes', { title: 'From API', acceptance: 'Pass tests' });
+    const created = await send('POST', '/changes', { title: 'From API' });
     expect(created.status).toBe(201);
     const plan = (await created.json()) as { id: string; status: string; worktree?: string };
     expect(plan.status).toBe('planned');
     expect(plan.worktree).toBeUndefined();
-    expect((await send('PATCH', `/changes/${plan.id}`, { body: 'Updated plan' })).status).toBe(200);
+    expect((await send('PATCH', `/changes/${plan.id}`, { title: 'Updated plan' })).status).toBe(200);
     const started = await send('POST', `/changes/${plan.id}/start`, { agent: 'Example agent', kind: 'worktree' });
     expect(started.status).toBe(200);
-    expect(await started.json()).toMatchObject({ status: 'working', agent: 'Example agent', body: 'Updated plan' });
+    expect(await started.json()).toMatchObject({ status: 'working', agent: 'Example agent', title: 'Updated plan' });
     expect((await send('POST', `/changes/${plan.id}/start`, null)).status).toBe(400);
   });
 

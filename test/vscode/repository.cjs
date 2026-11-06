@@ -53,7 +53,7 @@ async function checkRepositoryLoading(workbench, extension, fixture, eventually,
       const opening = timings.slice(first).find((row) => row.stage === 'engine.open');
       assert.equal(opening?.event, 'start', 'a blocked startup phase is visible before it finishes');
       assert(!timings.slice(first).some((row) => row.stage === 'engine.open' && row.event === 'end'));
-      for (const surface of ['workspaces', 'task', 'rebase', 'settings']) {
+      for (const surface of ['workspaces', 'rebase', 'settings']) {
         const model = workbench.model(surface);
         assert.equal(model.repositoryState, 'loading', `${operation} keeps ${surface} in its loading state`);
         assert.equal(model.repository, '');

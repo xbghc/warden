@@ -113,12 +113,11 @@ function migrateTodoPlans(state: ReviewState): void {
       workflow.changes.push({
         id,
         title: todo.title,
-        body: todo.body,
         ...('commentIds' in todo ? { commentIds: todo.commentIds } : {}),
         developmentBranch: branch,
         status: todo.status === 'done' ? 'archived' : 'planned',
         createdAt: todo.createdAt,
-        legacyTodo: { branch: todo.branch, status: todo.status },
+        legacyTodo: { branch: todo.branch, status: todo.status, ...(todo.body ? { body: todo.body } : {}) },
       });
     }
     return false;

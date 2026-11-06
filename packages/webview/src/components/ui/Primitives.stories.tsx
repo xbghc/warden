@@ -1,10 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { Check, Info, MessageSquarePlus, MoreHorizontal, PanelRight, RefreshCw, X } from 'lucide-react';
+import { Info, MessageSquarePlus, MoreHorizontal, PanelRight, RefreshCw } from 'lucide-react';
 import { Button } from './button';
 import { Checkbox } from './checkbox';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './dropdown-menu';
 import { IconButton } from './icon-button';
-import { Input } from './input';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from './select';
 import { StatusBadge } from './status-badge';
 import { Textarea } from './textarea';
@@ -16,7 +15,7 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-/** The shared primitives as the Task, Rebase and Task Chat webviews use them. */
+/** The shared primitives as the Rebase and Task Chat webviews use them. */
 export const Controls: Story = {
   render: () => (
     <section className="w-[560px] max-w-full space-y-6">
@@ -28,12 +27,6 @@ export const Controls: Story = {
         <Button disabled>Rebase Selected</Button>
       </div>
       <div className="actions">
-        <IconButton label="Save Notes" variant="default">
-          <Check aria-hidden="true" />
-        </IconButton>
-        <IconButton label="Discard Changes">
-          <X aria-hidden="true" />
-        </IconButton>
         <IconButton label="Check Again">
           <RefreshCw aria-hidden="true" />
         </IconButton>
@@ -58,12 +51,7 @@ export const Controls: Story = {
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-      <div className="field">
-        <Input aria-label="Title" placeholder="Task title" />
-      </div>
-      <div className="field">
-        <Textarea aria-label="Notes" placeholder="Additional notes (optional)" rows={4} />
-      </div>
+      <Textarea aria-label="Message" placeholder="Describe what to work on…" rows={3} />
       <div className="flex flex-wrap gap-4">
         <label className="selection-toggle">
           <Checkbox aria-label="Select All" defaultChecked="indeterminate" />

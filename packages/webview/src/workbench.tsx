@@ -1,27 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { GitBranch, RefreshCw } from 'lucide-react';
 import type { WorkbenchAction, WorkbenchModel } from '@warden/shared';
 import { rebaseCheckLabels, rebaseResultLabels } from '@warden/shared';
 import { Button } from './components/ui/button';
 import { Checkbox } from './components/ui/checkbox';
-import { Task, taskDraftKey } from './task';
-import type { ViewState } from './task';
 import { IconButton } from './components/ui/icon-button';
 import { StatusBadge } from './components/ui/status-badge';
 
-type Props = { model: WorkbenchModel; send(action: WorkbenchAction): void; state?: ViewState };
-export function WorkbenchApp({ model, send, state: persisted }: Props) {
-  const memory = useRef<Record<string, unknown>>({});
-  const state = useMemo<ViewState>(
-    () =>
-      persisted ?? {
-        read: <T,>(key: string, fallback: T) => (memory.current[key] as T | undefined) ?? fallback,
-        save: (key, value) => {
-          memory.current[key] = value;
-        },
-      },
-    [persisted],
-  );
+type Props = { model: WorkbenchModel; send(action: WorkbenchAction): void };
+export function WorkbenchApp({ model, send }: Props) {
   if (model.agentConfiguration.status !== 'configured' || model.agentReadiness.status !== 'ready' || model.surface === 'settings')
     return (
       <main className="setup">
@@ -36,9 +23,9 @@ export function WorkbenchApp({ model, send, state: persisted }: Props) {
         </p>
       </main>
     );
-  const scope = model.surface === 'task' ? `task:${model.task?.id ?? 'new'}` : model.surface;
+  const scope = model.surface;
   return (
-    <main className={model.surface === 'task' ? 'task-pane' : undefined}>
+    <main>
       {model.busy && (
         <p role="status" className="muted">
           {model.busy}
@@ -61,10 +48,7 @@ export function WorkbenchApp({ model, send, state: persisted }: Props) {
       ) : !model.workflow.workflow ? (
         <Setup model={model} send={send} />
       ) : (
-        <>
-          {model.surface === 'task' && <Task key={taskDraftKey(model)} model={model} send={send} state={state} />}
-          {model.surface === 'rebase' && <Rebase model={model} send={send} />}
-        </>
+        model.surface === 'rebase' && <Rebase model={model} send={send} />
       )}
     </main>
   );

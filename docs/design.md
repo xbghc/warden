@@ -58,9 +58,9 @@ without changing Git. Commit keeps its original task, repository and review vers
 typing require renewed review. Workspace allocation is automatic; delivery records use pickers
 and native diffs, and initialization output uses the Warden output channel.
 
-Multiline task notes open an explicit editor webview with persistent task-bound drafts. Draft edits are saved to VS Code workspace state under the repository and task identity, so closing the editor preserves unsaved notes. Saving or discarding clears only the matching draft; later typing remains intact. Selecting
-another task leaves that editor bound to its original task; switching repository or branch disables
-saving until it is reopened in the matching context. Batch rebase retains a dedicated editor panel. Script rows in Settings open native text editors with
+Like an item in a to-do list, a task is only its title: tasks are small units of work, so there is
+no description, notes field or task editor page. **Rename Task** opens a native input box with the
+saved title; Escape or an unchanged title writes nothing. Batch rebase retains a dedicated editor panel. Script rows in Settings open native text editors with
 multiline editing and normal Save. Saving is bound to the original repository and script version,
 and preserves other script settings. Workspace scripts run on allocation; preview setup keeps its
 normal automatic triggers. Preview diagnostics use native output. The primary sidebar navigation
@@ -113,7 +113,7 @@ Git rebase replays task commits onto the base branch.
   count belongs to the file-list heading. Remove duplicate summaries, subtitle explanations
   of the page title and notes that merely restate the adjacent action.
 - Use nouns for headings and verbs for actions. Within an identified object, shorten labels to
-  the needed distinction: **Notes**, **Connect**, **Open Workspace**. Keep destinations on actions
+  the needed distinction: **Connect**, **Open Workspace**. Keep destinations on actions
   where they matter, such as **Commit to Base Branch**.
 - Prefer familiar icons for navigation, refresh, edit, copy, terminal, settings, cancel, add,
   delete and reorder. Use the shared `IconButton` with an accessible name and a hover/focus
@@ -140,7 +140,7 @@ Git rebase replays task commits onto the base branch.
   A failed check still offers retry. A visible form owns its scoped error;
   native notifications draw attention to errors whose form is not visible.
 - Task copy actions use the more-actions menu; workspace storage, directory and branch choices
-  stay internal. Hiding a task editor preserves its unsaved notes.
+  stay internal.
 - Warden implements the workflow and does not teach it. Empty states stay blank: workspaces with no
   changes have no child rows or placeholder message, and empty chats or editors add no instructional
   copy. Native pickers keep their prompt, such as **Select a task**. Loading, unavailable data, stale checks
@@ -189,7 +189,7 @@ There is no separate review mode, allocation dashboard or delivery center.
 
 ```text
 ┌────────────────────────────┬─────────────────────────────────────────────────────┐
-│ Warden                     │ Task diff or task notes                             │
+│ Warden                     │ Task diff                                           │
 │                            │                                                     │
 │ feature/order      ...     │ No second workspace picker or global page tabs      │
 │ /project                   │                                                     │
@@ -254,15 +254,13 @@ supported. Opening the template does not save configuration or connect an agent.
 
 `＋` opens a native input for the task title. Enter creates the task and its workspace; Escape cancels and keeps
 the draft and prior selection. Drafts are scoped to the repository and base branch, and clear
-after the task is saved, including when allocation needs a retry. Multiline notes are
-edited separately on request.
+after the task is saved, including when allocation needs a retry. The title is the whole task;
+there is no follow-up step to describe it.
 
-The native input owns its creation draft and consumes the created task ID directly. The task editor
-webview only edits an existing task; it carries no creation lifecycle or workspace-options state.
+The native input owns its creation draft and consumes the created task ID directly.
 
 ```text
-Order API                                           [Edit Notes]
-Add filters to the order list…
+Order API
 
 Not in Preview
 [Chat with Agent] [Connect Preview] [Open Workspace]
@@ -297,7 +295,7 @@ requires disconnection in that window. Unsaved workspace editors must be saved o
 Deletion removes the task's preview contribution before releasing its workspace. A failed operation
 keeps the task visible with **Delete Failed** or **Deletion Pending**, its concrete error and
 **Retry Delete**. Other task operations cannot restart work in a partially released allocation.
-Successful deletion closes its note/chat editors and clears task selections and drafts. Reusable
+Successful deletion closes its chat editors and clears task selections and drafts. Reusable
 physical directories are internal resources and do not become new sidebar rows.
 
 ## Compose the independent preview
@@ -454,7 +452,7 @@ Avoid an omnibus task status. Each surface shows only facts it can establish:
 
 | Object | Display | Do not infer |
 |---|---|---|
-| Plan item | Order, notes, associated workspace | Started, finished or dependencies satisfied |
+| Plan item | Title, order, associated workspace | Started, finished or dependencies satisfied |
 | Git workspace | Branch, path, changed files, relation to base branch, Git operation | Agent activity or code correctness |
 | Hook | Result, output, exit code | Environment fully prepared or dependencies installed |
 | Preview | Applied combination, last successful snapshot, pending/failed update | A failed or unknown check means current content |

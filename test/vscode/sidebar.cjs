@@ -5,6 +5,10 @@ const vscode = require('vscode');
 const { execFileSync } = require('node:child_process');
 const { checkFileViews } = require('./file-views.cjs');
 
+let workbenchUnderTest;
+// Rebase is the only Workbench editor panel; tasks never open one.
+const taskPanelOpen = () => [...workbenchUnderTest.views.panels.keys()].some((surface) => surface !== 'rebase');
+
 async function checkQuietRefresh(workbench, workspace) {
   await workbench.refresh(true);
   while (workbench.checkReading) await workbench.checkReading;
@@ -90,7 +94,13 @@ async function checkQuietRefresh(workbench, workspace) {
 }
 
 exports.checkSidebar = async (workbench, extension, repository, eventually) => {
+  workbenchUnderTest = workbench;
   const contributions = extension.packageJSON.contributes;
+  assert.equal((await vscode.commands.getCommands(true)).includes('warden.editTask'), false, 'tasks have no notes editor');
+  assert(
+    contributions.menus['view/item/context'].some((row) => row.command === 'warden.renameTask'),
+    'Rename Task is a native context action',
+  );
   assert.notEqual(contributions.views.warden[0].type, 'webview', 'workspace navigation uses a native tree');
   assert.equal(workbench.sidebar.view.title, 'Workbench');
   assert(contributions.viewsWelcome.some((row) => row.when.includes('!warden.hasDevelopmentBranch')));
@@ -135,7 +145,7 @@ exports.checkSidebar = async (workbench, extension, repository, eventually) => {
   workbench.taskInput.hide();
   await cancel;
   assert.equal(workbench.tasks().length, count, 'cancellation leaves Git and the plan untouched');
-  assert.equal(workbench.views.panels.has('task'), false, 'native creation does not open a webview');
+  assert.equal(taskPanelOpen(), false, 'native creation does not open a webview');
 
   const create = vscode.commands.executeCommand('warden.createTask');
   await eventually(() => !!workbench.taskInput);
@@ -177,7 +187,7 @@ exports.checkSidebar = async (workbench, extension, repository, eventually) => {
   } finally {
     workbench.backend.execute = failCreate;
   }
-  await workbench.handleAction({ type: 'task.create', title: 'Native second task', body: '' }, session);
+  await workbench.handleAction({ type: 'task.create', title: 'Native second task' }, session);
   const secondId = workbench.tasks().at(-1).id;
   let nodes = await workbench.sidebar.getChildren();
   const first = nodes.find((node) => node.task.id === firstId);
@@ -204,7 +214,7 @@ exports.checkSidebar = async (workbench, extension, repository, eventually) => {
   await workbench.sidebar.handleDrop(undefined, transfer, token.token);
   assert.equal(workbench.tasks().at(-1).id, secondId, 'dropping at the root moves to the end');
   await vscode.commands.executeCommand('warden.selectTask', first);
-  assert.equal(workbench.views.panels.has('task'), false, 'task selection keeps the editor free for review');
+  assert.equal(taskPanelOpen(), false, 'task selection keeps the editor free for review');
   nodes = await workbench.sidebar.getChildren();
   const workspace = nodes.find((node) => node.task.id === firstId);
   assert.match(workbench.sidebar.getTreeItem(workspace).contextValue, /^wardenTask:workspace/);
@@ -265,36 +275,46 @@ exports.checkSidebar = async (workbench, extension, repository, eventually) => {
     current.find((node) => node.task.id === legacy.task.id),
   );
   assert.equal(workbench.tasks().find((task) => task.id === legacy.task.id).worktree, legacyWorkspace, 'reselection keeps the same workspace');
-  const editTask = current.find((node) => node.task.id === firstId);
-  await vscode.commands.executeCommand('warden.editTask', editTask);
-  assert(workbench.views.panels.has('task'), 'multiline editing opens only on explicit request');
-  await vscode.commands.executeCommand(
-    'warden.selectTask',
-    current.find((node) => node.task.id === secondId),
-  );
-  assert.equal(workbench.views.currentModel('task').task.id, firstId, 'notes remain bound to their task while navigating');
-  const notesModel = workbench.views.currentModel('task');
-  const noteDraft = { type: 'task.draft', taskId: firstId, title: notesModel.task.title, body: 'Unsaved native notes\nKeep on reopen' };
-  const sendDraft = (action) =>
-    workbench.views.receive('task', { type: 'action', session: notesModel.session, action }, workbench.views.panels.get('task').webview);
-  await sendDraft(noteDraft);
-  await assert.rejects(sendDraft({ ...noteDraft, taskId: secondId }), /assigned task draft/);
-  assert.notEqual(workbench.tasks().find((task) => task.id === firstId).body, noteDraft.body, 'draft edits never save task records');
-  workbench.views.panels.get('task').dispose();
-  await eventually(() => !workbench.views.panels.has('task'));
-  await vscode.commands.executeCommand('warden.editTask', editTask);
-  assert.deepEqual(
-    workbench.views.currentModel('task').taskDraft,
-    { title: noteDraft.title, body: noteDraft.body },
-    'closed editor drafts restore from host state',
-  );
-
-  await workbench.open(repository);
-  assert.match(workbench.views.currentModel('task').busy, /base branch changed/, 'old task forms become read-only after a context change');
-  await sendDraft({ ...noteDraft, body: 'Draft retained across the repository context change' });
-  assert.equal(workbench.views.currentModel('task').taskDraft.body, 'Draft retained across the repository context change');
-  await assert.rejects(sendDraft({ ...noteDraft, type: 'task.update' }), /base branch changed/);
-
-  workbench.views.panels.get('task').dispose();
+  const renameTarget = current.find((node) => node.task.id === firstId);
+  const originalTitle = renameTarget.task.title;
+  const rename = async (value) => {
+    const done = vscode.commands.executeCommand('warden.renameTask', renameTarget);
+    await eventually(() => !!workbench.renameInput);
+    const input = workbench.renameInput;
+    if (value === undefined) input.hide();
+    else {
+      input.value = value;
+      await eventually(async () => {
+        if (!workbench.renameInput) return true;
+        await vscode.commands.executeCommand('workbench.action.acceptSelectedQuickOpenItem');
+        return !workbench.renameInput;
+      });
+    }
+    await done;
+    return input;
+  };
+  // Cancelling, or accepting the unchanged title, writes nothing.
+  const cancelled = rename(undefined);
+  await eventually(() => !!workbench.renameInput);
+  assert.equal(workbench.renameInput.value, originalTitle, 'Rename Task starts from the saved title');
+  await cancelled;
+  await rename(`  ${originalTitle}  `);
+  assert.equal(workbench.tasks().find((task) => task.id === firstId).title, originalTitle);
+  // Invalid titles keep the input open with a validation message.
+  const invalid = vscode.commands.executeCommand('warden.renameTask', renameTarget);
+  await eventually(() => !!workbench.renameInput);
+  workbench.renameInput.value = '   ';
+  await vscode.commands.executeCommand('workbench.action.acceptSelectedQuickOpenItem');
+  assert.equal(workbench.renameInput?.validationMessage, 'Enter a task title.', 'blank titles keep the input open');
+  workbench.renameInput.value = 'x'.repeat(201);
+  await vscode.commands.executeCommand('workbench.action.acceptSelectedQuickOpenItem');
+  assert.equal(workbench.renameInput?.validationMessage, 'Task titles cannot exceed 200 characters.');
+  workbench.renameInput.hide();
+  await invalid;
+  await rename('  Renamed native task  ');
+  assert.equal(workbench.tasks().find((task) => task.id === firstId).title, 'Renamed native task', 'Rename Task saves the trimmed title');
+  assert.equal(workbench.renameInput, undefined);
+  assert.equal(taskPanelOpen(), false, 'renaming opens no webview');
+  assert.equal(workbench.tasks().find((task) => task.id === firstId).body, undefined, 'tasks have titles only');
   token.dispose();
 };

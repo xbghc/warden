@@ -33,7 +33,7 @@ workspace, task branch, base branch and primary folder. These explain source-edi
 the generated preview and its shared validation environment, saved uncommitted changes, ordinary
 commit hooks, user-initiated integration and rebase, and the conversation's fixed assignment.
 Read-only reference to other allocated directories remains subject to the agent's permissions.
-Directory and branch values are quoted as data. Task titles, notes, acceptance criteria, credentials,
+Directory and branch values are quoted as data. Task titles, credentials,
 preview paths, connection/sync state and current revisions are not included in system instructions.
 Live preview facts need current verification; this context neither authorizes tools nor supplies a sandbox.
 

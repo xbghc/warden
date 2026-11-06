@@ -70,6 +70,23 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
     return { text, version: current.draftVersion, revision: current.draftRevision + 1 };
   };
   await connected(chat);
+  // Renaming a task with a live conversation updates its process row in place.
+  const renaming = vscode.commands.executeCommand('warden.renameTask', chatTask);
+  await eventually(() => !!workbench.renameInput);
+  workbench.renameInput.value = 'Renamed chat task';
+  await eventually(async () => {
+    if (!workbench.renameInput) return true;
+    await vscode.commands.executeCommand('workbench.action.acceptSelectedQuickOpenItem');
+    return !workbench.renameInput;
+  });
+  await renaming;
+  assert.equal(chat.binding.title, 'Renamed chat task', 'a rename updates the live conversation title');
+  const acpRow = workbench.settings.getChildren().find((node) => node.id === 'acp');
+  const renamedRows = workbench.settings.getChildren(acpRow).find((node) => node.id === 'agent-processes')?.children ?? [];
+  assert(
+    renamedRows.some((row) => row.label === 'Renamed chat task'),
+    'Agent Processes shows the renamed task',
+  );
   assert.equal(conversations.defaultProfileId(), 'fixture', 'new chats use the verified agent, not settings order');
   assert.equal(chat.session.snapshot().record.profileId, 'fixture');
   await assert.rejects(conversations.handle(chat, { type: 'connect', profileId: 'other', resume: false }), /The agent changed/);

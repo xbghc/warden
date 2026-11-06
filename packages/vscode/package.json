@@ -130,8 +130,8 @@
         "icon": "$(refresh)"
       },
       {
-        "command": "warden.editTask",
-        "title": "Edit Task",
+        "command": "warden.renameTask",
+        "title": "Rename Task",
         "category": "Warden",
         "icon": "$(edit)"
       },
@@ -320,7 +320,7 @@
       },
       {
         "command": "warden.copyBrief",
-        "title": "Copy Task Notes",
+        "title": "Copy Task Brief",
         "category": "Warden",
         "icon": "$(copy)"
       },
@@ -540,7 +540,7 @@
           "when": "warden.agentReady"
         },
         {
-          "command": "warden.editTask",
+          "command": "warden.renameTask",
           "when": "warden.agentReady"
         },
         {
@@ -698,7 +698,7 @@
           "group": "1_workspace@1"
         },
         {
-          "command": "warden.editTask",
+          "command": "warden.renameTask",
           "when": "view == warden.task && viewItem =~ /^wardenTask:/ && !(viewItem =~ /^wardenTask:deleting/)",
           "group": "2_task@1"
         },

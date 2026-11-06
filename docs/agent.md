@@ -154,9 +154,9 @@ preview connection/synchronization state is not inferred from these instructions
 
 Add and order small tasks in the left navigation. Warden automatically assigns each task a workspace.
 Task Chat does not insert task briefs: the environment instructions already carry the assignment and
-workflow boundaries, and the user describes the work directly. **Copy Task Notes** serves external tools
-and includes the task title, goal, acceptance notes, assignment, workspace path and instructions to edit
-and commit there, since Warden does not control that external session's working directory.
+workflow boundaries, and the user describes the work directly. **Copy Task Brief** serves external tools
+and includes the task title, assignment, workspace path, base branch and instructions to edit and
+commit there, since Warden does not control that external session's working directory.
 
 Copying a brief only writes text to the clipboard. It does not launch an agent or update review state.
 Review feedback can be sent in the task conversation or through external tools. In a native Warden

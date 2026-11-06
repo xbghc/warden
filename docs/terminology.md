@@ -15,7 +15,7 @@ operation and its scope; they do not introduce additional domain concepts.
 | Interface term | Meaning and boundary |
 | --- | --- |
 | Base Branch | The explicitly selected local branch for the current work, such as `feature/order`. Task branches start from it, rebase onto it and contribute reviewed commits back to it. This role does not imply the repository's default branch or a permanent parent-child hierarchy. |
-| Task / Tasks | One linear piece of work with a title and notes / the ordered task list. Creating a task automatically allocates its workspace. A task can contribute several commits over time; order does not establish dependencies or automatic scheduling. |
+| Task / Tasks | One small, linear piece of work identified by its title alone / the ordered task list. Creating a task automatically allocates its workspace. A task can contribute several commits over time; order does not establish dependencies or automatic scheduling. |
 | Workbench | Warden's native sidebar containing ordered tasks as top-level items; not an execution directory or lifecycle object. Preview controls use native menus and the status bar. |
 | Primary Folder | The user's checkout of the base branch. Human edits and final commits belong here. Switching its branch changes the work context, not the folder's role. Use “primary directory” in technical prose if needed. |
 | Workspace | A task's allocated execution context, including its branch and assigned directory, retained across commits. Deleting a task releases this allocation; its physical directory can serve a new workspace later. Qualify it as “task workspace” when distinguishing it from a VS Code workspace. |
@@ -41,7 +41,8 @@ complete the task, recycle its workspace or prove that an agent is idle.
 | --- | --- |
 | Select Base Branch | Explicitly track the branch checked out in the primary folder; later checkouts restore tracked contexts only. This is independent of Git upstream tracking. |
 | New Task | Save a task and allocate its workspace and task branch automatically. |
-| Edit Task / Reorder Tasks | Edit task notes or order without changing Git. |
+| Rename Task / Reorder Tasks | Change a task's title or order without changing Git. Tasks have no description or notes field. |
+| Copy Task Brief | Copy the task title, workspace, base branch and working instructions for an external agent. |
 | Delete Task… / Retry Delete | Confirm discarding task work and releasing its workspace while retaining the directory / explicitly finish an interrupted deletion. No recovery backup is created. Commits already on the base branch remain. |
 | Open Workspace | Open the assigned directory. Legacy plans are prepared automatically on use. |
 | Retry Workspace Allocation | Retry for the same task after a failed allocation. |
@@ -71,7 +72,7 @@ and target and checks each workspace before invoking Git.
 Use **Refresh** for rereading visible state, **Sync Preview** for composing preview files, and
 **Rebase** for changing task branches. Preview synchronization flows from the primary
 folder and connected workspaces into the preview folder; it does not copy preview edits back.
-Use **Commit message**, **Notes** and **Commits** in their respective contexts. Use **Stop Turn**
+Use **Commit message** and **Commits** in their respective contexts. Use **Stop Turn**
 for cancellation and **End Agent Process** when closing an active agent process; neither claims
 that all commands started by the agent have stopped.
 
@@ -105,8 +106,8 @@ and errors. Use English punctuation and `lang="en"` for webviews. Preserve the a
 reason and recovery action in error messages. Do not add a separate “delivery” or “acceptance” step.
 
 “Delivery” remains an internal domain term for a recorded reviewed increment on the base branch.
-The interface presents its concrete action and result as a commit. Git merge operations, Git hooks
-and legacy acceptance notes keep their own meanings; they are not alternative names for Commit to….
+The interface presents its concrete action and result as a commit. Git merge operations and Git hooks
+keep their own meanings; they are not alternative names for Commit to….
 
 Existing persisted fields, command IDs, error codes and hook environment variables stay compatible:
 

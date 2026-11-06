@@ -187,7 +187,6 @@ export class TaskDeletionService {
     const sourceVersion = digest([
       task.id,
       task.title,
-      task.body,
       task.createdAt,
       task.developmentBranch,
       task.worktree,

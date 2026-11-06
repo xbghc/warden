@@ -47,7 +47,7 @@ the primary checkout in Git or VS Code automatically restores previously tracked
 Untracked branches and detached HEAD show no tasks, preview status, synchronization checks or recovery
 messages. Automatic preview updates pause, and **Select Base Branch** remains available to start using
 Warden there. Selection is remembered per
-repository and base branch. Existing task notes and commit drafts remain
+repository and base branch. Existing tasks and commit drafts remain
 with their tasks. Branches at the same commit are still separate contexts; old page actions are rejected
 after a switch. Existing native diffs and ACP conversations retain their original task.
 
@@ -63,7 +63,7 @@ and reveals **Settings** in the sidebar. Repository selection appears only when 
 windows; preview recovery actions appear while their failures persist. Preview has no editor page or tree row.
 The status bar shows preview synchronization; conflicts and setup failures remain visible above the task list.
 Each allocated task offers Agent, preview connection and commit as inline actions; its context menu holds opening the workspace,
-editing notes, delivery records, synchronization, copying and recovery. Allocation failures expose
+renaming, delivery records, synchronization, copying and recovery. Allocation failures expose
 retry on the same task; script failure rows expose script output and retry.
 
 Task file lists collapse independently and preserve that choice across refreshes. Selecting a task
@@ -84,16 +84,12 @@ typing. Failures remain visible in the row tooltip and native notifications; con
 recovery and re-review. Opening a workspace uses a new VS Code window.
 
 Delivery records use native pickers leading to read-only commit diffs. Script output uses the Warden
-output channel. Multiline task notes use an explicitly opened editor webview; its task-bound draft
-survives switching tasks and hiding/reopening the panel. Batch rebase retains a dedicated editor panel. Settings opens setup scripts in native text editors;
+output channel. **Rename Task** uses a native input box prefilled with the saved title; tasks have
+no notes. Batch rebase retains a dedicated editor panel. Settings opens setup scripts in native text editors;
 Save updates the script for its original repository, preserving unrelated script configuration and
 distinct legacy reuse scripts. Unsaved edits stay in the editor; stale repository or script versions
 cannot overwrite current configuration. Workspace scripts run on allocation; preview setup retains its normal automatic triggers. Preview diagnostics use the Warden output channel. Task Chat uses the Secondary Side Bar. Prefer native controls
 for future interactions and choose a webview only when its particular layout warrants one.
-
-Task-note drafts persist in VS Code workspace state when the editor is closed. Saving or discarding
-notes clears the matching draft; edits typed while a save is pending remain available. Draft storage
-never updates task records or Git.
 
 Packaged webviews follow VS Code themes and send a finite validated action vocabulary to the host.
 ACP conversations retain their original task independently of tree selection.

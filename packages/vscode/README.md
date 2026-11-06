@@ -22,7 +22,7 @@ See the [configuration examples](https://github.com/xbghc/warden/blob/main/docs/
 
 ## Work on a requirement
 
-- **Add a task.** Warden automatically allocates its workspace and branch. Add notes and order
+- **Add a task.** Warden automatically allocates its workspace and branch. Rename and order
   tasks in the native workbench tree.
 - **Develop.** Open Task Chat in the Secondary Side Bar, expand it into an editor when needed,
   or use external tools in the task workspace. Conversations remain bound to their task.

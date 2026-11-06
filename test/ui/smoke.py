@@ -18,7 +18,7 @@ try:
         page = browser.new_page(viewport={'width': 1100, 'height': 900})
         errors = []
         page.on('pageerror', lambda error: errors.append(str(error)))
-        for surface in ['task', 'rebase']:
+        for surface in ['rebase']:
             page.goto(origin + '?surface=' + surface)
             expect(page.locator('main')).to_have_text('Configure ACP')
             expect(page.locator('.acp-setup')).to_have_count(0)
@@ -28,7 +28,6 @@ try:
                 expect(page.get_by_role('button', name='Select Base Branch', exact=True)).to_have_count(0)
                 expect(page.get_by_role('button', name='Select Repository', exact=True)).to_have_count(0)
                 expect(page.get_by_role('region', name='Preview', exact=True)).to_have_count(0)
-                expect(page.get_by_role('region', name='Edit Notes', exact=True)).to_have_count(0)
                 expect(page.get_by_role('heading', name='Scripts', exact=True)).to_have_count(0)
             blocked()
             expect(page.get_by_role('button')).to_have_count(1)
@@ -57,7 +56,7 @@ try:
             expect(page.get_by_role('button', name='Select Repository', exact=True)).to_be_visible()
             page.evaluate("model => window.postMessage({type:'model', model}, '*')", initial)
             blocked()
-        page.goto(origin + '?surface=task')
+        page.goto(origin + '?surface=rebase')
         expect(page.get_by_role('button', name='Configure ACP', exact=True)).to_be_visible()
         expect(page.get_by_role('button')).to_have_count(1)
         page.get_by_role('button', name='Configure ACP', exact=True).click()
@@ -71,7 +70,7 @@ try:
         # The native preset picker and automatic connection are covered in the packaged host.
         configured = page.request.post(origin + '/action?surface=settings', data={'type': 'settings.agents'})
         assert configured.ok and configured.json()['agentReadiness']['status'] == 'ready'
-        page.goto(origin + '?surface=task')
+        page.goto(origin + '?surface=rebase')
         expect(page.get_by_role('button', name='Select Base Branch', exact=True)).to_be_visible()
         page.get_by_role('button', name='Select Base Branch', exact=True).click()
         # Navigation can abort the harness request before the native action is acknowledged.
@@ -84,68 +83,14 @@ try:
             assert result.ok, result.text()
             return result.json()
 
-        model = action({'type': 'task.create', 'title': '订单接口', 'body': '原有说明'})
+        model = action({'type': 'task.create', 'title': '订单接口草稿'})
         first_id = model['task']['id']
         assert model['task']['worktree'], 'New tasks allocate a workspace automatically'
-        page.goto(origin + '?surface=task')
-        notes = page.get_by_role('region', name='Edit Notes', exact=True)
-        expect(notes.get_by_role('textbox', name='Notes', exact=True)).to_have_value('原有说明')
-        notes.get_by_role('textbox', name='Notes', exact=True).fill('尚未保存的说明草稿')
-        page.reload()
-        expect(notes.get_by_role('textbox', name='Notes', exact=True)).to_have_value('尚未保存的说明草稿')
-        page.evaluate("async () => { await queue; sessionStorage.removeItem('warden-state'); }")
-        page.reload()
-        expect(notes.get_by_role('textbox', name='Notes', exact=True)).to_have_value('尚未保存的说明草稿')
-        assert page.request.get(origin + '/model?surface=task').json()['task']['body'] == '原有说明'
-        branch_a = page.request.get(origin + '/model?surface=task').json()
-        unavailable = {**branch_a, 'agentReadiness': {'status': 'error', 'message': 'The agent connection was lost.'}}
-        page.evaluate("model => window.postMessage({type:'model', model}, '*')", unavailable)
-        expect(page.get_by_role('region', name='Edit Notes', exact=True)).to_have_count(0)
-        expect(page.get_by_role('button', name='Configure ACP', exact=True)).to_be_visible()
-        page.evaluate("model => window.postMessage({type:'model', model}, '*')", branch_a)
-        expect(notes.get_by_role('textbox', name='Notes', exact=True)).to_have_value('尚未保存的说明草稿')
-        branch_b = action({'type': 'task.create', 'title': '其他任务', 'body': 'B 原有说明'})
-        page.goto(origin + '?surface=task')
-        expect(notes.get_by_role('textbox', name='Notes', exact=True)).to_have_value('B 原有说明')
-        notes.get_by_role('textbox', name='Notes', exact=True).fill('B 未保存的说明')
-        page.evaluate("async () => { await queue; sessionStorage.removeItem('warden-state'); }")
-        page.reload()
-        expect(notes.get_by_role('textbox', name='Notes', exact=True)).to_have_value('B 未保存的说明')
-        action({'type': 'task.select', 'taskId': first_id})
-        page.reload()
-        expect(notes.get_by_role('textbox', name='Notes', exact=True)).to_have_value('尚未保存的说明草稿')
-        notes.get_by_role('textbox', name='Notes', exact=True).fill('  保存后的订单说明  \n')
-        notes.get_by_role('button', name='Save Notes', exact=True).click()
-        expect(notes.get_by_role('status')).to_have_text('Saved')
-        page.reload()
-        expect(notes.get_by_role('textbox', name='Notes', exact=True)).to_have_value('保存后的订单说明')
-        assert page.request.get(origin + '/model?surface=task').json()['task']['body'] == '保存后的订单说明'
-        notes.get_by_role('textbox', name='Notes', exact=True).fill('应当丢弃的草稿')
-        notes.get_by_role('button', name='Discard Changes', exact=True).click()
-        page.evaluate("async () => { await queue; sessionStorage.removeItem('warden-state'); }")
-        action({'type': 'task.update', 'taskId': first_id, 'title': '订单接口', 'body': '外部更新说明'})
-        page.reload()
-        expect(notes.get_by_role('textbox', name='Notes', exact=True)).to_have_value('外部更新说明')
-        action({'type': 'task.update', 'taskId': first_id, 'title': '订单接口', 'body': '保存后的订单说明'})
-        page.reload()
-        expect(notes.get_by_role('textbox', name='Notes', exact=True)).to_have_value('保存后的订单说明')
-        expect(notes.get_by_role('button', name='Save Notes', exact=True)).to_be_disabled()
-        expect(notes.get_by_role('button', name='Discard Changes', exact=True)).to_be_disabled()
-        # An unedited form follows notes saved elsewhere instead of writing the old values back.
-        action({'type': 'task.update', 'taskId': first_id, 'title': '订单接口', 'body': '其他窗口的说明'})
-        page.evaluate("model => window.postMessage({type:'model', model}, '*')", page.request.get(origin + '/model?surface=task').json())
-        expect(notes.get_by_role('textbox', name='Notes', exact=True)).to_have_value('其他窗口的说明')
-        notes.get_by_role('textbox', name='Notes', exact=True).fill('本地未保存草稿')
-        action({'type': 'task.update', 'taskId': first_id, 'title': '订单接口', 'body': '保存后的订单说明'})
-        page.evaluate("model => window.postMessage({type:'model', model}, '*')", page.request.get(origin + '/model?surface=task').json())
-        expect(notes.get_by_role('textbox', name='Notes', exact=True)).to_have_value('本地未保存草稿')
-        notes.get_by_role('button', name='Discard Changes', exact=True).click()
-        expect(notes.get_by_role('textbox', name='Notes', exact=True)).to_have_value('保存后的订单说明')
-
-        page.set_viewport_size({'width': 320, 'height': 700})
-        assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
-        page.screenshot(path=str(artifacts / 'task-notes.png'), full_page=True)
-        page.set_viewport_size({'width': 1100, 'height': 900})
+        assert 'body' not in model['task']
+        # Rename Task is a native input box; the rebase panel shows the saved title.
+        renamed = action({'type': 'task.update', 'taskId': first_id, 'title': '订单接口'})
+        assert next(row for row in renamed['workflow']['workflow']['changes'] if row['id'] == first_id)['title'] == '订单接口'
+        action({'type': 'task.create', 'title': '其他任务'})
 
         page.goto(origin + '?surface=settings')
         expect(page.get_by_role('button', name='Open Settings', exact=True)).to_be_visible()
@@ -181,7 +126,7 @@ try:
         expect(page.locator('time')).to_have_count(0)
         page.screenshot(path=str(artifacts / 'rebase-checking.png'), full_page=True)
 
-        second = action({'type': 'task.create', 'title': '表单校验', 'body': ''})['task']
+        second = action({'type': 'task.create', 'title': '表单校验'})['task']
         assert second['worktree'] != model['task']['worktree']
         page.goto(origin + '?surface=rebase')
         select_all = page.get_by_role('checkbox', name='Select All', exact=True)
@@ -199,17 +144,16 @@ try:
         expect(page.get_by_role('checkbox', name='订单接口', exact=True)).not_to_be_checked()
         expect(page.get_by_role('checkbox', name='表单校验', exact=True)).not_to_be_checked()
         expect(page.get_by_role('button', name='Rebase Selected', exact=True)).to_be_disabled()
-        action({'type': 'task.select', 'taskId': first_id})
         for theme in ['dark', 'contrast']:
-            page.goto(origin + '?surface=task&theme=' + theme)
+            page.goto(origin + '?surface=rebase&theme=' + theme)
             page.set_viewport_size({'width': 360, 'height': 900})
-            expect(notes.get_by_role('textbox', name='Notes', exact=True)).to_be_visible()
+            expect(page.get_by_role('checkbox', name='订单接口', exact=True)).to_be_visible()
             assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
-            page.screenshot(path=str(artifacts / ('task-notes-' + theme + '.png')), full_page=True, animations='disabled')
+            page.screenshot(path=str(artifacts / ('rebase-' + theme + '.png')), full_page=True, animations='disabled')
         assert not errors, errors
         assert page.evaluate('window.__hostError') is None
         browser.close()
-    print('Webview browser flows passed: agent setup before branch selection, task-note editing and drafts, light/dark/high-contrast layouts, and rebase. Native settings, script editors, navigation and preview controls are verified in the packaged extension host.')
+    print('Webview browser flows passed: agent setup before branch selection, light/dark/high-contrast layouts, and rebase. Native settings, script editors, navigation and preview controls are verified in the packaged extension host.')
 except Exception:
     if 'errors' in globals():
         print('Browser errors:', errors, file=sys.stderr)

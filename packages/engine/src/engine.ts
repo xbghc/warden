@@ -34,7 +34,7 @@ import { repositoryReadRoots } from './read-roots.js';
 
 /** The desktop product has no adoption operation: allocation always creates a new logical workspace. */
 type NewWorkspace = Pick<StartChangeRequest, 'agent'> & { kind?: 'shared' | 'clone' };
-type NewTask = Pick<CreateChangeRequest, 'title' | 'body'>;
+type NewTask = Pick<CreateChangeRequest, 'title'>;
 
 function record(value: unknown): asserts value is Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw badRequest('Invalid operation parameters.', 'invalid_request');
@@ -79,7 +79,7 @@ function commands(repo: RepoContext, store: StateStore) {
       'task.create': (request: NewTask) => {
         record(request);
         if ('worktree' in request) throw badRequest('A new task cannot adopt an existing workspace.', 'invalid_request');
-        return workflow.createTask({ title: request.title, body: request.body });
+        return workflow.createTask({ title: request.title });
       },
       'task.update': ({ taskId, ...request }: UpdateChangeRequest & { taskId: string }) => {
         id(taskId);

@@ -72,6 +72,7 @@ export class Workbench {
   private readonly scriptSettings: ScriptSettings;
   private taskInput?: vscode.InputBox;
   private commitInput?: vscode.InputBox;
+  private renameInput?: vscode.InputBox;
   private fileErrors = new Map<string, string>();
   private readonly conversations: AcpConversations;
   private readonly agentSetup: AcpAgentSetup;
@@ -122,6 +123,8 @@ export class Workbench {
       this.log.child({ component: 'acp.workbench' }),
     );
     this.branchViews = new BranchViews(context.workspaceState);
+    // Tasks are title-only; unsaved note drafts from earlier versions have no editor left to restore them.
+    for (const key of context.workspaceState.keys()) if (key.startsWith('warden.task-note-draft:')) void context.workspaceState.update(key, undefined);
     this.documents = new Documents(context);
     this.conversations = new AcpConversations(
       context,
@@ -142,7 +145,7 @@ export class Workbench {
       context,
       (surface) => this.model(surface),
       (action, session) => this.handleAction(action, session),
-      (error, surface, taskId) => this.report(error, surface === 'task' ? `task:${taskId ?? 'new'}` : surface),
+      (error, surface) => this.report(error, surface),
     );
     this.sidebar = new Sidebar(
       () => this.model('workspaces'),
@@ -207,7 +210,7 @@ export class Workbench {
       taskActions: (node) => this.selectTask(node),
       selectTask: (node) => this.selectTask(node),
       startTask: (node) => this.selectTask(node, 'select'),
-      editTask: (node) => this.selectTask(node, 'edit'),
+      renameTask: (node) => this.renameTask(node),
       deleteTask: (node) => this.deleteTask(node),
       retryDeleteTask: (node) => this.deleteTask(node),
       moveTask: (node) => this.moveTask(node),
@@ -255,7 +258,7 @@ export class Workbench {
       'restoreTask',
       'selectTask',
       'taskActions',
-      'editTask',
+      'renameTask',
       'deleteTask',
       'retryDeleteTask',
       'deliver',
@@ -312,6 +315,7 @@ export class Workbench {
     if (!this.agentReady) {
       this.commitInput?.hide();
       this.taskInput?.hide();
+      this.renameInput?.hide();
     }
     if (this.agentReady && this.repositoryState === 'ready' && !this.branchTransition && this.data?.workflow) {
       const preview = this.preview;
@@ -432,6 +436,7 @@ export class Workbench {
     this.backend = undefined;
     this.commitInput?.hide();
     this.taskInput?.hide();
+    this.renameInput?.hide();
     this.switching = true;
     this.repositoryRevision++;
     this.session = randomUUID();
@@ -552,6 +557,7 @@ export class Workbench {
   private async changeBranch(data: WorkflowResponse, checkoutBranch?: string) {
     this.commitInput?.hide();
     this.taskInput?.hide();
+    this.renameInput?.hide();
     this.branchTransition = true;
     this.session = randomUUID();
     this.invalidateChecks();
@@ -825,7 +831,6 @@ export class Workbench {
       description: facts.slice(0, 2).join(' · '),
       tooltip: [
         task.title,
-        task.body,
         task.worktree,
         task.deletion?.error,
         task.workspaceError?.message,
@@ -979,11 +984,58 @@ export class Workbench {
     }
     if (title === undefined) return;
     this.assertSession(session);
-    const taskId = await this.handleAction({ type: 'task.create', title, body: '' }, session);
+    const taskId = await this.handleAction({ type: 'task.create', title }, session);
     if (taskId && session === this.session && !this.errors.has('task:new')) {
       await this.context.workspaceState.update(key, undefined);
       await this.sidebar.select(taskId);
     }
+  }
+  private async renameTask(node?: Node) {
+    const session = this.session;
+    const task = await this.pickTask(node);
+    if (!task) return;
+    if (task.deletion) throw new Error('Task deletion is pending. Use Retry Delete to finish it.');
+    const title = await this.askTaskTitle(task.title);
+    if (title === undefined || title.trim() === task.title) return;
+    await this.handleAction({ type: 'task.update', taskId: task.id, title: title.trim() }, session);
+    const renamed = session === this.session ? this.tasks().find((row) => row.id === task.id) : undefined;
+    if (renamed && this.backend) {
+      this.conversations.retitle(this.backend.root, renamed.id, renamed.title);
+      this.render();
+    }
+  }
+  /**
+   * A tracked input box, unlike showInputBox, can be closed when the repository, branch or agent
+   * connection changes, so an open rename never outlives its session or blocks navigation.
+   */
+  private askTaskTitle(value: string): Promise<string | undefined> {
+    this.renameInput?.hide();
+    const input = vscode.window.createInputBox();
+    this.renameInput = input;
+    input.title = 'Rename Task';
+    input.prompt = 'Enter a task title. Enter to rename, Escape to cancel.';
+    input.placeholder = 'Task title';
+    input.value = value;
+    input.ignoreFocusOut = true;
+    const validate = (text: string) =>
+      !text.trim() ? 'Enter a task title.' : text.trim().length > 200 ? 'Task titles cannot exceed 200 characters.' : undefined;
+    return new Promise((resolve) => {
+      let accepted: string | undefined;
+      input.onDidChangeValue((text) => (input.validationMessage = validate(text)));
+      input.onDidAccept(() => {
+        const message = validate(input.value);
+        input.validationMessage = message;
+        if (message) return;
+        accepted = input.value;
+        input.hide();
+      });
+      input.onDidHide(() => {
+        if (this.renameInput === input) this.renameInput = undefined;
+        input.dispose();
+        resolve(accepted);
+      });
+      input.show();
+    });
   }
   private async taskAction(node: Node | undefined, type: 'task.brief' | 'task.restore') {
     const session = this.session;
@@ -1012,7 +1064,7 @@ export class Workbench {
     assertSaved();
     const button = ownConnection ? 'End Agent Process and Delete' : 'Delete Task';
     const detail = [
-      `The task, its notes and local chat will be deleted. Commits already on ${check.developmentBranch} will remain.`,
+      `The task and its local chat will be deleted. Commits already on ${check.developmentBranch} will remain.`,
       check.worktree
         ? `All pending task changes will be discarded. The workspace folder and ignored local environment files will be kept.\n\nWorkspace: ${check.worktree}`
         : '',
@@ -1034,7 +1086,6 @@ export class Workbench {
         try {
           const result = await this.api('task.delete', { taskId: task.id, confirmation: check.confirmation });
           await this.conversations.forgetTask(repository, task.id);
-          await this.views.forgetTask(repository, task.id);
           this.reviews.delete(task.id);
           this.observedReviews.delete(task.id);
           this.taskTargets.delete(task.id);
@@ -1083,19 +1134,17 @@ export class Workbench {
     this.expanded[node.task.id] = expanded;
     await this.context.workspaceState.update(`warden.expanded:${this.backend.root}`, this.expanded);
   }
-  private async selectTask(node?: Node, action: 'review' | 'edit' | 'select' = 'review', refreshReview = false) {
+  private async selectTask(node?: Node, action: 'review' | 'select' = 'review', refreshReview = false) {
     const session = this.session;
     let task = await this.pickTask(node);
     if (!task || session !== this.session) return;
     if (task.deletion) throw new Error('Task deletion is pending. Use Retry Delete to finish it.');
     // Older plans receive their workspace on use, never from a background refresh.
-    if (!task.worktree && task.status === 'planned' && action !== 'edit') task = await this.ensureWorkspace(task);
+    if (!task.worktree && task.status === 'planned') task = await this.ensureWorkspace(task);
     this.selected = task.id;
     await this.branchViews.select(this.backend!.root, task.developmentBranch, task.id);
     if (session !== this.session) return;
     this.render();
-    if (action === 'edit') await this.views.show('task');
-    if (session !== this.session) return;
     if (action === 'review' && task.worktree) {
       const uris = this.reviewUris.get(task.id);
       const tabs = vscode.window.tabGroups.all
@@ -1665,7 +1714,6 @@ ${text}`,
       'task.brief',
       'task.chat',
       'task.select',
-      'task.edit',
       'task.history',
       'task.output',
       'task.options',
@@ -1701,9 +1749,6 @@ ${text}`,
           case 'task.select':
             await this.selectTask(node);
             break;
-          case 'task.edit':
-            await this.selectTask(node, 'edit');
-            break;
           case 'task.history':
             await this.showTaskHistory(node);
             break;
@@ -1738,7 +1783,7 @@ ${text}`,
             break;
           case 'task.create': {
             const repository = this.backend!.root;
-            const created = await this.api('task.create', { title: action.title, body: action.body });
+            const created = await this.api('task.create', { title: action.title });
             await this.branchViews.select(repository, created.developmentBranch, created.id);
             if (session !== this.session) break;
             this.selected = created.id;
@@ -1746,7 +1791,7 @@ ${text}`,
             return created.id;
           }
           case 'task.update':
-            await this.api('task.update', { taskId: action.taskId, title: action.title, body: action.body });
+            await this.api('task.update', { taskId: action.taskId, title: action.title });
             break;
           case 'task.restore':
             await this.api('task.update', { taskId: action.taskId, status: 'planned' });
@@ -1771,8 +1816,6 @@ ${text}`,
             await vscode.env.clipboard.writeText(
               [
                 `# ${task!.title}`,
-                task!.body,
-                task!.acceptance && `Acceptance criteria: ${task!.acceptance}`,
                 task!.agent && `Executor: ${task!.agent}`,
                 task!.worktree && `Workspace: ${task!.worktree}`,
                 `Base branch: ${task!.developmentBranch}`,
@@ -1829,15 +1872,12 @@ ${text}`,
     this.invalidateChecks();
     this.commitInput?.hide();
     this.taskInput?.hide();
+    this.renameInput?.hide();
     const closed = await Promise.allSettled([this.agentSetup.close(), this.conversations.close()]);
     for (const result of closed)
       if (result.status === 'rejected') this.log.write('error', 'extension.agent.cleanup.failed', { diagnostic: acpErrorDiagnostic(result.reason) });
     await Promise.allSettled([this.active, ...this.navigation, this.reading, this.checkReading, this.contextUpdate]);
-    try {
-      await this.views.flush();
-    } finally {
-      await this.backend?.close();
-      this.log.write('info', 'extension.close.end');
-    }
+    await this.backend?.close();
+    this.log.write('info', 'extension.close.end');
   }
 }

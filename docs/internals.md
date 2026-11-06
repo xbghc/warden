@@ -284,8 +284,10 @@ ignored local configuration even when status reports the slot clean.
 
 Task creation saves its plan and allocates a fresh logical workspace under one repository lock,
 using the existing validated numbered-path and shared-repository Git writes. Allocation selects
-the current requirement baseline without dependency enforcement. Notes and ordering write only
-Warden state. A pre-assignment failure persists `workspaceError` on the saved task; a retry keeps its
+the current requirement baseline without dependency enforcement. Renaming and ordering write only
+Warden state. Tasks store a title only; `body` and `acceptance` values saved by earlier versions stay
+in the state file untouched but are no longer read, shown or written, and legacy checklist imports
+keep their old description as unread `legacyTodo.body` data. A pre-assignment failure persists `workspaceError` on the saved task; a retry keeps its
 ID and clears the error after successful assignment. Assigned workspaces are never replaced on retry.
 Legacy plan creation remains only for imports and the compatibility adapter; desktop task use
 prepares these plans explicitly, without allocating from a background read.
@@ -448,7 +450,7 @@ User-configured workspace hooks are the deliberate shell interface (`/bin/sh -c`
 Windows' bundled `sh.exe -c`, with cwd/env and bounded output/timeout). They use the same Git
 environment isolation as engine Git calls. Warden records hook output and exit status without
 interpreting the script as an agent lifecycle. Adding a task runs its configured initialization
-hook after assignment is saved; editing notes and ordering do not execute hooks.
+hook after assignment is saved; renaming and ordering do not execute hooks.
 Windows shell discovery uses a fixed `git --exec-path` invocation with a five-second timeout and
 removes inherited `GIT_EXEC_PATH`; this installation lookup does not read or change the repository.
 
@@ -465,7 +467,7 @@ content fingerprints and periodic reads cover missed events. Closing a session d
 operations and releases watchers and leases before another repository is opened.
 
 Native read-only review documents are immutable snapshots stored under VS Code extension storage.
-Their random URI identities survive editor reloads without re-reading mutable source content. Commit-message drafts, task-note drafts and branch-scoped task selections use VS Code workspace state. Note drafts contain only bounded title and body text, keyed by the host-owned repository and task binding. Their writes are serialized; a completed save clears only its matching draft. Context changes block task updates but still preserve the pinned editor’s local draft. Earlier
+Their random URI identities survive editor reloads without re-reading mutable source content. Commit-message drafts, task-title drafts and branch-scoped task selections use VS Code workspace state. Task-note drafts saved by earlier versions are no longer read. Earlier
 history drafts remain untouched; Git operation journals stay in the existing
 Warden state location. Old HTTP host/origin checks remain only in `test/compat`, which is not bundled.
 

@@ -14,8 +14,8 @@ committed directly to the base branch without committing in the task workspace f
 snapshot delivery, the next comparison starts from that delivered content, even if task HEAD is unchanged.
 
 The native task tree provides inline actions and a context menu on each task. Its file list
-collapses independently without replacing the native diff or resetting editor scroll. Editing notes
-opens a dedicated form; delivery records use native pickers and diffs. Failed scripts expose output
+collapses independently without replacing the native diff or resetting editor scroll. Renaming a task
+uses a native input box; delivery records use native pickers and diffs. Failed scripts expose output
 and retry actions, with output in the Warden channel. Keyboard commands remain available throughout.
 
 Use **View as Tree** or **View as List** in the Workbench title bar or Command Palette to arrange

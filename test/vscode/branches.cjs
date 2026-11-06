@@ -32,7 +32,7 @@ exports.run = async () => {
 
 exports.checkBranches = async (workbench, root, eventually) => {
   const git = (...args) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', stdio: 'pipe' }).trim();
-  const branch = () => workbench.model('task').workflow?.workflow?.developmentBranch;
+  const branch = () => workbench.model('workspaces').workflow?.workflow?.developmentBranch;
   const follow = (name) => eventually(() => branch() === name && !workbench.branchTransition, 30_000);
   const configure = async (name) => {
     const api = workbench.api;
@@ -146,7 +146,7 @@ exports.checkBranches = async (workbench, root, eventually) => {
   assert.deepEqual(await workbench.getChildren(), []);
   assert.deepEqual(workbench.model('workspaces').workspaces, []);
   assert.deepEqual(await workbench.getChildren({ kind: 'task', task: a }), [], 'old task nodes cannot reveal the previous branch');
-  assert.equal(workbench.model('task').task, undefined);
+  assert.equal(workbench.model('workspaces').task, undefined);
   assert.equal(workbench.rebaseSelection, undefined);
   assert.equal(workbench.checks, undefined);
   assert.notEqual(workbench.session, sessionA);
@@ -182,13 +182,13 @@ exports.checkBranches = async (workbench, root, eventually) => {
   git('switch', '--detach');
   await workbench.refresh(true);
   await inactive();
-  assert.equal(workbench.model('task').task, undefined, 'detached HEAD hides the previous requirement');
+  assert.equal(workbench.model('workspaces').task, undefined, 'detached HEAD hides the previous requirement');
   git('switch', 'main');
   await follow('main');
   await pendingCommit;
   assert.equal(workbench.commitInput, undefined, 'a branch switch closes the previous branch commit input without submitting');
   assert.equal(workbench.messages[b.id], 'B commit draft');
-  assert.equal(workbench.model('task').task.id, a.id, 'returning to a branch restores its chosen task');
+  assert.equal(workbench.model('workspaces').task.id, a.id, 'returning to a branch restores its chosen task');
   await eventually(() =>
     workbench
       .model('workspaces')
@@ -216,7 +216,7 @@ exports.checkBranches = async (workbench, root, eventually) => {
     assert.equal(saved.sourceBase, task.sourceBase);
   }
   await workbench.open(root);
-  assert.equal(workbench.model('task').task.id, a.id, 'the branch selection survives reopening the repository');
+  assert.equal(workbench.model('workspaces').task.id, a.id, 'the branch selection survives reopening the repository');
 
   await workbench.api('preview.connect', { connectedIds: [a.id] });
   await workbench.refresh(true);
@@ -237,7 +237,7 @@ exports.checkBranches = async (workbench, root, eventually) => {
   await inactive();
   git('switch', 'main');
   await follow('main');
-  assert.equal(workbench.model('task').task.id, a.id);
+  assert.equal(workbench.model('workspaces').task.id, a.id);
   assert.deepEqual(workbench.preview.connectedIds, [a.id]);
   await screenshot('tracked-restored-branch');
   git('switch', 'feature/other');
@@ -251,7 +251,7 @@ exports.checkBranches = async (workbench, root, eventually) => {
   await workbench.api('preview.connect', { connectedIds: [] });
   git('switch', 'feature/other');
   await follow('feature/other');
-  assert.equal(workbench.model('task').task.id, b.id);
+  assert.equal(workbench.model('workspaces').task.id, b.id);
   assert.deepEqual(
     workbench.checks.checks.map((check) => check.changeId),
     workbench
@@ -275,7 +275,7 @@ exports.checkBranches = async (workbench, root, eventually) => {
   await workbench.refresh(true);
   assert.equal(workbench.checkouts.worktrees.find((row) => row.isMain).busy, 'merge');
   await inactive();
-  assert.equal(workbench.model('task').task, undefined, 'an untracked branch remains quiet during a merge');
+  assert.equal(workbench.model('workspaces').task, undefined, 'an untracked branch remains quiet during a merge');
   git('merge', '--abort');
   await workbench.refresh(true);
   await inactive();

@@ -30,13 +30,13 @@ exports.checkAgentSetup = async (workbench, extension, fixture, eventually) => {
       kinds,
     );
     assert.equal(workbench.sidebar.view.description, undefined, 'base branch is hidden while the agent is unavailable');
-    for (const surface of ['workspaces', 'task', 'rebase', 'settings']) {
-      const model = workbench.views.currentModel(surface);
+    for (const surface of ['workspaces', 'rebase', 'settings']) {
+      const model = workbench.model(surface);
       assert.equal(model.repository, '');
       for (const field of ['workflow', 'task', 'workspaces', 'preview', 'review', 'checks']) assert.equal(model[field], undefined, `${surface} hides ${field}`);
     }
     assert.deepEqual(await workbench.getChildren(), [], 'task navigation stays hidden while the agent is unavailable');
-    for (const action of [{ type: 'setup.branch' }, { type: 'task.create', title: 'Blocked task', body: '' }, { type: 'preview.refresh' }]) {
+    for (const action of [{ type: 'setup.branch' }, { type: 'task.create', title: 'Blocked task' }, { type: 'preview.refresh' }]) {
       await assert.rejects(workbench.handleAction(action, workbench.session), /ACP is unavailable/);
     }
     await vscode.commands.executeCommand('warden.createTask');
@@ -75,8 +75,19 @@ exports.checkAgentSetup = async (workbench, extension, fixture, eventually) => {
     for (const command of ['warden.configure', 'warden.createTask', 'warden.showPreview']) {
       assert.equal(extension.packageJSON.contributes.commands.find((item) => item.command === command).enablement, 'warden.agentReady');
     }
+    // An open rename belongs to the connected session; losing the agent closes it without saving.
+    const renaming = hasBranch ? vscode.commands.executeCommand('warden.renameTask', { kind: 'task', task: workbench.tasks()[0] }) : undefined;
+    if (renaming) {
+      await eventually(() => !!workbench.renameInput);
+      workbench.renameInput.value = 'Unsaved rename';
+    }
     await configuration.update('acpAgents', [], vscode.ConfigurationTarget.Global);
     await eventually(() => workbench.model('workspaces').agentConfiguration.status === 'missing');
+    if (renaming) {
+      await renaming;
+      assert.equal(workbench.renameInput, undefined, 'disconnecting closes Rename Task');
+      assert(!workbench.tasks().some((task) => task.title === 'Unsaved rename'), 'a closed rename saves nothing');
+    }
     await gate([]);
     assert.deepEqual(
       workbench.settings.getChildren().map((node) => node.id),

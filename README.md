@@ -30,7 +30,7 @@ code --install-extension packages/vscode/warden-0.26.1.vsix
 ## Development workflow
 
 1. **Add a task.** Enter a title; Warden automatically assigns its workspace and branch and runs any
-   configured initialization script. Add multiline notes as needed. Dragging tasks changes plan order only.
+   configured initialization script. A task is just its title; keep tasks small. Dragging tasks changes plan order only.
 2. **Develop.** Open Task Chat in the auxiliary sidebar, expand it into an editor when needed, or use external tools in its workspace. The same task
    keeps its workspace across multiple deliveries.
 3. **Connect for preview.** Use each task's connection action. Saved primary content and connected

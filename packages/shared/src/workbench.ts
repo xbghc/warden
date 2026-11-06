@@ -2,7 +2,7 @@ import type { PreviewResponse, RebaseBatchResponse, RebaseResponse, WorkflowResp
 import type { TaskReview } from './review.js';
 import type { AgentConfiguration, AgentReadiness } from './agent.js';
 
-export type Surface = 'workspaces' | 'task' | 'settings' | 'rebase';
+export type Surface = 'workspaces' | 'settings' | 'rebase';
 export interface WorkspaceRow {
   task: WorkflowTask;
   expanded: boolean;
@@ -17,10 +17,6 @@ export interface WorkbenchError {
   message: string;
   code?: string;
 }
-export interface TaskNoteDraft {
-  title: string;
-  body: string;
-}
 export interface WorkbenchModel {
   session: string;
   repository: string;
@@ -30,7 +26,6 @@ export interface WorkbenchModel {
   surface: Surface;
   workflow?: WorkflowResponse;
   task?: WorkflowTask;
-  taskDraft?: TaskNoteDraft;
   workspaces?: WorkspaceRow[];
   preview?: PreviewResponse;
   hasPreviewCommand: boolean;
@@ -49,12 +44,12 @@ export type WorkbenchAction =
   | { type: 'setup.repository' | 'setup.branch' | 'setup.agents' | 'setup.checkAgent' | 'setup.cancelAgentCheck' | 'settings.agents' }
   | { type: 'workspaces.create' | 'workspaces.refresh' }
   | { type: 'workspaces.show'; surface: 'preview' | 'settings' | 'rebase' }
-  | { type: 'task.create'; title: string; body: string }
+  | { type: 'task.create'; title: string }
   | { type: 'task.cancelCreate' }
-  | { type: 'task.update' | 'task.draft'; taskId: string; title: string; body: string }
+  | { type: 'task.update'; taskId: string; title: string }
   | { type: 'task.start'; taskId: string; kind: 'shared' | 'clone'; agent?: string }
   | { type: 'task.review' | 'task.open' | 'task.hook' | 'task.resume' | 'task.copy' | 'task.brief' | 'task.restore' | 'task.chat'; taskId: string }
-  | { type: 'task.select' | 'task.edit' | 'task.history' | 'task.output' | 'task.options' | 'task.connect' | 'task.sync' | 'task.commit'; taskId: string }
+  | { type: 'task.select' | 'task.history' | 'task.output' | 'task.options' | 'task.connect' | 'task.sync' | 'task.commit'; taskId: string }
   | { type: 'task.toggle'; taskId: string; expanded: boolean }
   | { type: 'task.file'; taskId: string; path: string }
   | { type: 'task.move'; taskId: string; before: string | null }
@@ -102,10 +97,9 @@ export function parseWorkbenchAction(value: unknown): WorkbenchAction {
     case 'task.move':
       return { type: action.type, taskId: identity(action.taskId), before: action.before === null ? null : identity(action.before) };
     case 'task.create':
-      return { type: action.type, title: string(action.title, 200), body: string(action.body) };
+      return { type: action.type, title: string(action.title, 200) };
     case 'task.update':
-    case 'task.draft':
-      return { type: action.type, taskId: identity(action.taskId), title: string(action.title, 200), body: string(action.body) };
+      return { type: action.type, taskId: identity(action.taskId), title: string(action.title, 200) };
     case 'task.start':
       if (action.kind !== 'shared' && action.kind !== 'clone') throw new Error('Invalid workspace type.');
       if ('worktree' in action) throw new Error('Warden allocates workspace folders.');
@@ -124,7 +118,6 @@ export function parseWorkbenchAction(value: unknown): WorkbenchAction {
     case 'task.restore':
     case 'task.chat':
     case 'task.select':
-    case 'task.edit':
     case 'task.history':
     case 'task.output':
     case 'task.options':

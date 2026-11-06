@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { parseWorkbenchAction } from './workbench.js';
 
 describe('webview protocol boundary', () => {
-  it('bounds task-note drafts and strips host-owned storage identifiers', () => {
-    const draft = { type: 'task.draft', taskId: 'task', title: '', body: 'Unsaved\nnotes' };
-    expect(parseWorkbenchAction({ ...draft, repository: '/outside', command: 'injected' })).toEqual(draft);
-    for (const patch of [{ taskId: '' }, { title: 'x'.repeat(201) }, { body: 'x'.repeat(10001) }, { body: 42 }])
-      expect(() => parseWorkbenchAction({ ...draft, ...patch })).toThrow();
+  it('bounds task titles, rejects retired note drafts and strips host-owned storage identifiers', () => {
+    const update = { type: 'task.update', taskId: 'task', title: 'Renamed' };
+    // Tasks are titles only: notes an older webview still sends never cross the boundary.
+    expect(parseWorkbenchAction({ ...update, body: 'Old notes', repository: '/outside', command: 'injected' })).toEqual(update);
+    expect(parseWorkbenchAction({ type: 'task.create', title: 'New', body: 'Old notes' })).toEqual({ type: 'task.create', title: 'New' });
+    for (const patch of [{ taskId: '' }, { title: 'x'.repeat(201) }, { title: 42 }]) expect(() => parseWorkbenchAction({ ...update, ...patch })).toThrow();
+    for (const type of ['task.draft', 'task.edit']) expect(() => parseWorkbenchAction({ type, taskId: 'task', title: 'x', body: '' })).toThrow();
   });
   it('accepts only host-owned agent setup actions without executable configuration', () => {
     for (const type of ['setup.agents', 'setup.checkAgent', 'setup.cancelAgentCheck'])
@@ -18,7 +20,7 @@ describe('webview protocol boundary', () => {
       { type: 'task.start', taskId: 'task', kind: 'shared', worktree: '/outside' },
       { type: 'task.start', taskId: 'task', kind: 'shared', agent: 'x'.repeat(101) },
       { type: 'settings.save', config: { hooks: { create: 42, reuse: '' }, previewSetup: '' } },
-      { type: 'task.create', title: 'x'.repeat(201), body: '' },
+      { type: 'task.create', title: 'x'.repeat(201) },
       { type: 'history.preview', draft: { head: 'head', start: 'start', commits: [] } },
     ])
       expect(() => parseWorkbenchAction(action)).toThrow();

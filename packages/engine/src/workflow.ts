@@ -229,11 +229,6 @@ export class WorkflowService {
         throw badRequest('Enter a task title of 1–200 characters.', 'invalid_title');
       patch.title = request.title.trim();
     }
-    for (const field of ['body', 'acceptance'] as const) {
-      if (request[field] === undefined) continue;
-      if (typeof request[field] !== 'string' || request[field].length > 10000) throw badRequest('Task notes cannot exceed 10,000 characters.', 'invalid_plan');
-      patch[field] = request[field].trim();
-    }
     if (request.dependsOn !== undefined) {
       if (!Array.isArray(request.dependsOn) || request.dependsOn.some((key) => typeof key !== 'string'))
         throw badRequest('Invalid task dependencies.', 'invalid_dependencies');
@@ -248,7 +243,7 @@ export class WorkflowService {
     return this.createChange(request, false);
   }
 
-  createTask(request: Pick<CreateChangeRequest, 'title' | 'body'>) {
+  createTask(request: Pick<CreateChangeRequest, 'title'>) {
     return this.createChange(request, true);
   }
 
@@ -326,12 +321,11 @@ export class WorkflowService {
         workflow.changes.push({
           id: `todo-${todo.id}`,
           title: todo.title,
-          body: todo.body,
           ...('commentIds' in todo ? { commentIds: todo.commentIds } : {}),
           developmentBranch: workflow.developmentBranch,
           status: todo.status === 'done' ? 'archived' : 'planned',
           createdAt: todo.createdAt,
-          legacyTodo: { branch: todo.branch, status: todo.status },
+          legacyTodo: { branch: todo.branch, status: todo.status, ...(todo.body ? { body: todo.body } : {}) },
         });
         state.todos = state.todos.filter((row) => row.id !== id);
       });

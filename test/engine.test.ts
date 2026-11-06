@@ -332,7 +332,7 @@ describe('desktop engine', () => {
     fixture.git('-C', old.worktree.path, 'add', '.');
     fixture.git('-C', old.worktree.path, 'commit', '-qm', 'Old task');
     fixture.git('-C', old.worktree.path, 'switch', '--detach');
-    const task = await engine.execute('task.create', { title: 'New workspace', body: 'Fresh task' });
+    const task = await engine.execute('task.create', { title: 'New workspace' });
     expect(task.status).toBe('working');
     if (!task.worktree) throw new Error('Task creation must allocate a workspace');
     expect(task.worktree).toBe(old.worktree.path);
@@ -350,14 +350,14 @@ describe('desktop engine', () => {
 
   it('keeps a failed allocation on its task and retries once across concurrent requests', async () => {
     const allocation = vi.spyOn(worktrees, 'checkoutWorktree').mockRejectedValueOnce(new WardenError(409, 'Allocation unavailable', 'checkout_unavailable'));
-    const task = await engine.execute('task.create', { title: 'Retained task', body: 'Keep these notes' });
+    const task = await engine.execute('task.create', { title: 'Retained task' });
     expect(task).toMatchObject({ status: 'planned', workspaceError: { message: 'Allocation unavailable', code: 'checkout_unavailable' } });
     expect(task.worktree).toBeUndefined();
     const persisted = (await engine.execute('workflow.get', undefined)).workflow!.changes;
     expect(persisted).toHaveLength(1);
     expect(persisted[0]).toEqual(task);
     const [first, second] = await Promise.all([engine.execute('task.start', { taskId: task.id }), engine.execute('task.start', { taskId: task.id })]);
-    expect(first).toMatchObject({ id: task.id, title: task.title, body: task.body, status: 'working' });
+    expect(first).toMatchObject({ id: task.id, title: task.title, status: 'working' });
     expect(second.worktree).toBe(first.worktree);
     expect(first.workspaceError).toBeUndefined();
     expect(allocation).toHaveBeenCalledTimes(2);

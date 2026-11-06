@@ -11,7 +11,7 @@ exports.checkTaskDeletion = async (workbench, extension, fixture, eventually) =>
   assert(menus.some((item) => item.command === 'warden.deleteTask' && item.group === '9_delete@1'));
   assert(menus.some((item) => item.command === 'warden.retryDeleteTask' && item.when.includes('wardenTask:deleting')));
   const before = (await workbench.backend.store.load()).workflow.changes.map((task) => task.id);
-  const created = await workbench.backend.execute('task.create', { title: 'Delete this task', body: 'Task notes' });
+  const created = await workbench.backend.execute('task.create', { title: 'Delete this task' });
   await fs.writeFile(path.join(created.worktree, 'discard.txt'), 'Pending task work\n');
   await fs.mkdir(path.join(created.worktree, 'node_modules'), { recursive: true });
   await fs.writeFile(path.join(created.worktree, 'node_modules', 'retained'), 'Installed environment\n');
@@ -36,8 +36,6 @@ exports.checkTaskDeletion = async (workbench, extension, fixture, eventually) =>
     );
     assert.equal(await fs.readFile(path.join(created.worktree, 'discard.txt'), 'utf8'), 'Pending task work\n');
 
-    await workbench.selectTask(node, 'edit');
-    await workbench.views.notes.save(fixture.root, created.id, { title: 'Unsaved note', body: 'Draft' }, { title: created.title, body: created.body });
     await workbench.conversations.show(fixture.root, created.id);
     const entry = [...workbench.conversations.entries.values()].find((row) => row.binding.taskId === created.id);
     await eventually(() => entry.session.snapshot().status === 'connected' && entry.surface?.ready, 30_000);
@@ -51,8 +49,6 @@ exports.checkTaskDeletion = async (workbench, extension, fixture, eventually) =>
       before,
     );
     assert.equal(workbench.conversations.entries.has(JSON.stringify([fixture.root, created.id])), false);
-    assert.equal(workbench.views.notes.read(fixture.root, created.id), undefined);
-    assert.equal(workbench.views.panels.has('task'), false);
     assert(!(await workbench.getChildren()).some((row) => row.task.id === created.id));
     assert.equal(await fs.readFile(path.join(created.worktree, 'node_modules', 'retained'), 'utf8'), 'Installed environment\n');
     await assert.rejects(fs.access(path.join(created.worktree, 'discard.txt')), { code: 'ENOENT' });

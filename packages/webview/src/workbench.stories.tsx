@@ -8,7 +8,7 @@ const base: WorkbenchModel = {
   repositoryState: 'ready',
   agentConfiguration: { status: 'configured', count: 1 },
   agentReadiness: { status: 'ready', profile: { id: 'fixture', label: 'Fixture agent' }, message: 'Agent connection verified.' },
-  surface: 'task',
+  surface: 'rebase',
   message: '',
   errors: [],
   reviewCurrent: false,
@@ -18,7 +18,6 @@ const base: WorkbenchModel = {
 const task = {
   id: 'orders',
   title: '订单查询接口',
-  body: '增加分页查询\n保留旧调用方式',
   developmentBranch: 'feature/orders',
   status: 'working' as const,
   createdAt: '2026-10-24T00:00:00Z',
@@ -28,36 +27,19 @@ const task = {
   workspaceHook: { event: 'create' as const, command: 'pnpm install', status: 'failed' as const, exitCode: 1, output: '依赖安装失败，请检查仓库配置后重试。' },
 };
 const meta = {
-  title: 'Workbench/Task and Rebase Panels',
+  title: 'Workbench/Rebase Panel',
   component: WorkbenchApp,
   args: { model: base, send: () => {} },
 } satisfies Meta<typeof WorkbenchApp>;
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-export const TaskNotes: Story = { args: { model: { ...base, task } } };
-// Panels stay open across agent disconnects and fall back to the Configure ACP entry point.
+// The panel stays open across agent disconnects and falls back to the Configure ACP entry point.
 export const UnavailableAgent: Story = {
   args: {
     model: {
       ...base,
-      task,
       agentReadiness: { status: 'error', message: 'Unable to start the agent. Check its executable path on the workspace host.' },
-    },
-  },
-};
-export const TaskSaveFailure: Story = {
-  args: {
-    model: {
-      ...base,
-      task,
-      errors: [
-        {
-          scope: 'task:orders',
-          code: 'operation_locked',
-          message: 'Unable to save while another window updates the repository. The draft has been preserved; retry shortly.',
-        },
-      ],
     },
   },
 };

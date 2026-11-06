@@ -2,33 +2,23 @@ import * as vscode from 'vscode';
 import { randomBytes } from 'node:crypto';
 import { parseWorkbenchAction } from '@warden/shared';
 import type { Surface, WorkbenchAction, WorkbenchModel } from '@warden/shared';
-import { TaskNoteDrafts } from './task-note-drafts.js';
 
-const titles: Record<Surface, string> = { workspaces: 'Workbench', task: 'Task', settings: 'Settings', rebase: 'Rebase' };
+const titles: Record<Surface, string> = { workspaces: 'Workbench', settings: 'Settings', rebase: 'Rebase' };
 
 export class Views implements vscode.Disposable {
   private readonly panels = new Map<Surface, vscode.WebviewPanel>();
   private readonly subscriptions: vscode.Disposable[] = [];
-  private taskModel?: WorkbenchModel;
-  private readonly notes: TaskNoteDrafts;
   constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly model: (surface: Surface) => WorkbenchModel,
     private readonly action: (action: WorkbenchAction, session: string) => Promise<unknown>,
-    private readonly error: (error: unknown, surface: Surface, taskId?: string) => void,
-  ) {
-    this.notes = new TaskNoteDrafts(context.workspaceState);
-  }
+    private readonly error: (error: unknown, surface: Surface) => void,
+  ) {}
   async show(surface: Surface) {
     if (!Object.hasOwn(titles, surface)) throw new Error('Unknown view.');
     if (surface === 'workspaces' || surface === 'settings') {
       await vscode.commands.executeCommand(surface === 'settings' ? 'warden.configureAgents' : 'warden.task.focus');
       return;
-    }
-    if (surface === 'task') {
-      this.taskModel = this.model('task');
-      const { repository, task } = this.taskModel;
-      if (task) await this.notes.saved(repository, task.id, { title: task.title, body: task.body ?? '' });
     }
     const existing = this.panels.get(surface);
     if (existing) {
@@ -50,11 +40,10 @@ export class Views implements vscode.Disposable {
     webview.html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';"><link rel="stylesheet" href="${style}"><title>${titles[surface]}</title></head><body><div id="root"></div><script nonce="${nonce}" src="${script}"></script></body></html>`;
     this.subscriptions.push(
       webview.onDidReceiveMessage(async (message: unknown) => {
-        const taskId = surface === 'task' ? this.taskModel?.task?.id : undefined;
         try {
           await this.receive(surface, message, webview);
         } catch (error) {
-          this.error(error, surface, taskId);
+          this.error(error, surface);
         }
       }),
     );
@@ -63,74 +52,23 @@ export class Views implements vscode.Disposable {
     if (!message || typeof message !== 'object' || Array.isArray(message)) throw new Error('Invalid view message.');
     const envelope = message as Record<string, unknown>;
     if (envelope.type === 'ready') {
-      await webview.postMessage({ type: 'model', model: this.currentModel(surface) });
+      await webview.postMessage({ type: 'model', model: this.model(surface) });
       return;
     }
     if (envelope.type !== 'action' || typeof envelope.session !== 'string') throw new Error('Unknown view message.');
     const action = parseWorkbenchAction(envelope.action);
-    const binding = this.taskModel;
-    if (surface === 'task' && action.type === 'task.draft') {
-      if (!binding?.task || binding.session !== envelope.session || binding.task.id !== action.taskId)
-        throw new Error('This editor can only modify its assigned task draft.');
-      // Drafts still belong to the pinned task while a branch switch disables saving.
-      const current = this.currentModel('task');
-      const task = current.repository === binding.repository && current.task?.id === action.taskId ? current.task : binding.task;
-      await this.notes.save(binding.repository, action.taskId, action, { title: task.title, body: task.body ?? '' });
-      return;
-    }
     if (envelope.session !== this.model(surface).session) throw new Error('The repository or base branch changed. Retry from the current view.');
     const prefix = action.type.split('.')[0];
     const setup = prefix === 'setup';
     if (!setup && prefix !== surface) throw new Error('This action is not available in this view.');
-    if (surface === 'task' && !setup && ('taskId' in action ? action.taskId !== binding?.task?.id : true))
-      throw new Error('This editor can only modify its assigned task.');
     await this.action(action, envelope.session);
-    if (surface === 'task' && action.type === 'task.update' && binding) {
-      const current = this.currentModel('task');
-      const submitted = { title: action.title.trim(), body: action.body.trim() };
-      if (
-        current.repository === binding.repository &&
-        current.task?.id === action.taskId &&
-        current.task.title === submitted.title &&
-        (current.task.body ?? '') === submitted.body
-      ) {
-        await this.notes.saved(binding.repository, action.taskId, submitted);
-        this.render();
-      }
-    }
-  }
-  private currentModel(surface: Surface): WorkbenchModel {
-    const model = this.model(surface);
-    if (model.agentReadiness.status !== 'ready' || model.agentConfiguration.status !== 'configured') return model;
-    const pinned = this.taskModel;
-    if (surface !== 'task' || !pinned) return model;
-    const task = model.workspaces?.find((row) => row.task.id === pinned.task?.id)?.task;
-    const taskDraft = pinned.task && this.notes.read(pinned.repository, pinned.task.id);
-    if (model.session !== pinned.session || !task)
-      return { ...pinned, taskDraft, busy: 'The repository or base branch changed. Switch back and reopen the task editor.' };
-    return { ...model, task, taskDraft };
   }
   render() {
-    const model = this.model('task');
-    const pinned = this.taskModel;
-    if (pinned?.task && model.repository === pinned.repository && model.workflow?.workflow?.deletedTasks?.some((task) => task.id === pinned.task!.id))
-      void this.forgetTask(pinned.repository, pinned.task.id).catch((error) => this.error(error, 'task', pinned.task?.id));
-    for (const [surface, panel] of this.panels) void panel.webview.postMessage({ type: 'model', model: this.currentModel(surface) });
+    for (const [surface, panel] of this.panels) void panel.webview.postMessage({ type: 'model', model: this.model(surface) });
   }
   displaysError(scope: string): boolean {
     if (scope === 'repository' || scope === 'workspaces') return [...this.panels.values()].some((panel) => panel.visible);
-    if (scope.startsWith('task:')) return !!this.panels.get('task')?.visible && scope === `task:${this.currentModel('task').task?.id}`;
     return [...this.panels].some(([surface, panel]) => surface === scope && panel.visible);
-  }
-  flush() {
-    return this.notes.flush();
-  }
-  async forgetTask(repository: string, taskId: string) {
-    if (this.taskModel?.repository === repository && this.taskModel.task?.id === taskId) {
-      this.taskModel = undefined;
-      this.panels.get('task')?.dispose();
-    }
-    await this.notes.forget(repository, taskId);
   }
   dispose() {
     for (const panel of this.panels.values()) panel.dispose();

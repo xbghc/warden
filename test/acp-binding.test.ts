@@ -99,7 +99,7 @@ describe('ACP task binding', () => {
       await validateAcpBinding(engine, binding);
       fixture.git('-C', task.worktree, 'add', 'agent.txt');
       fixture.git('-C', task.worktree, 'commit', '-qm', 'Agent progress');
-      await engine.execute('task.update', { taskId: task.id, title: 'Updated title', body: 'Clarified scope' });
+      await engine.execute('task.update', { taskId: task.id, title: 'Updated title' });
       const updated = await resolveAcpBinding(engine, task.id);
       expect(updated.title).toBe('Updated title');
       expect(updated.identity).toBe(binding.identity);

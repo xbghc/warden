@@ -33,11 +33,11 @@ exports.run = async () => {
     console.log('Checking repository loading');
     await checkRepositoryLoading(workbench, extension, fixture, eventually);
     await workbench.open(fixture.unconfigured);
-    assert.equal(workbench.model('task').workflow.workflow, null, 'opening a repository does not choose its requirement branch');
+    assert.equal(workbench.model('workspaces').workflow.workflow, null, 'opening a repository does not choose its requirement branch');
     assert.deepEqual(await workbench.getChildren(), [], 'unconfigured repositories show setup instead of operational navigation');
     console.log('Checking agent setup before branch selection');
     await checkAgentSetup(workbench, extension, fixture, eventually);
-    for (const surface of ['workspaces', 'task', 'rebase']) {
+    for (const surface of ['workspaces', 'rebase']) {
       const model = workbench.model(surface);
       assert.equal(model.repository, fixture.unconfigured);
       assert.equal(model.workflow.workflow, null, 'directly opened workflow pages receive setup state');
@@ -136,11 +136,13 @@ exports.run = async () => {
       vscode.window.tabGroups.all.flatMap((group) => group.tabs).some((tab) => tab === diff),
       'selecting the task retains the existing native diff',
     );
-    assert.equal(workbench.model('task').message, 'Keep this draft');
-    assert.equal(workbench.views.panels.has('task'), false, 'task controls stay out of the editor area');
+    assert.equal(workbench.model('workspaces').message, 'Keep this draft');
+    // Rebase is the only Workbench editor panel; tasks never open one.
+    const taskPanelOpen = () => [...workbench.views.panels.keys()].some((surface) => surface !== 'rebase');
+    assert.equal(taskPanelOpen(), false, 'task controls stay out of the editor area');
     await workbench.handleAction({ type: 'task.history', taskId: tasks[0].task.id }, workbench.session);
-    assert.equal(workbench.model('task').task.id, tasks[0].task.id, 'delivery records keep the selected task context');
-    assert.equal(workbench.views.panels.has('task'), false);
+    assert.equal(workbench.model('workspaces').task.id, tasks[0].task.id, 'delivery records keep the selected task context');
+    assert.equal(taskPanelOpen(), false);
     await vscode.commands.executeCommand('type', { text: 'Forbidden' });
     assert.equal(doc.getText(), originalText, 'native typing cannot edit review content');
     await assert.rejects(vscode.workspace.fs.writeFile(doc.uri, Buffer.from('Forbidden')), 'review documents cannot be saved');
@@ -298,10 +300,7 @@ exports.run = async () => {
     assert.equal(workbench.taskInput, undefined);
     assert.equal(workbench.model('workspaces').task.id, previousTask, 'cancel preserves the prior task selection');
     assert.equal((await state()).workflow.changes.length, count, 'cancel never creates a task');
-    await assert.rejects(
-      workbench.handleAction({ type: 'task.create', title: 'Wrong repository', body: '' }, 'old-session'),
-      /The repository or base branch changed/,
-    );
+    await assert.rejects(workbench.handleAction({ type: 'task.create', title: 'Wrong repository' }, 'old-session'), /The repository or base branch changed/);
     assert.equal((await state()).workflow.changes.length, count);
     // Hold a real pre-mutation read until creation commits; it must not hide the newly saved task.
     await workbench.reading;
@@ -342,7 +341,7 @@ exports.run = async () => {
     try {
       const reading = workbench.refresh();
       await captured;
-      const creating = workbench.handleAction({ type: 'task.create', title: 'Fresh workspace', body: 'Line one\nLine two' }, session);
+      const creating = workbench.handleAction({ type: 'task.create', title: 'Fresh workspace' }, session);
       await eventually(() => creationStarted);
       await workbench.handleAction({ type: 'task.cancelCreate' }, session);
       assert.equal(workbench.model('workspaces').task.id, previousTask, 'pending creation keeps the prior task selection');
@@ -357,10 +356,11 @@ exports.run = async () => {
     }
     const newTask = (await state()).workflow.changes.at(-1);
     assert.equal(createdTaskId, newTask.id, 'successful creation returns its task directly to the native input');
-    assert.equal(newTask.body, 'Line one\nLine two');
+    assert.equal(newTask.title, 'Fresh workspace');
     assert(newTask.worktree, 'task creation includes automatic workspace allocation');
     await workbench.handleAction({ type: 'task.brief', taskId: newTask.id }, session);
-    assert((await vscode.env.clipboard.readText()).includes(newTask.worktree));
+    const brief = await vscode.env.clipboard.readText();
+    assert(brief.startsWith('# Fresh workspace\n\n') && brief.includes(newTask.worktree), 'Copy Task Brief carries the title and workspace');
     assert.notEqual((await state()).workflow.changes.at(-1).worktree, workspace);
 
     assert.equal((await state()).workflow.changes[0].deliveries[0].id, accepted.id, 'existing delivery records remain available');
@@ -368,7 +368,7 @@ exports.run = async () => {
     assert.equal(await workbench.documents.provideTextDocumentContent(pinnedDoc.uri), pinnedContent, 'saved native snapshots survive memory eviction');
     await workbench.open(fixture.root);
     assert.notEqual(workbench.session, session, 'reopening the repository creates a new session');
-    await assert.rejects(workbench.handleAction({ type: 'task.create', title: 'Stale view', body: '' }, session), /The repository or base branch changed/);
+    await assert.rejects(workbench.handleAction({ type: 'task.create', title: 'Stale view' }, session), /The repository or base branch changed/);
     assert.equal((await state()).workflow.changes.length, count + 1);
 
     // A pure executable-bit change has identical text on both sides of the native diff.

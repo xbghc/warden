@@ -10,7 +10,7 @@ Workspace creation does not install dependencies or launch an agent.
 
 The left navigation’s *Tasks* list holds the ordered work plan. Adding a task automatically allocates
 its own workspace and branch from the current requirement baseline, then runs the configured
-initialization script. The user enters a title and can edit notes or reorder tasks afterward.
+initialization script. The user enters a title and can rename or reorder tasks afterward.
 Directory, branch and storage choices stay internal. Warden may reuse a clean, unassigned physical
 directory without adopting its old logical workspace.
 
@@ -24,9 +24,9 @@ repository; preview composition imports the task commits it needs into Warden's 
 repository. Existing shared-repository worktrees and primary-linked worktrees remain usable. Ordering never enforces dependencies.
 
 A workspace corresponds to one linear task. It can contain multiple local commits and make multiple
-deliveries without being recycled. There is no task-complete declaration or release step. Editing
-notes and ordering remain available while work is in progress. Historical TODO descriptions and
-historical metadata is retained; old checked items migrate as archived notes, not accepted commits.
+deliveries without being recycled. There is no task-complete declaration or release step. Renaming
+and ordering remain available while work is in progress. Historical TODO descriptions and
+historical metadata are retained as unread data; old checked items migrate as archived notes, not accepted commits.
 
 Selecting a base branch explicitly starts tracking it in Warden, even before it has tasks.
 Switching the primary checkout in Git or VS Code restores only previously tracked branches.

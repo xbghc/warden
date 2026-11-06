@@ -178,15 +178,16 @@ export interface ChangePlan {
   id: string;
   title: string;
   developmentBranch: string;
-  body?: string;
-  acceptance?: string;
   /** Legacy planning metadata; never blocks allocation. */
   dependsOn?: string[];
   agent?: string;
   /** Allocation failed before a workspace was assigned; retry uses this same task. */
   workspaceError?: { message: string; code?: string };
-  /** Kept when importing old checklists; a checked box is not evidence of a Git commit. */
-  legacyTodo?: { branch: string; status: TodoStatus };
+  /**
+   * Kept when importing old checklists; a checked box is not evidence of a Git commit. The old
+   * description is retained as unread data so migration never discards user text.
+   */
+  legacyTodo?: { branch: string; status: TodoStatus; body?: string };
   createdAt: string;
   /** An explicit deletion interrupted before all task resources were released. */
   deletion?: TaskDeletion;
@@ -353,8 +354,6 @@ export interface DevelopmentPreparation {
 
 export interface CreateChangeRequest {
   title: string;
-  body?: string;
-  acceptance?: string;
   /** Legacy planning metadata; never blocks allocation. */
   dependsOn?: string[];
   /** Adopt an existing numbered checkout instead of creating a task branch. */
@@ -363,8 +362,6 @@ export interface CreateChangeRequest {
 
 export interface UpdateChangeRequest {
   title?: string;
-  body?: string;
-  acceptance?: string;
   /** Legacy planning metadata; never blocks allocation. */
   dependsOn?: string[];
   status?: 'planned' | 'archived';

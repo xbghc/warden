@@ -249,6 +249,14 @@ export class AcpConversations {
     this.changed();
   }
 
+  /** Titles are not part of a binding's identity, so a rename updates live conversations in place. */
+  retitle(repository: string, taskId: string, title: string) {
+    const entry = this.entries.get(this.key(repository, taskId));
+    if (!entry || entry.binding.title === title) return;
+    entry.binding = { ...entry.binding, title };
+    if (entry.panel) entry.panel.title = `${title} · Agent`;
+  }
+
   hasConnection(repository: string, taskId: string) {
     const entry = this.entries.get(this.key(repository, taskId));
     return !!entry && (!!entry.connecting || entry.session.snapshot().status !== 'disconnected');

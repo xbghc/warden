@@ -7,8 +7,6 @@ import { unzipSync } from 'fflate';
 import { Engine } from '@warden/engine';
 import { parseWorkbenchAction, taskReview } from '@warden/shared';
 import type { Surface, WorkbenchModel, AcpConfiguration, AcpReadiness } from '@warden/shared';
-import type { Memento } from 'vscode';
-import { TaskNoteDrafts } from '../../packages/vscode/src/task-note-drafts.js';
 import { makeFixtureRepo } from '../fixtures/make-repo.js';
 
 const fixture = await makeFixtureRepo('warden-ui-');
@@ -16,14 +14,6 @@ const data = await mkdtemp(path.join(os.tmpdir(), 'warden-ui-data-'));
 const engine = await Engine.open(fixture.root, path.join(data, 'state.json'));
 let selected: string | undefined;
 const messages: Record<string, string> = {};
-const savedNotes = new Map<string, unknown>();
-const notes = new TaskNoteDrafts({
-  keys: () => [...savedNotes.keys()],
-  get: <T>(key: string, fallback?: T) => (savedNotes.has(key) ? (savedNotes.get(key) as T) : fallback),
-  update: async (key: string, value: unknown) => {
-    savedNotes.set(key, value);
-  },
-} as Memento);
 const expanded: Record<string, boolean> = {};
 const session = 'browser-fixture';
 let agentConfiguration: AcpConfiguration = { status: 'missing' };
@@ -43,7 +33,6 @@ const model = async (surface: Surface): Promise<WorkbenchModel> => {
     surface,
     workflow,
     task,
-    taskDraft: task && notes.read(fixture.root, task.id),
     workspaces: await Promise.all(
       (workflow.workflow?.changes ?? []).map(async (row) => {
         const review = row.worktree ? taskReview(workflow, row.id, workspaces.worktrees) : undefined;
@@ -51,7 +40,7 @@ const model = async (surface: Surface): Promise<WorkbenchModel> => {
           task: row,
           expanded: !!expanded[row.id],
           description: row.worktree ? 'Not in Preview' : 'Prepared on first use',
-          tooltip: [row.title, row.body, row.worktree].filter(Boolean).join('\n'),
+          tooltip: [row.title, row.worktree].filter(Boolean).join('\n'),
           files: expanded[row.id] && review ? (await engine.execute('review.files', { key: review.targetKey })).files : undefined,
         };
       }),
@@ -68,11 +57,11 @@ const model = async (surface: Surface): Promise<WorkbenchModel> => {
 const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url!, 'http://localhost');
-    const surface = (url.searchParams.get('surface') ?? 'task') as Surface;
+    const surface = (url.searchParams.get('surface') ?? 'rebase') as Surface;
     if (url.pathname === '/inspect') {
       response.setHeader('Content-Type', 'text/html');
       response.end(`<!doctype html><html lang="en"><meta charset="utf-8"><title>Warden · 表单验证</title><body style="background:#eee;font:13px sans-serif;padding:20px;display:flex;gap:24px">
-        ${['light', 'dark', 'contrast'].map((theme) => `<section><h2>${{ light: '浅色', dark: '深色', contrast: '高对比' }[theme]} · 320px</h2><iframe title="${theme}" src="/?surface=task&theme=${theme}" style="width:320px;height:700px;border:1px solid #888"></iframe></section>`).join('')}
+        ${['light', 'dark', 'contrast'].map((theme) => `<section><h2>${{ light: '浅色', dark: '深色', contrast: '高对比' }[theme]} · 320px</h2><iframe title="${theme}" src="/?surface=rebase&theme=${theme}" style="width:320px;height:700px;border:1px solid #888"></iframe></section>`).join('')}
       </body></html>`);
       return;
     }
@@ -106,7 +95,6 @@ const server = createServer(async (request, response) => {
         case 'task.select':
         case 'task.file':
         case 'task.review':
-        case 'task.edit':
         case 'task.history':
         case 'task.output':
         case 'task.options':
@@ -132,7 +120,7 @@ const server = createServer(async (request, response) => {
           await engine.execute('preview.refresh', undefined);
           break;
         case 'task.create': {
-          const task = await engine.execute('task.create', { title: action.title, body: action.body });
+          const task = await engine.execute('task.create', { title: action.title });
           selected = task.id;
           if (task.worktree) await writeFile(path.join(task.worktree, 'ui-fixture.txt'), 'Workspace file for native diff routing\n');
           break;
@@ -141,15 +129,8 @@ const server = createServer(async (request, response) => {
           await engine.execute('task.start', { taskId: action.taskId, kind: action.kind, agent: action.agent });
           break;
         }
-        case 'task.draft': {
-          const task = (await engine.execute('workflow.get', undefined)).workflow?.changes.find((item) => item.id === action.taskId);
-          if (!task) throw new Error('Unknown draft task');
-          await notes.save(fixture.root, task.id, action, { title: task.title, body: task.body ?? '' });
-          break;
-        }
         case 'task.update':
-          await engine.execute('task.update', { taskId: action.taskId, title: action.title, body: action.body });
-          await notes.saved(fixture.root, action.taskId, { title: action.title.trim(), body: action.body.trim() });
+          await engine.execute('task.update', { taskId: action.taskId, title: action.title });
           break;
         case 'task.message':
           messages[action.taskId] = action.message;
@@ -184,21 +165,18 @@ const server = createServer(async (request, response) => {
     response.end(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/index.css">
       ${dark ? `<style>:root { --vscode-editor-background:#1f1f1f; --vscode-sideBar-background:#181818; --vscode-editor-foreground:#ddd; --vscode-button-background:#0e639c; --vscode-button-foreground:#fff; --vscode-descriptionForeground:#aaa; --vscode-textCodeBlock-background:#252525; --vscode-list-hoverBackground:#333; --vscode-widget-border:#555; --vscode-input-border:#666; --vscode-focusBorder:#007fd4; ${theme === 'contrast' ? '--vscode-contrastBorder:#fff; --vscode-focusBorder:#f38518; --vscode-widget-border:#fff; --vscode-input-border:#fff;' : ''} }</style>` : ''}
       </head><body class="${dark ? (theme === 'contrast' ? 'vscode-high-contrast' : 'vscode-dark') : 'vscode-light'}"><div id="root"></div><script>
-      let surface = new URL(location.href).searchParams.get('surface') || 'task';
-      let saved = JSON.parse(sessionStorage.getItem('warden-state') || '{}');
+      let surface = new URL(location.href).searchParams.get('surface') || 'rebase';
       let queue = Promise.resolve();
       window.__actions = [];
-      window.acquireVsCodeApi = () => ({ getState: () => saved, setState: s => { saved=s; sessionStorage.setItem('warden-state', JSON.stringify(s)); }, postMessage: message => {
+      window.acquireVsCodeApi = () => ({ postMessage: message => {
         if (message.action) window.__actions.push(message.action);
         queue = queue.then(async () => {
           const response = await fetch((message.type === 'ready' ? '/model' : '/action') + '?surface=' + surface,
             message.type === 'ready' ? {} : { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify(message.action) });
           if (!response.ok) throw new Error(await response.text());
           const model = await response.json();
-          if (message.action?.type !== 'task.draft') {
-            surface = model.surface;
-            window.postMessage({ type:'model', model }, '*');
-          }
+          surface = model.surface;
+          window.postMessage({ type:'model', model }, '*');
           if (message.action?.type === 'settings.save') window.__settingsSaved = true;
         }).catch(error => { window.__hostError = String(error); console.error(error); });
       }});
