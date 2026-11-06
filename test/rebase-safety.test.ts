@@ -1,6 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, open, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DevelopmentChange, SlotKind } from '@warden/shared';
 import { resolveRepo, StateStore, WorkflowService } from './compat/index.js';
@@ -70,9 +70,20 @@ describe('rebase safety', () => {
       });
       const paths = [fx.root, first.worktree, second.worktree];
       const before = await Promise.all(paths.map(capture));
-      const firstGitfile = await readFile(path.join(first.worktree, '.git'));
-      await writeFile(path.join(first.worktree, '.git'), await readFile(path.join(second.worktree, '.git')));
+      const gitfile = path.join(first.worktree, '.git');
+      const firstGitfile = await readFile(gitfile);
+      const replaceGitfile = async (contents: Buffer) => {
+        // Git marks this file hidden on Windows; opening it with creation flags is denied.
+        const file = await open(gitfile, 'r+');
+        try {
+          await file.truncate(0);
+          await file.writeFile(contents);
+        } finally {
+          await file.close();
+        }
+      };
       try {
+        await replaceGitfile(await readFile(path.join(second.worktree, '.git')));
         const result = await engine.execute(
           'rebase.run',
           { items: [{ changeId: first.id, sourceHead: checked.sourceHead, developmentHead: checked.developmentHead }] },
@@ -80,7 +91,7 @@ describe('rebase safety', () => {
         );
         expect(result.results).toEqual([{ changeId: first.id, status: 'failed', message: expect.stringContaining('another repository') }]);
       } finally {
-        await writeFile(path.join(first.worktree, '.git'), firstGitfile);
+        await replaceGitfile(firstGitfile);
       }
       expect(await Promise.all(paths.map(capture))).toEqual(before);
       expect((await store.load()).workflow!.changes.find((row) => row.id === first.id)!.base).toBe(first.base);
