@@ -387,20 +387,41 @@ export class WorkflowService {
       fork = (await runGit(['merge-base', base, 'HEAD'], { cwd: worktree })).stdout.trim();
     } else {
       branch = `warden/change-${plan.id.replace(/^todo-/, '').slice(0, 8)}`;
-      const kind = request.kind ?? 'clone';
-      const free = list.find(
+      // An allocation interrupted after checkout, or whose state write failed, leaves this task's own
+      // branch in an unassigned numbered workspace. Only allocation creates that name, so a retry
+      // resumes it instead of failing forever because the branch is already checked out.
+      const interrupted = list.find(
         (row) =>
-          row.free &&
-          !!row.clone === (kind === 'clone') &&
-          !!row.shared === (kind === 'shared') &&
+          row.branch === branch &&
+          row.slot !== undefined &&
+          row.dirty === 0 &&
+          !row.busy &&
+          !row.foreign &&
+          !row.prunable &&
           !workflow.changes.some((change) => change.worktree === row.path),
       );
-      const slot = free?.slot ?? (await nextSlot(this.repo, list)).slot;
-      if (free?.clone || free?.shared) await this.importCommit(this.repo.commonRoot, free.path, base);
-      const created = await checkoutWorktree(this.repo, { branch, base, slot, kind });
-      worktree = created.worktree.path;
-      ownsBranch = !!created.branchCreated;
-      hookEvent = created.reused ? 'reuse' : 'create';
+      if (interrupted) {
+        worktree = interrupted.path;
+        ownsBranch = true;
+        hookEvent = 'create';
+        if (interrupted.clone || interrupted.shared) await this.importCommit(this.repo.commonRoot, worktree, base);
+        fork = (await runGit(['merge-base', base, 'HEAD'], { cwd: worktree })).stdout.trim();
+      } else {
+        const kind = request.kind ?? 'clone';
+        const free = list.find(
+          (row) =>
+            row.free &&
+            !!row.clone === (kind === 'clone') &&
+            !!row.shared === (kind === 'shared') &&
+            !workflow.changes.some((change) => change.worktree === row.path),
+        );
+        const slot = free?.slot ?? (await nextSlot(this.repo, list)).slot;
+        if (free?.clone || free?.shared) await this.importCommit(this.repo.commonRoot, free.path, base);
+        const created = await checkoutWorktree(this.repo, { branch, base, slot, kind });
+        worktree = created.worktree.path;
+        ownsBranch = !!created.branchCreated;
+        hookEvent = created.reused ? 'reuse' : 'create';
+      }
       await this.store.update((state) => forgetWorktreeTargets(state, worktree));
     }
     const change: DevelopmentChange = { ...plan, branch, ownsBranch, worktree, base: fork, status: 'working', agent: request.agent?.trim() || undefined };

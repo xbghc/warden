@@ -364,6 +364,27 @@ describe('desktop engine', () => {
     expect((await engine.execute('workflow.get', undefined)).workflow!.changes).toHaveLength(1);
   });
 
+  it('resumes a task workspace whose allocation was interrupted after checkout', async () => {
+    const real = worktrees.checkoutWorktree;
+    let orphan: string | undefined;
+    vi.spyOn(worktrees, 'checkoutWorktree').mockImplementationOnce(async (...args) => {
+      const created = await real(...args);
+      orphan = created.worktree.path;
+      // The checkout exists, but nothing recorded it before the failure.
+      throw new WardenError(500, 'Interrupted after checkout', 'git_failed');
+    });
+    const task = await engine.execute('task.create', { title: 'Interrupted allocation' });
+    expect(task).toMatchObject({ status: 'planned', workspaceError: { code: 'git_failed' } });
+    expect(orphan).toBeTruthy();
+    const resumed = await engine.execute('task.start', { taskId: task.id });
+    expect(resumed).toMatchObject({ id: task.id, status: 'working', worktree: orphan, ownsBranch: true });
+    expect(resumed.workspaceError).toBeUndefined();
+    expect(fixture.git('-C', orphan!, 'branch', '--show-current').trim()).toBe(resumed.branch);
+    // A different task never takes over that workspace.
+    const other = await engine.execute('task.create', { title: 'Other task' });
+    expect(other.worktree).not.toBe(orphan);
+  });
+
   it('runs initialization during creation and preserves its workspace when the script fails', async () => {
     await engine.execute('config.save', { hooks: { create: 'echo retained > hook.txt; exit 1' } });
     const task = await engine.execute('task.create', { title: 'Script failure' });

@@ -288,7 +288,9 @@ the current requirement baseline without dependency enforcement. Renaming and or
 Warden state. Tasks store a title only; `body` and `acceptance` values saved by earlier versions stay
 in the state file untouched but are no longer read, shown or written, and legacy checklist imports
 keep their old description as unread `legacyTodo.body` data. A pre-assignment failure persists `workspaceError` on the saved task; a retry keeps its
-ID and clears the error after successful assignment. Assigned workspaces are never replaced on retry.
+ID and clears the error after successful assignment. When an interrupted allocation already checked out
+the task's own `warden/change-<id>` branch in an unassigned, clean numbered workspace, the retry
+resumes that workspace instead of failing because the branch is in use. Assigned workspaces are never replaced on retry.
 Legacy plan creation remains only for imports and the compatibility adapter; desktop task use
 prepares these plans explicitly, without allocating from a background read.
 `workflow.changes[].deliveries` stores stable delivery IDs, source ranges, primary commits and
