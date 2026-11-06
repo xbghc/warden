@@ -44,6 +44,64 @@ async function createTask(title: string) {
 }
 
 describe('saved workspace delivery', () => {
+  it.each([
+    { synchronization: 'merge', increment: 'saved' },
+    { synchronization: 'merge', increment: 'committed' },
+    { synchronization: 'rebase', increment: 'saved' },
+    { synchronization: 'rebase', increment: 'committed' },
+  ] as const)(
+    'keeps superseded snapshots out of a $increment increment after manual $synchronization and a primary revert',
+    { timeout },
+    async ({ synchronization, increment }) => {
+      const task = await createTask('Snapshot boundary');
+      await fx.write('human.txt', 'Primary contribution\n');
+      fx.git('add', '.');
+      fx.git('commit', '-qm', 'Add primary contribution');
+      await writeFile(path.join(task.worktree, 'first.txt'), 'First increment\n');
+      const first = await reviewed(task.id);
+      expect(first.sourceTree).toBeTruthy();
+      await engine.execute('task.deliver', { ...first, message: 'Deliver saved first increment' });
+      const incorporated = fx.git('rev-parse', 'HEAD').trim();
+
+      fx.git('-C', task.worktree, 'add', '.');
+      fx.git('-C', task.worktree, 'commit', '-qm', 'Checkpoint the first increment');
+      fx.git('-C', task.worktree, 'fetch', '-q', fx.root, 'main');
+      if (synchronization === 'merge') fx.git('-C', task.worktree, 'merge', '-q', '--no-edit', 'FETCH_HEAD');
+      else fx.git('-C', task.worktree, 'rebase', '-q', 'FETCH_HEAD');
+      fx.git('rm', 'human.txt');
+      fx.git('commit', '-qm', 'Remove primary contribution');
+      await writeFile(path.join(task.worktree, 'second.txt'), 'Second increment\n');
+      if (increment === 'committed') {
+        fx.git('-C', task.worktree, 'add', '.');
+        fx.git('-C', task.worktree, 'commit', '-qm', 'Checkpoint the second increment');
+      }
+
+      // Effective boundaries belong to this observation; review must not repair persisted state.
+      const state = await readFile(engine.store.file);
+      const beforeIndex = await index(task.worktree);
+      const beforeStatus = fx.git('-C', task.worktree, 'status', '--porcelain');
+      const beforeHead = fx.git('-C', task.worktree, 'rev-parse', 'HEAD').trim();
+      const review = (await engine.execute('task.review', { taskId: task.id }))!;
+      expect(review.sourceBase).toBe(incorporated);
+      expect(!!review.sourceTree).toBe(increment === 'saved');
+      expect((await engine.execute('review.files', { key: review.targetKey })).files.map((file) => file.path)).toEqual(['second.txt']);
+      expect(await readFile(engine.store.file)).toEqual(state);
+
+      const preview = await engine.execute('preview.connect', { connectedIds: [task.id] });
+      expect(preview.syncStatus).toBe('synced');
+      await expect(readFile(path.join(preview.worktree!, 'human.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(await readFile(path.join(preview.worktree!, 'second.txt'), 'utf8')).toBe('Second increment\n');
+      await engine.execute('task.deliver', { ...(await reviewed(task.id)), message: 'Deliver only the reviewed second increment' });
+      expect(fx.git('diff', '--name-only', 'HEAD^', 'HEAD').trim()).toBe('second.txt');
+      await expect(readFile(path.join(fx.root, 'human.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(await readFile(path.join(fx.root, 'first.txt'), 'utf8')).toBe('First increment\n');
+      expect(await readFile(path.join(fx.root, 'second.txt'), 'utf8')).toBe('Second increment\n');
+      expect(await index(task.worktree)).toEqual(beforeIndex);
+      expect(fx.git('-C', task.worktree, 'status', '--porcelain')).toBe(beforeStatus);
+      expect(fx.git('-C', task.worktree, 'rev-parse', 'HEAD').trim()).toBe(beforeHead);
+    },
+  );
+
   it('keeps a saved delivery boundary usable after hooks edit its contents and Git prunes trial objects', { timeout }, async () => {
     const task = await createTask('Hook edits');
     const lines = Array.from({ length: 30 }, (_, index) => `line ${index}\n`);

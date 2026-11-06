@@ -81,6 +81,19 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   });
   await renaming;
   assert.equal(chat.binding.title, 'Renamed chat task', 'a rename updates the live conversation title');
+  const webview = chat.surface.webview;
+  const post = webview.postMessage;
+  let renamedModel;
+  webview.postMessage = (message) => {
+    if (message.type === 'acp-model') renamedModel = message.model;
+    return post.call(webview, message);
+  };
+  try {
+    conversations.refresh();
+  } finally {
+    webview.postMessage = post;
+  }
+  assert.equal(renamedModel.record.binding.title, 'Renamed chat task', 'the rendered Task Chat header and permission labels use the renamed title');
   const acpRow = workbench.settings.getChildren().find((node) => node.id === 'acp');
   const renamedRows = workbench.settings.getChildren(acpRow).find((node) => node.id === 'agent-processes')?.children ?? [];
   assert(

@@ -22,19 +22,20 @@ import type {
   RebaseBatchResponse,
 } from '@warden/shared';
 import { moveBefore, isValidRef, taskReview } from '@warden/shared';
-import { runWorkspaceHook } from './workspace.js';
+import { assertSetupIdle, runWorkspaceHook } from './workspace.js';
 import { badRequest, WardenError, notFound } from './errors.js';
 import { GitError, LONG_GIT_TIMEOUT_MS, gitEnvironment, refExists, runGit, runGitWrite } from './git.js';
 import { listWorktreesAll, type RepoContext } from './repo.js';
 import { forgetWorktreeTargets, type StateStore } from './state.js';
 import { checkoutState, checkoutWorktree, dirtyCount, listWorktreesDetailed, nextSlot } from './worktrees.js';
-import { applyPatch, GitSandbox, oid, patchBetween, gitOid, deliveryBase } from './git-sandbox.js';
+import { applyPatch, GitSandbox, oid, patchBetween, gitOid, deliveryBase, deliveryContentBase } from './git-sandbox.js';
 import { PreviewService } from './preview.js';
 import { assertSafetyBackupCurrent, createSafetyBackup, discardOperationBackup } from './backups.js';
 import { retireWorkflowRefs } from './retention.js';
 import { readWorktreeState } from './worktree-state.js';
 import { ensureSharedRepository } from './shared-repository.js';
 import { snapshotObjects, snapshotStore, snapshotWorktree } from './snapshots.js';
+import { withIdleTaskConnection } from './task-access.js';
 
 function fail(message: string, code: string): never {
   throw new WardenError(409, message, code);
@@ -444,6 +445,7 @@ export class WorkflowService {
   retryHook(id: string) {
     return this.store.withRepositoryLock(async () => {
       const change = changeOf(await this.store.load(), id);
+      assertSetupIdle(change.workspaceHook);
       if (change.status === 'integrating' || change.status === 'accepted')
         fail('The workspace setup script cannot run for this task right now.', 'change_closed');
       await this.checkout(change);
@@ -460,6 +462,7 @@ export class WorkflowService {
   private async syncLocked(id: string, sourceHead: string, developmentHead?: string, automatic = false) {
     const state = await this.store.load();
     const change = changeOf(state, id);
+    assertSetupIdle(change.workspaceHook);
     if (change.developmentBranch !== state.workflow!.developmentBranch) fail('Switch to the base branch for this workspace first.', 'requirement_changed');
     const target = await this.developmentHead(change.developmentBranch);
     if (developmentHead && developmentHead !== target) fail('The base branch changed. Run the check again.', 'review_changed');
@@ -797,7 +800,14 @@ export class WorkflowService {
     if (
       !Array.isArray(request?.items) ||
       request.items.length > 100 ||
-      request.items.some((i) => !i || typeof i.changeId !== 'string' || (i.sourceHead !== '' && !gitOid(i.sourceHead)) || !gitOid(i.developmentHead)) ||
+      request.items.some(
+        (i) =>
+          !i ||
+          typeof i.changeId !== 'string' ||
+          (i.sourceHead !== '' && !gitOid(i.sourceHead)) ||
+          !gitOid(i.developmentHead) ||
+          (i.connectionToken !== undefined && (typeof i.connectionToken !== 'string' || !/^[a-f0-9-]{36}$/.test(i.connectionToken))),
+      ) ||
       (request.automatic !== undefined && typeof request.automatic !== 'boolean')
     )
       throw badRequest('Invalid rebase request.');
@@ -807,10 +817,13 @@ export class WorkflowService {
         try {
           // Unavailable checks have no source head. Report their checkout failure per item;
           // if the checkout has returned, syncLocked still rejects the unreviewed head.
-          await this.syncLocked(item.changeId, item.sourceHead, item.developmentHead, request.automatic === true);
+          const run = () => this.syncLocked(item.changeId, item.sourceHead, item.developmentHead, request.automatic === true);
+          if (request.automatic) await withIdleTaskConnection(this.store, item.changeId, item.connectionToken, run);
+          else await run();
           results.push({ changeId: item.changeId, status: 'updated' });
         } catch (error) {
-          results.push({ changeId: item.changeId, status: 'failed', message: errorMessage(error) });
+          const skipped = request.automatic && error instanceof WardenError && ['task_agent_connected', 'task_connection_changed'].includes(error.code ?? '');
+          results.push({ changeId: item.changeId, status: skipped ? 'skipped' : 'failed', message: errorMessage(error) });
         }
       }
       return { results };
@@ -979,8 +992,8 @@ export class WorkflowService {
       } else await this.assertClean(checkout.path);
     };
     await validateSource();
-    const from = boundary === target ? boundary : (change.sourceTree ?? boundary);
-    const objects = sourceTree || change.sourceTree ? await snapshotObjects(checkout.path, snapshots) : undefined;
+    const from = deliveryContentBase(change, boundary);
+    const objects = sourceTree || from !== boundary ? await snapshotObjects(checkout.path, snapshots) : undefined;
     const preview = new PreviewService(this.repo, this.store);
     const sandbox = await GitSandbox.create(this.store, this.repo.commonRoot, target);
     try {

@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { readdir, realpath, stat } from 'node:fs/promises';
+import { lstat, readFile, readdir, realpath, stat } from 'node:fs/promises';
 import type {
   BranchInfo,
   CreateWorktreeRequest,
@@ -61,14 +61,36 @@ export async function listUpstreams(cwd: string): Promise<Map<string, Upstream>>
 }
 
 /** The checkout `dir` is, if it is one of its own: git finds a parent's repository from a plain directory too. */
-async function commonDirOf(dir: string): Promise<string | undefined> {
+async function checkoutDirectories(dir: string): Promise<{ common: string; private: string } | undefined> {
   try {
-    const r = await runGit(['rev-parse', '--show-toplevel', '--git-common-dir'], { cwd: dir });
-    const [top, common] = r.stdout.trim().split('\n');
-    if (!top || !common || (await realpath(top)) !== (await realpath(dir))) return undefined;
-    return await realpath(path.resolve(dir, common));
+    const r = await runGit(['rev-parse', '--show-toplevel', '--git-common-dir', '--absolute-git-dir'], { cwd: dir });
+    const [top, common, privateDirectory] = r.stdout.trim().split('\n');
+    if (!top || !common || !privateDirectory || (await realpath(top)) !== (await realpath(dir))) return undefined;
+    return { common: await realpath(path.resolve(dir, common)), private: path.resolve(dir, privateDirectory) };
   } catch {
     return undefined;
+  }
+}
+
+/** A copied .git file must not borrow another checkout's branch and index. */
+async function registeredLinkedCheckout(dir: string, common: string, privateDirectory: string): Promise<boolean> {
+  try {
+    const gitfile = path.join(dir, '.git');
+    const registration = path.join(privateDirectory, 'gitdir');
+    const registrations = path.join(common, 'worktrees');
+    if (path.dirname(privateDirectory) !== registrations) return false;
+    for (const directory of [registrations, privateDirectory]) {
+      const info = await lstat(directory);
+      if (!info.isDirectory() || info.isSymbolicLink() || (await realpath(directory)) !== directory) return false;
+    }
+    for (const file of [gitfile, registration]) {
+      const info = await lstat(file);
+      if (!info.isFile() || info.isSymbolicLink()) return false;
+    }
+    const target = path.resolve(privateDirectory, (await readFile(registration, 'utf8')).trim());
+    return target === gitfile && (await realpath(target)) === gitfile;
+  } catch {
+    return false;
   }
 }
 
@@ -96,8 +118,9 @@ export async function checkoutState(ctx: RepoContext, wt: WorktreeInfo): Promise
   } else if (wt.shared) {
     if (!(await isSharedCheckout(ctx.commonRoot, dir))) return { foreign: true };
   } else {
-    const [ours, theirs] = await Promise.all([commonDirOf(ctx.commonRoot), commonDirOf(dir)]);
-    if (!ours || ours !== theirs) return { foreign: true };
+    const [ours, theirs] = await Promise.all([checkoutDirectories(ctx.commonRoot), checkoutDirectories(dir)]);
+    if (!ours || !theirs || ours.common !== theirs.common) return { foreign: true };
+    if (wt.isMain ? theirs.private !== ours.common : !(await registeredLinkedCheckout(dir, ours.common, theirs.private))) return { foreign: true };
   }
   const r = await runGit(['rev-parse', ...IN_PROGRESS.flatMap(([f]) => ['--git-path', f])], { cwd: dir });
   const paths = r.stdout.trim().split('\n');

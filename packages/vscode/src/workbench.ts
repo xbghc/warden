@@ -604,11 +604,23 @@ export class Workbench {
       async () => {
         this.assertSession(session);
         // Agent state can change while earlier operations finish; decide again right before running.
-        const items = eligible().map(({ changeId, sourceHead, developmentHead }) => ({ changeId, sourceHead, developmentHead }));
-        for (const item of items) this.autoRebased.add(`${item.changeId}:${item.sourceHead}:${item.developmentHead}`);
-        if (!items.length) return undefined;
-        this.log.write('info', 'workbench.autoRebase.start', { tasks: items.length });
-        return this.api('rebase.run', { items, automatic: true });
+        const candidates = eligible();
+        const reservation = this.conversations.reserveRebase(
+          repository,
+          candidates.map((check) => check.changeId),
+        );
+        try {
+          const items = reservation.items.map(({ taskId, connectionToken }) => {
+            const { changeId, sourceHead, developmentHead } = candidates.find((check) => check.changeId === taskId)!;
+            return { changeId, sourceHead, developmentHead, ...(connectionToken ? { connectionToken } : {}) };
+          });
+          for (const item of items) this.autoRebased.add(`${item.changeId}:${item.sourceHead}:${item.developmentHead}`);
+          if (!items.length) return undefined;
+          this.log.write('info', 'workbench.autoRebase.start', { tasks: items.length });
+          return await this.api('rebase.run', { items, automatic: true });
+        } finally {
+          reservation.release();
+        }
       },
       undefined,
       'rebase',

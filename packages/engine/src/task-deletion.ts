@@ -13,6 +13,7 @@ import { readWorktreeState } from './worktree-state.js';
 import { PreviewService } from './preview.js';
 import { ensureSharedRepository } from './shared-repository.js';
 import { deleteTaskConversations, taskHasConnection, withoutTaskConnection } from './task-access.js';
+import { assertSetupIdle } from './workspace.js';
 
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 function fail(message: string, code = 'task_delete_changed'): never {
@@ -84,6 +85,7 @@ export class TaskDeletionService {
     const state = await this.store.load();
     const task = state.workflow?.changes.find((row) => row.id === taskId);
     if (!task) throw notFound('Task not found.', 'unknown_change');
+    if (task.worktree) assertSetupIdle(task.workspaceHook);
     if (task.developmentBranch !== state.workflow?.developmentBranch) fail('Switch to this task’s base branch before deleting it.', 'requirement_changed');
     if (task.integration)
       fail('This task has a pending commit in the primary folder. Finish or cancel that commit before deleting the task.', 'task_commit_pending');

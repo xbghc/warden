@@ -21,27 +21,27 @@ async function prepare(store: StateStore, taskId: string, create = true) {
     return undefined;
   });
   if (info && (!info.isDirectory() || info.isSymbolicLink() || (await realpath(directory)) !== directory))
-    throw new WardenError(409, 'The conversation storage folder changed. Inspect it before deleting the task.', 'task_connection_invalid');
+    throw new WardenError(409, 'The conversation storage folder changed. Inspect it before changing the task workspace.', 'task_connection_invalid');
   return taskConnectionPaths(directory, store.repoRoot, taskId);
 }
 
-async function connected(paths: ReturnType<typeof taskConnectionPaths>) {
+async function connectionOwner(paths: ReturnType<typeof taskConnectionPaths>) {
   const info = await lstat(paths.owner).catch((error: NodeJS.ErrnoException) => {
     if (error.code !== 'ENOENT') throw error;
     return undefined;
   });
-  if (!info) return false;
+  if (!info) return undefined;
   try {
     if (!info.isFile() || info.isSymbolicLink() || info.size > 16 * 1024) throw new Error('Invalid owner file.');
     const owner = JSON.parse(await readFile(paths.owner, 'utf8'));
     if (owner.schemaVersion !== 1 || owner.taskKey !== paths.key || !Number.isSafeInteger(owner.pid) || owner.pid < 1 || typeof owner.hostname !== 'string')
       throw new Error('Invalid owner record.');
-    if (owner.hostname !== os.hostname()) return true;
+    if (owner.hostname !== os.hostname()) return owner as { pid: number; hostname: string; token?: string };
     try {
       process.kill(owner.pid, 0);
-      return true;
+      return owner as { pid: number; hostname: string; token?: string };
     } catch (error) {
-      return (error as NodeJS.ErrnoException).code !== 'ESRCH';
+      return (error as NodeJS.ErrnoException).code === 'ESRCH' ? undefined : (owner as { pid: number; hostname: string; token?: string });
     }
   } catch {
     throw new WardenError(409, 'The task connection owner cannot be verified. Inspect its connection record first.', 'task_connection_invalid');
@@ -49,7 +49,19 @@ async function connected(paths: ReturnType<typeof taskConnectionPaths>) {
 }
 
 export async function taskHasConnection(store: StateStore, taskId: string) {
-  return connected(await prepare(store, taskId, false));
+  return !!(await connectionOwner(await prepare(store, taskId, false)));
+}
+
+/** Keep new claims out until Git finishes; the host reserves any existing local idle session. */
+export async function withIdleTaskConnection<T>(store: StateStore, taskId: string, token: string | undefined, action: () => Promise<T>): Promise<T> {
+  const paths = await prepare(store, taskId);
+  return new StateStore(paths.metadata, store.repoRoot).withRepositoryLock(async () => {
+    const owner = await connectionOwner(paths);
+    if (owner && (!token || owner.token !== token || owner.pid !== process.pid || owner.hostname !== os.hostname()))
+      throw new WardenError(409, 'Automatic rebase skipped an agent connection whose idle state cannot be verified in this window.', 'task_agent_connected');
+    if (token && !owner) throw new WardenError(409, 'The reserved agent connection changed before automatic rebase. Check again.', 'task_connection_changed');
+    return action();
+  });
 }
 
 /** Publish the deletion journal under the same short lock that grants an executable connection.
@@ -58,7 +70,7 @@ export async function taskHasConnection(store: StateStore, taskId: string) {
 export async function withoutTaskConnection<T>(store: StateStore, taskId: string, action: () => Promise<T>): Promise<T> {
   const paths = await prepare(store, taskId);
   return new StateStore(paths.metadata, store.repoRoot).withRepositoryLock(async () => {
-    if (await connected(paths))
+    if (await connectionOwner(paths))
       throw new WardenError(409, 'This task still has an agent connection. Disconnect it in its Warden window, then retry deletion.', 'task_agent_connected');
     return action();
   });

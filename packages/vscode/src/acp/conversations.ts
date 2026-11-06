@@ -49,6 +49,7 @@ export class AcpConversations {
   private readonly opening = new Map<string, Promise<Conversation>>();
   private readonly engines = new Map<string, Promise<Engine>>();
   private readonly deleting = new Set<string>();
+  private readonly rebasing = new Map<string, symbol>();
   private readonly subscriptions: vscode.Disposable[] = [];
   private closed = false;
   private sidebar?: vscode.WebviewView;
@@ -192,6 +193,7 @@ export class AcpConversations {
     if (this.closed || !vscode.workspace.isTrusted) throw new Error('Open and trust a workspace first.');
     const key = this.key(repository, taskId);
     if (this.deleting.has(key)) throw new Error('This task is being deleted.');
+    if (this.rebasing.has(key)) throw new Error('This task is being rebased automatically. Try again when it finishes.');
     let opening = this.opening.get(key);
     if (!opening) {
       opening = (async () => {
@@ -258,8 +260,35 @@ export class AcpConversations {
   isBusy(repository: string, taskId: string) {
     const key = this.key(repository, taskId);
     const entry = this.entries.get(key);
-    if (this.deleting.has(key) || this.opening.has(key) || entry?.connecting) return true;
-    return !!entry && ['connecting', 'running', 'waiting_permission', 'cancelling', 'resetting'].includes(entry.session.currentStatus());
+    if (this.deleting.has(key) || this.rebasing.has(key) || this.opening.has(key) || entry?.connecting) return true;
+    return !!entry && (entry.sending || entry.session.isBusy());
+  }
+
+  /** Keep local actions from starting while the engine queues or runs an automatic rebase. */
+  reserveRebase(repository: string, taskIds: string[]) {
+    const reservations: { key: string; token: symbol; release?: () => void }[] = [];
+    const items: { taskId: string; connectionToken?: string }[] = [];
+    if (!this.closed)
+      for (const taskId of taskIds) {
+        const key = this.key(repository, taskId);
+        if (this.isBusy(repository, taskId)) continue;
+        const entry = this.entries.get(key);
+        const reservation = entry?.session.reserveIdle();
+        if (entry && !reservation) continue;
+        const token = Symbol('automatic rebase');
+        this.rebasing.set(key, token);
+        reservations.push({ key, token, release: reservation?.release });
+        items.push({ taskId, ...(reservation?.connectionToken ? { connectionToken: reservation.connectionToken } : {}) });
+      }
+    return {
+      items,
+      release: () => {
+        for (const reservation of reservations) {
+          reservation.release?.();
+          if (this.rebasing.get(reservation.key) === reservation.token) this.rebasing.delete(reservation.key);
+        }
+      },
+    };
   }
 
   /** Titles are not part of a binding's identity, so a rename updates live conversations in place. */
@@ -267,6 +296,7 @@ export class AcpConversations {
     const entry = this.entries.get(this.key(repository, taskId));
     if (!entry || entry.binding.title === title) return;
     entry.binding = { ...entry.binding, title };
+    entry.session.retitle(title);
     if (entry.panel) entry.panel.title = `${title} · Agent`;
   }
 
@@ -363,6 +393,8 @@ export class AcpConversations {
 
   private async connect(entry: Conversation, requestedId?: string) {
     if (this.deleting.has(this.key(entry.binding.repository, entry.binding.taskId))) throw new Error('This task is being deleted.');
+    if (this.rebasing.has(this.key(entry.binding.repository, entry.binding.taskId)))
+      throw new Error('This task is being rebased automatically. Try again when it finishes.');
     const snapshot = entry.session.snapshot();
     const profileId = requestedId ?? snapshot.record.profileId ?? this.defaultProfileId();
     if (!profileId) throw new Error('Connect an agent in Warden Settings first.');
@@ -590,6 +622,11 @@ export class AcpConversations {
   private async handle(entry: Conversation, action: AcpAction) {
     if (!['draft', 'view-state', 'view-ready'].includes(action.type) && this.deleting.has(this.key(entry.binding.repository, entry.binding.taskId)))
       throw new Error('This task is being deleted.');
+    if (
+      ['send', 'connect', 'new', 'authenticate', 'set-config', 'set-mode'].includes(action.type) &&
+      this.rebasing.has(this.key(entry.binding.repository, entry.binding.taskId))
+    )
+      throw new Error('This task is being rebased automatically. Try again when it finishes.');
     if (this.closed) return;
     if (action.type === 'view-ready') {
       if (entry.surface) entry.surface.ready = true;

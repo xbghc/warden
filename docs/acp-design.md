@@ -394,16 +394,24 @@ that cleanup. **New Session** remains an explicit reset, not a prerequisite for 
 ## Git and preview remain user-operated
 
 ACP activity does not approve or complete a task. A prompt ending, permission being granted or an
-agent reporting success never connects preview, commits source changes, delivers to primary,
-rebases a workspace or retries a failed operation automatically.
+agent reporting success never connects preview, commits source changes, delivers to primary or
+authorizes a rebase. The separately configured [automatic rebase](worktrees.md#automatic-rebase)
+can proceed once an already eligible task becomes idle; cancellation or an error label does not prove
+that its turn ended. Failed operations are not retried because an agent reports success.
 
 Users coordinate their agent's activity before requesting mutations. Warden does not infer
-idleness from clean Git status or cancellation and adds no agent-idle declaration. Existing Git
-operation locks, workspace identity checks and source/HEAD/index checks remain in force. Delivery
+idleness from clean Git status or cancellation and adds no agent-idle declaration. Automatic rebase
+reserves an idle local session until the engine finishes; new turns, connection attempts and session
+configuration are rejected during that interval. The engine also serializes against connection
+claims from other windows. This coordinates Warden's own operations, not agent-owned child commands.
+Existing Git operation locks, workspace identity checks and source/HEAD/index checks remain in force. Delivery
 still requires complete review of the pinned source HEAD, saved content tree when applicable,
 delivery boundary and primary HEAD. Saved uncommitted task content can be delivered directly;
 changed source content or baseline versions require fresh review. Connection previews continue to
 observe live content.
+
+Renaming a task updates the live conversation binding, persisted record and emitted Task Chat title
+without replacing the allocation identity or agent session.
 
 A merge, cherry-pick or rebase conflict does not block conversation with the agent working on that
 task. A detached rebase is accepted only when its private Git metadata identifies the original task

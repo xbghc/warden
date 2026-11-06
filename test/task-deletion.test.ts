@@ -37,6 +37,29 @@ const remove = async (taskId: string) => {
 const currentTasks = async () => (await engine.store.load()).workflow!.changes;
 
 describe('confirmed task deletion', () => {
+  it.each(['live', 'unknown'])('preserves a task with a running setup whose owner is %s', async (owner) => {
+    const created = await task();
+    await writeFile(path.join(created.worktree!, 'keep.txt'), 'Do not discard while setup may write.\n');
+    const check = await engine.execute('task.deleteCheck', { taskId: created.id });
+    const before = fixture.git('-C', created.worktree!, 'rev-parse', 'HEAD');
+    await engine.store.update((state) => {
+      const row = state.workflow!.changes.find((row) => row.id === created.id)!;
+      if (row.worktree)
+        row.workspaceHook = {
+          event: 'create',
+          command: 'setup',
+          status: 'running',
+          ...(owner === 'live' ? { owner: { pid: process.pid, hostname: os.hostname() } } : {}),
+        };
+    });
+    await expect(engine.execute('task.deleteCheck', { taskId: created.id })).rejects.toMatchObject({ code: 'setup_running' });
+    await expect(engine.execute('task.delete', { taskId: created.id, confirmation: check.confirmation })).rejects.toMatchObject({ code: 'setup_running' });
+    expect(await readFile(path.join(created.worktree!, 'keep.txt'), 'utf8')).toBe('Do not discard while setup may write.\n');
+    expect(fixture.git('-C', created.worktree!, 'rev-parse', 'HEAD')).toBe(before);
+    expect((await currentTasks()).find((row) => row.id === created.id)).toMatchObject({ workspaceHook: { status: 'running' } });
+    expect((await currentTasks()).find((row) => row.id === created.id)!.deletion).toBeUndefined();
+  });
+
   it('discards saved and staged work without a backup, keeps the directory and ignored environment, and allocates a fresh logical workspace on reuse', async () => {
     const created = await task();
     const cwd = created.worktree!;

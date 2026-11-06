@@ -7,6 +7,7 @@ import { resolveRepo, StateStore, WorkflowService } from './compat/index.js';
 import * as backups from '../packages/engine/src/backups.js';
 import * as git from '../packages/engine/src/git.js';
 import { listWorktreesDetailed } from '../packages/engine/src/worktrees.js';
+import { Engine } from '../packages/engine/src/engine.js';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
 let fx: FixtureRepo;
@@ -52,6 +53,42 @@ async function advance(file = 'destination.txt', content = 'destination work\n')
 }
 
 describe('rebase safety', () => {
+  it('rejects a previously checked legacy workspace whose Git file now names another task', async () => {
+    const first = await source('worktree');
+    const second = await workflow.start((await workflow.create({ title: 'Separate task with the same commit' })).id, { kind: 'worktree' });
+    fx.git('-C', second.worktree, 'reset', '--hard', head(first.worktree));
+    await advance();
+    const engine = await Engine.open(fx.root, store.file);
+    try {
+      const checked = (await engine.execute('rebase.check', undefined)).checks.find((row) => row.changeId === first.id)!;
+      expect(checked.status).toBe('ready');
+      const capture = async (cwd: string) => ({
+        head: head(cwd),
+        index: await readFile(path.resolve(cwd, fx.git('-C', cwd, 'rev-parse', '--git-path', 'index').trim())),
+        task: await readFile(path.join(cwd, 'task.txt'), 'utf8').catch(() => undefined),
+        destination: await readFile(path.join(cwd, 'destination.txt'), 'utf8').catch(() => undefined),
+      });
+      const paths = [fx.root, first.worktree, second.worktree];
+      const before = await Promise.all(paths.map(capture));
+      const firstGitfile = await readFile(path.join(first.worktree, '.git'));
+      await writeFile(path.join(first.worktree, '.git'), await readFile(path.join(second.worktree, '.git')));
+      try {
+        const result = await engine.execute(
+          'rebase.run',
+          { items: [{ changeId: first.id, sourceHead: checked.sourceHead, developmentHead: checked.developmentHead }] },
+          { developmentBranch: 'feature/order' },
+        );
+        expect(result.results).toEqual([{ changeId: first.id, status: 'failed', message: expect.stringContaining('another repository') }]);
+      } finally {
+        await writeFile(path.join(first.worktree, '.git'), firstGitfile);
+      }
+      expect(await Promise.all(paths.map(capture))).toEqual(before);
+      expect((await store.load()).workflow!.changes.find((row) => row.id === first.id)!.base).toBe(first.base);
+    } finally {
+      await engine.close();
+    }
+  });
+
   it.each(['worktree', 'clone', 'shared'] as const)('completes and verifies a backup before rebasing a %s', async (kind) => {
     const change = await source(kind);
     const before = head(change.worktree);

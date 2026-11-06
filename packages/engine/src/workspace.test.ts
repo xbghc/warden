@@ -1,11 +1,14 @@
 import path from 'node:path';
-import { execFile, type ChildProcess } from 'node:child_process';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import { access } from 'node:fs/promises';
+import os from 'node:os';
+import { PassThrough } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DevelopmentChange } from '@warden/shared';
-import { runWorkspaceHook, workspaceConfig, workspaceShell } from './workspace.js';
+import { assertSetupIdle, runSetupCommand, runWorkspaceHook, workspaceConfig, workspaceShell } from './workspace.js';
 
-vi.mock('node:child_process', () => ({ execFile: vi.fn() }));
+vi.mock('node:child_process', () => ({ execFile: vi.fn(), spawn: vi.fn() }));
 vi.mock('node:fs/promises', () => ({ access: vi.fn() }));
 
 type Completion = (error: (Error & { code?: string | number }) | null, stdout: string, stderr: string) => void;
@@ -19,6 +22,17 @@ const change = {
 } as DevelopmentChange;
 const root = path.resolve('primary checkout');
 
+function simulatedProcess(stdout = 'hook output\n', stderr = '', code: number | null = 0, error?: NodeJS.ErrnoException) {
+  const child = Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough() });
+  queueMicrotask(() => {
+    if (error) child.emit('error', error);
+    child.stdout.end(stdout);
+    child.stderr.end(stderr);
+    child.emit('close', code, null);
+  });
+  return child as unknown as ChildProcess;
+}
+
 beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(access).mockResolvedValue(undefined);
@@ -27,9 +41,15 @@ beforeEach(() => {
     done(null, args[0] === 'git' ? execPath : 'hook output\n', '');
     return {} as ChildProcess;
   });
+  vi.mocked(spawn).mockImplementation(() => simulatedProcess());
 });
 
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
 
 describe('workspace hook configuration', () => {
   it('keeps only lifecycle hooks and preserves script text literally', () => {
@@ -113,13 +133,13 @@ describe('workspace hook process contract', () => {
     vi.stubEnv('WARDEN_TASK_ID', 'stale task');
     const result = await runWorkspaceHook(root, change, event, command);
     expect(result).toEqual({ event, command, status: 'succeeded', exitCode: 0, output: 'hook output\n' });
-    const invocation = vi.mocked(execFile).mock.calls.find((call) => call[0] !== 'git')!;
+    const invocation = vi.mocked(spawn).mock.calls[0]!;
     expect(invocation[0]).toBe(process.platform === 'win32' ? path.win32.join(installation, 'bin', 'sh.exe') : '/bin/sh');
     expect(invocation[1]).toEqual(['-c', command]);
     expect(invocation[2]).toMatchObject({
       cwd: change.worktree,
-      timeout: 600000,
-      maxBuffer: 128 * 1024,
+      detached: process.platform !== 'win32',
+      stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
       env: {
         WARDEN_REPO: root,
@@ -137,29 +157,91 @@ describe('workspace hook process contract', () => {
   });
 
   it('retains a failed command exit code and the tail of its diagnostics', async () => {
-    vi.mocked(execFile).mockImplementation((...args) => {
-      const done = args[3] as Completion;
-      if (args[0] === 'git') done(null, execPath, '');
-      else done(Object.assign(new Error('Command exited with 7'), { code: 7 }), 'x'.repeat(17000), 'validation failed');
-      return {} as ChildProcess;
-    });
+    vi.mocked(spawn).mockImplementation(() => simulatedProcess('x'.repeat(17000), 'validation failed', 7));
     const result = await runWorkspaceHook(root, change, 'create', 'exit 7');
     expect(result).toMatchObject({ status: 'failed', exitCode: 7 });
     expect(result.output).toHaveLength(16000);
-    expect(result.output).toMatch(/validation failed\nCommand exited with 7$/);
+    expect(result.output).toMatch(/validation failed\nSetup script exited with 7\.$/);
   });
 
   it('exposes shell startup failures as a failed hook with a useful message', async () => {
-    vi.mocked(execFile).mockImplementation((...args) => {
-      const done = args[3] as Completion;
-      if (args[0] === 'git') done(null, execPath, '');
-      else done(Object.assign(new Error('spawn sh ENOENT'), { code: 'ENOENT' }), '', '');
-      return {} as ChildProcess;
-    });
+    vi.mocked(spawn).mockImplementation(() => simulatedProcess('', '', null, Object.assign(new Error('spawn sh ENOENT'), { code: 'ENOENT' })));
     expect(await runWorkspaceHook(root, change, 'reuse', 'echo ready')).toMatchObject({
       status: 'failed',
       exitCode: null,
       output: expect.stringContaining('Cannot run the workspace setup script: shell not found'),
     });
+  });
+
+  it.skipIf(process.platform === 'win32')('rejects uncertain process cleanup instead of returning a retryable failed setup', async () => {
+    vi.useFakeTimers();
+    const child = Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough(), pid: 12345 });
+    vi.mocked(spawn).mockReturnValue(child as unknown as ChildProcess);
+    vi.spyOn(process, 'kill').mockImplementation(() => {
+      throw Object.assign(new Error('Cannot terminate the process group'), { code: 'EPERM' });
+    });
+    const result = runSetupCommand(root, change.worktree, 'setup', {}, 100);
+    const checked = expect(result).rejects.toMatchObject({ code: 'setup_cleanup_failed' });
+    await vi.advanceTimersByTimeAsync(100);
+    await checked;
+    expect(process.kill).toHaveBeenCalledWith(-12345, 'SIGKILL');
+    child.emit('close', null, 'SIGKILL');
+  });
+
+  it.each([false, true])('waits for Windows tree termination and reports cleanup failure = %s', async (failed) => {
+    vi.useFakeTimers();
+    vi.stubGlobal('process', Object.create(process, { platform: { value: 'win32' } }));
+    vi.stubEnv('SystemRoot', 'C:\\Windows');
+    const child = Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough(), pid: 12345 });
+    vi.mocked(spawn).mockReturnValue(child as unknown as ChildProcess);
+    let completeKill: Completion | undefined;
+    vi.mocked(execFile).mockImplementation((...args) => {
+      if (args[0] === 'git') (args[3] as Completion)(null, execPath, '');
+      else completeKill = args[3] as Completion;
+      return {} as ChildProcess;
+    });
+    const result = runSetupCommand(root, change.worktree, 'setup', {}, 100);
+    const checked = failed
+      ? expect(result).rejects.toMatchObject({ code: 'setup_cleanup_failed', message: expect.stringContaining('PID 12345') })
+      : expect(result).resolves.toMatchObject({ status: 'failed', exitCode: null, output: expect.stringContaining('time limit') });
+    let settled = false;
+    void result.finally(() => (settled = true)).catch(() => {});
+    await vi.advanceTimersByTimeAsync(100);
+    expect(execFile).toHaveBeenCalledWith(
+      'C:\\Windows\\System32\\taskkill.exe',
+      ['/PID', '12345', '/T', '/F'],
+      expect.objectContaining({ windowsHide: true, timeout: 5000 }),
+      expect.any(Function),
+    );
+    child.emit('close', null, 'SIGKILL');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settled).toBe(false);
+    completeKill!(failed ? Object.assign(new Error('Access denied'), { code: 1 }) : null, '', '');
+    await checked;
+  });
+});
+
+describe('setup ownership guard', () => {
+  const running = { status: 'running' as const, owner: { pid: 12345, hostname: os.hostname() } };
+
+  it('allows an interrupted setup only when its valid same-host owner has exited', () => {
+    vi.spyOn(process, 'kill').mockImplementation(() => {
+      throw Object.assign(new Error('No process'), { code: 'ESRCH' });
+    });
+    expect(() => assertSetupIdle(running)).not.toThrow();
+    expect(() => assertSetupIdle(undefined)).not.toThrow();
+    expect(() => assertSetupIdle({ status: 'failed' })).not.toThrow();
+  });
+
+  it('blocks live, unowned, foreign-host and unverifiable setup processes', () => {
+    const kill = vi.spyOn(process, 'kill').mockReturnValue(true);
+    expect(() => assertSetupIdle(running)).toThrow('still running');
+    expect(() => assertSetupIdle({ status: 'running' })).toThrow('still running');
+    expect(() => assertSetupIdle({ ...running, owner: { ...running.owner, hostname: `${os.hostname()}-other` } })).toThrow('still running');
+    expect(() => assertSetupIdle({ ...running, owner: { ...running.owner, pid: -1 } })).toThrow('still running');
+    kill.mockImplementation(() => {
+      throw Object.assign(new Error('Access denied'), { code: 'EPERM' });
+    });
+    expect(() => assertSetupIdle(running)).toThrow('still running');
   });
 });

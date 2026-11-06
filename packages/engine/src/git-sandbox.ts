@@ -30,6 +30,14 @@ export async function deliveryBase(change: DevelopmentChange, head: string, targ
   const inTask = new Set(await since(cwd, head));
   return onPrimary.find((commit) => inTask.has(commit)) ?? stored;
 }
+
+/** Saved delivery content belongs only to its recorded source boundary. A manual
+ * rebase or merge that advances that boundary also supersedes the saved tree.
+ */
+export function deliveryContentBase(change: DevelopmentChange, boundary: string): string {
+  return boundary === (change.sourceBase ?? change.base) ? (change.sourceTree ?? boundary) : boundary;
+}
+
 export async function patchBetween(cwd: string, from: string, to: string, snapshot?: SnapshotEnv) {
   const args = ['diff', ...DIFF_OUTPUT_ARGS, '--binary', '--full-index', '--no-renames', from, to, '--'];
   return (await runGit(args, { cwd, snapshot })).stdout;

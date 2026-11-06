@@ -1,16 +1,24 @@
+import os from 'node:os';
 import type { DevelopmentChange, PreviewResponse, ReviewState } from '@warden/shared';
 import { snapshotObjects, snapshotStore, snapshotWorktree } from './snapshots.js';
 import { badRequest, WardenError } from './errors.js';
 import { runGit } from './git.js';
-import { applyPatch, GitSandbox, gitMessage, oid, patchBetween, deliveryBase } from './git-sandbox.js';
+import { applyPatch, GitSandbox, gitMessage, oid, patchBetween, deliveryBase, deliveryContentBase } from './git-sandbox.js';
 import { listWorktreesAll, type RepoContext } from './repo.js';
 import type { StateStore } from './state.js';
 import { checkoutState, listWorktreesDetailed } from './worktrees.js';
-import { runSetupCommand } from './workspace.js';
+import { assertSetupIdle, runSetupCommand } from './workspace.js';
 
 function conflict(message: string, code = 'preview_conflict'): never {
   throw new WardenError(409, message, code);
 }
+
+function assertPreviewSetupIdle(setup: PreviewResponse['setup']) {
+  // Legacy previews did not record an owner and recover under the repository lock as before.
+  // New runs retain their owner when cleanup fails, so a retry cannot overlap surviving commands.
+  if (setup?.status === 'running' && setup.owner !== undefined) assertSetupIdle({ status: setup.status, owner: setup.owner }, 'preview');
+}
+
 export async function primaryCheckout(repo: RepoContext, branch: string) {
   const row = (await listWorktreesAll(repo)).find((w) => !w.clone && !w.shared && w.branch === branch && !w.prunable);
   if (!row) return conflict('Check out the base branch in the primary folder first.', 'development_checkout_missing');
@@ -114,6 +122,7 @@ export class PreviewService {
         return;
       }
       try {
+        assertPreviewSetupIdle(state.connectionPreview.setup);
         const inputs = await this.inputs(state, state.connectionPreview.connectedIds);
         const saved = state.connectionPreview;
         const target = GitSandbox.open(this.store, saved.directory!);
@@ -161,22 +170,28 @@ export class PreviewService {
 
   setup() {
     return this.store.withRepositoryLock(async () => {
-      const state = await this.store.load();
-      if (!state.connectionPreview?.directory) return this.compose();
-      await this.runSetup();
-      return this.get();
+      try {
+        const state = await this.store.load();
+        if (!state.connectionPreview?.directory) return await this.compose();
+        await this.runSetup();
+        return this.get();
+      } catch (error) {
+        await this.failed(error);
+        throw error;
+      }
     });
   }
   private async runSetup() {
     const state = await this.store.load();
     const saved = state.connectionPreview;
     const command = state.workspaceConfig?.previewSetup;
+    assertPreviewSetupIdle(saved?.setup);
     if (!saved?.directory || !command) return;
     const target = GitSandbox.open(this.store, saved.directory);
     await target.validate();
     const directory = target.path;
     await this.store.update((s) => {
-      s.connectionPreview!.setup = { command, status: 'running' };
+      s.connectionPreview!.setup = { command, status: 'running', owner: { pid: process.pid, hostname: os.hostname() } };
     });
     const result = await runSetupCommand(this.repo.commonRoot, directory, command, {
       WARDEN_PREVIEW: directory,
@@ -249,6 +264,7 @@ export class PreviewService {
   private async recover(state: ReviewState) {
     const saved = state.connectionPreview;
     if (!saved?.pending || !saved.directory) return;
+    assertPreviewSetupIdle(saved.setup);
     const target = GitSandbox.open(this.store, saved.directory);
     await target.validate();
     const actual = await snapshotWorktree(target.path, snapshotStore(this.store.file));
@@ -309,6 +325,7 @@ export class PreviewService {
       if (!requestedIds?.length) return this.get();
       throw badRequest('Select a base branch first.');
     }
+    assertPreviewSetupIdle(state.connectionPreview?.setup);
     await this.migrateLegacy(state);
     state = await this.store.load();
     await this.recover(state);
@@ -330,11 +347,12 @@ export class PreviewService {
         await sandbox.fetch(change.worktree, from);
         try {
           const objects = await snapshotObjects(change.worktree, snapshotStore(this.store.file));
+          const contentBase = deliveryContentBase(change, from);
           await sandbox.apply(
-            await patchBetween(change.worktree, from === head ? from : (change.sourceTree ?? from), tree, objects),
+            await patchBetween(change.worktree, contentBase, tree, objects),
             true,
             true,
-            change.sourceTree && from !== head ? { cwd: change.worktree, snapshot: objects } : undefined,
+            contentBase !== from ? { cwd: change.worktree, snapshot: objects } : undefined,
           );
         } catch (error) {
           const conflicts = await sandbox.conflicts();

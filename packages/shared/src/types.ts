@@ -272,7 +272,13 @@ export interface RebaseResponse {
 }
 
 export interface RebaseBatchRequest {
-  items: { changeId: string; sourceHead: string; developmentHead: string }[];
+  items: {
+    changeId: string;
+    sourceHead: string;
+    developmentHead: string;
+    /** Internal proof of this host's reserved idle connection; never accepted from a webview. */
+    connectionToken?: string;
+  }[];
   /**
    * Set by Warden's own automatic rebase. A conflict the isolated check did not predict is undone
    * with `git rebase --abort`, so no workspace is left mid-rebase by an operation nobody requested.
@@ -282,6 +288,15 @@ export interface RebaseBatchRequest {
 
 export interface RebaseBatchResponse {
   results: { changeId: string; status: 'updated' | 'skipped' | 'failed'; message?: string }[];
+}
+
+export interface PreviewSetup {
+  command: string;
+  status: 'pending' | 'running' | 'succeeded' | 'failed';
+  exitCode?: number | null;
+  output?: string;
+  /** Warden host retaining ownership until its setup commands have stopped. */
+  owner?: { pid: number; hostname: string };
 }
 
 export interface PreviewResponse {
@@ -297,7 +312,7 @@ export interface PreviewResponse {
   syncStatus?: 'pending' | 'updating' | 'synced' | 'conflict' | 'error';
   baselineTree?: string;
   sources?: { changeId: string; observedTree: string; appliedTree?: string; status: 'pending' | 'updating' | 'synced' | 'conflict' | 'error' }[];
-  setup?: { command: string; status: 'pending' | 'running' | 'succeeded' | 'failed'; exitCode?: number | null; output?: string };
+  setup?: PreviewSetup;
 }
 
 export interface HistoryEntry {

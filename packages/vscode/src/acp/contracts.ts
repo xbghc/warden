@@ -21,6 +21,7 @@ export interface AcpStorage {
   save(record: AcpRecord): Promise<void>;
   archive(record: AcpRecord): Promise<void>;
   claim(): Promise<() => Promise<void>>;
+  claimToken?(): string | undefined;
 }
 
 export interface AcpSessionOptions {

@@ -1,9 +1,28 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { access } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import type { DevelopmentChange, WorkspaceConfig, WorkspaceHookResult } from '@warden/shared';
-import { badRequest } from './errors.js';
+import { badRequest, WardenError } from './errors.js';
 import { gitEnvironment } from './git.js';
+
+/** A failed cleanup leaves the running record occupied until its owner is known to be gone. */
+export function assertSetupIdle(hook: Pick<WorkspaceHookResult, 'status' | 'owner'> | undefined, kind: 'workspace' | 'preview' = 'workspace'): void {
+  if (hook?.status !== 'running') return;
+  const owner = hook.owner;
+  if (owner?.hostname === os.hostname() && Number.isSafeInteger(owner.pid) && owner.pid > 0) {
+    try {
+      process.kill(owner.pid, 0);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ESRCH') return;
+    }
+  }
+  throw new WardenError(
+    409,
+    `The ${kind} setup script is still running or its process state is unknown. Wait for it to finish. If cleanup failed, stop its commands and close the owning Warden window before retrying.`,
+    'setup_running',
+  );
+}
 
 /** Configuration is saved explicitly by the user, never loaded from a task branch. */
 export function workspaceConfig(value: unknown): WorkspaceConfig {
@@ -87,35 +106,120 @@ export async function runSetupCommand(
   } catch (error) {
     return { status: 'failed', exitCode: null, output: error instanceof Error ? error.message : String(error) };
   }
-  return new Promise((resolve) => {
-    execFile(
-      shell,
-      ['-c', command],
-      {
-        cwd,
-        timeout,
-        maxBuffer: 128 * 1024,
-        windowsHide: true,
-        env: {
-          ...gitEnvironment(),
-          WARDEN_REPO: root,
-          WARDEN_WORKTREE: cwd,
-          ...environment,
-        },
-      },
-      (error, stdout, stderr) =>
-        resolve({
-          status: error ? 'failed' : 'succeeded',
-          exitCode: error ? (typeof error.code === 'number' ? error.code : null) : 0,
-          output: [
-            stdout,
-            stderr,
-            error?.code === 'ENOENT' ? `Cannot run the workspace setup script: shell not found (${shell}). ${error.message}` : error?.message,
-          ]
-            .filter(Boolean)
-            .join('\n')
-            .slice(-16000),
-        }),
-    );
+  return new Promise((resolve, reject) => {
+    let child: ReturnType<typeof spawn>;
+    const env = { ...gitEnvironment(), WARDEN_REPO: root, WARDEN_WORKTREE: cwd, ...environment };
+    const startupFailure = (error: NodeJS.ErrnoException) => {
+      const message = error.code === 'ENOENT' ? `Cannot run the workspace setup script: shell not found (${shell}). ${error.message}` : error.message;
+      resolve({ status: 'failed', exitCode: null, output: message });
+    };
+    try {
+      // Setup scripts belong to Warden. A separate process group lets a limit stop their
+      // foreground descendants before the repository lock is released for another write.
+      child = spawn(shell, ['-c', command], { cwd, env, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    } catch (error) {
+      startupFailure(error as NodeJS.ErrnoException);
+      return;
+    }
+    let stdout = '';
+    let stderr = '';
+    let outputBytes = 0;
+    let errorBytes = 0;
+    let failure: string | undefined;
+    let startupError: NodeJS.ErrnoException | undefined;
+    let stopping: Promise<void> | undefined;
+    let exitCode: number | null = null;
+    let exitSignal: NodeJS.Signals | null = null;
+    let closed = false;
+    let close: () => void;
+    const closing = new Promise<void>((resolve) => {
+      close = resolve;
+    });
+    const finish = () => {
+      if (startupError) return startupFailure(startupError);
+      const message = failure ?? (exitCode === 0 ? undefined : `Setup script exited with ${exitSignal ?? exitCode}.`);
+      resolve({
+        status: message ? 'failed' : 'succeeded',
+        exitCode: failure ? null : exitCode,
+        output: [stdout, stderr, message].filter(Boolean).join('\n').slice(-16000),
+      });
+    };
+    const stop = (message: string) => {
+      if (stopping) return;
+      failure = message;
+      clearTimeout(timer);
+      stopping = (async () => {
+        try {
+          if (child.pid) await stopSetupTree(child.pid, env);
+          if (!closed) {
+            let deadline: ReturnType<typeof setTimeout> | undefined;
+            try {
+              await Promise.race([
+                closing,
+                new Promise<never>((_resolve, reject) => {
+                  deadline = setTimeout(() => reject(new Error('The setup process did not close after termination.')), 5000);
+                }),
+              ]);
+            } finally {
+              clearTimeout(deadline);
+            }
+          }
+        } catch (error) {
+          // Do not publish a retryable failed setup when its commands may still be writing.
+          const identity = process.platform === 'win32' ? 'process tree rooted at PID' : 'process group';
+          throw new WardenError(
+            409,
+            `Unable to stop setup ${identity} ${child.pid ?? 'unknown'}. Stop its commands and close the owning Warden window before retrying: ${String(error)}`,
+            'setup_cleanup_failed',
+          );
+        }
+      })();
+      void stopping.then(finish, reject);
+    };
+    const timer = setTimeout(() => stop(`Setup script exceeded its ${timeout} ms time limit.`), timeout);
+    child.stdout!.setEncoding('utf8').on('data', (chunk: string) => {
+      outputBytes += Buffer.byteLength(chunk);
+      stdout = (stdout + chunk).slice(-16000);
+      if (outputBytes > 128 * 1024) stop('Setup script stdout exceeded its 128 KiB output limit.');
+    });
+    child.stdout!.on('error', (error: Error) => stop(`Unable to read setup stdout: ${error.message}`));
+    child.stderr!.setEncoding('utf8').on('data', (chunk: string) => {
+      errorBytes += Buffer.byteLength(chunk);
+      stderr = (stderr + chunk).slice(-16000);
+      if (errorBytes > 128 * 1024) stop('Setup script stderr exceeded its 128 KiB output limit.');
+    });
+    child.stderr!.on('error', (error: Error) => stop(`Unable to read setup stderr: ${error.message}`));
+    child.once('error', (error: NodeJS.ErrnoException) => {
+      startupError = error;
+    });
+    child.once('close', (code, signal) => {
+      closed = true;
+      exitCode = code;
+      exitSignal = signal;
+      clearTimeout(timer);
+      close();
+      if (!stopping) finish();
+    });
+  });
+}
+
+/** Force termination avoids a shell exiting while a child ignores a graceful signal. */
+async function stopSetupTree(pid: number, env: NodeJS.ProcessEnv): Promise<void> {
+  if (process.platform !== 'win32') {
+    try {
+      process.kill(-pid, 'SIGKILL');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+    }
+    return;
+  }
+  const variables = new Map(Object.entries(env).map(([name, value]) => [name.toUpperCase(), value]));
+  const windows = variables.get('SYSTEMROOT') ?? variables.get('WINDIR');
+  if (!windows || !path.win32.isAbsolute(windows)) throw new Error('The Windows system directory is unavailable.');
+  await new Promise<void>((resolve, reject) => {
+    execFile(path.win32.join(windows, 'System32', 'taskkill.exe'), ['/PID', String(pid), '/T', '/F'], { windowsHide: true, timeout: 5000, env }, (error) => {
+      if (error) reject(error);
+      else resolve();
+    });
   });
 }

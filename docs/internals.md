@@ -229,6 +229,12 @@ stay beside primary. The repository owns task branches and objects; it is never 
 common directory. Repository resolution validates its ownership and maps its task worktrees back to
 primary for state and locking. Inventory excludes the bare repository and internal operation
 worktrees. Existing `kind: worktree` and `kind: clone` layouts remain supported without migration.
+Legacy primary-linked worktrees also validate their private Git directory and its `gitdir` backlink
+against the selected checkout. Sharing a common Git directory alone does not authorize a write:
+a copied `.git` pointer to another task is rejected, including after a previously valid rebase check.
+Validation reads `rev-parse --show-toplevel --git-common-dir --absolute-git-dir` through the existing
+Git reader, then inspects the `.git` file, private metadata directory and `gitdir` backlink with
+filesystem metadata/content reads. Symlinked registrations and backlinks are refused.
 Product inventory reads retain dirty-state, ownership and unfinished-operation checks, but omit
 the retired management page's upstream comparisons and free-slot branch lists. The test-only HTTP
 adapter adds those fields with the same validated Git reader; no new Git write path is introduced.
@@ -324,8 +330,14 @@ action; startup never automatically repeats cleanup. Git checks do not stop exte
 `POST /workflow/rebase` validates source and
 primary HEADs and clean checkout state, then explicitly rebases selected workspaces with
 `rebase --no-autostash --onto`. Actual conflicts from an explicit request remain for manual handling.
-A request marked `automatic` comes only from the host's automatic rebase of idle workspaces; when its
-replay stops at a conflict, the engine runs `rebase --abort` in that workspace and accepts the undo
+A request marked `automatic` comes only from the host's automatic rebase of idle workspaces. The host
+reserves local conversation activity before queuing the request. Under the repository lock, each
+automatic replay also holds the task's existing connection metadata lock until Git finishes. A live
+owner is accepted only with the reserved connection token from the same host process and hostname;
+foreign, missing or replaced claims cannot inherit that authorization. An unclaimed task can rebase
+while this metadata lock prevents a new connection claim. Tokens are internal and are not accepted
+by the webview action parser. Explicit user rebase retains its existing coordination contract. When an
+automatic replay stops at a conflict, the engine runs `rebase --abort` in that workspace and accepts the undo
 only if HEAD is the recorded pre-rebase commit, the tree is clean and no Git operation remains.
 Otherwise the conflict record and safety backup are kept as for an explicit request. There is no
 workspace recycling.
@@ -398,8 +410,11 @@ only full object IDs and reads exact trees through that task repository and the 
 store, with no merge-base substitution. Source HEAD and the current snapshot are rechecked during
 preparation and again before staging. A saved edit after review fails with `review_changed`.
 Preparation and delivery records retain `sourceTree`; future review and preview subtract that tree
-instead of replaying the same uncommitted contribution. Incorporating primary through rebase clears
-the snapshot boundary. Rebase still requires a clean task checkout and retains normal Git conflict handling.
+instead of replaying the same uncommitted contribution. The tree belongs only to its recorded source
+boundary. If a manual merge or rebase advances the effective boundary, review, preparation and preview
+all use that new commit even when primary has subsequently advanced again. Read-only normalization
+does not save state or authorize reuse of the obsolete snapshot. Rebase still requires a clean task
+checkout and retains normal Git conflict handling.
 If a patch's saved base blob has been pruned from the shared repository, internal three-way composition
 reads that exact blob from snapshot storage and restores it with `hash-object -w --no-filters` in the
 validated sandbox repository, checking the resulting object ID. This never imports objects into primary.
@@ -459,6 +474,16 @@ interpreting the script as an agent lifecycle. Adding a task runs its configured
 hook after assignment is saved; renaming and ordering do not execute hooks.
 Windows shell discovery uses a fixed `git --exec-path` invocation with a five-second timeout and
 removes inherited `GIT_EXEC_PATH`; this installation lookup does not read or change the repository.
+Setup execution uses a separate POSIX process group. Timeout or output overflow sends `SIGKILL` to
+that group; Windows invokes the system directory's `taskkill.exe /PID <owned-shell> /T /F` instead.
+Completion waits for successful termination and process close before releasing the repository
+operation. Execution retains its ten-minute limit, 128 KiB per output stream and 16,000-character
+display tail. Cleanup itself has a bounded wait; failure throws `setup_cleanup_failed` and retains
+the persisted running owner. Task deletion, hook retry and rebase reject a live or uncertain setup
+owner. Preview setup records the same owner and blocks retry/composition after an uncertain cleanup;
+legacy preview records without an owner retain their existing interrupted-run recovery. A confirmed
+dead owner permits recovery. These checks do not supervise ACP children or deliberately detached
+POSIX sessions.
 
 The webview receives only presentation models. A finite, runtime-validated action union crosses
 its message boundary; session tokens reject messages from a previous repository, and each surface

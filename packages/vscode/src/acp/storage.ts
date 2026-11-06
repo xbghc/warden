@@ -266,6 +266,11 @@ export class AcpSessionStorage implements AcpStorage {
     );
   }
 
+  /** Identifies this connection's existing claim without granting or renewing ownership. */
+  claimToken(): string | undefined {
+    return this.token;
+  }
+
   private serialized<T>(fn: () => Promise<T>): Promise<T> {
     const next = this.queue.then(fn, fn);
     this.queue = next.catch(() => undefined);

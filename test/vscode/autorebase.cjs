@@ -20,7 +20,7 @@ exports.run = async () => {
     await verifyAgent(workbench, fixture);
     await workbench.open(fixture.root);
     await exports.checkAutoRebase(workbench, fixture.root, eventually);
-    console.log('Packaged automatic rebase passed: idle tasks only, busy tasks resume after their turn, once per check, setting off');
+    console.log('Packaged automatic rebase passed: idle tasks, uncertain cancellation, queued reservations, once per check, setting off');
   } finally {
     await workbench.close();
   }
@@ -60,6 +60,7 @@ exports.checkAutoRebase = async (workbench, root, eventually) => {
   const isBusy = workbench.conversations.isBusy;
   const run = workbench.api;
   const requests = [];
+  let liveChat;
   workbench.api = function (command, request) {
     if (command === 'rebase.run') requests.push(request);
     return run.call(this, command, request);
@@ -112,9 +113,90 @@ exports.checkAutoRebase = async (workbench, root, eventually) => {
     assert.equal(requests.length, 2, 'disabled automatic rebase sends no request');
     assert.equal(parent(idle), first);
     assert.equal(workbench.checks.checks.find((row) => row.changeId === idle.id)?.status, 'ready', 'the manual Can Rebase action remains');
+
+    const unopened = await task('Unopened reserved task', 'unopened.txt');
+    const reservation = workbench.conversations.reserveRebase(root, [unopened.id]);
+    try {
+      assert.deepEqual(reservation.items, [{ taskId: unopened.id }]);
+      await assert.rejects(workbench.conversations.ensure(root, unopened.id), /being rebased automatically/);
+    } finally {
+      reservation.release();
+    }
+
+    // A real ACP turn remains active when cancellation times out, even though its label is Error.
+    const live = await task('Uncertain agent turn', 'live.txt');
+    liveChat = await workbench.conversations.ensure(root, live.id);
+    await workbench.conversations.connect(liveChat);
+    liveChat.session.options.timeoutMs = 1000;
+    let turnSettled = false;
+    const turn = liveChat.session
+      .send('neverfinish')
+      .catch(() => {})
+      .finally(() => {
+        turnSettled = true;
+      });
+    await eventually(() => liveChat.session.turn?.sent);
+    const third = await advance('auto-3.txt');
+    await eventually(() => checked(third), 60_000);
+    await configuration.update('autoRebase', true, vscode.ConfigurationTarget.Global);
+    await workbench.autoRebase(workbench.session, workbench.checks);
+    assert.notEqual(parent(live), third, 'a live turn cannot be rebased');
+    await assert.rejects(liveChat.session.cancel(), /has not ended this turn/);
+    await workbench.autoRebasing;
+    assert.equal(liveChat.session.currentStatus(), 'error');
+    assert.equal(turnSettled, false);
+    assert.equal(workbench.conversations.isBusy(root, live.id), true, 'uncertain cancellation keeps the workspace busy');
+    await workbench.autoRebase(workbench.session, workbench.checks);
+    assert.notEqual(parent(live), third, 'the error label cannot authorize an automatic rebase');
+
+    await configuration.update('autoRebase', false, vscode.ConfigurationTarget.Global);
+    await liveChat.session.disconnect();
+    await turn;
+    liveChat.session.options.timeoutMs = 15_000;
+    await workbench.conversations.connect(liveChat);
+    const fourth = await advance('auto-4.txt');
+    await eventually(() => checked(fourth), 60_000);
+    await workbench.autoRebasing;
+    const selectedCheck = workbench.checks.checks.find((row) => row.changeId === live.id);
+    assert.equal(selectedCheck.status, 'ready');
+    const dispatch = workbench.api;
+    let unqueue;
+    let queued;
+    const waiting = new Promise((resolve) => {
+      queued = resolve;
+    });
+    const gate = new Promise((resolve) => {
+      unqueue = resolve;
+    });
+    workbench.api = async function (command, request) {
+      if (command === 'rebase.run') {
+        queued();
+        await gate;
+      }
+      return dispatch.call(this, command, request);
+    };
+    let rebasing;
+    try {
+      await configuration.update('autoRebase', true, vscode.ConfigurationTarget.Global);
+      rebasing = workbench.autoRebase(workbench.session, { checks: [selectedCheck] });
+      await waiting;
+      await assert.rejects(liveChat.session.send('must not run during queued rebase'), /being rebased automatically/);
+      await assert.rejects(workbench.conversations.ensure(root, live.id), /being rebased automatically/);
+    } finally {
+      unqueue();
+      await rebasing;
+      workbench.api = dispatch;
+    }
+    assert.equal(parent(live), fourth, 'a reserved idle connection still permits automatic rebase');
+    assert.equal(workbench.conversations.isBusy(root, live.id), false, 'the reservation is released after Git finishes');
+    assert(
+      requests.some((request) => request.items.some((item) => item.changeId === live.id && item.connectionToken)),
+      'the shipped host passes its claim token',
+    );
   } finally {
     workbench.conversations.isBusy = isBusy;
     workbench.api = run;
     await configuration.update('autoRebase', false, vscode.ConfigurationTarget.Global);
+    await liveChat?.session.disconnect();
   }
 };

@@ -76,6 +76,7 @@ exports.checkAgentSetup = async (workbench, extension, fixture, eventually) => {
       assert.equal(extension.packageJSON.contributes.commands.find((item) => item.command === command).enablement, 'warden.agentReady');
     }
     // An open rename belongs to the connected session; losing the agent closes it without saving.
+    if (hasBranch) await exports.verifyAgent(workbench, fixture);
     const renaming = hasBranch ? vscode.commands.executeCommand('warden.renameTask', { kind: 'task', task: workbench.tasks()[0] }) : undefined;
     if (renaming) {
       await eventually(() => !!workbench.renameInput);

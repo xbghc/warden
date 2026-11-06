@@ -36,6 +36,11 @@ reuse and visible retry after failed preview disconnection. The full native suit
 Can Rebase tasks only, busy tasks resuming after their turn, one attempt per check and the setting
 turned off. The launcher writes `"warden.autoRebase": false` to the disposable user settings so other
 suites see exact workspace heads; this suite and the full native suite enable it explicitly.
+It also exercises cancellation timeout with a real ACP turn, reservations of unopened tasks and
+blocked prompts while an idle connection's rebase is queued. Engine tests separately verify foreign
+owners, replaced/removed claims and connection acquisition during a replay. Task Chat checks the
+actual emitted model title after renaming. Setup regressions run real Node descendants through
+timeout and output overflow, and preserve running ownership when cleanup cannot be confirmed.
 
 `build` and `build:vscode` build the extension and its webviews. `build:webview` refreshes just the
 webview bundle. The VSIX contains bundled JavaScript and uses the workspace's Git CLI.

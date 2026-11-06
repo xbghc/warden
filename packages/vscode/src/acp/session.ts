@@ -124,6 +124,7 @@ export class AcpSession {
   private flush?: ReturnType<typeof setTimeout>;
   private disconnecting?: Promise<void>;
   private ownsClaim = false;
+  private rebaseReservation?: symbol;
 
   constructor(private readonly options: AcpSessionOptions) {
     this.log = (options.log ?? new DiagnosticLog()).child({ component: 'acp.task', task: options.binding.taskId, conversation: randomUUID() });
@@ -146,6 +147,45 @@ export class AcpSession {
   /** Cheap status for process listings; snapshot() clones the whole transcript. */
   currentStatus(): AcpStatus {
     return this.resetting ? 'resetting' : this.status;
+  }
+
+  /** Display errors do not settle a turn or prove that a live connection has stopped work. */
+  isBusy(): boolean {
+    return !!(
+      this.turn ||
+      this.connecting ||
+      this.authenticating ||
+      this.resetting ||
+      this.configuration ||
+      this.disconnecting ||
+      this.rebaseReservation ||
+      (this.status === 'error' && this.runtime && !this.runtime.exited)
+    );
+  }
+
+  /** Reserve an observed idle session until the engine has finished its automatic rebase. */
+  reserveIdle(): { connectionToken?: string; release(): void } | undefined {
+    if (this.disposed || this.isBusy()) return;
+    const reservation = Symbol('automatic rebase');
+    this.rebaseReservation = reservation;
+    const connectionToken = this.ownsClaim ? this.options.storage.claimToken?.() : undefined;
+    return {
+      ...(connectionToken ? { connectionToken } : {}),
+      release: () => {
+        if (this.rebaseReservation === reservation) this.rebaseReservation = undefined;
+      },
+    };
+  }
+
+  private assertNotRebasing() {
+    if (this.rebaseReservation) throw new Error('This task is being rebased automatically. Try again when it finishes.');
+  }
+
+  /** Titles are presentation data; keep restored and newly saved records on the same binding. */
+  retitle(title: string) {
+    this.options.binding = { ...this.options.binding, title };
+    this.record.binding = { ...this.record.binding, title };
+    this.changed();
   }
 
   /** The agent process this conversation still owns. A stopping process is already being ended. */
@@ -324,6 +364,7 @@ export class AcpSession {
   }
 
   async connect(profile: AcpProfile, options: { resume: boolean }): Promise<void> {
+    this.assertNotRebasing();
     if (this.disposed) throw new Error('This task conversation is closed.');
     if (this.connecting || this.runtime || this.disconnecting || this.resetting)
       throw new Error('The agent is already connected or a connection attempt is still running.');
@@ -634,6 +675,7 @@ export class AcpSession {
   }
 
   send(value: string): Promise<void> {
+    if (this.rebaseReservation) return Promise.reject(new Error('This task is being rebased automatically. Try again when it finishes.'));
     if (!value.trim() || value.length > 100_000) return Promise.reject(new Error('Messages must contain 1–100,000 characters.'));
     const runtime = this.runtime;
     if (!runtime || !this.current(runtime) || !runtime.sessionId || this.status !== 'connected')
@@ -768,6 +810,7 @@ export class AcpSession {
   }
 
   async authenticate(methodId: string): Promise<void> {
+    this.assertNotRebasing();
     const runtime = this.runtime;
     if (!runtime || !this.current(runtime) || !runtime.initialized) throw new Error('Connect to the agent to obtain authentication methods.');
     if (this.turn || this.connecting || this.authenticating || this.configuration) throw new Error('Wait for the current request before logging in.');
@@ -932,6 +975,7 @@ export class AcpSession {
   }
 
   private async configure(method: string, request: (runtime: Runtime) => Promise<() => void>, modelConfigId?: string): Promise<void> {
+    this.assertNotRebasing();
     const runtime = this.runtime;
     if (!runtime || !this.current(runtime) || !runtime.established || this.status !== 'connected')
       throw new Error('Connect to an agent session and wait for the current request to finish.');
@@ -1335,6 +1379,7 @@ export class AcpSession {
   }
 
   async newConversation(): Promise<void> {
+    this.assertNotRebasing();
     if (this.disposed) throw new Error('This task conversation is closed.');
     if (this.resetting || this.connecting) throw new Error('A session operation is still running. Please wait.');
     this.resetting = true;

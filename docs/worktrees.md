@@ -84,6 +84,13 @@ These legacy fields are optional POSIX shell commands executed after the assignm
 saved, with the workspace as cwd. Linux and macOS use `/bin/sh -c`; native Windows uses Git for
 Windows' bundled `sh.exe -c`. They expose stdout/stderr, exit code and failure. A failed hook
 leaves the workspace intact; retry it explicitly. Hooks have a ten-minute timeout and bounded output.
+On timeout or output overflow, Warden terminates the setup process group on Linux/macOS or its process
+tree on Windows, and waits for cleanup before reporting a retryable failure. If cleanup cannot be
+confirmed, setup remains running and blocks retry, rebase and deletion while its host owner is live
+or uncertain. Stop the identified commands and close their owning Warden window before recovering.
+Preview setup uses the same cleanup rule and blocks recomposition while cleanup is uncertain.
+Scripts that deliberately detach into a new POSIX session are outside the owned process group;
+setup scripts should finish their foreground work rather than launch persistent daemons.
 A run interrupted by a closed window or host restart is reported as failed once its recorded owner
 process has exited on this host, so it can be retried; the task row shows **Setup Running** meanwhile.
 Warden does not provide a dependency installer or supervise agent-started commands. Its ACP client
@@ -186,7 +193,11 @@ reports **Can Rebase**, using the same engine path and guards as an explicit reb
 qualify: the workspace is clean with no Git operation in progress, no setup script or deletion is
 running, and its Task Chat has no turn, permission wait, cancellation, reset or connection in
 progress. A task skipped while its agent was busy qualifies once the turn ends. Each check result is
-acted on at most once. If the real replay stops at a conflict the isolated check did not predict,
+acted on at most once. A cancellation timeout or a live connection with an uncertain result remains
+busy. The owning window reserves an idle conversation while rebase queues and runs, preventing a
+new turn or connection from starting in that interval. Other windows skip that task's live connection;
+the engine verifies ownership again under the connection metadata lock before changing Git.
+If the real replay stops at a conflict the isolated check did not predict,
 Warden runs `git rebase --abort`, confirms the workspace is back on its previous commit, clean and
 without a Git operation, discards the safety backup and reports the task as skipped; the check still
 offers a manual rebase. Agents working in the workspace outside Task Chat are not detected, so turn

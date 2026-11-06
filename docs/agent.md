@@ -132,16 +132,18 @@ the agent requests authentication; connection failures have a separate **Reconne
 **Stop Turn** requests cancellation; **End Agent Process** under **Settings › ACP › Agent Processes**
 closes a task's agent connection and process. Neither
 proves that all agent-started background commands have stopped. The agent owns those commands and its
-execution policies. Coordinate ongoing work before delivery or rebase; Warden adds no execution guard
-or agent-idle declaration and retains its existing Git version checks.
+execution policies. Coordinate ongoing work before delivery or explicit rebase. Automatic rebase
+additionally checks and reserves Warden's own Task Chat activity; it does not supervise external
+agent commands or infer their idleness from Git status.
 
 Conversation records persist outside the source repository. After reload or disconnect, reopening
 Task Chat automatically resumes the saved session when the agent supports loading it. Otherwise use
 **New Session**, retaining the previous record. Warden never silently resends an uncertain prompt or
 claims that saved text restores the agent's model state. Reopening an active chat reuses its connection.
 **New Session** explicitly resets the conversation and connects after preserving the previous record.
-A completed turn does not connect preview,
-commit, deliver or rebase. See the [ACP boundary](acp-design.md) for ownership and recovery details.
+A completed turn does not connect preview, commit, deliver or authorize a rebase. Separately enabled
+automatic rebase may proceed once the task becomes idle and its existing check qualifies.
+See the [ACP boundary](acp-design.md) for ownership and recovery details.
 
 ## Task briefs
 
