@@ -295,6 +295,16 @@ async function handle(message) {
   turn = { id, text, cancelled: false };
   remember('user', sentText);
   if (text === 'crash') return process.exit(17);
+  if (text === 'permission-error') {
+    // The turn fails while its permission request is still pending.
+    void request('session/request_permission', {
+      sessionId,
+      toolCall: { toolCallId: 'failing-tool', title: 'Write after failure', kind: 'edit' },
+      options: [{ optionId: 'allow-once', name: 'Allow once', kind: 'allow_once' }],
+    });
+    setTimeout(() => error(id, -32603, 'Turn failed during approval'), 100);
+    return;
+  }
   if (text === 'malformed') return result(id, { stopReason: 42 });
   if (text.startsWith('echo-error ')) {
     process.stderr.write(`Rejected prompt: ${text}\n`);
@@ -521,6 +531,11 @@ if (mode === 'auth-delayed-load') {
     }
     setTimeout(() => process.exit(0), 10);
   });
+}
+if (mode === 'linger') {
+  // Simulates a process that outlives closed stdin and ignores termination.
+  process.on('SIGTERM', () => {});
+  setInterval(() => {}, 1000);
 }
 if (mode === 'late-on-disconnect') {
   process.on('SIGTERM', () => {

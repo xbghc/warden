@@ -991,6 +991,48 @@ describe('ACP subprocess conversations', () => {
     await expect(readFile(path.join(f.workspace, 'agent-output.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it('keeps a failed turn in error when its pending permission is cancelled during teardown', async () => {
+    const f = await fixture();
+    await f.session.connect(f.profile, { resume: false });
+    await expect(f.session.send('permission-error')).rejects.toThrow('Turn failed during approval');
+    expect(f.session.snapshot().permissions).toEqual([]);
+    expect(f.session.currentStatus()).toBe('error');
+    // The error state accepts a reconnect instead of staying busy without a turn.
+    await f.session.disconnect();
+    await f.session.connect(f.profile, { resume: true });
+    expect(f.session.currentStatus()).toBe('connected');
+  });
+
+  it('ignores Stop while a failed turn is saving its result', async () => {
+    const f = await fixture();
+    const slow = new MemoryStorage();
+    let delay = false;
+    slow.save = async (record) => {
+      if (delay) await new Promise((resolve) => setTimeout(resolve, 300));
+      slow.record = structuredClone(record);
+    };
+    const session = f.create(slow);
+    await session.initialize();
+    await session.connect(f.profile, { resume: false });
+    delay = true;
+    const sent = session.send('malformed').catch((error: unknown) => error);
+    await expect.poll(() => session.currentStatus(), { timeout: 5_000 }).toBe('error');
+    await session.cancel();
+    await sent;
+    expect(session.currentStatus()).toBe('error');
+  });
+
+  it('keeps the disconnected status when a connection is cancelled during validation', async () => {
+    const f = await fixture();
+    const connecting = f.session.connect(f.profile, { resume: false });
+    await f.session.disconnect();
+    await expect(connecting).rejects.toThrow('Connection cancelled.');
+    expect(f.session.currentStatus()).toBe('disconnected');
+    expect(f.session.process()).toBeUndefined();
+    await f.session.connect(f.profile, { resume: false });
+    expect(f.session.currentStatus()).toBe('connected');
+  });
+
   it('cancels a permission response when the task allocation changed while approval was pending', async () => {
     const f = await fixture();
     await f.session.connect(f.profile, { resume: false });

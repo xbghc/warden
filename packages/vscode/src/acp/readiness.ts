@@ -39,6 +39,8 @@ export class AcpReadinessCheck {
   private runtime?: Runtime;
   private generation = 0;
   private cleanup: Promise<void> = Promise.resolve();
+  /** Retired processes that ignored SIGTERM and SIGKILL within the stop timeout. */
+  private readonly unstopped = new Set<Runtime>();
 
   constructor(
     private readonly changed: () => void,
@@ -214,7 +216,10 @@ export class AcpReadinessCheck {
             runtime.child.kill('SIGKILL');
             await wait(1000);
           }
-          if (!runtime.exited) throw new Error('The ACP process could not be stopped.');
+          if (!runtime.exited) {
+            this.unstopped.add(runtime);
+            throw new Error('The ACP process could not be stopped.');
+          }
         }),
       );
     return this.cleanup;
@@ -225,7 +230,12 @@ export class AcpReadinessCheck {
     if (this.runtime) this.retire(this.runtime);
     this.profile = undefined;
     this.publish({ status: 'unchecked' });
-    return this.cleanup;
+    // A stop timeout blocks new connections only while that process is still running; once it
+    // exits, even late, a later connection must not inherit the old failure.
+    return this.cleanup.catch((error) => {
+      for (const runtime of this.unstopped) if (runtime.exited) this.unstopped.delete(runtime);
+      if (this.unstopped.size) throw error;
+    });
   }
 
   unavailable(profile: AcpProfile, reason: string) {

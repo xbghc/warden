@@ -170,6 +170,31 @@ it('observes an unexpected exit after initialization and retires the live connec
   await stopped();
 });
 
+it('connects again once a process that resisted stopping has exited', { timeout: 15_000 }, async () => {
+  await check.check(profile('linger'), directory);
+  expect(check.snapshot().status).toBe('ready');
+  const runtime = (check as unknown as { runtime: { child: { pid: number; kill: () => boolean } } }).runtime;
+  const pid = runtime.child.pid;
+  // Neither signal reaches the process, as with one stuck in uninterruptible I/O.
+  runtime.child.kill = () => true;
+  await check.check(profile(), directory);
+  expect(check.snapshot()).toMatchObject({ status: 'error', message: 'The ACP process could not be stopped.' });
+  process.kill(pid, 'SIGKILL');
+  await expect
+    .poll(() => {
+      try {
+        process.kill(pid, 0);
+        return false;
+      } catch {
+        return true;
+      }
+    })
+    .toBe(true);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  await check.check(profile(), directory);
+  expect(check.snapshot().status).toBe('ready');
+});
+
 it('stops the old process before replacing a connection', async () => {
   await check.check(profile(), directory);
   const oldPid = (await events())[0].pid;

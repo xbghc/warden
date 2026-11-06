@@ -91,6 +91,8 @@ type Turn = {
   record: AcpRecord;
   promise: Promise<void>;
   cancelling: boolean;
+  /** Set once the prompt has settled, so teardown cannot reopen a finished turn's status. */
+  ended?: boolean;
   sent: boolean;
   input: string;
   user?: AcpMessage;
@@ -345,6 +347,8 @@ export class AcpSession {
         if (this.record.profileId !== profile.id || this.record.profileSignature !== signature)
           throw new Error('The agent profile changed. Resume with the original profile or start a new session.');
       } else if (this.record.sessionId) throw new Error('A previous session exists. Resume it or start a new session first.');
+      // A disconnect during validation already published its own status.
+      if (generation !== this.generation || this.disposed) throw new Error('Connection cancelled.');
       this.status = 'connecting';
       this.error = undefined;
       this.controls = emptyControls();
@@ -703,6 +707,7 @@ export class AcpSession {
       }
       throw error;
     } finally {
+      turn.ended = true;
       this.cancelPermissions(runtime);
       this.history.lastChunk = undefined;
       if (this.record === turn.record) markUnsettledTools(this.record.messages);
@@ -732,7 +737,8 @@ export class AcpSession {
 
   async cancel(): Promise<void> {
     const turn = this.turn;
-    if (!turn) return;
+    // A settled turn is only saving its result; its error or completion status must stand.
+    if (!turn || turn.ended) return;
     turn.cancelling = true;
     turn.runtime.log.write('info', 'acp.cancel.requested', { turn: turn.id, sent: turn.sent });
     this.status = 'cancelling';
@@ -1179,7 +1185,7 @@ export class AcpSession {
           choice: answer.outcome === 'selected' ? view.options.find((option) => option.id === answer.optionId)?.kind : undefined,
         });
         signal.removeEventListener('abort', cancelled);
-        if (this.current(runtime) && this.turn === turn && !turn.cancelling)
+        if (this.current(runtime) && this.turn === turn && !turn.cancelling && !turn.ended)
           this.status = [...this.permissions.values()].some((permission) => !permission.checking) ? 'waiting_permission' : 'running';
         resolve(response);
         this.notify();
