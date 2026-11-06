@@ -428,9 +428,11 @@ export function AcpApp({ model, send: dispatch }: Props) {
         >
           <div className="acp-transcript-content" ref={transcriptContent}>
             {record.messages.length
-              ? activityRows(record.messages).map((messages) =>
+              ? // Flatten to one keyed level: nested unkeyed arrays match by position, so folding an
+                // earlier row would remount every later message and close its expanded details.
+                activityRows(record.messages).flatMap((messages) =>
                   messages.length >= 3 ? (
-                    <details className="acp-activity-group" key={messages[0]!.id}>
+                    <details className="acp-activity-group" key={`group:${messages[0]!.id}`}>
                       <summary>
                         <ChevronRight className="acp-disclosure" aria-hidden="true" />
                         {messages.length} earlier activities
@@ -872,6 +874,8 @@ function Permission({
   status: AcpStatus;
   send: Props['send'];
 }) {
+  // One choice per request: a second click would reach the host after the request ended.
+  const [answered, setAnswered] = useState(false);
   let command = permission.command;
   let decodedCommand = false;
   // Some adapters JSON-encode the command string again inside rawInput. Decode one
@@ -917,8 +921,11 @@ function Permission({
             key={option.id}
             size="sm"
             variant={option.kind === 'allow_once' ? 'default' : 'secondary'}
-            disabled={status === 'cancelling' || status === 'disconnected' || status === 'resetting' || status === 'error'}
-            onClick={() => send({ type: 'permission', requestId: permission.id, optionId: option.id })}
+            disabled={answered || status === 'cancelling' || status === 'disconnected' || status === 'resetting' || status === 'error'}
+            onClick={() => {
+              setAnswered(true);
+              send({ type: 'permission', requestId: permission.id, optionId: option.id });
+            }}
           >
             {option.label}
           </Button>

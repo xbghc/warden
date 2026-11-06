@@ -43,6 +43,10 @@ export const UnavailableAgent: Story = {
     },
   },
 };
+// A pending reconnect, such as after a profile change, shows progress instead of setup.
+export const ConnectingAgent: Story = {
+  args: { model: { ...base, agentReadiness: { status: 'checking', message: 'Connecting to ACP…' } } },
+};
 const synchronizationCases = [
   { id: 'current', title: '订单查询', status: 'current', message: 'Includes the current base branch commit.' },
   { id: 'ready', title: '订单筛选', status: 'ready', message: 'The check found no rebase conflicts.' },

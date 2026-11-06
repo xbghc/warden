@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import type { AcpModel, WorkbenchModel } from '@warden/shared';
+import type { AcpAction, AcpModel, WorkbenchModel } from '@warden/shared';
 import { WorkbenchApp } from './workbench';
 import { AcpApp } from './acp';
 import { bridge } from './bridge';
@@ -16,9 +16,15 @@ function App() {
     bridge.ready();
     return () => window.removeEventListener('message', receive);
   }, []);
+  // A stable sender lets memoized transcript rows skip re-rendering on every streamed model.
+  const latest = useRef(view);
+  latest.current = view;
+  const sendAcp = useCallback((action: AcpAction) => {
+    if (latest.current?.type === 'acp-model') bridge.acpAction(latest.current.model, action);
+  }, []);
   if (!view) return <main>Loading workspace…</main>;
   if (view.type === 'acp-empty') return <main />;
-  if (view.type === 'acp-model') return <AcpApp key={view.model.panelId} model={view.model} send={(action) => bridge.acpAction(view.model, action)} />;
+  if (view.type === 'acp-model') return <AcpApp key={view.model.panelId} model={view.model} send={sendAcp} />;
   return <WorkbenchApp key={`${view.model.session}:${view.model.surface}`} model={view.model} send={(action) => bridge.action(view.model, action)} />;
 }
 createRoot(document.getElementById('root')!).render(

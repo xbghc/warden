@@ -36,14 +36,19 @@ try:
             expect(page.locator('main')).to_have_text('Configure ACP')
             blocked()
             for readiness in [
-                {'status': 'unchecked'},
                 {'status': 'error', 'message': 'Agent executable not found.'},
                 {'status': 'authentication_required', 'message': 'Sign in to continue.', 'authMethods': [{'id': 'login', 'name': 'Sign In'}]},
-                {'status': 'checking', 'message': 'Connecting to ACP…'},
             ]:
                 configured = {**initial, 'agentConfiguration': {'status': 'configured', 'count': 1}, 'agentReadiness': readiness}
                 page.evaluate("model => window.postMessage({type:'model', model}, '*')", configured)
                 expect(page.locator('main')).to_have_text('Configure ACP')
+                blocked()
+            # Pending connections, including the startup scheduling delay, show progress, never setup.
+            for readiness in [{'status': 'unchecked'}, {'status': 'checking', 'message': 'Connecting to ACP…'}]:
+                configured = {**initial, 'agentConfiguration': {'status': 'configured', 'count': 1}, 'agentReadiness': readiness}
+                page.evaluate("model => window.postMessage({type:'model', model}, '*')", configured)
+                expect(page.get_by_role('status')).to_have_text('Connecting to ACP…')
+                expect(page.get_by_role('button')).to_have_count(0)
                 blocked()
             ready = {**initial, 'agentConfiguration': {'status': 'configured', 'count': 1}, 'agentReadiness': {'status': 'ready'}}
             for repository in ['', initial['repository']]:

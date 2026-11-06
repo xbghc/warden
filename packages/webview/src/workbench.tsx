@@ -9,18 +9,21 @@ import { StatusBadge } from './components/ui/status-badge';
 
 type Props = { model: WorkbenchModel; send(action: WorkbenchAction): void };
 export function WorkbenchApp({ model, send }: Props) {
+  // Loading and pending connections, including the startup scheduling delay, never offer setup.
+  const pending =
+    model.surface !== 'settings' && model.agentConfiguration.status === 'configured' && ['unchecked', 'checking'].includes(model.agentReadiness.status);
+  if (model.repositoryState === 'loading' || pending)
+    return (
+      <main>
+        <p className="muted" role="status">
+          {model.repositoryState === 'loading' ? 'Opening repository…' : 'Connecting to ACP…'}
+        </p>
+      </main>
+    );
   if (model.agentConfiguration.status !== 'configured' || model.agentReadiness.status !== 'ready' || model.surface === 'settings')
     return (
       <main className="setup">
         <Button onClick={() => send({ type: 'setup.agents' })}>{model.agentReadiness.status === 'ready' ? 'Open Settings' : 'Configure ACP'}</Button>
-      </main>
-    );
-  if (model.repositoryState === 'loading')
-    return (
-      <main>
-        <p className="muted" role="status">
-          Opening repository…
-        </p>
       </main>
     );
   const scope = model.surface;

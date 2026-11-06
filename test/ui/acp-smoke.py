@@ -403,8 +403,10 @@ try:
         assert first.request.post(origin + '/reopen?task=0').ok
         first.reload()
         expect(composer).to_have_value('')
-        first.get_by_role('button', name='Allow this write', exact=True).click()
+        # A double click answers once; the second click must not reach the ended request.
+        first.get_by_role('button', name='Allow this write', exact=True).dblclick()
         connected(first)
+        expect(first.get_by_role('alert')).to_have_count(0)
         assert inspect()['entries'][0]['output'] == 'Permission granted\n'
         expect(composer).to_have_value('')
         expect(first.get_by_role('button', name='Send', exact=True)).to_be_disabled()
