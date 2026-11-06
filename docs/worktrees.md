@@ -50,7 +50,9 @@ the new branch, and the configured setup script receives the new base branch.
 The primary checkout retains its own Git repository. Warden creates a separate bare repository at
 `<primary>-warden/repo.git` for preview and composition. Task directories remain numbered siblings
 such as `<primary>-1` and `<primary>-2`; new ones are independent clones, while tasks created by
-earlier versions may still be worktrees of the shared repository. Newly created preview and temporary composition worktrees live in Warden's
+earlier versions may still be worktrees of the shared repository. Opening Warden inside a clone
+Warden made (marked by `warden.main`) uses its primary's state; a sibling clone made by hand is its own
+primary. Newly created preview and temporary composition worktrees live in Warden's
 external data directory and use the shared repository. Each worktree has independent files,
 HEAD and index. Branch references and Git objects are shared among these Warden worktrees.
 

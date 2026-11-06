@@ -133,14 +133,17 @@ async function ownRoot(dir: string): Promise<string | undefined> {
 
 /**
  * The main worktree a clone slot at `root` belongs to: `<repo>` beside `<repo>-<n>`, when that is a
- * repository of its own and `root` a clone of it. A server started there shares that repository's
- * review state, as one in a linked worktree does.
+ * repository of its own and `root` a clone Warden made of it. A server started there shares that
+ * repository's review state, as one in a linked worktree does. A clone made by hand only shares a
+ * server with its sibling; opened on its own, it is the user's primary, never redirected elsewhere.
  */
 async function mainOfClone(root: string): Promise<string | undefined> {
   const m = /^(.+)-[1-9]\d*$/.exec(path.basename(root));
   if (!m?.[1]) return undefined;
   const main = await ownRoot(path.join(path.dirname(root), m[1]));
-  return main && (await isCloneOf(main, root)) ? main : undefined;
+  if (!main) return undefined;
+  const mark = (await runGit(['config', '--get', CLONE_MARK], { cwd: root, okCodes: [0, 1] })).stdout.trim();
+  return mark && (await realpath(mark).catch(() => mark)) === main ? main : undefined;
 }
 
 async function safeRealpath(p: string): Promise<string> {

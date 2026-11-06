@@ -253,6 +253,14 @@ describe('a clone slot', () => {
     expect((await checkout({ branch: 'agent/one' })).worktree).toMatchObject({ path: await realpath(slotDir(1)), clone: true });
   });
 
+  it('treats a hand-made sibling clone opened on its own as its own primary', async () => {
+    git(path.dirname(slotDir(1)), 'clone', '-q', server, slotDir(1));
+    const own = await realpath(slotDir(1));
+    // It may serve as a slot for this repository, but opening Warden there never moves primary,
+    // state or deliveries to the sibling folder.
+    expect(await resolveRepo(own)).toEqual({ root: own, commonRoot: own });
+  });
+
   it('leaves a repository that is not a clone of this one out, and never writes in it', async () => {
     const other = slotDir(1);
     git(path.dirname(other), 'init', '-q', other);
