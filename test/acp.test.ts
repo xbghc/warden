@@ -1162,6 +1162,26 @@ describe('ACP subprocess conversations', () => {
     expect(transcript(restored).at(-1)).toEqual({ role: 'agent', text: 'Echo: next' });
   });
 
+  it('keeps the local transcript when a loaded session replays nothing', async () => {
+    const f = await fixture('task', 'load-without-replay');
+    await f.session.connect(f.profile, { resume: false });
+    await f.session.send('remember me');
+    const expected = transcript(f.session);
+    expect(expected).toHaveLength(2);
+    await f.session.disconnect();
+    const restored = f.create();
+    await restored.initialize();
+    await restored.connect(f.profile, { resume: true });
+    expect(restored.snapshot().status).toBe('connected');
+    expect(transcript(restored)).toEqual(expected);
+    // The retained display history survives the next save and the session stays usable.
+    await restored.send('next');
+    expect(transcript(restored)).toEqual([...expected, { role: 'user', text: 'next' }, { role: 'agent', text: 'Echo: next' }]);
+    const reopened = f.create();
+    await reopened.initialize();
+    expect(transcript(reopened)).toEqual(transcript(restored));
+  });
+
   it('requires a new conversation when the agent cannot load and archives rather than silently resending the old transcript', async () => {
     const f = await fixture('task', 'no-load');
     await f.session.connect(f.profile, { resume: false });

@@ -201,7 +201,8 @@ async function handle(message) {
       update('agent', 'LATE_TIMED_OUT_REPLAY');
       delayedLoad = undefined;
     }
-    if (method === 'session/load' && existsSync(historyFile)) {
+    // Some agents restore model state on load without replaying the conversation.
+    if (method === 'session/load' && mode !== 'load-without-replay' && existsSync(historyFile)) {
       for (const line of readFileSync(historyFile, 'utf8').split('\n').filter(Boolean)) {
         const message = JSON.parse(line);
         if (message.update) {

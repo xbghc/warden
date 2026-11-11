@@ -628,8 +628,12 @@ export class AcpSession {
         await this.options.validate();
         if (!this.current(runtime)) throw new Error('Connection closed.');
         this.initialControls(runtime, session);
-        const uncertain = this.record.messages.filter((item) => item.role === 'user' && item.uncertain);
-        this.record.messages = [...runtime.replay.messages, ...uncertain];
+        // An agent may restore model state without replaying the conversation. An empty replay then
+        // says nothing about the history, so the local transcript stays as the display record.
+        if (runtime.replay.messages.length) {
+          const uncertain = this.record.messages.filter((item) => item.role === 'user' && item.uncertain);
+          this.record.messages = [...runtime.replay.messages, ...uncertain];
+        } else if (this.record.messages.length) runtime.log.write('info', 'acp.session.replay_empty', { retained: this.record.messages.length });
         markUnsettledTools(this.record.messages);
         this.history = { messages: this.record.messages };
       } catch (error) {

@@ -381,7 +381,8 @@ On opening a disconnected or failed task chat, retire any failed connection and 
 and profile. A turn the agent has not settled, including one whose cancellation timed out, is not a
 failed connection: showing or selecting its chat leaves the process running. If the same agent supports
 `session/load`, load its saved session and treat replayed updates as display history, not tool
-execution or new prompts. Preserve the prior local record when loading fails. If loading is
+execution or new prompts. A load that replays nothing keeps the local transcript as the display
+history. Preserve the prior local record when loading fails. If loading is
 unsupported, offer **New Session** while retaining the previous record; local transcript storage is not
 a promise of restored model state. Changing agents likewise starts an explicit new conversation.
 An empty, uninterrupted conversation is an exception when Codex reports that its saved thread has
