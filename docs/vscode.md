@@ -67,7 +67,7 @@ renaming, delivery records, synchronization, copying and recovery. Allocation fa
 retry on the same task; script failure rows expose script output and retry.
 
 Task file lists collapse independently and preserve that choice across refreshes. Selecting a task
-restores its existing native diff and scroll; background updates do not advance a pinned review.
+opens its Task Chat while keeping any existing native diff and scroll intact; background updates do not advance a pinned review.
 Drag a task or press Alt+Up/Down with its row focused to change plan order. The Command Palette also
 provides an explicit move picker. Drag data and menu actions are bound to the originating repository
 session, so old operations cannot affect another requirement after navigation.
@@ -76,7 +76,7 @@ Add-task uses a native input box for the title. Enter creates the task and autom
 workspace and branch, then runs the configured initialization script. Escape cancels while retaining
 the draft and prior task selection. Drafts belong to their repository and base branch and
 clear after the task is saved. Directory and storage details require no user input. Older unallocated
-plans are prepared automatically on use; archived plans require restoration. Opening a task does not launch an agent.
+plans are prepared automatically on use; archived plans require restoration. Creating a task does not launch an agent.
 
 The commit action uses a native input box. Enter submits with ordinary Git hooks and signing;
 Escape retains the draft without staging. Task, repository and review version stay pinned while
@@ -222,7 +222,7 @@ resumes the saved session or creates the first session, without a manual connect
 New conversations use the agent verified in workbench setup; existing conversations retain their agent.
 Agent configuration and the ACP setup guide stay in workbench setup and settings.
 **Switch Task Chat** in the view title chooses another task; selecting a task
-in the workbench continues to open its diff. **Open Chat in Editor** expands the same conversation;
+in the workbench opens the same chat. **Open Chat in Editor** expands the same conversation;
 **Move Chat to Side Bar** returns it. Only one surface edits a task's chat at a time, while different
 tasks may be expanded side by side. Drafts and reading positions survive switching. The composer
 stays at the bottom, and session details and history scroll within the available height.

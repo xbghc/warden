@@ -331,7 +331,7 @@ The working copy implements the workflow above. It has not been published as a r
 | Delivery | All current undelivered saved workspace changes, pinned by source HEAD, saved content tree, delivery boundary and primary HEAD. No task commit prerequisite or file/commit subset picking. |
 | Extension commit | Normal primary-directory Git commit with hooks/signing. Failed hooks retain files/index. No test-passed checkbox or agent handoff. |
 | Rebase | Isolated checks and explicit single/selected/all execution, with per-workspace results and pinned heads. Actual conflicts are left for the user to handle. |
-| Navigation | Ordered tasks are top-level sidebar items. Settings is a native collapsible view stacked below Workbench. More Actions offers one preview execution action and Settings, with repository selection and persistent recovery actions when needed. Preview diagnostics use the status bar and output; secondary commands remain in the Command Palette. Selecting a task/file directly opens review. Preview has no editor page. |
+| Navigation | Ordered tasks are top-level sidebar items. Settings is a native collapsible view stacked below Workbench. More Actions offers one preview execution action and Settings, with repository selection and persistent recovery actions when needed. Preview diagnostics use the status bar and output; secondary commands remain in the Command Palette. Selecting a task opens its Task Chat; selecting a file directly opens review. Preview has no editor page. |
 
 `sourceBase` records the last delivered source tip, independently of the squash commit SHA.
 Each delivery has a stable identifier and a source range, primary parent, commit, message and

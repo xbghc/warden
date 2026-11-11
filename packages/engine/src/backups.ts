@@ -295,18 +295,26 @@ export async function discardOperationBackup(store: StateStore, backup: SafetyBa
     (backup.reason !== 'rebase' && backup.reason !== 'history')
   )
     throw new WardenError(409, 'Temporary backup path or purpose mismatch. The backup has been preserved.', 'backup_invalid');
+  // Removing a copy with dependencies can take long enough to be interrupted, and a partly
+  // removed directory has already lost its manifest. Rename the verified copy first, so a retry
+  // finds either the intact backup or a directory only this function could have produced.
+  const discarding = path.join(root, `.discarding-${backup.id}`);
   // Recovery can repeat after deletion succeeded but the following state write failed.
   const info = await lstat(backup.path).catch((error: NodeJS.ErrnoException) => {
     if (error.code !== 'ENOENT') throw error;
     return undefined;
   });
-  if (!info) return;
+  if (!info) {
+    await rm(discarding, { recursive: true, force: true });
+    return;
+  }
   if (!info.isDirectory() || info.isSymbolicLink())
     throw new WardenError(409, 'Temporary backup folder mismatch. The backup has been preserved.', 'backup_invalid');
   const manifest = JSON.parse(await readFile(path.join(backup.path, 'manifest.json'), 'utf8')) as Manifest;
   if (manifest.version !== 1 || manifest.id !== backup.id || manifest.reason !== backup.reason || manifest.head !== backup.head)
     throw new WardenError(409, 'Temporary backup manifest mismatch. The backup has been preserved.', 'backup_invalid');
-  await rm(backup.path, { recursive: true, force: true });
+  await rename(backup.path, discarding);
+  await rm(discarding, { recursive: true, force: true });
 }
 
 /** Completed backups are discoverable even if the operation or state update crashed afterward. */

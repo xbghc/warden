@@ -106,15 +106,16 @@ describe('task workspace parity across checkout kinds', () => {
       localAttribute: 'set',
       branchVisibleInPrimary: true,
     });
-    // Shared-repository worktrees use Warden's external repository, not primary's local setup.
+    // Warden's external repository mirrors what decides which files Git sees and how their bytes
+    // are stored, so preview agrees with primary. Hooks, signing and other settings stay out.
     expect(observed.shared).toEqual({
       hookRan: false,
-      autocrlf: null,
+      autocrlf: 'input',
       gpgsign: null,
       customLocal: null,
-      localLogUntracked: true,
-      previewHasLocalLog: true,
-      localAttribute: 'unspecified',
+      localLogUntracked: false,
+      previewHasLocalLog: false,
+      localAttribute: 'set',
       branchVisibleInPrimary: false,
     });
     // Independent clones copy primary's hooks, local settings and info files when they are made.

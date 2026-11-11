@@ -1,4 +1,5 @@
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -95,6 +96,66 @@ describe.each(['working', 'all', 'base'] as const)('%s live full file contents',
       await rm(path.join(checkout, 'src', 'file.ts'));
       expect(await getFullFile(context, 'src/file.ts', 'new')).toBeNull();
       expect(await getFullFile(context, 'file-link', 'new')).toBe(path.join('src', 'file.ts'));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('full file contents that are not files', () => {
+  const git = (cwd: string, ...args: string[]) =>
+    execFileSync('git', args, {
+      cwd,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        GIT_CONFIG_GLOBAL: os.devNull,
+        GIT_CONFIG_SYSTEM: os.devNull,
+        GIT_AUTHOR_NAME: 'F',
+        GIT_AUTHOR_EMAIL: 'f@example.com',
+        GIT_COMMITTER_NAME: 'F',
+        GIT_COMMITTER_EMAIL: 'f@example.com',
+      },
+    });
+
+  it('reports a path that is a directory in the revision as absent', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'warden-file-trees-'));
+    try {
+      git(root, 'init', '-q', '-b', 'main');
+      await writeFile(path.join(root, 'name'), 'a file\n');
+      git(root, 'add', '.');
+      git(root, 'commit', '-qm', 'File');
+      await rm(path.join(root, 'name'));
+      await mkdir(path.join(root, 'name'));
+      await writeFile(path.join(root, 'name', 'inner.txt'), 'inner\n');
+      git(root, 'add', '-A');
+      git(root, 'commit', '-qm', 'Directory');
+      const context: TargetContext = { cwd: root, key: 'commit:HEAD', target: { kind: 'commit', sha: git(root, 'rev-parse', 'HEAD').trim() } };
+      expect(await getFullFile(context, 'name', 'old')).toBe('a file\n');
+      expect(await getFullFile(context, 'name', 'new')).toBeNull();
+      expect(await getFullFile(context, 'name/inner.txt', 'new')).toBe('inner\n');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('never reads through a directory replaced by a symlink', async ({ skip }) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'warden-file-parents-'));
+    const checkout = path.join(root, 'checkout');
+    try {
+      await mkdir(path.join(root, 'outside'));
+      await writeFile(path.join(root, 'outside', 'key.json'), 'outside secret\n');
+      await mkdir(checkout);
+      await mkdir(path.join(checkout, 'kept'));
+      await writeFile(path.join(checkout, 'kept', 'key.json'), 'inside\n');
+      try {
+        await symlink(path.join(root, 'outside'), path.join(checkout, 'linked'), 'dir');
+      } catch {
+        skip();
+      }
+      const context: TargetContext = { cwd: checkout, key: 'working', target: { kind: 'working' } };
+      expect(await getFullFile(context, 'kept/key.json', 'new')).toBe('inside\n');
+      expect(await getFullFile(context, 'linked/key.json', 'new')).toBeNull();
     } finally {
       await rm(root, { recursive: true, force: true });
     }

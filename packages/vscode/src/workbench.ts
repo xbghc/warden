@@ -328,6 +328,13 @@ export class Workbench {
       this.renameInput?.hide();
     }
     if (this.agentReady && this.repositoryState === 'ready' && !this.branchTransition && this.data?.workflow) {
+      if (this.backend)
+        this.conversations.prewarm(
+          this.backend.root,
+          this.tasks()
+            .filter((task) => task.worktree && !task.deletion)
+            .map((task) => task.id),
+        );
       const preview = this.preview;
       const sync = preview?.syncStatus ?? preview?.status ?? 'disconnected';
       const problem = ['stale', 'conflict', 'error', 'paused'].includes(sync) || preview?.setup?.status === 'failed';
@@ -427,6 +434,8 @@ export class Workbench {
       } catch (error) {
         failed = true;
         this.log.write('error', 'extension.initialize.failed', { diagnostic: acpErrorDiagnostic(error) });
+        // Falling back to Select Repository without a reason hides what needs fixing.
+        this.report(error, 'repository');
       } finally {
         this.initializing = false;
         await this.updateContext(span);
@@ -454,15 +463,23 @@ export class Workbench {
     this.session = randomUUID();
     this.invalidateChecks();
     this.status.hide();
+    // The previous engine owns a preview lease, watchers and a timer. Nothing below may skip
+    // closing it, or it keeps running against a repository this window no longer shows.
+    let retired = false;
+    const retire = async () => {
+      if (retired) return;
+      retired = true;
+      await previous?.close();
+    };
     try {
       // Publish menu contexts while the old native tree still exists; replacing
       // its roots first lets VS Code rerender removed rows during context updates.
       await this.updateContext(span);
       this.render();
       await span.measure('repository.wait', async () => {
-        await Promise.allSettled([...this.navigation]);
-        await this.reading;
-        await previous?.close();
+        // A failed read of the repository being left is not a reason to stay on it.
+        await Promise.allSettled([...this.navigation, this.reading]);
+        await retire();
       });
       this.backend = await span.measure('engine.open', () => Engine.open(directory, undefined, this.log));
       // The primary path is known now; agent readiness does not depend on Git inventories
@@ -496,6 +513,7 @@ export class Workbench {
       this.reviewUris.clear();
       await span.measure('repository.refresh', (refresh) => this.refresh(false, refresh));
     } catch (error) {
+      await retire().catch((closing) => this.log.write('error', 'repository.retire.failed', { diagnostic: acpErrorDiagnostic(closing) }));
       await this.backend?.close();
       this.backend = undefined;
       throw error;
@@ -629,7 +647,16 @@ export class Workbench {
     const title = (id: string) => this.tasks().find((task) => task.id === id)?.title ?? id;
     const updated = outcome.results.filter((row) => row.status === 'updated');
     const failed = outcome.results.filter((row) => row.status !== 'updated');
-    this.log.write(failed.length ? 'warn' : 'info', 'workbench.autoRebase.end', { updated: updated.length, failed: failed.length });
+    this.log.write(failed.length ? 'warn' : 'info', 'workbench.autoRebase.end', {
+      updated: updated.length,
+      failed: failed.length,
+      diagnostic: failed.length
+        ? failed
+            .map((row) => `${row.changeId}: ${row.message ?? row.status}`)
+            .join('\n')
+            .slice(0, 2000)
+        : undefined,
+    });
     if (updated.length)
       void vscode.window.showInformationMessage(
         updated.length === 1 ? `Rebased ${title(updated[0]!.changeId)} onto ${this.branch}` : `Rebased ${updated.length} tasks onto ${this.branch}`,
@@ -881,7 +908,8 @@ export class Workbench {
         }
       } catch (error) {
         if (current()) {
-          this.checkSignature = undefined;
+          // Keep the signature: the same inputs would fail the same way on every background
+          // refresh. Check Again and any change to the inputs still start a new check.
           for (const check of this.checks?.checks ?? []) check.message = 'Synchronization check failed. Check again to retry.';
           this.report(error, 'rebase');
         }
@@ -1231,7 +1259,7 @@ export class Workbench {
     this.expanded[node.task.id] = expanded;
     await this.context.workspaceState.update(`warden.expanded:${this.backend.root}`, this.expanded);
   }
-  private async selectTask(node?: Node, action: 'review' | 'select' = 'review', refreshReview = false) {
+  private async selectTask(node?: Node, action: 'chat' | 'review' | 'select' = 'chat', refreshReview = false) {
     const session = this.session;
     let task = await this.pickTask(node);
     if (!task || session !== this.session) return;
@@ -1242,6 +1270,10 @@ export class Workbench {
     await this.branchViews.select(this.backend!.root, task.developmentBranch, task.id);
     if (session !== this.session) return;
     this.render();
+    if (action === 'chat' && task.worktree) {
+      await this.conversations.show(this.backend!.root, task.id);
+      return;
+    }
     if (action === 'review' && task.worktree) {
       const uris = this.reviewUris.get(task.id);
       const tabs = vscode.window.tabGroups.all
@@ -1465,12 +1497,22 @@ export class Workbench {
     if (!task?.worktree) return;
     const current = await this.readReview(task.id);
     if (task.integration && !task.integration.prepared && !current?.preparation) {
-      await this.api('task.prepare', {
-        taskId: task.id,
-        sourceHead: task.integration.source,
-        sourceTree: task.integration.sourceTree,
-        developmentHead: task.integration.parent,
-      });
+      try {
+        await this.api('task.prepare', {
+          taskId: task.id,
+          sourceHead: task.integration.source,
+          sourceTree: task.integration.sourceTree,
+          developmentHead: task.integration.parent,
+        });
+      } catch (error) {
+        if (!(error instanceof WardenError) || error.code !== 'review_changed') throw error;
+        // The pinned heads moved, so the unprepared record can never be completed. It staged
+        // nothing; the engine discards it only while the primary folder is clean.
+        await this.api('task.resume', { taskId: task.id });
+        this.reviews.delete(task.id);
+        void vscode.window.showWarningMessage('The interrupted commit preparation was discarded because code changed. Reopen the diff and review again.');
+        return;
+      }
       this.reviews.delete(task.id);
       void vscode.window.showInformationMessage('Commit preparation was recovered. Reopen the diff to review the contents preserved in the primary folder.');
       return;

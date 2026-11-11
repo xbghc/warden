@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { cp, mkdir, readdir, rm } from 'node:fs/promises';
+import { cp, mkdir, readdir, rm, stat } from 'node:fs/promises';
 import type { RemoveWorktreeResponse, SafetyBackup, WorktreeInfo } from '@warden/shared';
 import { assertSafetyBackupCurrent, createSafetyBackup } from './backups.js';
 import type { StateStore } from './state.js';
@@ -116,6 +116,53 @@ async function copyLocalSetup(main: string, dir: string): Promise<void> {
       if (e.code !== 'ENOENT') throw e;
     });
   }
+}
+
+/** Settings that decide which files Git sees and how their bytes are stored. */
+const RUNTIME_CONFIG = /^(core\.(autocrlf|eol|safecrlf)|(filter|merge|diff)\..+\..+)$/;
+const mirrored = new Map<string, { common: string; signature?: string }>();
+
+/**
+ * Keeps the bare shared repository's view of files aligned with primary. Preview and composition
+ * worktrees read `info/exclude`, `info/attributes` and drivers from it, so a file ignored only
+ * locally in primary must not count as an unexpected preview edit. Primary can change these at
+ * any time; unchanged files are detected by stat and cost no Git process. Hooks, identity and
+ * signing stay out: internal composition disables them per command.
+ */
+export async function mirrorLocalSetup(main: string, repository: string): Promise<void> {
+  let known = mirrored.get(repository);
+  if (!known) {
+    known = { common: path.resolve(main, (await runGit(['rev-parse', '--git-common-dir'], { cwd: main })).stdout.trim()) };
+    mirrored.set(repository, known);
+  }
+  const sources = ['config', path.join('info', 'exclude'), path.join('info', 'attributes')].map((name) => path.join(known.common, name));
+  const stats = await Promise.all(
+    sources.map((file) =>
+      stat(file).then(
+        (info) => `${info.mtimeMs}:${info.size}`,
+        () => 'missing',
+      ),
+    ),
+  );
+  const signature = stats.join('|');
+  if (known.signature === signature) return;
+  const [source, shared] = await Promise.all([copiedConfig(main), copiedConfig(repository)]);
+  for (const [key, values] of source) {
+    if (!RUNTIME_CONFIG.test(key) || shared.get(key)?.join('\0') === values.join('\0')) continue;
+    await runGitWrite(['config', '--replace-all', key, values[0]!], { cwd: repository });
+    for (const value of values.slice(1)) await runGitWrite(['config', '--add', key, value], { cwd: repository });
+  }
+  // A value primary no longer resolves can only be an earlier mirrored copy.
+  for (const key of shared.keys()) if (RUNTIME_CONFIG.test(key) && !source.has(key)) await runGitWrite(['config', '--unset-all', key], { cwd: repository });
+  for (const name of ['exclude', 'attributes']) {
+    const to = path.join(repository, 'info', name);
+    await mkdir(path.dirname(to), { recursive: true });
+    await cp(path.join(known.common, 'info', name), to, { dereference: true, force: true }).catch(async (e: NodeJS.ErrnoException) => {
+      if (e.code !== 'ENOENT') throw e;
+      await rm(to, { force: true });
+    });
+  }
+  known.signature = signature;
 }
 
 /**

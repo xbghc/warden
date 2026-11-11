@@ -9,4 +9,6 @@ export { parseUnifiedDiff } from './diffparse.js';
 export { WorkflowService } from './workflow.js';
 export { PreviewService } from './preview.js';
 export { HistoryService } from './history.js';
+export { inspectTaskWorktree } from './worktrees.js';
 export { taskConnectionPaths } from './task-access.js';
+export { processExited } from './liveness.js';

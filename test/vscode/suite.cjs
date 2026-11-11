@@ -8,7 +8,6 @@ const { checkTaskDeletion } = require('./deletion.cjs');
 const { checkBranches } = require('./branches.cjs');
 const { checkSettings } = require('./settings.cjs');
 const { checkSidebar } = require('./sidebar.cjs');
-const { checkAutoRebase } = require('./autorebase.cjs');
 const { checkPreviewLineEndings, checkPreviewActions, checkPreviewTerminals } = require('./preview.cjs');
 const { checkRepositoryLoading } = require('./repository.cjs');
 const { checkAgentSetup, checkAgentPresets, verifyAgent } = require('./agent-setup.cjs');
@@ -75,8 +74,6 @@ exports.run = async () => {
     await checkBranches(workbench, fixture.unconfigured, eventually);
     console.log('Checking native task sidebar');
     await checkSidebar(workbench, extension, fixture.unconfigured, eventually);
-    console.log('Checking automatic rebase');
-    await checkAutoRebase(workbench, workbench.backend.root, eventually);
     await workbench.open(fixture.root);
     assert.equal(workbench.backend.store.file, fixture.state);
     console.log('Checking preview terminal reuse');
@@ -134,12 +131,15 @@ exports.run = async () => {
     await workbench.rememberExpansion(tasks[0], false);
     await workbench.handleAction({ type: 'task.message', taskId: tasks[0].task.id, message: 'Keep this draft' }, workbench.session);
     await workbench.selectTask(tasks[0]);
+    assert.equal(workbench.conversations.sidebarEntry?.binding.taskId, tasks[0].task.id, 'selecting a task opens its Task Chat');
+    await eventually(() => workbench.conversations.sidebarEntry?.session.snapshot().status === 'connected');
     assert.equal(workbench.workspaceRow(tasks[0].task).expanded, false, 'selecting a task does not reopen its changed files');
     assert(
       vscode.window.tabGroups.all.flatMap((group) => group.tabs).some((tab) => tab === diff),
       'selecting the task retains the existing native diff',
     );
     assert.equal(workbench.model('workspaces').message, 'Keep this draft');
+    await workbench.conversations.forgetTask(fixture.root, tasks[0].task.id);
     // Rebase is the only Workbench editor panel; tasks never open one.
     const taskPanelOpen = () => [...workbench.views.panels.keys()].some((surface) => surface !== 'rebase');
     assert.equal(taskPanelOpen(), false, 'task controls stay out of the editor area');

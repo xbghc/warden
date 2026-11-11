@@ -99,7 +99,8 @@ prompt retry. A provider may defer authentication or network validation until a 
 cannot guarantee every later turn will succeed. Observed failures of the selected agent close the gate.
 
 Disconnect, configuration changes and extension shutdown cancel pending attempts and retire the owned
-stdio process with bounded termination. Late results cannot mark a replaced connection ready. Task
+stdio process with bounded termination. Task connections escalate from SIGTERM to SIGKILL within
+about two seconds each, inside the time VS Code allows for shutdown. Late results cannot mark a replaced connection ready. Task
 conversations keep their own process and session cwd in the assigned task workspace, independently
 of this startup connection. Shutdown also closes those connections, flushes local conversation/draft
 state and releases their claims. It does not supervise agent-owned child commands. Existing task data,
@@ -172,8 +173,8 @@ never triggers an automatic prompt retry.
 ## Task-bound conversations
 
 Each conversation belongs to one repository, task allocation and workspace identity. It retains the
-original repository Engine; selecting another task or repository does not retarget its draft,
-permission answers or review action. **Chat with Agent** opens the conversation in a shared Task Chat
+original repository Engine; selecting another repository does not retarget its draft,
+permission answers or review action. Selecting a task or choosing **Chat with Agent** opens the conversation in a shared Task Chat
 view, contributed to the Secondary Side Bar (VS Code 1.106+). Explicit chat selection changes which
 conversation the view presents. **Open Chat in Editor** and **Move Chat to Side Bar** transfer its one
 editable surface without creating a session or process. Multiple tasks can have editor chats open.
@@ -186,7 +187,8 @@ Opening a chat shows saved history and automatically prepares its agent connecti
 session exists, resume it with `session/load`; otherwise create the first session with `session/new`.
 Opening a chat sends no prompt. New conversations use the profile
 verified in workbench setup, independent of settings order or an older saved view selection. Existing
-records retain their original profile, including after the workbench agent changes. The host rejects
+records retain their original profile, including after the workbench agent changes. A conversation
+whose first connection failed before any session existed is still new and keeps no profile. The host rejects
 stale profile choices for new conversations. Repeated opens share a pending connection attempt or reuse
 the active session, without delaying navigation. Sending after a disconnect also restores the session
 before submitting the new message. One executable connection
@@ -376,7 +378,8 @@ Record replacement remains atomic while bounded retries tolerate brief filesyste
 If replacement keeps failing, the previous record is retained and the save error remains visible.
 
 On opening a disconnected or failed task chat, retire any failed connection and revalidate the binding
-and profile. If the same agent supports
+and profile. A turn the agent has not settled, including one whose cancellation timed out, is not a
+failed connection: showing or selecting its chat leaves the process running. If the same agent supports
 `session/load`, load its saved session and treat replayed updates as display history, not tool
 execution or new prompts. Preserve the prior local record when loading fails. If loading is
 unsupported, offer **New Session** while retaining the previous record; local transcript storage is not

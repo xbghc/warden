@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { readdir, realpath, stat } from 'node:fs/promises';
+import { lstat, readdir, realpath, stat } from 'node:fs/promises';
 import type { WorktreeInfo } from '@warden/shared';
 import { refExists, runGit } from './git.js';
 import { WardenError } from './errors.js';
@@ -105,10 +105,14 @@ export const CLONE_MARK = 'warden.main';
  * recognised by a remote the main worktree has as well, the server both were cloned from; and for a
  * repository with no server, by a remote that is the main worktree itself.
  */
-export async function isCloneOf(mainRoot: string, dir: string, mainRemotes?: Map<string, RemoteConfig>): Promise<boolean> {
+export async function isCloneOf(
+  mainRoot: string,
+  dir: string,
+  mainRemotes?: Map<string, RemoteConfig> | (() => Promise<Map<string, RemoteConfig>>),
+): Promise<boolean> {
   const mark = (await runGit(['config', '--get', CLONE_MARK], { cwd: dir, okCodes: [0, 1] })).stdout.trim();
   if (mark && (await realpath(mark).catch(() => mark)) === mainRoot) return true;
-  const [ours, theirs] = await Promise.all([mainRemotes ?? readRemotes(mainRoot), readRemotes(dir)]);
+  const [ours, theirs] = await Promise.all([typeof mainRemotes === 'function' ? mainRemotes() : (mainRemotes ?? readRemotes(mainRoot)), readRemotes(dir)]);
   const known = new Set([...ours.values()].flatMap((r) => r.urls));
   for (const r of theirs.values()) {
     for (const url of r.urls) {
@@ -183,31 +187,45 @@ export async function resolveRepo(dir: string): Promise<RepoContext> {
  * there that is not a clone of this one is left out — it is not ours to write in — and its number
  * stays taken, as any directory with something in it does.
  */
-async function listCloneSlots(ctx: RepoContext, listed: Set<string>): Promise<(WorktreeInfo & { prunable: boolean })[]> {
+async function listCloneSlots(ctx: RepoContext, listed: Set<string>, onlyPath?: string): Promise<(WorktreeInfo & { prunable: boolean })[]> {
   const parent = path.dirname(ctx.commonRoot);
-  const entries = await readdir(parent, { withFileTypes: true }).catch(() => []);
-  const candidates = entries
+  let candidates: string[];
+  if (onlyPath) {
     // A symlink is not a directory entry here: a slot is a directory beside the main worktree, not a way elsewhere.
-    .filter((e) => e.isDirectory() && slotOf(ctx, path.join(parent, e.name)) !== undefined)
-    .map((e) => path.join(parent, e.name))
-    .filter((p) => !listed.has(p));
+    const entry =
+      !listed.has(onlyPath) && path.dirname(onlyPath) === parent && slotOf(ctx, onlyPath) !== undefined
+        ? await lstat(onlyPath).catch(() => undefined)
+        : undefined;
+    candidates = entry?.isDirectory() ? [onlyPath] : [];
+  } else {
+    const entries = await readdir(parent, { withFileTypes: true }).catch(() => []);
+    candidates = entries
+      .filter((e) => e.isDirectory() && slotOf(ctx, path.join(parent, e.name)) !== undefined)
+      .map((e) => path.join(parent, e.name))
+      .filter((p) => !listed.has(p));
+  }
   if (!candidates.length) return [];
-  const remotes = await readRemotes(ctx.commonRoot);
+  let remotes: Promise<Map<string, RemoteConfig>> | undefined;
+  const getRemotes = () => (remotes ??= readRemotes(ctx.commonRoot));
   const found = await Promise.all(
     candidates.map(async (dir) => {
       const git = await stat(path.join(dir, '.git')).catch(() => undefined);
-      if (!git?.isDirectory() || (await ownRoot(dir)) !== dir || !(await isCloneOf(ctx.commonRoot, dir, remotes))) return undefined;
+      if (!git?.isDirectory()) return undefined;
       try {
-        const [head, ref] = await Promise.all([
-          runGit(['rev-parse', '--verify', 'HEAD'], { cwd: dir }),
-          runGit(['rev-parse', '--symbolic-full-name', 'HEAD'], { cwd: dir }),
+        const [rev, clone] = await Promise.all([
+          runGit(['rev-parse', '--show-toplevel', '--git-common-dir', 'HEAD', '--symbolic-full-name', 'HEAD'], { cwd: dir }),
+          isCloneOf(ctx.commonRoot, dir, getRemotes),
         ]);
-        const name = ref.stdout.trim();
+        if (!clone) return undefined;
+        const [top = '', common = '', head = '', name = ''] = rev.stdout.trim().split('\n');
+        if (!top || !common || !head) return undefined;
+        const root = await realpath(top);
+        if (root !== dir || (await realpath(path.resolve(dir, common))) !== path.join(root, '.git')) return undefined;
         const branch = name.startsWith('refs/heads/') ? name.slice('refs/heads/'.length) : undefined;
-        const trunk = await remoteDefault(dir);
+        const trunk = onlyPath ? undefined : await remoteDefault(dir);
         return {
           path: dir,
-          head: head.stdout.trim(),
+          head,
           branch,
           isMain: false,
           detached: !branch,
@@ -270,7 +288,11 @@ async function listedWorktrees(cwd: string): Promise<(WorktreeInfo & { prunable:
   return out;
 }
 
-export async function listWorktreesAll(ctx: RepoContext): Promise<(WorktreeInfo & { prunable: boolean })[]> {
+export async function listWorktreesAll(ctx: RepoContext, onlyPath?: string): Promise<(WorktreeInfo & { prunable: boolean })[]> {
+  if (onlyPath && onlyPath !== ctx.commonRoot && slotOf(ctx, onlyPath) !== undefined) {
+    const git = await lstat(path.join(onlyPath, '.git')).catch(() => undefined);
+    if (git?.isDirectory()) return listCloneSlots(ctx, new Set([ctx.commonRoot]), onlyPath);
+  }
   // Internal preview and replay worktrees are deliberately absent from the public task inventory.
   const [primary, repository] = await Promise.all([listedWorktrees(ctx.commonRoot), validatedSharedRepository(ctx.commonRoot)]);
   for (const wt of primary) wt.isMain = wt.path === ctx.commonRoot;
@@ -278,7 +300,8 @@ export async function listWorktreesAll(ctx: RepoContext): Promise<(WorktreeInfo 
     ? (await listedWorktrees(repository)).filter((wt) => !wt.bare && slotOf(ctx, wt.path) !== undefined).map((wt) => ({ ...wt, shared: true }))
     : [];
   const out = [...primary, ...shared.filter((wt) => !primary.some((other) => other.path === wt.path))];
-  return [...out, ...(await listCloneSlots(ctx, new Set(out.map((w) => w.path))))];
+  if (onlyPath && out.some((w) => w.path === onlyPath)) return out;
+  return [...out, ...(await listCloneSlots(ctx, new Set(out.map((w) => w.path)), onlyPath))];
 }
 
 /**

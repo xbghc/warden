@@ -752,6 +752,8 @@ try:
         first.get_by_role('button', name='More Chat Actions', exact=True).click()
         expect(first.get_by_role('menuitem', name='Info: Hide', exact=True)).to_be_visible()
         first.keyboard.press('Escape')
+        # The open menu captures pointer events until it has fully closed.
+        expect(first.get_by_role('menu')).to_have_count(0)
         expect(first.get_by_label('Session Usage', exact=True)).to_contain_text('1,200 / 8,000 tokens')
         expect(first.get_by_label('Session Usage', exact=True)).to_contain_text('0.02 USD')
         expect(first.get_by_text('会话更新提示', exact=True)).to_be_visible()

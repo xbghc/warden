@@ -277,7 +277,7 @@ export class Sidebar implements vscode.TreeDataProvider<SidebarNode>, vscode.Tre
                   ? 'git-branch'
                   : 'circle-outline',
       );
-      item.command = { command: 'warden.selectTask', title: 'View Task Changes', arguments: [node] };
+      item.command = { command: 'warden.selectTask', title: 'Open Task Chat', arguments: [node] };
       return item;
     }
     if (node.kind === 'folder') {

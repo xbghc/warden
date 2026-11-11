@@ -17,7 +17,9 @@ const validPath = (value: unknown): value is string =>
 export function repositoryReadRequest(request: RequestPermissionRequest, workspace: string) {
   const tool = request.toolCall;
   const choices = request.options.filter((option) => option.kind === 'allow_once');
-  if (tool.kind !== 'read' || choices.length !== 1 || !choices[0]!.optionId || tool.content?.some((item) => item.type === 'diff')) return;
+  // Terminal output marks a command, whatever kind the agent reported for it.
+  if (tool.kind !== 'read' || choices.length !== 1 || !choices[0]!.optionId || tool.content?.some((item) => item.type === 'diff' || item.type === 'terminal'))
+    return;
   if (request.options.filter((option) => option.optionId === choices[0]!.optionId).length !== 1) return;
   if (!tool.locations?.length || tool.locations.length > 32) return;
   const paths: string[] = [];
@@ -47,7 +49,8 @@ function relativeSource(root: string, file: string) {
         /^(?:\.git|\.hg|\.svn|\.ssh|\.aws|\.azure|\.gnupg|\.kube|\.codex|\.claude|\.config|\.npmrc|\.netrc|\.pypirc|\.git-credentials|\.gitconfig)$/i.test(
           part,
         ) ||
-        /^(?:\.env(?:\.|$)|credentials?(?:\.|$)|secrets?(?:\.|$)|id_(?:rsa|dsa|ecdsa|ed25519)(?:\.|$))/i.test(part) ||
+        /^(?:\.env|credentials?(?:\.|$)|secrets?(?:\.|$)|id_(?:rsa|dsa|ecdsa|ed25519)(?:\.|$))/i.test(part) ||
+        /\.env$/i.test(part) ||
         /\.(?:pem|key|p12|pfx)$/i.test(part) ||
         part.includes(':'),
     )

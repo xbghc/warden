@@ -39,3 +39,8 @@ export interface AcpSessionOptions {
   connectionFailed?(profile: AcpProfile, message: string): void;
   timeoutMs?: number;
 }
+
+/** The SDK's own default. Stored text is truncated separately, so a large tool result or image
+ * must not be treated as a broken connection.
+ */
+export const MAX_ACP_MESSAGE_BYTES = 32 * 1024 * 1024;

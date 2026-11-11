@@ -20,7 +20,8 @@
     "workspace"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "onStartupFinished",
+    "onFileSystem:warden-review"
   ],
   "capabilities": {
     "untrustedWorkspaces": {
@@ -234,7 +235,7 @@
       },
       {
         "command": "warden.selectTask",
-        "title": "View Task Changes",
+        "title": "Open Task Chat",
         "category": "Warden",
         "enablement": "warden.agentReady"
       },

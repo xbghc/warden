@@ -215,6 +215,8 @@ exports.checkSidebar = async (workbench, extension, repository, eventually) => {
   assert.equal(workbench.tasks().at(-1).id, secondId, 'dropping at the root moves to the end');
   await vscode.commands.executeCommand('warden.selectTask', first);
   assert.equal(taskPanelOpen(), false, 'task selection keeps the editor free for review');
+  assert.equal(workbench.conversations.sidebarEntry?.binding.taskId, firstId, 'selecting a task opens its Task Chat');
+  await eventually(() => workbench.conversations.sidebarEntry?.session.snapshot().status === 'connected');
   nodes = await workbench.sidebar.getChildren();
   const workspace = nodes.find((node) => node.task.id === firstId);
   assert.match(workbench.sidebar.getTreeItem(workspace).contextValue, /^wardenTask:workspace/);
@@ -270,11 +272,13 @@ exports.checkSidebar = async (workbench, extension, repository, eventually) => {
   );
   const legacyWorkspace = workbench.tasks().find((task) => task.id === legacy.task.id).worktree;
   assert(legacyWorkspace, 'opening a legacy task prepares its workspace without a separate creation action');
+  assert.equal(workbench.conversations.sidebarEntry?.binding.taskId, legacy.task.id, 'selecting a legacy task opens its Task Chat');
   await vscode.commands.executeCommand(
     'warden.selectTask',
     current.find((node) => node.task.id === legacy.task.id),
   );
   assert.equal(workbench.tasks().find((task) => task.id === legacy.task.id).worktree, legacyWorkspace, 'reselection keeps the same workspace');
+  await eventually(() => workbench.conversations.sidebarEntry?.session.snapshot().status === 'connected');
   const renameTarget = current.find((node) => node.task.id === firstId);
   const originalTitle = renameTarget.task.title;
   const rename = async (value) => {
@@ -316,5 +320,6 @@ exports.checkSidebar = async (workbench, extension, repository, eventually) => {
   assert.equal(workbench.renameInput, undefined);
   assert.equal(taskPanelOpen(), false, 'renaming opens no webview');
   assert.equal(workbench.tasks().find((task) => task.id === firstId).body, undefined, 'tasks have titles only');
+  for (const taskId of [firstId, legacy.task.id]) await workbench.conversations.forgetTask(repository, taskId);
   token.dispose();
 };

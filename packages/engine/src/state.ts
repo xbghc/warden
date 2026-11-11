@@ -2,6 +2,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { processExited } from './liveness.js';
 import { lstat, mkdir, open, readFile, readdir, rename, rm, rmdir, unlink, utimes, writeFile } from 'node:fs/promises';
 import type { Prefs, ReviewState } from '@warden/shared';
 import { sha1 } from './hash.js';
@@ -128,18 +129,14 @@ const LOCK_STALE_MS = 5_000;
 const LOCK_WAIT_MS = 5_000;
 const RENAME_ATTEMPTS = 6;
 
-function lockOwnerHasExited(owner: string | undefined): boolean {
+function lockOwnerHasExited(owner: string | undefined, heartbeat?: number): boolean {
   const match = /^([1-9]\d*):[^:\r\n]+$/.exec(owner ?? '');
   const pid = match ? Number(match[1]) : undefined;
   // Incomplete owner records or uncertain process status stay occupied. An interrupted
   // owner-record write may need manual inspection; age alone cannot permit concurrent writes.
   if (pid === undefined || !Number.isSafeInteger(pid)) return false;
-  try {
-    process.kill(pid, 0);
-    return false;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'ESRCH';
-  }
+  // A heartbeat from before this boot is the one age that does prove the owner gone.
+  return processExited(pid, heartbeat);
 }
 
 async function sleep(ms: number): Promise<void> {
@@ -221,7 +218,7 @@ async function reclaimLock(lock: string): Promise<boolean> {
       const metadata = await lstat(owner);
       if (!metadata.isFile() || Date.now() - metadata.mtimeMs <= LOCK_STALE_MS) return false;
       const token = await readFile(owner, 'utf8');
-      if (token !== `${match[1]}:${match[2]}` || !lockOwnerHasExited(token)) return false;
+      if (token !== `${match[1]}:${match[2]}` || !lockOwnerHasExited(token, metadata.mtimeMs)) return false;
       // The unique filename, unlike the shared directory path, can never name a newer owner.
       await unlink(owner).catch((error) => {
         if (errorCode(error) !== 'ENOENT') throw error;

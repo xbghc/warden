@@ -6,6 +6,7 @@ import { client, ndJsonStream, PROTOCOL_VERSION, type ClientConnection } from '@
 import type { AcpAuthMethod, AcpReadiness } from '@warden/shared';
 import { DiagnosticLog, diagnosticError } from '@warden/shared';
 import type { AcpProfile, AgentProcessInfo } from './contracts.js';
+import { MAX_ACP_MESSAGE_BYTES } from './contracts.js';
 import type { PerformanceLog, PerformanceOutcome, PerformanceSpan, PerformanceStage } from '../performance.js';
 import { AcpStderr, acpDiagnosticSecrets, acpErrorDiagnostic, redactAcpDiagnostic } from './diagnostics.js';
 
@@ -129,7 +130,7 @@ export class AcpReadinessCheck {
         log.write('debug', 'acp.permission.cancelled', { reason: 'workbench_connection' });
         return { outcome: { outcome: 'cancelled' } };
       })
-      .connect(ndJsonStream(Writable.toWeb(child.stdin), Readable.toWeb(child.stdout), { maxMessageBytes: 2 * 1024 * 1024 }));
+      .connect(ndJsonStream(Writable.toWeb(child.stdin), Readable.toWeb(child.stdout), { maxMessageBytes: MAX_ACP_MESSAGE_BYTES }));
     let ended!: () => void;
     let reject!: (error: Error) => void;
     const runtime: Runtime = {

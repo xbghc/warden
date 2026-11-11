@@ -21,11 +21,15 @@ export async function deliveryBase(change: DevelopmentChange, head: string, targ
   // task is then the boundary, so those commits are never delivered, replayed or previewed as task
   // changes. The task clone may lack newer primary commits, so each side lists its own history. A
   // delivered source tip is not on primary, so it lists nothing there and keeps precedence.
-  const since = async (repository: string, tip: string) => {
-    const result = await runGit(['rev-list', '--topo-order', tip, '--not', stored, '--'], { cwd: repository, okCodes: [0, 128] });
+  const since = async (repository: string, tip: string, exclude = stored) => {
+    const result = await runGit(['rev-list', '--topo-order', tip, '--not', exclude, '--'], { cwd: repository, okCodes: [0, 128] });
     return result.code === 0 ? result.stdout.split('\n').filter(Boolean) : [];
   };
-  const onPrimary = await since(primary, target);
+  // A delivered source tip exists only in the task. Primary's history since that delivery starts
+  // at the commit the delivery created; without it, a sync made after a committed delivery would
+  // be forgotten as soon as primary moved again.
+  const known = await runGit(['rev-parse', '--verify', '--quiet', `${stored}^{commit}`], { cwd: primary, okCodes: [0, 1, 128] });
+  const onPrimary = await since(primary, target, known.code === 0 ? stored : (change.deliveries?.at(-1)?.commit ?? stored));
   if (!onPrimary.length) return stored;
   const inTask = new Set(await since(cwd, head));
   return onPrimary.find((commit) => inTask.has(commit)) ?? stored;
@@ -34,24 +38,37 @@ export async function deliveryBase(change: DevelopmentChange, head: string, targ
 /** Saved delivery content belongs only to its recorded source boundary. A manual
  * rebase or merge that advances that boundary also supersedes the saved tree.
  */
-export function deliveryContentBase(change: DevelopmentChange, boundary: string): string {
-  return boundary === (change.sourceBase ?? change.base) ? (change.sourceTree ?? boundary) : boundary;
+export function deliveryContentBase(change: DevelopmentChange, boundary: string, delivered: string | undefined): string {
+  return boundary === (change.sourceBase ?? change.base) ? (delivered ?? boundary) : boundary;
 }
 
-export async function patchBetween(cwd: string, from: string, to: string, snapshot?: SnapshotEnv) {
+/** Saved content counts as delivered only while its delivery commit is still on the base branch.
+ * After that commit is reset away, the same content is undelivered again.
+ */
+export async function deliveredTree(change: DevelopmentChange, target: string, primary: string): Promise<string | undefined> {
+  const commit = change.deliveries?.at(-1)?.commit;
+  if (!change.sourceTree || !commit) return change.sourceTree;
+  const kept = await runGit(['merge-base', '--is-ancestor', commit, target], { cwd: primary, okCodes: [0, 1, 128] });
+  return kept.code === 0 ? change.sourceTree : undefined;
+}
+
+/** Patches stay bytes end to end: `--binary` only armours files containing NUL, so text in a
+ * legacy encoding appears raw and a UTF-8 round trip would replace it with U+FFFD.
+ */
+export async function patchBetween(cwd: string, from: string, to: string, snapshot?: SnapshotEnv): Promise<Buffer> {
   const args = ['diff', ...DIFF_OUTPUT_ARGS, '--binary', '--full-index', '--no-renames', from, to, '--'];
-  return (await runGit(args, { cwd, snapshot })).stdout;
+  return (await runGitBuffer(args, { cwd, snapshot })).stdout;
 }
 
 /** Server-generated patches only. No shell, no partial/reject application, no automatic stash. */
 export async function applyPatch(
   cwd: string,
-  patch: string,
+  patch: Buffer,
   index: boolean,
   threeWay = false,
   write: (args: string[]) => Promise<unknown> = (args) => runGitWrite(args, { cwd }),
 ) {
-  if (!patch) return;
+  if (!patch.length) return;
   const tmp = await mkdtemp(path.join((await import('node:os')).tmpdir(), 'warden-patch-'));
   try {
     const file = path.join(tmp, 'change.patch');
@@ -166,13 +183,16 @@ export class GitSandbox {
     await this.repository();
   }
 
-  async apply(patch: string, index: boolean, threeWay = false, source?: { cwd: string; snapshot: SnapshotEnv }) {
+  async apply(patch: Buffer, index: boolean, threeWay = false, source?: { cwd: string; snapshot: SnapshotEnv }) {
     await this.repository();
     // A delivered uncommitted blob may exist only in checkpoints after Git prunes trial
     // commits. Three-way application needs that exact base even if primary hooks changed it.
     if (threeWay && source) {
+      // Header lines are ASCII; latin1 maps every other byte to one character without loss.
       const bases = new Set(
-        [...patch.matchAll(/^index ([a-f0-9]{40}(?:[a-f0-9]{24})?)\.\.[a-f0-9]+(?: (?:100644|100755|120000))?$/gm)].map((match) => match[1]!),
+        [...patch.toString('latin1').matchAll(/^index ([a-f0-9]{40}(?:[a-f0-9]{24})?)\.\.[a-f0-9]+(?: (?:100644|100755|120000))?$/gm)].map(
+          (match) => match[1]!,
+        ),
       );
       for (const base of bases) {
         if (/^0+$/.test(base)) continue;

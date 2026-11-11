@@ -233,6 +233,26 @@ describe('setup ownership guard', () => {
     expect(() => assertSetupIdle({ status: 'failed' })).not.toThrow();
   });
 
+  it('stays running while the setup process group outlives its host', () => {
+    const group = 4321;
+    const owner = { ...running.owner, group, startedAt: new Date().toISOString() };
+    // The host is gone; only the detached group answers.
+    const kill = vi.spyOn(process, 'kill').mockImplementation((pid) => {
+      if (pid === -group) return true;
+      throw Object.assign(new Error('No process'), { code: 'ESRCH' });
+    });
+    expect(() => assertSetupIdle({ ...running, owner })).toThrow('still running');
+    kill.mockImplementation(() => {
+      throw Object.assign(new Error('No process'), { code: 'ESRCH' });
+    });
+    expect(() => assertSetupIdle({ ...running, owner })).not.toThrow();
+  });
+
+  it('treats a run recorded before this host started as ended', () => {
+    vi.spyOn(process, 'kill').mockReturnValue(true);
+    expect(() => assertSetupIdle({ ...running, owner: { ...running.owner, group: 4321, startedAt: '2000-01-01T00:00:00.000Z' } })).not.toThrow();
+  });
+
   it('blocks live, unowned, foreign-host and unverifiable setup processes', () => {
     const kill = vi.spyOn(process, 'kill').mockReturnValue(true);
     expect(() => assertSetupIdle(running)).toThrow('still running');

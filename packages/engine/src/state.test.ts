@@ -586,10 +586,24 @@ describe('what the state file will not lose', () => {
   it('keeps a live directory owner even when its heartbeat is stale', async () => {
     const file = path.join(dir, 'state.json');
     const owner = await directoryOwner(`${file}.repository.lock`, process.pid);
+    // Stale, but written since this host started: only then can its process still be running.
+    const stale = new Date(Date.now() - 30_000);
+    await utimes(owner, stale, stale);
     const token = await readFile(owner, 'utf8');
     expireLockWait();
     await expect(new StateStore(file, '/repo').withRepositoryLock(async () => undefined)).rejects.toMatchObject({ code: 'operation_locked' });
     expect(await readFile(owner, 'utf8')).toBe(token);
+  });
+
+  it('reclaims an owner last written before this host started, whatever now holds its process ID', async () => {
+    const file = path.join(dir, 'state.json');
+    // The process ID is alive, as a reused one would be; the heartbeat predates the boot.
+    await directoryOwner(`${file}.repository.lock`, process.pid);
+    let entered = false;
+    await new StateStore(file, '/repo').withRepositoryLock(async () => {
+      entered = true;
+    });
+    expect(entered).toBe(true);
   });
 
   it.each(['state', 'repository'] as const)("does not steal a live owner's %s lock when its heartbeat is stale", async (kind) => {

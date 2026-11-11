@@ -7,8 +7,8 @@ This guide describes the current implementation. The [workflow contract](workflo
 places user review before squash and uses commit history for requirement acceptance; it does not
 require an agent-delivery protocol or a separate final-approval flow.
 
-Select a task in the left work plan, then a file. This directly opens its undelivered diff;
-there is no separate review-mode switch. The baseline is the last delivered source tip, or the
+Expand a task in the left work plan and select a file, or choose **Review Current Changes**, to open its undelivered diff;
+selecting a task row itself opens its Task Chat, and there is no separate review-mode switch. The baseline is the last delivered source tip, or the
 primary baseline already incorporated by the workspace. Saved uncommitted edits can be reviewed and
 committed directly to the base branch without committing in the task workspace first. Following a
 snapshot delivery, the next comparison starts from that delivered content, even if task HEAD is unchanged.

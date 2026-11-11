@@ -102,7 +102,7 @@ describe('shared preview worktrees', () => {
     await replaceGitfile(path.join(a.path, '.git'), await readFile(path.join(b.path, '.git')));
     try {
       await expect(a.write(['update-ref', 'HEAD', head])).rejects.toThrow('Invalid operation repository');
-      await expect(a.apply('', true)).rejects.toThrow('Invalid operation repository');
+      await expect(a.apply(Buffer.alloc(0), true)).rejects.toThrow('Invalid operation repository');
       await expect(a.dispose()).rejects.toThrow('Invalid operation repository');
       expect(await oid(b.path, 'HEAD')).toBe(otherHead);
       expect(await readFile(indexPath)).toEqual(index);

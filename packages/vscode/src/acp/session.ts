@@ -23,6 +23,7 @@ import type { AcpControls, AcpMessage, AcpPermission, AcpRecord, AcpSnapshot, Ac
 import { DiagnosticLog, diagnosticError, diagnosticOutcome } from '@warden/shared';
 import type { DiagnosticOutcome } from '@warden/shared';
 import type { AcpProfile, AcpSessionOptions, AgentProcessInfo } from './contracts.js';
+import { MAX_ACP_MESSAGE_BYTES } from './contracts.js';
 import { availableCommands, configOptions, emptyControls, isModelOption, sessionModes } from './session-controls.js';
 import { AcpStderr, acpDiagnosticSecrets, acpErrorMessage, acpFailureLog } from './diagnostics.js';
 import { approveRepositoryRead, repositoryReadRequest } from './read-permissions.js';
@@ -99,6 +100,9 @@ type Turn = {
 };
 
 /** A task-bound protocol client. Files, commands and any agent-owned background work remain the agent's responsibility. */
+const SAVE_INTERVAL_MS = 1_000;
+const STOP_GRACE_MS = 2_000;
+
 export class AcpSession {
   private readonly log: DiagnosticLog;
   private readonly environment: string;
@@ -142,6 +146,11 @@ export class AcpSession {
       messages: [],
       updatedAt: new Date().toISOString(),
     };
+  }
+
+  /** A turn the agent has not settled; an error label or a timed-out cancellation does not end it. */
+  hasOpenTurn(): boolean {
+    return !!this.turn;
   }
 
   /** Cheap status for process listings; snapshot() clones the whole transcript. */
@@ -235,10 +244,10 @@ export class AcpSession {
     return this.initialized;
   }
 
-  private timeout<T>(operation: Promise<T>, description: string): Promise<T> {
+  private timeout<T>(operation: Promise<T>, description: string, ms = this.options.timeoutMs ?? 15_000): Promise<T> {
     let timer: ReturnType<typeof setTimeout>;
     const deadline = new Promise<never>((_resolve, reject) => {
-      timer = setTimeout(() => reject(Object.assign(new Error(description), { name: 'TimeoutError' })), this.options.timeoutMs ?? 15_000);
+      timer = setTimeout(() => reject(Object.assign(new Error(description), { name: 'TimeoutError' })), ms);
     });
     return Promise.race([operation, deadline]).finally(() => clearTimeout(timer));
   }
@@ -338,7 +347,9 @@ export class AcpSession {
         this.error = `Unable to save the local session: ${message(error)}`;
         this.notify();
       });
-    }, 100);
+      // Each save reads back, validates and rewrites the whole record. Turn boundaries persist
+      // explicitly, so streaming only needs a coarse checkpoint.
+    }, SAVE_INTERVAL_MS);
   }
 
   private validateProfile(profile: AcpProfile) {
@@ -479,6 +490,14 @@ export class AcpSession {
       outcome = 'ok';
     } catch (error) {
       outcome = generation !== this.generation ? 'cancelled' : diagnosticOutcome(error);
+      // A conversation that never obtained a session is still new. Keeping the failed profile
+      // would bind its first real session to an agent the user has since replaced. A connection
+      // kept open for authentication still belongs to this profile.
+      const awaitingAuthentication = !!runtime?.initialized && authRequired(error);
+      if (generation === this.generation && !awaitingAuthentication && !this.record.sessionId && !this.record.messages.length) {
+        delete this.record.profileId;
+        delete this.record.profileSignature;
+      }
       if (generation === this.generation) {
         this.reportFailure(stage, error, runtime, log);
         if (runtime) runtime.authenticationRequired = authRequired(error);
@@ -532,7 +551,7 @@ export class AcpSession {
     const app = client({ name: 'Warden' })
       .onNotification('session/update', ({ params }) => this.update(runtime, params))
       .onRequest('session/request_permission', ({ params, signal }) => this.permission(runtime, params, signal));
-    runtime.connection = app.connect(ndJsonStream(Writable.toWeb(child.stdin), Readable.toWeb(child.stdout), { maxMessageBytes: 2 * 1024 * 1024 }));
+    runtime.connection = app.connect(ndJsonStream(Writable.toWeb(child.stdin), Readable.toWeb(child.stdout), { maxMessageBytes: MAX_ACP_MESSAGE_BYTES }));
     child.stderr.setEncoding('utf8');
     child.stderr.on('data', (chunk: string) => {
       runtime.stderr.append(chunk);
@@ -1114,8 +1133,9 @@ export class AcpSession {
       history.messages.push({ id: randomUUID(), role: 'notice', text: text(update.entries.map((entry) => `${entry.status}: ${entry.content}`).join('\n')) });
       history.lastChunk = undefined;
     }
-    this.boundHistory(history);
-    if (!runtime.replay) this.changed();
+    // changed() bounds the live history itself; each bound serializes every message.
+    if (runtime.replay) this.boundHistory(history);
+    else this.changed();
   }
 
   private compaction(history: History, update: CompactionUpdate | CompactionSummaryChunk) {
@@ -1325,8 +1345,11 @@ export class AcpSession {
       if (!runtime.exited) {
         runtime.log.write('debug', 'acp.process.signal', { signal: 'SIGTERM' });
         runtime.child.kill('SIGTERM');
+        // Shutdown gets about five seconds from VS Code. Termination must reach SIGKILL inside
+        // that, or an agent that ignores SIGTERM outlives the window and keeps editing.
+        const grace = Math.min(this.options.timeoutMs ?? 15_000, STOP_GRACE_MS);
         try {
-          await this.timeout(runtime.exit, 'The agent has not exited.');
+          await this.timeout(runtime.exit, 'The agent has not exited.', grace);
         } catch {
           if (!runtime.exited) {
             runtime.log.write('warn', 'acp.process.signal', { signal: 'SIGKILL' });
@@ -1335,6 +1358,7 @@ export class AcpSession {
           await this.timeout(
             runtime.exit,
             'Unable to confirm agent process exit. Ownership has been retained; inspect the process before disconnecting again.',
+            grace,
           );
         }
       }

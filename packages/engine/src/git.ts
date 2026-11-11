@@ -100,14 +100,20 @@ const REPOSITORY_ENV = new Set([
   'GIT_CONFIG_COUNT',
 ]);
 
-export function gitEnvironment(overrides: Record<string, string> = {}): NodeJS.ProcessEnv {
+/** The inherited environment without overrides that would point Git at another repository. */
+export function repositoryEnvironment(): NodeJS.ProcessEnv {
   const env = { ...process.env };
   for (const key of Object.keys(env)) {
     // Environment names are case-insensitive on Windows, including when the server runs in a worker.
     const name = key.toUpperCase();
     if (REPOSITORY_ENV.has(name) || /^GIT_CONFIG_(KEY|VALUE)_\d+$/.test(name)) delete env[key];
   }
-  return { ...env, LC_ALL: 'C', GIT_PAGER: 'cat', PAGER: 'cat', GIT_TERMINAL_PROMPT: '0', ...overrides };
+  return env;
+}
+
+/** For Warden's own Git calls, whose output is parsed: fixed locale, no pager, no prompt. */
+export function gitEnvironment(overrides: Record<string, string> = {}): NodeJS.ProcessEnv {
+  return { ...repositoryEnvironment(), LC_ALL: 'C', GIT_PAGER: 'cat', PAGER: 'cat', GIT_TERMINAL_PROMPT: '0', ...overrides };
 }
 
 function snapshotVars(snapshot: SnapshotEnv | undefined): Record<string, string> {
@@ -206,8 +212,11 @@ function gitSpawnPathError(cwd: string): GitError {
 }
 
 /** The same guarded read, preserving bytes for NUL protocols and lossless fingerprints. */
-export async function runGitBuffer(args: readonly string[], opts: GitRunOptions): Promise<GitBufferResult> {
-  assertAllowedGitArgs(args);
+export async function runGitBuffer(requested: readonly string[], opts: GitRunOptions): Promise<GitBufferResult> {
+  assertAllowedGitArgs(requested);
+  // `log.showSignature` prints verification text ahead of each record, which every parser of
+  // formatted log output would read as data.
+  const args = requested[0] === 'log' ? ['log', '--no-show-signature', ...requested.slice(1)] : requested;
   const okCodes = opts.okCodes ?? [0];
   return new Promise((resolve, reject) => {
     const complete = (error: unknown, stdout: Buffer = Buffer.alloc(0), stderrBytes: Buffer = Buffer.alloc(0)) => {

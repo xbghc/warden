@@ -36,6 +36,21 @@ describe('ACP automatic read permissions', () => {
     expect(repositoryReadRequest(changed, root)?.optionId).toBe('one');
   });
 
+  it('keeps a request with terminal output manual even when its kind says read', () => {
+    const changed = request();
+    delete changed.toolCall.rawInput;
+    expect(repositoryReadRequest(changed, root)?.optionId).toBe('one');
+    changed.toolCall.content = [{ type: 'terminal', terminalId: 'shell' }];
+    expect(repositoryReadRequest(changed, root)).toBeUndefined();
+  });
+
+  it.each(['.envrc', '.env', '.env.local', 'production.env'])('keeps the environment file %s manual', async (name) => {
+    const secret = path.join(root, name);
+    await writeFile(secret, 'TOKEN=1\n');
+    expect(await approve([secret])).toBe(false);
+    expect(await approve([file])).toBe(true);
+  });
+
   it.each(['execute', 'edit', 'delete', 'search', 'other'] as const)('keeps %s requests manual even when labeled as reads', (kind) => {
     const changed = request();
     changed.toolCall.kind = kind;

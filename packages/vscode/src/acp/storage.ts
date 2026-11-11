@@ -3,7 +3,7 @@ import os from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, realpath, rename, rm } from 'node:fs/promises';
-import { StateStore, taskConnectionPaths } from '@warden/engine';
+import { processExited, StateStore, taskConnectionPaths } from '@warden/engine';
 import type { AcpBinding, AcpMessage, AcpRecord } from '@warden/shared';
 import type { AcpStorage } from './contracts.js';
 import { modelSelection } from './model-preferences.js';
@@ -377,13 +377,8 @@ export class AcpSessionStorage implements AcpStorage {
   }
 
   private exited(claim: Owner): boolean {
-    if (claim.hostname !== os.hostname()) return false;
-    try {
-      process.kill(claim.pid, 0);
-      return false;
-    } catch (error) {
-      return (error as NodeJS.ErrnoException).code === 'ESRCH';
-    }
+    // A claim is written once and never refreshed, so its age proves nothing about its owner.
+    return claim.hostname === os.hostname() && processExited(claim.pid);
   }
 
   private async assertWriteOwner() {
@@ -392,6 +387,7 @@ export class AcpSessionStorage implements AcpStorage {
   }
 
   private busy(): never {
-    throw new Error('Another Warden window owns this task conversation. Disconnect it in that window first.');
+    // The record is named so a leftover from a crashed window can be inspected and removed.
+    throw new Error(`Another Warden window owns this task conversation. Disconnect it in that window first. Owner record: ${this.ownerFile}`);
   }
 }

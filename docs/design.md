@@ -35,7 +35,7 @@ specific interaction that benefits from a custom form or conversation layout. Th
 uses `TreeView`; native commands, menus, inputs and pickers own everyday task operations.
 
 Task rows expand into changed files and preserve their expansion across refreshes. Selecting a task
-opens or restores its native diff without replacing a pinned version or resetting editor scroll.
+opens its Task Chat; **Review Current Changes** opens its native diff without resetting editor scroll.
 The title bar offers **View as Tree** / **View as List**, matching Source Control's layout switch.
 List view shows file names with relative parent paths; tree view adds expandable directories.
 The choice persists in VS Code workspace state and leaves task order, expansion and open diffs intact.
@@ -66,7 +66,7 @@ multiline editing and normal Save. Saving is bound to the original repository an
 and preserves other script settings. Workspace scripts run on allocation; preview setup keeps its
 normal automatic triggers. Preview diagnostics use native output. The primary sidebar navigation
 contains no webview. **Task Chat** is a separate webview in the Secondary Side Bar by default.
-Selecting a task still opens its diff; **Chat with Agent** explicitly switches the displayed chat.
+Selecting a task opens its Task Chat while keeping any open diff intact; expanding a task and selecting a file or choosing **Review Current Changes** opens its diff, and **Chat with Agent** also switches the displayed chat.
 The view title offers **Switch Task Chat** and **Open Chat in Editor**. An expanded chat offers
 **Move Chat to Side Bar**; each task has one editable chat surface and the same underlying session.
 Different tasks may be expanded side by side. Hiding or switching the view does not disconnect agents.
@@ -303,7 +303,7 @@ physical directories are internal resources and do not become new sidebar rows.
 
 The sidebar's task list is the one place to manage workspace connections. Each allocated task
 has an action for connecting to the independent preview, available while reviewing any task.
-Failed allocations have no connection switch until retried. Selecting a task still opens its review;
+Failed allocations have no connection switch until retried. Selecting a task still opens its Task Chat;
 changing its connection does not change the selected task or plan order.
 
 There is no Preview page. **Show Preview Output** shows the current combination, runtime path,

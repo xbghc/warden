@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { lstat, readFile, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { runGit } from '@warden/engine';
+import { inspectTaskWorktree, runGit } from '@warden/engine';
 import type { Engine } from '@warden/engine';
 import type { AcpBinding } from '@warden/shared';
 
@@ -29,28 +29,46 @@ async function rebaseBelongsToTask(gitDir: string, branch: string): Promise<bool
 
 /** Task allocation and Git registration identify a conversation; commits do not. */
 export async function resolveAcpBinding(engine: Engine, taskId: string): Promise<AcpBinding> {
-  const [workflow, workspaces] = await Promise.all([engine.execute('workflow.get', undefined), engine.execute('workspaces.list', undefined)]);
-  const task = workflow.workflow?.changes.find((row) => row.id === taskId);
+  const state = await engine.store.load();
+  const task = state.workflow?.changes.find((row) => row.id === taskId);
   if (task?.deletion) throw new Error('Task deletion is pending. Retry deletion before using this workspace.');
   if (!task?.worktree || !task.branch) throw new Error('The task workspace is not ready. Reopen the task.');
-  const checkout = workspaces.worktrees.find((row) => row.path === task.worktree);
+  const checkout = await inspectTaskWorktree(engine.repo, task.worktree);
   if (!checkout || checkout.foreign || checkout.prunable) throw new Error('The task workspace changed. Confirm its task association and reconnect.');
-  const workspace = await realpath(task.worktree);
-  const repository = await realpath(engine.root);
+  const [workspace, repository] = await Promise.all([realpath(task.worktree), realpath(engine.root)]);
   if (workspace === repository) throw new Error('Agent sessions must use the task workspace.');
-  const gitPath = async (flag: string) => {
-    const result = await runGit(['rev-parse', flag], { cwd: workspace });
-    return realpath(path.resolve(workspace, result.stdout.trim()));
-  };
-  const [gitDir, commonDir] = await Promise.all([gitPath('--absolute-git-dir'), gitPath('--git-common-dir')]);
+  const dotGit = path.join(workspace, '.git');
+  let gitDir: string;
+  let commonDir: string;
+  let canonicalDotGit: string;
+  if (checkout.clone) {
+    canonicalDotGit = await realpath(dotGit);
+    gitDir = canonicalDotGit;
+    commonDir = canonicalDotGit;
+  } else {
+    const revParse = await runGit(['rev-parse', '--absolute-git-dir', '--git-common-dir'], { cwd: workspace });
+    const [rawGitDir, rawCommonDir] = revParse.stdout.trim().split('\n');
+    if (!rawGitDir || !rawCommonDir) throw new Error('The task workspace changed. Confirm its task association and reconnect.');
+    [gitDir, commonDir, canonicalDotGit] = await Promise.all([
+      realpath(path.resolve(workspace, rawGitDir)),
+      realpath(path.resolve(workspace, rawCommonDir)),
+      realpath(dotGit),
+    ]);
+  }
   // A conversation may be needed to resolve the operation itself. Keep allocation checks,
   // but do not turn Git's in-progress state into an agent execution gate.
   if (checkout.branch !== task.branch && !(checkout.detached && checkout.busy === 'rebase' && (await rebaseBelongsToTask(gitDir, task.branch))))
     throw new Error('The task workspace changed. Confirm its branch and reconnect.');
-  const paths = [repository, workspace, path.join(workspace, '.git'), gitDir, commonDir];
+  const paths: [string, string][] = [
+    [repository, repository],
+    [workspace, workspace],
+    [dotGit, canonicalDotGit],
+    [gitDir, gitDir],
+    [commonDir, commonDir],
+  ];
   const identities = await Promise.all(
-    paths.map(async (file) => {
-      const [canonical, info] = await Promise.all([realpath(file), stat(file)]);
+    paths.map(async ([file, canonical]) => {
+      const info = await stat(file);
       return [canonical, info.dev, info.ino, info.birthtimeMs, info.isFile() ? await readFile(file, 'utf8') : null];
     }),
   );

@@ -246,15 +246,28 @@ async function refForSide(ctx: TargetContext, side: DiffSide): Promise<string | 
   }
 }
 
-/** Gitlinks name commits in another repository; show must not dereference them as local objects. */
-async function gitlink(cwd: string, file: string, ref: string, snapshot?: SnapshotEnv): Promise<string | undefined> {
+/** What a revision or the index holds at a path: `show` would dereference a gitlink as a local
+ * object and print a directory listing for a tree, neither of which is file content.
+ */
+async function entryAt(
+  cwd: string,
+  file: string,
+  ref: string,
+  snapshot?: SnapshotEnv,
+): Promise<{ kind: 'gitlink'; commit: string } | { kind: 'tree' } | undefined> {
   const staged = ref === ':0';
   const args = staged ? ['ls-files', '--stage', '-z', '--', literal(file)] : ['ls-tree', '-z', ref, '--', literal(file)];
   const result = await runGit(args, { cwd, snapshot });
   const entry = result.stdout.split('\0')[0] ?? '';
   const fields = entry.slice(0, entry.indexOf('\t')).split(' ');
+  if (!staged && fields[1] === 'tree') return { kind: 'tree' };
   if (fields[0] !== '160000' || (staged ? fields[2] !== '0' : fields[1] !== 'commit')) return undefined;
-  return fields[staged ? 1 : 2];
+  return { kind: 'gitlink', commit: fields[staged ? 1 : 2]! };
+}
+
+async function gitlink(cwd: string, file: string, ref: string, snapshot?: SnapshotEnv): Promise<string | undefined> {
+  const entry = await entryAt(cwd, file, ref, snapshot);
+  return entry?.kind === 'gitlink' ? entry.commit : undefined;
 }
 
 /** Full content of a file on one side of the target; null when it does not exist there. */
@@ -264,6 +277,10 @@ export async function getFullFile(ctx: TargetContext, filePath: string, side: Di
   if (ref === undefined) {
     try {
       const fullPath = path.join(ctx.cwd, filePath);
+      // Git treats a path beneath a symlinked directory as absent. Following the link instead
+      // would present a file from outside the checkout as this workspace's content.
+      const parent = path.dirname(fullPath);
+      if ((await realpath(parent)) !== path.join(await realpath(ctx.cwd), path.relative(ctx.cwd, parent))) return null;
       // Git stores a symlink's destination text, including dangling and directory links.
       const info = await lstat(fullPath);
       if (info.isSymbolicLink()) return await readlink(fullPath);
@@ -283,8 +300,9 @@ export async function getFullFile(ctx: TargetContext, filePath: string, side: Di
     }
   }
   try {
-    const commit = await gitlink(ctx.cwd, filePath, ref, ctx.snapshot);
-    if (commit) return `Subproject commit ${commit}\n`;
+    const entry = await entryAt(ctx.cwd, filePath, ref, ctx.snapshot);
+    if (entry?.kind === 'tree') return null;
+    if (entry) return `Subproject commit ${entry.commit}\n`;
     // Without the separator Git also stats the entire revision:path as a filename,
     // which can exceed filesystem limits even when the actual file path is valid.
     const r = await runGit(['show', `${ref}:${filePath}`, '--'], { cwd: ctx.cwd, snapshot: ctx.snapshot });

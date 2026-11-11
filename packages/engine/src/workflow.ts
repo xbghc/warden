@@ -1,5 +1,4 @@
 import { createHash, randomUUID } from 'node:crypto';
-import os from 'node:os';
 import path from 'node:path';
 import { readFile, realpath, stat } from 'node:fs/promises';
 import type {
@@ -22,13 +21,13 @@ import type {
   RebaseBatchResponse,
 } from '@warden/shared';
 import { moveBefore, isValidRef, taskReview } from '@warden/shared';
-import { assertSetupIdle, runWorkspaceHook } from './workspace.js';
+import { assertSetupIdle, runWorkspaceHook, setupEnded, setupOwner } from './workspace.js';
 import { badRequest, WardenError, notFound } from './errors.js';
 import { GitError, LONG_GIT_TIMEOUT_MS, gitEnvironment, refExists, runGit, runGitWrite } from './git.js';
 import { listWorktreesAll, type RepoContext } from './repo.js';
 import { forgetWorktreeTargets, type StateStore } from './state.js';
 import { checkoutState, checkoutWorktree, dirtyCount, listWorktreesDetailed, nextSlot } from './worktrees.js';
-import { applyPatch, GitSandbox, oid, patchBetween, gitOid, deliveryBase, deliveryContentBase } from './git-sandbox.js';
+import { applyPatch, GitSandbox, oid, patchBetween, gitOid, deliveryBase, deliveryContentBase, deliveredTree } from './git-sandbox.js';
 import { PreviewService } from './preview.js';
 import { assertSafetyBackupCurrent, createSafetyBackup, discardOperationBackup } from './backups.js';
 import { retireWorkflowRefs } from './retention.js';
@@ -77,13 +76,7 @@ async function finishReads<T extends readonly unknown[]>(reads: { [K in keyof T]
 // Hooks run only under the repository lock. A record whose owner process has exited on this
 // host was interrupted, for example by a closed window; report it as retryable.
 function interruptedHook(hook: DevelopmentChange['workspaceHook']) {
-  if (hook?.status !== 'running' || !hook.owner || hook.owner.hostname !== os.hostname()) return false;
-  try {
-    process.kill(hook.owner.pid, 0);
-    return false;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'ESRCH';
-  }
+  return hook?.status === 'running' && setupEnded(hook.owner);
 }
 
 async function fileExists(file: string) {
@@ -145,7 +138,7 @@ export class WorkflowService {
             delete row.sourceBase;
             delete row.sourceTree;
             delete row.sync;
-          }
+          } else if (row.sourceTree && !(await deliveredTree(row, developmentHead, this.repo.commonRoot))) delete row.sourceTree;
         } catch {
           /* Unavailable workspaces are reported by the synchronization checks. */
         }
@@ -436,9 +429,17 @@ export class WorkflowService {
   private async runHook(change: DevelopmentChange, event: 'create' | 'reuse') {
     const command = (await this.store.load()).workspaceConfig?.hooks[event];
     if (!command) return;
-    change.workspaceHook = { event, command, status: 'running', owner: { pid: process.pid, hostname: os.hostname() } };
+    const running = { event, command, status: 'running' as const, owner: setupOwner() };
+    change.workspaceHook = running;
     await this.save(change);
-    change.workspaceHook = await runWorkspaceHook(this.repo.commonRoot, change, event, command);
+    // The group outlives this host. Recording it lets a later window see the script still running.
+    let recorded: Promise<unknown> | undefined;
+    const result = await runWorkspaceHook(this.repo.commonRoot, change, event, command, (group) => {
+      running.owner.group = group;
+      recorded = this.save(change).catch(() => {});
+    });
+    await recorded;
+    change.workspaceHook = result;
     await this.save(change);
   }
 
@@ -479,12 +480,18 @@ export class WorkflowService {
     if (boundary !== target) {
       await this.assertRebaseIgnoredFiles(checkout.path, boundary, before, target);
       const backup = await createSafetyBackup(this.store, checkout.path, 'rebase');
-      await this.checkout(change);
-      await this.assertClean(checkout.path);
-      if ((await revParse(checkout.path, 'HEAD')) !== before || (await this.developmentHead(change.developmentBranch)) !== target)
-        fail('Code or the base branch changed during backup. Run the check again.', 'review_changed');
-      await this.assertRebaseIgnoredFiles(checkout.path, boundary, before, target);
-      await assertSafetyBackupCurrent(backup);
+      try {
+        await this.checkout(change);
+        await this.assertClean(checkout.path);
+        if ((await revParse(checkout.path, 'HEAD')) !== before || (await this.developmentHead(change.developmentBranch)) !== target)
+          fail('Code or the base branch changed during backup. Run the check again.', 'review_changed');
+        await this.assertRebaseIgnoredFiles(checkout.path, boundary, before, target);
+        await assertSafetyBackupCurrent(backup);
+      } catch (error) {
+        // No rebase started, so this copy protects nothing and no journal would ever retire it.
+        await discardOperationBackup(this.store, backup).catch(() => {});
+        throw error;
+      }
       change.rebaseBackups = [...(change.rebaseBackups ?? []), backup];
       await this.save(change);
       try {
@@ -493,11 +500,15 @@ export class WorkflowService {
           timeoutMs: LONG_GIT_TIMEOUT_MS,
         });
       } catch (error) {
-        if (automatic && (await this.abortAutomaticRebase(checkout.path, before))) {
+        // Git can refuse before rewriting anything, for example from a pre-rebase hook. That is
+        // neither a conflict to resolve nor a state the backup is needed for.
+        const refused = await this.rebaseUndone(checkout.path, before);
+        if (refused || (automatic && (await this.abortAutomaticRebase(checkout.path, before)))) {
           change.rebaseBackups = change.rebaseBackups?.filter((row) => row !== backup);
           if (!change.rebaseBackups?.length) delete change.rebaseBackups;
           await this.save(change);
           await discardOperationBackup(this.store, backup);
+          if (refused) throw error;
           fail('Automatic rebase stopped at a conflict and was undone. Rebase this workspace manually when ready.', 'rebase_conflict_aborted');
         }
         change.sync = {
@@ -533,6 +544,14 @@ export class WorkflowService {
   private async abortAutomaticRebase(cwd: string, before: string) {
     try {
       await runGitWrite(['rebase', '--abort'], { cwd, timeoutMs: LONG_GIT_TIMEOUT_MS });
+      return await this.rebaseUndone(cwd, before);
+    } catch {
+      return false;
+    }
+  }
+
+  private async rebaseUndone(cwd: string, before: string) {
+    try {
       const [head, state] = await Promise.all([revParse(cwd, 'HEAD'), readWorktreeState(cwd)]);
       const busy = (await this.listCheckouts()).get(cwd)?.busy;
       return head === before && !state.dirtyCount && !busy;
@@ -850,7 +869,10 @@ export class WorkflowService {
       if (change.status === 'accepted') fail('This legacy commit is already recorded.', 'change_closed');
       if (change.integration) {
         const target = await this.developmentHead(change.developmentBranch);
-        if (target !== change.integration.parent) fail('The base branch has new commits. Confirm the final commit first.', 'change_closed');
+        // An unprepared journal staged nothing in primary, so later base commits cannot be its
+        // delivery and must not keep it open. The clean check below still protects partial files.
+        if (change.integration.prepared && target !== change.integration.parent)
+          fail('The base branch has new commits. Confirm the final commit first.', 'change_closed');
         // Never discard test fixes or hook edits. The reviewer explicitly restores the development
         // checkout before returning the task to its agent.
         await this.destination(change.developmentBranch, true, change.integration.worktree);
@@ -929,7 +951,14 @@ export class WorkflowService {
       const destination = await this.destination(change.developmentBranch, false, integration.worktree);
       result.worktree = destination.path;
       result.head = await this.developmentHead(change.developmentBranch);
-      if (result.head !== integration.parent) {
+      // Only a prepared journal staged this task's changes. Without it, a later base commit is
+      // unrelated work and must never be offered for recording as this task's delivery.
+      if (!integration.prepared) {
+        result.message =
+          result.head === integration.parent
+            ? 'Commit preparation is incomplete. Retry preparation; existing files will be preserved.'
+            : 'Commit preparation is incomplete and the base branch has new commits. Resume work on the task, then review again.';
+      } else if (result.head !== integration.parent) {
         if (!(await this.singleCommit(change, result.head)))
           fail(
             'Base branch history changed. Arrange these changes as a single commit on the original base revision before confirming.',
@@ -940,8 +969,6 @@ export class WorkflowService {
         result.changed =
           (await revParse(destination.path, 'HEAD^{tree}')) !== (integration.tree ?? (await revParse(change.worktree, `${integration.source}^{tree}`)));
         if (!result.canRecord) result.message = 'The commit was created, but the base branch still has uncommitted changes. Handle them before confirming.';
-      } else if (!integration.prepared) {
-        result.message = 'Commit preparation is incomplete. Retry preparation; existing files will be preserved.';
       } else {
         const index = await this.indexState(destination.path);
         result.state = 'testing';
@@ -992,7 +1019,7 @@ export class WorkflowService {
       } else await this.assertClean(checkout.path);
     };
     await validateSource();
-    const from = deliveryContentBase(change, boundary);
+    const from = deliveryContentBase(change, boundary, await deliveredTree(change, target, this.repo.commonRoot));
     const objects = sourceTree || from !== boundary ? await snapshotObjects(checkout.path, snapshots) : undefined;
     const preview = new PreviewService(this.repo, this.store);
     const sandbox = await GitSandbox.create(this.store, this.repo.commonRoot, target);
@@ -1014,7 +1041,7 @@ export class WorkflowService {
       const composed = await sandbox.commit();
       const tree = await oid(sandbox.path, 'HEAD^{tree}');
       const patch = await patchBetween(sandbox.path, target, composed);
-      if (!patch) fail('The workspace has no pending changes to commit to the base branch.', 'empty_change');
+      if (!patch.length) fail('The workspace has no pending changes to commit to the base branch.', 'empty_change');
       await validateSource();
       await preview.suspend();
       const destination = await this.destination(change.developmentBranch, !change.integration, change.integration?.worktree);
@@ -1040,11 +1067,24 @@ export class WorkflowService {
           worktree: destination.path,
           message: change.title,
         };
-        change.status = 'integrating';
-        await this.save(change);
+        // Final read-only checks precede the journal, so their failure leaves no record behind.
         await this.destination(change.developmentBranch, true, destination.path);
         if ((await this.developmentHead(change.developmentBranch)) !== target) fail('The base branch changed. Refresh and retry.', 'review_changed');
-        await applyPatch(destination.path, patch, true);
+        const status = change.status;
+        change.status = 'integrating';
+        await this.save(change);
+        try {
+          await applyPatch(destination.path, patch, true);
+        } catch (error) {
+          // The journal exists for a crash during apply. A rejected apply that left primary
+          // clean staged nothing, so the journal would only block every later delivery.
+          if (!(await dirtyCount(destination.path).catch(() => 1))) {
+            delete change.integration;
+            change.status = status;
+            await this.save(change);
+          }
+          throw error;
+        }
       }
       const expected = await runGit(['diff', ...INDEX_DIFF_FLAGS, target, composed, '--'], { cwd: sandbox.path });
       change.integration!.indexFingerprint = fingerprint(expected.stdout);
@@ -1128,6 +1168,7 @@ export class WorkflowService {
         await this.save(change);
       }
     } else if (request?.mode === 'record') {
+      if (!integration.prepared) fail('Commit preparation is incomplete. Resume work on the task, then review again.', 'change_not_prepared');
       if (request.commit !== head) fail('The commit changed. Open the latest commit before confirming.', 'review_changed');
     } else throw badRequest('Choose whether to create a validated commit or record an existing commit.', 'invalid_accept_mode');
     if (!(await this.singleCommit(change, head)))

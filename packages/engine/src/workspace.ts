@@ -4,24 +4,33 @@ import os from 'node:os';
 import path from 'node:path';
 import type { DevelopmentChange, WorkspaceConfig, WorkspaceHookResult } from '@warden/shared';
 import { badRequest, WardenError } from './errors.js';
-import { gitEnvironment } from './git.js';
+import { gitEnvironment, repositoryEnvironment } from './git.js';
+import { processExited } from './liveness.js';
 
 /** A failed cleanup leaves the running record occupied until its owner is known to be gone. */
 export function assertSetupIdle(hook: Pick<WorkspaceHookResult, 'status' | 'owner'> | undefined, kind: 'workspace' | 'preview' = 'workspace'): void {
   if (hook?.status !== 'running') return;
-  const owner = hook.owner;
-  if (owner?.hostname === os.hostname() && Number.isSafeInteger(owner.pid) && owner.pid > 0) {
-    try {
-      process.kill(owner.pid, 0);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ESRCH') return;
-    }
-  }
+  if (setupEnded(hook.owner)) return;
   throw new WardenError(
     409,
     `The ${kind} setup script is still running or its process state is unknown. Wait for it to finish. If cleanup failed, stop its commands and close the owning Warden window before retrying.`,
     'setup_running',
   );
+}
+
+/**
+ * Setup commands run in a process group of their own, so they outlive a closed window or a
+ * reloaded host. The run has ended only when both the host and that group are gone; a group that
+ * is still alive keeps writing into the workspace and must block retry, rebase and deletion.
+ */
+export function setupEnded(owner: WorkspaceHookResult['owner']): boolean {
+  if (!owner || owner.hostname !== os.hostname() || !Number.isSafeInteger(owner.pid) || owner.pid <= 0) return false;
+  if (!processExited(owner.pid, owner.startedAt)) return false;
+  return owner.group === undefined || processExited(-owner.group, owner.startedAt);
+}
+
+export function setupOwner(): NonNullable<WorkspaceHookResult['owner']> {
+  return { pid: process.pid, hostname: os.hostname(), startedAt: new Date().toISOString() };
 }
 
 /** Configuration is saved explicitly by the user, never loaded from a task branch. */
@@ -79,16 +88,24 @@ export async function workspaceShell(root: string, platform = process.platform):
 }
 
 /** A thin shell-command hook: cwd and environment in, output and exit status out. */
-export async function runWorkspaceHook(root: string, change: DevelopmentChange, event: 'create' | 'reuse', command: string): Promise<WorkspaceHookResult> {
+export async function runWorkspaceHook(
+  root: string,
+  change: DevelopmentChange,
+  event: 'create' | 'reuse',
+  command: string,
+  started?: (group: number) => void,
+): Promise<WorkspaceHookResult> {
   return {
     event,
     command,
-    ...(await runSetupCommand(root, change.worktree, command, {
-      WARDEN_BRANCH: change.branch,
-      WARDEN_DEVELOPMENT_BRANCH: change.developmentBranch,
-      WARDEN_TASK_ID: change.id,
-      WARDEN_HOOK_EVENT: event,
-    })),
+    ...(await runSetupCommand(
+      root,
+      change.worktree,
+      command,
+      { WARDEN_BRANCH: change.branch, WARDEN_DEVELOPMENT_BRANCH: change.developmentBranch, WARDEN_TASK_ID: change.id, WARDEN_HOOK_EVENT: event },
+      undefined,
+      started,
+    )),
   };
 }
 
@@ -99,6 +116,8 @@ export async function runSetupCommand(
   command: string,
   environment: Record<string, string> = {},
   timeout = 600000,
+  /** Receives the setup process group once it exists, before any output is awaited. */
+  started?: (group: number) => void,
 ): Promise<Pick<WorkspaceHookResult, 'status' | 'exitCode' | 'output'>> {
   let shell: string;
   try {
@@ -108,7 +127,8 @@ export async function runSetupCommand(
   }
   return new Promise((resolve, reject) => {
     let child: ReturnType<typeof spawn>;
-    const env = { ...gitEnvironment(), WARDEN_REPO: root, WARDEN_WORKTREE: cwd, ...environment };
+    // The user's script keeps the user's locale and pager; only repository overrides are removed.
+    const env = { ...repositoryEnvironment(), WARDEN_REPO: root, WARDEN_WORKTREE: cwd, ...environment };
     const startupFailure = (error: NodeJS.ErrnoException) => {
       const message = error.code === 'ENOENT' ? `Cannot run the workspace setup script: shell not found (${shell}). ${error.message}` : error.message;
       resolve({ status: 'failed', exitCode: null, output: message });
@@ -121,6 +141,8 @@ export async function runSetupCommand(
       startupFailure(error as NodeJS.ErrnoException);
       return;
     }
+    // Windows has no process groups; its tree is found from the host when stopping.
+    if (child.pid && process.platform !== 'win32') started?.(child.pid);
     let stdout = '';
     let stderr = '';
     let outputBytes = 0;

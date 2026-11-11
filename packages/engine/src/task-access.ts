@@ -1,3 +1,4 @@
+import { processExited } from './liveness.js';
 import { createHash } from 'node:crypto';
 import { lstat, mkdir, readFile, readdir, realpath, rm } from 'node:fs/promises';
 import os from 'node:os';
@@ -45,12 +46,7 @@ async function connectionOwner(paths: ReturnType<typeof taskConnectionPaths>) {
     if (owner.schemaVersion !== 1 || owner.taskKey !== paths.key || !Number.isSafeInteger(owner.pid) || owner.pid < 1 || typeof owner.hostname !== 'string')
       throw new Error('Invalid owner record.');
     if (owner.hostname !== os.hostname()) return owner as { pid: number; hostname: string; token?: string };
-    try {
-      process.kill(owner.pid, 0);
-      return owner as { pid: number; hostname: string; token?: string };
-    } catch (error) {
-      return (error as NodeJS.ErrnoException).code === 'ESRCH' ? undefined : (owner as { pid: number; hostname: string; token?: string });
-    }
+    return processExited(owner.pid) ? undefined : (owner as { pid: number; hostname: string; token?: string });
   } catch {
     throw new WardenError(409, 'The task connection owner cannot be verified. Inspect its connection record first.', 'task_connection_invalid');
   }

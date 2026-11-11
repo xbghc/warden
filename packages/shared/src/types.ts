@@ -133,7 +133,7 @@ export interface WorkspaceHookResult {
   exitCode?: number | null;
   output?: string;
   /** Process running the script, so readers can recognize a run interrupted by a closed window. */
-  owner?: { pid: number; hostname: string };
+  owner?: SetupOwner;
 }
 
 export interface DevelopmentWorkflow {
@@ -296,7 +296,7 @@ export interface PreviewSetup {
   exitCode?: number | null;
   output?: string;
   /** Warden host retaining ownership until its setup commands have stopped. */
-  owner?: { pid: number; hostname: string };
+  owner?: SetupOwner;
 }
 
 export interface PreviewResponse {
@@ -558,4 +558,12 @@ export interface FullFileResponse {
   side: DiffSide;
   /** null when the file doesn't exist on that side. */
   content: string | null;
+}
+
+/** The host that started a setup script and, once spawned, the script's own process group. */
+export interface SetupOwner {
+  pid: number;
+  hostname: string;
+  startedAt?: string;
+  group?: number;
 }

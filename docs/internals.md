@@ -12,7 +12,8 @@ history or discarding a checkout. These are separate from preview snapshots and 
 instances can share it. A permanent `.lock/v2/` container is created with exclusive directory creation;
 the `active` directory inside it is published atomically with a uniquely named owner file,
 whose token and heartbeat identify its holder. One left by a process that died is taken over after
-5 s, a slow holder's is not, and a holder
+5 s, as is one whose heartbeat predates the last boot of this host whatever now holds its process
+ID; a slow holder's is not, and a holder
 whose lock was taken over meanwhile writes nothing. A file written by a newer warden is refused
 rather than read as empty; one that is not a state file at all is set aside as `.corrupt-<time>`;
 top-level fields this version does not know are kept when it writes. `schemaVersion` stays 1: every
@@ -120,8 +121,9 @@ the workbench. Settings edits are coalesced and failures do not trigger a restar
 are separately closed on shutdown, even if cleanup of the workbench connection reports an error.
 Agent-owned tools, login data, empty-session records and child commands remain the agent's responsibility.
 Availability is window-local and is not stored as a persistent readiness flag. Task connections retain
-their own workspace cwd and start when the user opens Task Chat or sends a message. Workbench startup
-alone never opens a task session or replays an uncertain prompt.
+their own workspace cwd and start when the user opens Task Chat or sends a message. Workbench refreshes
+prewarm only the read-only conversation Engine and single-checkout binding resolution (`inspectTaskWorktree`);
+startup alone never opens a task session, claims session ownership or replays an uncertain prompt.
 
 Task environment instructions use only the existing validated allocation's primary/workspace paths,
 task branch and base branch. Values are JSON-quoted data; user task text and executable configuration
@@ -378,6 +380,14 @@ or intermediate replay commits, creates an independent backup, then rechecks the
 and checkout state. A retry after successful rebase but failed state persistence recognizes an
 already-incorporated target and repairs bookkeeping without executing rebase hooks again.
 
+Before composing, Warden copies primary's `info/exclude` and `info/attributes` and sets its resolved
+`core.autocrlf`, `core.eol`, `core.safecrlf` and `filter.*`/`merge.*`/`diff.*` driver values in the
+shared repository with `git config`. Recovery of an interrupted publication runs
+`reset --hard HEAD` and `clean -fd` in the preview worktree only, after verifying that every path
+holds its previous or candidate content, and removes that worktree's `index.lock` once it has been
+unchanged for five seconds. Patches are read and written as bytes. Every `git log` read passes
+`--no-show-signature`.
+
 `PUT /preview` and the refresh timer snapshot saved primary content and selected workspaces into
 Warden's external snapshot store. Binary patches compose with `apply --index --3way` in a temporary
 worktree of the external shared repository. A persistent runtime worktree reads the complete candidate,
@@ -428,7 +438,10 @@ validated sandbox repository, checking the resulting object ID. This never impor
 range in isolation, and stages only that delivery. Existing primary user edits are rejected without
 being changed. The independent runtime remains available throughout delivery. `update-index --refresh`
 refreshes stat metadata before explicit `apply --index`; preview never refreshes the primary index.
-Preparation is journaled first. Interrupted preparation accepts only its known reviewed tree,
+Preparation is journaled after its final read-only checks and before staging. A refused staging that
+left primary clean removes the journal again. An unprepared journal staged nothing: it never offers
+a later base commit for recording, and resuming work discards it whatever the base branch has become.
+Interrupted preparation accepts only its known reviewed tree,
 preserving other edits.
 Legacy requests without `sourceTree` still require a clean source so they cannot authorize unseen edits.
 

@@ -68,6 +68,9 @@ Warden does not relocate active tasks or existing previews. Old operation journa
 Warden started from a shared task still resolves to the primary repository's state and lock.
 Internal composition disables hooks and signing only for its own commands, without changing the
 shared repository's configuration or ordinary agent commits.
+The shared repository mirrors primary's `info/exclude`, `info/attributes`, line-ending settings and
+filter/merge/diff drivers before each composition and preview check, so a file ignored only locally
+in primary is ignored in preview too. Hooks, identity and signing are not mirrored.
 Shallow primary clones retain their shallow boundary when imported into the shared repository. This
 keeps task history and review usable after agent commits without downloading additional remote history.
 
@@ -92,7 +95,9 @@ Preview setup uses the same cleanup rule and blocks recomposition while cleanup 
 Scripts that deliberately detach into a new POSIX session are outside the owned process group;
 setup scripts should finish their foreground work rather than launch persistent daemons.
 A run interrupted by a closed window or host restart is reported as failed once its recorded owner
-process has exited on this host, so it can be retried; the task row shows **Setup Running** meanwhile.
+process and the script's own process group have both exited on this host, so it can be retried; the
+task row shows **Setup Running** meanwhile. A script that outlives its window keeps blocking retry,
+rebase and deletion until it finishes. A run recorded before the host last booted has ended.
 Warden does not provide a dependency installer or supervise agent-started commands. Its ACP client
 owns only the process carrying its stdio connection; agents execute their own tools.
 
@@ -101,7 +106,8 @@ Environment: `WARDEN_REPO`, `WARDEN_WORKTREE`, `WARDEN_BRANCH`, `WARDEN_DEVELOPM
 normal commit hooks. Reuse applies only to a genuinely unassigned available slot, never to a task
 whose most recent delivery happened to succeed.
 Inherited Git repository/index/object-store overrides are removed before running a hook, so a Git
-command in it operates on the assigned workspace. Normal identity and configuration still apply.
+command in it operates on the assigned workspace. Normal identity and configuration still apply,
+and the script keeps the inherited locale and pager settings.
 
 ## Connected previews
 
@@ -123,11 +129,15 @@ There is no Preview editor page. Synchronization and setup failures remain visib
 One extension session owns background preview synchronization; it checks content each second and
 debounces saved edits. Other windows observe shared state and can take over when the owner closes. Initial conflicts fail
 the connection attempt and preserve the previous set and files. A later conflict preserves the last
-coherent preview and marks it stale. Adjust the source edits or selection, then choose *Sync Preview*. Disconnecting
+coherent preview and marks it stale. Adjust the source edits or selection, then choose *Sync Preview*.
+The same sources, baseline and preview content are not composed again automatically; a change to any
+of them, or *Sync Preview*, retries. Disconnecting
 recomposes the remaining contributions; it does not discard unexpected user or tool edits.
 
 Before replacing preview files, Warden verifies its saved ownership tree. Unexpected preview edits
-block synchronization and remain available for manual repair. Edit human code in primary and agent
+block synchronization and remain available for manual repair. A publication interrupted midway is
+returned to the previous preview when every path still holds its previous or its candidate content;
+any other content is kept for manual repair. Edit human code in primary and agent
 code in task workspaces. Ignored dependencies and caches persist in preview. Saved primary edits
 are observed by content and debounced into preview; they are not unexpected edits to discard.
 

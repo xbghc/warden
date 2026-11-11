@@ -160,6 +160,16 @@ jobs:
         env:
           WARDEN_VSCODE_SUITE: tree-refresh
         run: pnpm test:vscode
+      - name: Test automatic rebase on Linux
+        if: runner.os == 'Linux'
+        env:
+          WARDEN_VSCODE_SUITE: autorebase
+        run: xvfb-run -a pnpm test:vscode
+      - name: Test automatic rebase on Windows and macOS
+        if: runner.os != 'Linux'
+        env:
+          WARDEN_VSCODE_SUITE: autorebase
+        run: pnpm test:vscode
       - name: Test the packaged extension on Linux
         if: runner.os == 'Linux'
         run: xvfb-run -a pnpm test:vscode

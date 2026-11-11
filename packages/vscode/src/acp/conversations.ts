@@ -47,6 +47,7 @@ export interface TaskAgentProcess extends AgentProcessInfo {
 export class AcpConversations {
   private readonly entries = new Map<string, Conversation>();
   private readonly opening = new Map<string, Promise<Conversation>>();
+  private readonly prewarmedBindings = new Map<string, Promise<AcpBinding>>();
   private readonly engines = new Map<string, Promise<Engine>>();
   private readonly deleting = new Set<string>();
   private readonly rebasing = new Map<string, symbol>();
@@ -134,9 +135,26 @@ export class AcpConversations {
     }
     return opening;
   }
+  /** Warm the conversation engine and task bindings before the user opens Task Chat. */
+  prewarm(repository: string, taskIds: string[] = []) {
+    if (this.closed || !vscode.workspace.isTrusted || !repository) return;
+    const opening = this.engine(repository);
+    for (const taskId of taskIds) {
+      const key = this.key(repository, taskId);
+      if (this.entries.has(key) || this.opening.has(key) || this.prewarmedBindings.has(key) || this.deleting.has(key) || this.rebasing.has(key)) continue;
+      const warming = opening.then((engine) => resolveAcpBinding(engine, taskId));
+      this.prewarmedBindings.set(key, warming);
+      void warming.catch(() => {
+        if (this.prewarmedBindings.get(key) === warming) this.prewarmedBindings.delete(key);
+      });
+    }
+  }
   private async create(repository: string, taskId: string) {
+    const key = this.key(repository, taskId);
+    const prewarmed = this.prewarmedBindings.get(key);
+    this.prewarmedBindings.delete(key);
     const engine = await this.engine(repository);
-    const binding = await resolveAcpBinding(engine, taskId);
+    const binding = (await prewarmed?.catch(() => undefined)) ?? (await resolveAcpBinding(engine, taskId));
     const draftKey = `warden.acpDraft:${createHash('sha256')
       .update(JSON.stringify([repository, taskId, binding.identity]))
       .digest('hex')}`;
@@ -210,7 +228,7 @@ export class AcpConversations {
           if (binding.identity === previous.binding.identity) return previous;
           // Only a live process or attempt can still act in the old workspace. An error status
           // after a crash or failed connect has nothing left to end, so it is replaced too.
-          if (previous.connecting || previous.session.process() || ['connecting', 'resetting'].includes(previous.session.snapshot().status)) {
+          if (previous.connecting || previous.session.process() || ['connecting', 'resetting'].includes(previous.session.currentStatus())) {
             previous.error =
               'The task workspace was replaced. End the original agent process in Settings › Agent Processes, then reopen the task conversation.';
             return previous;
@@ -293,7 +311,9 @@ export class AcpConversations {
 
   /** Titles are not part of a binding's identity, so a rename updates live conversations in place. */
   retitle(repository: string, taskId: string, title: string) {
-    const entry = this.entries.get(this.key(repository, taskId));
+    const key = this.key(repository, taskId);
+    this.prewarmedBindings.delete(key);
+    const entry = this.entries.get(key);
     if (!entry || entry.binding.title === title) return;
     entry.binding = { ...entry.binding, title };
     entry.session.retitle(title);
@@ -302,13 +322,14 @@ export class AcpConversations {
 
   hasConnection(repository: string, taskId: string) {
     const entry = this.entries.get(this.key(repository, taskId));
-    return !!entry && (!!entry.connecting || entry.session.snapshot().status !== 'disconnected');
+    return !!entry && (!!entry.connecting || entry.session.currentStatus() !== 'disconnected');
   }
 
   async prepareDeletion(repository: string, taskId: string) {
     const key = this.key(repository, taskId);
     if (this.deleting.has(key)) throw new Error('This task is already being deleted.');
     this.deleting.add(key);
+    this.prewarmedBindings.delete(key);
     try {
       await this.opening.get(key);
       const entry = this.entries.get(key);
@@ -327,6 +348,7 @@ export class AcpConversations {
 
   async forgetTask(repository: string, taskId: string) {
     const key = this.key(repository, taskId);
+    this.prewarmedBindings.delete(key);
     const entry = this.entries.get(key);
     if (!entry) return;
     const panel = entry.panel;
@@ -344,16 +366,25 @@ export class AcpConversations {
   show(repository: string, taskId: string, location: ChatSurface['location'] = 'sidebar') {
     // Serialize only presentation changes; background turns and permission answers stay independent.
     const opening = this.transition.then(async () => {
-      const entry = await this.ensure(repository, taskId);
+      const sidebar = location === 'sidebar' && !this.sidebar ? this.openSidebar() : undefined;
+      let entry: Conversation;
+      try {
+        entry = await this.ensure(repository, taskId);
+      } catch (error) {
+        void sidebar?.catch(() => undefined);
+        throw error;
+      }
       if (entry.surface?.location === location) {
-        if (location === 'sidebar') this.sidebar?.show(false);
+        if (location === 'sidebar') (this.sidebar ?? (await sidebar))?.show(false);
         else entry.panel?.reveal(vscode.ViewColumn.Beside);
         this.render(entry);
         this.start(entry);
         return;
       }
       if (location === 'sidebar') {
-        const view = this.sidebar ?? (await this.openSidebar());
+        if (!this.sidebar) this.start(entry);
+        // The view can be disposed while the conversation was being prepared.
+        const view = this.sidebar ?? (await (sidebar ?? this.openSidebar()));
         if (this.sidebarEntry) await this.release(this.sidebarEntry);
         await this.release(entry);
         if (this.closed) return;
@@ -422,7 +453,10 @@ export class AcpConversations {
   }
 
   private start(entry: Conversation) {
-    if (this.closed || entry.connecting || !['disconnected', 'error'].includes(entry.session.snapshot().status)) return;
+    if (this.closed || entry.connecting || !['disconnected', 'error'].includes(entry.session.currentStatus())) return;
+    // Showing a view must not end work: after a cancellation that the agent never confirmed the
+    // label is `error` but the turn and its process are alive. Only End Agent Process stops them.
+    if (entry.sending || entry.session.hasOpenTurn()) return;
     entry.error = undefined;
     // Opening a chat prepares its session without blocking navigation or sending the draft.
     void this.connect(entry)
@@ -712,7 +746,7 @@ export class AcpConversations {
 
   activity(repository: string, taskId: string) {
     const entry = this.entries.get(this.key(repository, taskId));
-    const status = entry?.session.snapshot().status;
+    const status = entry?.session.currentStatus();
     return status === 'waiting_permission'
       ? 'Agent: Permission Required'
       : entry?.error || status === 'error'
@@ -738,6 +772,7 @@ export class AcpConversations {
   async close() {
     if (this.closed) return;
     this.closed = true;
+    this.prewarmedBindings.clear();
     this.sidebarWaiter?.reject(new Error('The Warden session is closed.'));
     await Promise.allSettled([...this.opening.values()]);
     await Promise.allSettled(

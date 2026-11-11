@@ -1299,6 +1299,15 @@ describe('ACP subprocess conversations', () => {
     expect(f.session.snapshot().authMethods).toEqual([]);
   });
 
+  it('leaves a conversation that never obtained a session free to use another agent', async () => {
+    const f = await fixture('task', 'session-new-fails');
+    await expect(f.session.connect(f.profile, { resume: false })).rejects.toThrow('Provider is unavailable');
+    const record = f.session.snapshot().record;
+    expect(record.sessionId).toBeUndefined();
+    expect(record.profileId).toBeUndefined();
+    expect(record.profileSignature).toBeUndefined();
+  });
+
   it('does not present advertised login methods during connection or after a provider error', async () => {
     const f = await fixture('task', 'session-new-fails');
     let release!: () => void;

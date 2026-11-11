@@ -24,6 +24,8 @@ removes those backups and clears their journal entries. An interrupted operation
 a successful retry completes cleanup without repeating an already-published Git operation.
 Cleanup validates the backup's external path, directory type, manifest identity and operation
 reason, and is idempotent if the files were removed before the final journal update.
+A verified backup is first renamed to `.discarding-<id>` beside it and removed from there, so an
+interrupted removal is finished by the next retry instead of leaving a copy without its manifest.
 
 Release/removal backups remain available because their original workspace may no longer exist.
 Older backups without an active operation journal are also preserved. These retained backups can

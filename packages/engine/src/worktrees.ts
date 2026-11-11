@@ -111,10 +111,10 @@ const IN_PROGRESS: [string, string][] = [
  * nothing may be stopped halfway in it, since a release, a reuse or a removal would throw the
  * half-done rebase or merge away.
  */
-export async function checkoutState(ctx: RepoContext, wt: WorktreeInfo): Promise<{ foreign: boolean; busy?: string }> {
+export async function checkoutState(ctx: RepoContext, wt: WorktreeInfo, cloneVerified = false): Promise<{ foreign: boolean; busy?: string }> {
   const dir = wt.path;
   if (wt.clone) {
-    if (!(await isCloneOf(ctx.commonRoot, dir))) return { foreign: true };
+    if (!cloneVerified && !(await isCloneOf(ctx.commonRoot, dir))) return { foreign: true };
   } else if (wt.shared) {
     if (!(await isSharedCheckout(ctx.commonRoot, dir))) return { foreign: true };
   } else {
@@ -122,20 +122,36 @@ export async function checkoutState(ctx: RepoContext, wt: WorktreeInfo): Promise
     if (!ours || !theirs || ours.common !== theirs.common) return { foreign: true };
     if (wt.isMain ? theirs.private !== ours.common : !(await registeredLinkedCheckout(dir, ours.common, theirs.private))) return { foreign: true };
   }
-  const r = await runGit(['rev-parse', ...IN_PROGRESS.flatMap(([f]) => ['--git-path', f])], { cwd: dir });
-  const paths = r.stdout.trim().split('\n');
-  for (const [i, [, what]] of IN_PROGRESS.entries()) {
-    const p = paths[i];
-    if (
-      p &&
-      (await stat(path.resolve(dir, p)).then(
-        () => true,
-        () => false,
-      ))
-    )
-      return { foreign: false, busy: what };
-  }
-  return { foreign: false };
+  const paths =
+    wt.clone && cloneVerified
+      ? IN_PROGRESS.map(([f]) => path.join(dir, '.git', f))
+      : (await runGit(['rev-parse', ...IN_PROGRESS.flatMap(([f]) => ['--git-path', f])], { cwd: dir })).stdout.trim().split('\n');
+  const exists = await Promise.all(
+    IN_PROGRESS.map((_, i) => {
+      const p = paths[i];
+      return p
+        ? stat(path.resolve(dir, p)).then(
+            () => true,
+            () => false,
+          )
+        : Promise.resolve(false);
+    }),
+  );
+  const busyIndex = exists.indexOf(true);
+  return busyIndex >= 0 ? { foreign: false, busy: IN_PROGRESS[busyIndex]![1] } : { foreign: false };
+}
+
+/** Inspect one task's registered checkout without scanning other slots or dirty working trees. */
+export async function inspectTaskWorktree(
+  ctx: RepoContext,
+  targetPath: string,
+): Promise<(WorktreeInfo & { prunable: boolean; foreign: boolean; busy?: string }) | undefined> {
+  const all = await listWorktreesAll(ctx, targetPath);
+  const checkout = all.find((row) => row.path === targetPath);
+  if (!checkout) return undefined;
+  if (checkout.prunable || checkout.bare) return { ...checkout, foreign: false };
+  const state = await checkoutState(ctx, checkout, true);
+  return { ...checkout, ...state };
 }
 
 /** Main worktree first, then the slots by number, whichever kind, then worktrees made anywhere else. */
@@ -152,7 +168,7 @@ export async function listWorktreesDetailed(ctx: RepoContext): Promise<WorktreeD
       const dirty = w.prunable || w.bare ? 0 : await dirtyCount(w.path).catch(() => -1);
       // Primary and non-slot checkouts also carry operation markers. Branch following
       // must not treat their unfinished merge or cherry-pick as a new requirement.
-      const state = w.bare || w.prunable ? { foreign: false } : await checkoutState(ctx, w);
+      const state = w.bare || w.prunable ? { foreign: false } : await checkoutState(ctx, w, true);
       const detail: WorktreeDetail = {
         ...w,
         dirty,
