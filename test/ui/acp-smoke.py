@@ -750,8 +750,8 @@ try:
         chat_action(first, 'Info: Show')
         expect(first.get_by_text('Agent session: 测试会话标题', exact=True)).to_be_visible()
         first.get_by_role('button', name='More Chat Actions', exact=True).click()
-        expect(first.get_by_role('menuitem', name='Info: Hide', exact=True)).to_be_visible()
-        first.keyboard.press('Escape')
+        # Escape reaches the menu only once focus is inside it; pressing it on the item waits for that.
+        first.get_by_role('menuitem', name='Info: Hide', exact=True).press('Escape')
         # The open menu captures pointer events until it has fully closed.
         expect(first.get_by_role('menu')).to_have_count(0)
         expect(first.get_by_label('Session Usage', exact=True)).to_contain_text('1,200 / 8,000 tokens')
