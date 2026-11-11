@@ -109,8 +109,8 @@ describe('full file contents that are not files', () => {
       encoding: 'utf8',
       env: {
         ...process.env,
-        GIT_CONFIG_GLOBAL: os.devNull,
-        GIT_CONFIG_SYSTEM: os.devNull,
+        GIT_CONFIG_GLOBAL: '/dev/null',
+        GIT_CONFIG_SYSTEM: '/dev/null',
         GIT_AUTHOR_NAME: 'F',
         GIT_AUTHOR_EMAIL: 'f@example.com',
         GIT_COMMITTER_NAME: 'F',

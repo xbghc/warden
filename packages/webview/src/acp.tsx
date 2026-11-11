@@ -327,12 +327,10 @@ export function AcpApp({ model, send: dispatch }: Props) {
                   <Info aria-hidden="true" />
                   {showInfo ? 'Info: Hide' : 'Info: Show'}
                 </DropdownMenuItem>
-                {(record.profileId || record.sessionId || record.messages.length > 0) && (
-                  <DropdownMenuItem disabled={busy || sending} onSelect={() => send({ type: 'new' })}>
-                    <MessageSquarePlus aria-hidden="true" />
-                    New Session
-                  </DropdownMenuItem>
-                )}
+                <DropdownMenuItem disabled={busy || sending} onSelect={() => send({ type: 'new' })}>
+                  <MessageSquarePlus aria-hidden="true" />
+                  New Session
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
