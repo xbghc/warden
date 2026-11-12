@@ -431,6 +431,16 @@ async function handle(message) {
     answer(id, 'Long tool IDs completed');
     return;
   }
+  if (text === 'stream-chunks') {
+    // Many small chunks of one message: the per-chunk cost on the client is what matters.
+    for (let index = 0; index < 60; index++)
+      write({
+        method: 'session/update',
+        params: { sessionId, update: { sessionUpdate: 'agent_message_chunk', messageId: 'stream', content: { type: 'text', text: `part ${index} ` } } },
+      });
+    answer(id, 'Stream complete');
+    return;
+  }
   if (text === 'expanded-controls') {
     // Each wire line stays below the stream limit, but JSON escaping makes the
     // combined history exceed storage's byte limit despite a modest text length.

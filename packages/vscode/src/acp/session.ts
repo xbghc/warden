@@ -120,6 +120,7 @@ export class AcpSession {
   private turn?: Turn;
   private history: History;
   private toolDisplays = new WeakMap<AcpMessage, ToolDisplay>();
+  private measured = new WeakMap<AcpMessage, { size: number; bytes: number }>();
   private permissions = new Map<string, Permission>();
   private authMethods: AuthMethod[] = [];
   private controls: AcpControls = emptyControls();
@@ -292,17 +293,25 @@ export class AcpSession {
     }
   }
 
-  private boundHistory(history: History) {
+  // A streamed update names the one existing message it changed, so the other messages reuse
+  // their last measurement instead of being serialized again for every chunk. Every other caller,
+  // including each save, measures the whole history, which keeps the stored record within its
+  // limits even when a message changed without being named.
+  private boundHistory(history: History, touched?: AcpMessage) {
     const currentUser = history === this.history && this.turn?.record === this.record ? this.turn.user : undefined;
     let size = 0;
     let bytes = 0;
     const encodedSizes: number[] = [];
     for (const item of history.messages) {
-      item.text = text(item.text);
-      size += item.text.length;
-      const encoded = Buffer.byteLength(JSON.stringify(item), 'utf8') + 1;
-      encodedSizes.push(encoded);
-      bytes += encoded;
+      let measured = touched && item !== touched ? this.measured.get(item) : undefined;
+      if (!measured) {
+        item.text = text(item.text);
+        measured = { size: item.text.length, bytes: Buffer.byteLength(JSON.stringify(item), 'utf8') + 1 };
+        this.measured.set(item, measured);
+      }
+      size += measured.size;
+      encodedSizes.push(measured.bytes);
+      bytes += measured.bytes;
     }
     let trimmed = false;
     // JSON escapes control characters, so a character limit alone cannot bound the saved bytes.
@@ -337,8 +346,8 @@ export class AcpSession {
     return save;
   }
 
-  private changed() {
-    this.boundHistory(this.history);
+  private changed(touched?: AcpMessage) {
+    this.boundHistory(this.history, touched);
     this.notify();
     if (this.flush) return;
     this.flush = setTimeout(() => {
@@ -1116,6 +1125,7 @@ export class AcpSession {
     const history = runtime.replay ?? (this.turn?.runtime === runtime ? this.history : undefined);
     if (!history) return;
     const update = notification.update;
+    let touched: AcpMessage | undefined;
     if (
       update.sessionUpdate === 'agent_message_chunk' ||
       update.sessionUpdate === 'agent_thought_chunk' ||
@@ -1125,21 +1135,24 @@ export class AcpSession {
       const value = update.content.type === 'text' ? update.content.text : `[Only text is supported; ${update.content.type} content not shown]`;
       const key = `${role}:${update.messageId ?? ''}`;
       const previous = history.lastChunk?.key === key ? history.messages.find((item) => item.id === history.lastChunk!.id) : undefined;
-      if (previous) previous.text = text(previous.text + value);
-      else {
-        const item: AcpMessage = { id: randomUUID(), role, text: text(value) };
-        history.messages.push(item);
-        history.lastChunk = { key, id: item.id };
+      if (previous) {
+        previous.text = text(previous.text + value);
+        touched = previous;
+      } else {
+        touched = { id: randomUUID(), role, text: text(value) };
+        history.messages.push(touched);
+        history.lastChunk = { key, id: touched.id };
       }
     } else if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
-      this.tool(history, update);
+      touched = this.tool(history, update);
     } else if (update.sessionUpdate === 'plan') {
-      history.messages.push({ id: randomUUID(), role: 'notice', text: text(update.entries.map((entry) => `${entry.status}: ${entry.content}`).join('\n')) });
+      touched = { id: randomUUID(), role: 'notice', text: text(update.entries.map((entry) => `${entry.status}: ${entry.content}`).join('\n')) };
+      history.messages.push(touched);
       history.lastChunk = undefined;
     }
-    // changed() bounds the live history itself; each bound serializes every message.
-    if (runtime.replay) this.boundHistory(history);
-    else this.changed();
+    // changed() bounds the live history itself.
+    if (runtime.replay) this.boundHistory(history, touched);
+    else this.changed(touched);
   }
 
   private compaction(history: History, update: CompactionUpdate | CompactionSummaryChunk) {
@@ -1211,6 +1224,7 @@ export class AcpSession {
     const fallback = display.terminal && !display.output ? 'Agent terminal activity (this terminal is not managed by Warden)' : undefined;
     item.text = text([display.title, display.content, fallback, display.exit, display.output].filter(Boolean).join('\n'));
     history.lastChunk = undefined;
+    return item;
   }
 
   private permission(runtime: Runtime, request: RequestPermissionRequest, signal: AbortSignal): Promise<RequestPermissionResponse> {

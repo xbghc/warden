@@ -1182,6 +1182,38 @@ describe('ACP subprocess conversations', () => {
     expect(transcript(reopened)).toEqual(transcript(restored));
   });
 
+  it('measures only the changed message for each streamed chunk', async () => {
+    const f = await fixture('task', 'load-without-replay');
+    await f.session.connect(f.profile, { resume: false });
+    await f.session.send('remember me');
+    await f.session.disconnect();
+    const seeded = 300;
+    f.storage.record!.messages.unshift(
+      ...Array.from({ length: seeded }, (_, index) => ({ id: `seed-${index}`, role: 'notice' as const, text: `Earlier message ${index}` })),
+    );
+    const restored = f.create();
+    await restored.initialize();
+    await restored.connect(f.profile, { resume: true });
+    expect(restored.snapshot().record.messages).toHaveLength(seeded + 2);
+    // Bounding the history encodes messages one at a time; storage encodes the record as a whole.
+    const stringify = vi.spyOn(JSON, 'stringify');
+    let encoded = 0;
+    try {
+      await restored.send('stream-chunks');
+      encoded = stringify.mock.calls.filter(([value]) => !!value && typeof value === 'object' && 'role' in value && 'text' in value).length;
+    } finally {
+      stringify.mockRestore();
+    }
+    const messages = restored.snapshot().record.messages;
+    expect(messages.at(-2)?.text).toBe(Array.from({ length: 60 }, (_, index) => `part ${index} `).join(''));
+    expect(messages.at(-1)?.text).toBe('Stream complete');
+    // 62 chunks arrive. Full passes remain at turn boundaries and coarse checkpoints only.
+    expect(encoded).toBeLessThan(10 * (seeded + 4));
+    const reopened = f.create();
+    await reopened.initialize();
+    expect(transcript(reopened)).toEqual(transcript(restored));
+  });
+
   it('requires a new conversation when the agent cannot load and archives rather than silently resending the old transcript', async () => {
     const f = await fixture('task', 'no-load');
     await f.session.connect(f.profile, { resume: false });
