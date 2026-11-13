@@ -168,7 +168,12 @@ const server = createServer(async (request, response) => {
       let surface = new URL(location.href).searchParams.get('surface') || 'rebase';
       let queue = Promise.resolve();
       window.__actions = [];
-      window.acquireVsCodeApi = () => ({ postMessage: message => {
+      // Like VS Code, keep webview state across a rebuilt page of the same panel.
+      const stateKey = 'warden-state:' + surface;
+      window.acquireVsCodeApi = () => ({
+        getState: () => JSON.parse(sessionStorage.getItem(stateKey) ?? 'null') ?? undefined,
+        setState: value => sessionStorage.setItem(stateKey, JSON.stringify(value)),
+        postMessage: message => {
         if (message.action) window.__actions.push(message.action);
         queue = queue.then(async () => {
           const response = await fetch((message.type === 'ready' ? '/model' : '/action') + '?surface=' + surface,

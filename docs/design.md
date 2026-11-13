@@ -129,6 +129,8 @@ Git rebase replays task commits onto the base branch.
   use placeholders and accessible names instead of repeated standalone labels. Preserve visible
   labels for script fields and agent-provided configuration whose values need disambiguation.
   Rebase selection uses one select-all checkbox with partial-selection feedback and a count.
+  The selection survives hiding and showing the Rebase tab; opening Rebase again from a task or the
+  toolbar starts a new selection.
 - Keep secondary content on demand: delivery records and script output. Preserve accessible names
   and tooltips on icon buttons. Errors and recovery actions must remain visible.
 - Task rows show at most two facts, prioritizing permission requests, failures and stale reviews;

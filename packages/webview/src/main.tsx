@@ -25,7 +25,14 @@ function App() {
   if (!view) return <main>Loading workspace…</main>;
   if (view.type === 'acp-empty') return <main />;
   if (view.type === 'acp-model') return <AcpApp key={view.model.panelId} model={view.model} send={sendAcp} />;
-  return <WorkbenchApp key={`${view.model.session}:${view.model.surface}`} model={view.model} send={(action) => bridge.action(view.model, action)} />;
+  return (
+    <WorkbenchApp
+      key={`${view.model.session}:${view.model.surface}`}
+      model={view.model}
+      send={(action) => bridge.action(view.model, action)}
+      saved={{ load: bridge.state, save: bridge.saveState }}
+    />
+  );
 }
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

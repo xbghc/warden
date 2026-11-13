@@ -141,6 +141,12 @@ try:
         expect(select_all.locator('.lucide-minus')).to_be_visible()
         expect(select_all.locator('.lucide-check')).to_be_hidden()
         page.screenshot(path=str(artifacts / 'rebase-partial-selection.png'), full_page=True)
+        # VS Code discards a hidden panel's page and rebuilds it when the tab is shown again.
+        page.reload()
+        select_all = page.get_by_role('checkbox', name='Select All', exact=True)
+        expect(page.get_by_role('checkbox', name='订单接口', exact=True)).to_be_checked(timeout=30000)
+        expect(page.get_by_role('checkbox', name='表单校验', exact=True)).not_to_be_checked()
+        expect(select_all).to_have_attribute('aria-checked', 'mixed')
         select_all.check()
         expect(page.get_by_role('checkbox', name='表单校验', exact=True)).to_be_checked()
         expect(select_all.locator('.lucide-check')).to_be_visible()

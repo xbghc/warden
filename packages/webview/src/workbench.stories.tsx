@@ -81,6 +81,14 @@ export const SynchronizationChecks: Story = {
   },
 };
 
+// A panel rebuilt after its tab was hidden keeps the selection the user made, not the one it opened with.
+export const RestoredSelection: Story = {
+  args: {
+    model: { ...(SynchronizationChecks.args?.model as WorkbenchModel), rebaseSelection: { request: 'opened', taskIds: ['current'] } },
+    saved: { load: () => ({ request: 'opened', taskIds: ['ready', 'conflict'] }), save: () => {} },
+  },
+};
+
 export const CheckingSynchronization: Story = {
   args: {
     model: {

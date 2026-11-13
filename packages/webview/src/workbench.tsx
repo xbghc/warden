@@ -7,8 +7,16 @@ import { Checkbox } from './components/ui/checkbox';
 import { IconButton } from './components/ui/icon-button';
 import { StatusBadge } from './components/ui/status-badge';
 
-type Props = { model: WorkbenchModel; send(action: WorkbenchAction): void };
-export function WorkbenchApp({ model, send }: Props) {
+/** State that outlives the page: VS Code rebuilds a panel's content each time its tab is shown again. */
+export type SavedState = { load(): unknown; save(state: unknown): void };
+type Props = { model: WorkbenchModel; send(action: WorkbenchAction): void; saved?: SavedState };
+
+function savedSelection(saved: SavedState | undefined, request: string): string[] | undefined {
+  const state = saved?.load() as { request?: unknown; taskIds?: unknown } | undefined;
+  if (!state || state.request !== request || !Array.isArray(state.taskIds)) return undefined;
+  return state.taskIds.filter((id): id is string => typeof id === 'string');
+}
+export function WorkbenchApp({ model, send, saved }: Props) {
   // Loading and pending connections, including the startup scheduling delay, never offer setup.
   const pending =
     model.surface !== 'settings' && model.agentConfiguration.status === 'configured' && ['unchecked', 'checking'].includes(model.agentReadiness.status);
@@ -51,7 +59,7 @@ export function WorkbenchApp({ model, send }: Props) {
       ) : !model.workflow.workflow ? (
         <Setup model={model} send={send} />
       ) : (
-        model.surface === 'rebase' && <Rebase model={model} send={send} />
+        model.surface === 'rebase' && <Rebase model={model} send={send} saved={saved} />
       )}
     </main>
   );
@@ -69,11 +77,17 @@ function Setup({ model, send }: Props) {
   );
 }
 
-function Rebase({ model, send }: Props) {
-  const [selected, setSelected] = useState<string[]>([]);
+function Rebase({ model, send, saved }: Props) {
+  const request = model.rebaseSelection?.request ?? '';
+  const [selected, setSelectedState] = useState<string[]>(() => savedSelection(saved, request) ?? []);
+  const setSelected = (taskIds: string[]) => {
+    setSelectedState(taskIds);
+    saved?.save({ request, taskIds });
+  };
   useEffect(() => {
-    if (model.rebaseSelection) setSelected(model.rebaseSelection.taskIds);
-  }, [model.rebaseSelection?.request]);
+    // A rebuilt page receives the request it already had; only a new request replaces the user's choice.
+    if (model.rebaseSelection && !savedSelection(saved, request)) setSelected(model.rebaseSelection.taskIds);
+  }, [request]);
   const checks = model.checks?.checks ?? [];
   const selectedChecks = checks.filter((check) => selected.includes(check.changeId));
   const retry = !model.checks || model.errors.some((error) => error.scope === 'rebase' || error.scope === 'repository');
