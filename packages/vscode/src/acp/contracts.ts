@@ -1,5 +1,6 @@
 import type { AcpBinding, AcpModelSelection, AcpRecord, DiagnosticLog } from '@warden/shared';
 import type { EngineOutput } from '@warden/engine';
+import type { ProcessTree } from './process-tree.js';
 
 export interface AcpProfile {
   id: string;
@@ -38,6 +39,8 @@ export interface AcpSessionOptions {
   log?: DiagnosticLog;
   connectionFailed?(profile: AcpProfile, message: string): void;
   timeoutMs?: number;
+  /** Inspects and stops what a stopped agent left running. Replaced in tests. */
+  processTree?: ProcessTree;
 }
 
 /** The SDK's own default. Stored text is truncated separately, so a large tool result or image

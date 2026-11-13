@@ -131,7 +131,7 @@ Task paths remain `<primary>-<n>`. Task creation allocates fresh logical workspa
 Workspace creation does not launch an agent. Opening Task Chat connects its agent session; users can also run
 external tools in that directory. In the current ACP integration, Warden owns only the agent process
 carrying the stdio connection; it does not implement ACP terminal tools or supervise agent-started
-commands. An integration with an externally managed agent must preserve that application's process
+commands while the agent runs, and stops the ones still attached when it stops the agent. An integration with an externally managed agent must preserve that application's process
 ownership.
 
 Workspace hooks are a thin interface for user scripts: execute the configured creation/reuse

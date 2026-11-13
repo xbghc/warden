@@ -264,9 +264,11 @@ Warden started in this window: the workbench connection and each live task conve
 agent, status and PID. The tooltip shows the workspace, repository, start time and executable. Selecting
 a task row opens its chat. **End Agent Process** closes that connection and its process; a responding or
 permission-waiting process asks for confirmation first, and a row whose process was already replaced
-does nothing. Other windows list their own processes. These actions do not promise that every command
-started by the agent has stopped. The agent owns its child commands and execution policies; coordinate
-ongoing work before Git mutations. A turn ending never connects preview, commits, delivers or rebases.
+does nothing. Other windows list their own processes. Ending a process also stops the commands it was
+still running; if one cannot be stopped, the action fails, names it and keeps the conversation's
+ownership. Commands that detached from the agent earlier, and all commands on Windows, are not found.
+While it runs, the agent owns its child commands and execution policies; coordinate ongoing work before
+Git mutations. A turn ending never connects preview, commits, delivers or rebases.
 Native review and its source/baseline pins remain unchanged.
 
 The implementation is tested with an SDK-compatible child-agent fixture and packaged extension flows.

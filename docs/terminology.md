@@ -73,8 +73,8 @@ Use **Refresh** for rereading visible state, **Sync Preview** for composing prev
 **Rebase** for changing task branches. Preview synchronization flows from the primary
 folder and connected workspaces into the preview folder; it does not copy preview edits back.
 Use **Commit message** and **Commits** in their respective contexts. Use **Stop Turn**
-for cancellation and **End Agent Process** when closing an active agent process; neither claims
-that all commands started by the agent have stopped.
+for cancellation and **End Agent Process** when closing an active agent process. Stop Turn does not
+claim that commands started by the agent have stopped; End Agent Process stops the ones still attached to it.
 
 ## Observable status vocabulary
 

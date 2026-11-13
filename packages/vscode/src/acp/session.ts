@@ -29,6 +29,7 @@ import { AcpStderr, acpDiagnosticSecrets, acpErrorMessage, acpFailureLog } from 
 import { approveRepositoryRead, repositoryReadRequest } from './read-permissions.js';
 import { workspaceContext, workspaceContextFallback } from './workspace-context.js';
 import { sameAcpBinding } from './binding.js';
+import { describeProcesses, type ProcessIdentity, processTree, reapSurvivors } from './process-tree.js';
 
 declare const __WARDEN_VERSION__: string;
 const CLIENT_VERSION = typeof __WARDEN_VERSION__ === 'undefined' ? 'development' : __WARDEN_VERSION__;
@@ -69,6 +70,8 @@ type Runtime = {
   exited: boolean;
   release(): Promise<void>;
   released?: Promise<void>;
+  /** What ran under the agent when Warden first stopped it; kept until none of it survives. */
+  descendants?: ProcessIdentity[];
   stopping: boolean;
   initialized: boolean;
   established: boolean;
@@ -99,7 +102,10 @@ type Turn = {
   user?: AcpMessage;
 };
 
-/** A task-bound protocol client. Files, commands and any agent-owned background work remain the agent's responsibility. */
+/**
+ * A task-bound protocol client. Files, commands and background work belong to the agent while it
+ * runs; once Warden stops the agent, Warden also stops the processes it left behind.
+ */
 const SAVE_INTERVAL_MS = 1_000;
 const STOP_GRACE_MS = 2_000;
 
@@ -1336,6 +1342,8 @@ export class AcpSession {
   private async releaseRuntime(runtime: Runtime) {
     if (!runtime.exited) throw new Error('Agent process exit has not been confirmed. Session ownership has been retained.');
     runtime.released ??= (async () => {
+      // Every release passes here, including the one the exit event starts by itself.
+      await this.reapDescendants(runtime);
       const turn = this.turn?.runtime === runtime ? this.turn : undefined;
       if (turn) await turn.promise.catch(() => undefined);
       await this.persist();
@@ -1353,11 +1361,39 @@ export class AcpSession {
     }
   }
 
+  private async reapDescendants(runtime: Runtime) {
+    if (!runtime.descendants?.length) return;
+    const outcome = await reapSurvivors(this.options.processTree ?? processTree, runtime.descendants);
+    if (outcome.kind === 'clean') {
+      runtime.descendants = [];
+      return;
+    }
+    runtime.log.write('warn', 'acp.process.survivors', { outcome: outcome.kind, processes: describeProcesses(outcome.processes) });
+    if (outcome.kind === 'unstopped') {
+      // A later disconnect checks the same processes again instead of releasing past them.
+      runtime.descendants = outcome.processes;
+      throw new Error(
+        `Processes started by the agent are still running in the task workspace: ${describeProcesses(outcome.processes)}. Ownership has been retained; stop them before disconnecting again.`,
+      );
+    }
+    runtime.descendants = [];
+  }
+
   private async stopRuntime(runtime: Runtime) {
     const span = runtime.log.start('acp.process.stop', { pid: runtime.child.pid });
     try {
       runtime.stopping = true;
       this.cancelPermissions(runtime);
+      // Taken while the agent still lives: its death reparents its commands and erases the link.
+      // An agent that exited by itself left no link to follow.
+      if (!runtime.descendants && !runtime.exited && runtime.child.pid) {
+        const tree = this.options.processTree ?? processTree;
+        runtime.descendants = await tree.descendants(runtime.child.pid).catch((error) => {
+          runtime.log.write('warn', 'acp.process.descendants_unavailable', diagnosticError(error));
+          return [];
+        });
+        runtime.log.write('debug', 'acp.process.descendants', { count: runtime.descendants.length });
+      }
       runtime.connection.close();
       runtime.child.stdin.destroy();
       if (!runtime.exited) {

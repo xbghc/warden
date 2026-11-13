@@ -9,6 +9,7 @@ import type { AcpProfile, AgentProcessInfo } from './contracts.js';
 import { MAX_ACP_MESSAGE_BYTES } from './contracts.js';
 import type { PerformanceLog, PerformanceOutcome, PerformanceSpan, PerformanceStage } from '../performance.js';
 import { AcpStderr, acpDiagnosticSecrets, acpErrorDiagnostic, redactAcpDiagnostic } from './diagnostics.js';
+import { describeProcesses, processTree, reapSurvivors } from './process-tree.js';
 
 declare const __WARDEN_VERSION__: string;
 const clientVersion = typeof __WARDEN_VERSION__ === 'undefined' ? 'development' : __WARDEN_VERSION__;
@@ -194,6 +195,14 @@ export class AcpReadinessCheck {
       .catch(() => {})
       .then(() =>
         runtime.log.measure('acp.process.stop', async () => {
+          // Taken while the agent still lives: its death reparents what it started.
+          const descendants =
+            runtime.exited || !runtime.child.pid
+              ? []
+              : await processTree.descendants(runtime.child.pid).catch((error) => {
+                  runtime.log.write('warn', 'acp.process.descendants_unavailable', { message: message(error) });
+                  return [];
+                });
           const wait = async (ms: number) => {
             let timer: ReturnType<typeof setTimeout>;
             try {
@@ -221,6 +230,10 @@ export class AcpReadinessCheck {
             this.unstopped.add(runtime);
             throw new Error('The ACP process could not be stopped.');
           }
+          // This connection runs no task work, so a survivor is reported rather than blocking the next connection.
+          const outcome = await reapSurvivors(processTree, descendants).catch(() => ({ kind: 'failed' as const, processes: descendants }));
+          if (outcome.kind !== 'clean')
+            runtime.log.write('warn', 'acp.process.survivors', { outcome: outcome.kind, processes: describeProcesses(outcome.processes) });
         }),
       );
     return this.cleanup;

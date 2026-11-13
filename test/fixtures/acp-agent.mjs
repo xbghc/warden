@@ -574,3 +574,16 @@ createInterface({ input: process.stdin }).on('line', (line) => {
     process.exitCode = 1;
   }
 });
+if (mode.startsWith('orphan-tool')) {
+  // A tool command in a session of its own, the way real agents start them: a signal to the
+  // agent or to its process group does not reach it. It keeps writing to the task workspace.
+  const { spawn } = await import('node:child_process');
+  const ignore = mode === 'orphan-tool-stubborn' ? "process.on('SIGTERM',()=>{});" : '';
+  const tool = spawn(process.execPath, ['-e', `${ignore}const fs=require('fs');setInterval(()=>fs.appendFileSync('tool-writes.log','x'),50)`], {
+    cwd: process.cwd(),
+    detached: true,
+    stdio: 'ignore',
+  });
+  writeFileSync('tool.pid', String(tool.pid));
+  if (mode === 'orphan-tool-linger') process.on('SIGTERM', () => {});
+}

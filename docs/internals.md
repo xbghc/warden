@@ -119,7 +119,8 @@ close its stream and terminate the owned process, escalating from SIGTERM to SIG
 wait. Pending connection attempts and authentication pickers are cancelled; stale results cannot unlock
 the workbench. Settings edits are coalesced and failures do not trigger a restart loop. Task connections
 are separately closed on shutdown, even if cleanup of the workbench connection reports an error.
-Agent-owned tools, login data, empty-session records and child commands remain the agent's responsibility.
+Agent-owned tools, login data, empty-session records and the child commands of a running agent remain the
+agent's responsibility; after stopping an agent, Warden stops the [processes it left behind](acp-design.md).
 Availability is window-local and is not stored as a persistent readiness flag. Task connections retain
 their own workspace cwd and start when the user opens Task Chat or sends a message. Workbench refreshes
 prewarm only the read-only conversation Engine and single-checkout binding resolution (`inspectTaskWorktree`);

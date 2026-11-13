@@ -103,9 +103,21 @@ stdio process with bounded termination. Task connections escalate from SIGTERM t
 about two seconds each, inside the time VS Code allows for shutdown. Late results cannot mark a replaced connection ready. Task
 conversations keep their own process and session cwd in the assigned task workspace, independently
 of this startup connection. Shutdown also closes those connections, flushes local conversation/draft
-state and releases their claims. It does not supervise agent-owned child commands. Existing task data,
+state and releases their claims. Existing task data,
 conversations and drafts remain available for explicit recovery. Availability is held in the current
 window; startup remembers the selected profile ID, not a persistent success flag.
+
+The agent owns its child commands while it runs; Warden does not supervise them. Stopping the agent
+ends that: nothing else will stop what it started, and a survivor keeps writing to the task
+workspace after the claim is gone. Before signalling, Warden records the agent's live descendants by
+parent links, because agents commonly start commands in a session of their own that a process-group
+signal cannot reach. After the agent has exited, descendants that are still the same running process
+receive SIGTERM and then SIGKILL, about half a second each. A task connection releases its claim
+only when none remain; otherwise disconnect fails, names the processes and keeps ownership, and a
+later disconnect checks them again. The workbench connection logs survivors without blocking a new
+connection. Not covered: an agent that exits by itself, a process that had already left the agent's
+tree before the stop (a daemonized command), one started between the record and the agent's exit, an
+extension host that is killed, and Windows, where the process tree is not inspected.
 
 Workbench connections emit local [startup performance diagnostics](development.md#startup-performance)
 for cleanup, process creation, initialization and session creation. Failed, timed-out, cancelled and
@@ -407,7 +419,7 @@ Users coordinate their agent's activity before requesting mutations. Warden does
 idleness from clean Git status or cancellation and adds no agent-idle declaration. Automatic rebase
 reserves an idle local session until the engine finishes; new turns, connection attempts and session
 configuration are rejected during that interval. The engine also serializes against connection
-claims from other windows. This coordinates Warden's own operations, not agent-owned child commands.
+claims from other windows. This coordinates Warden's own operations, not the child commands of a running agent.
 Existing Git operation locks, workspace identity checks and source/HEAD/index checks remain in force. Delivery
 still requires complete review of the pinned source HEAD, saved content tree when applicable,
 delivery boundary and primary HEAD. Saved uncommitted task content can be delivered directly;

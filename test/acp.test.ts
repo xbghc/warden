@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AcpBinding, AcpModelSelection, AcpRecord } from '@warden/shared';
 import { DiagnosticLog } from '@warden/shared';
 import type { AcpProfile, AcpSessionOptions, AcpStorage } from '../packages/vscode/src/acp/contracts.js';
+import { parseProcessList, processTree } from '../packages/vscode/src/acp/process-tree.js';
 import { AcpSession } from '../packages/vscode/src/acp/session.js';
 import { AcpSessionStorage } from '../packages/vscode/src/acp/storage.js';
 
@@ -83,7 +84,11 @@ async function fixture(name = 'task', mode = 'normal', timeoutMs = 15_000) {
   const report = vi.fn();
   const diagnostics: Array<{ level: string; [key: string]: unknown }> = [];
   const log = new DiagnosticLog((level, line) => diagnostics.push({ level, ...JSON.parse(line.slice('[diagnostic] '.length)) }));
-  const create = (persistence: AcpStorage = storage, models: AcpSessionOptions['modelPreferences'] = modelPreferences) => {
+  const create = (
+    persistence: AcpStorage = storage,
+    models: AcpSessionOptions['modelPreferences'] = modelPreferences,
+    extra: Partial<AcpSessionOptions> = {},
+  ) => {
     const session = new AcpSession({
       binding,
       storage: persistence,
@@ -95,6 +100,7 @@ async function fixture(name = 'task', mode = 'normal', timeoutMs = 15_000) {
       report,
       timeoutMs,
       log,
+      ...extra,
     });
     sessions.push(session);
     return session;
@@ -1212,6 +1218,113 @@ describe('ACP subprocess conversations', () => {
     const reopened = f.create();
     await reopened.initialize();
     expect(transcript(reopened)).toEqual(transcript(restored));
+  });
+
+  const toolState = async (workspace: string) => {
+    const pid = Number(await readFile(path.join(workspace, 'tool.pid'), 'utf8'));
+    const writes = async () => (await readFile(path.join(workspace, 'tool-writes.log'), 'utf8').catch(() => '')).length;
+    return { pid, writes };
+  };
+  const alive = (pid: number) => {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return false;
+    }
+    // A reparented process that has exited but is not yet collected still accepts signal 0.
+    return true;
+  };
+  const gone = async (pid: number) => {
+    for (let attempt = 0; attempt < 40 && alive(pid); attempt++) await new Promise((resolve) => setTimeout(resolve, 50));
+    return !alive(pid);
+  };
+
+  // Windows has no process inspection here; see docs/acp-design.md.
+  describe.skipIf(process.platform === 'win32')('processes an agent leaves behind', () => {
+    for (const [mode, signals] of [
+      ['orphan-tool', ['SIGTERM']],
+      ['orphan-tool-linger', ['SIGTERM', 'SIGKILL']],
+      ['orphan-tool-stubborn', ['SIGTERM']],
+    ] as const)
+      it(`stops a tool command in its own session before releasing ownership (${mode})`, async () => {
+        const f = await fixture('task', mode);
+        await f.session.connect(f.profile, { resume: false });
+        await f.session.send('hello');
+        const tool = await toolState(f.workspace);
+        expect(alive(tool.pid)).toBe(true);
+        await f.session.disconnect();
+        expect(await gone(tool.pid)).toBe(true);
+        const settled = await tool.writes();
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        expect(await tool.writes()).toBe(settled);
+        expect(f.session.snapshot().status).toBe('disconnected');
+        expect(f.storage.claimed).toBe(false);
+        expect(f.diagnostics.filter((entry) => entry.event === 'acp.process.signal').map((entry) => entry.signal)).toEqual(signals);
+        expect(f.diagnostics.find((entry) => entry.event === 'acp.process.survivors')).toMatchObject({ level: 'warn', outcome: 'reaped' });
+      });
+
+    it('retains ownership while a process the agent started cannot be stopped, and releases once it is gone', async () => {
+      const f = await fixture('task', 'orphan-tool');
+      const session = f.create(f.storage, f.modelPreferences, { processTree: { ...processTree, signal: () => {} } });
+      await session.connect(f.profile, { resume: false });
+      await session.send('hello');
+      const tool = await toolState(f.workspace);
+      await expect(session.disconnect()).rejects.toThrow(new RegExp(`still running in the task workspace: ${tool.pid} `));
+      expect(alive(tool.pid)).toBe(true);
+      expect(f.storage.claimed).toBe(true);
+      // The agent has exited by now; a retry must still look at what it left, not release past it.
+      await expect(session.disconnect()).rejects.toThrow(/Ownership has been retained/);
+      expect(f.storage.claimed).toBe(true);
+      expect(f.diagnostics.find((entry) => entry.event === 'acp.process.survivors')).toMatchObject({ outcome: 'unstopped' });
+      process.kill(tool.pid, 'SIGKILL');
+      expect(await gone(tool.pid)).toBe(true);
+      await session.disconnect();
+      expect(session.snapshot().status).toBe('disconnected');
+      expect(f.storage.claimed).toBe(false);
+    });
+
+    it('disconnects as before when the process list cannot be read', async () => {
+      const f = await fixture('task', 'orphan-tool');
+      const session = f.create(f.storage, f.modelPreferences, {
+        processTree: { ...processTree, descendants: () => Promise.reject(new Error('ps is unavailable')) },
+      });
+      await session.connect(f.profile, { resume: false });
+      await session.send('hello');
+      const tool = await toolState(f.workspace);
+      await session.disconnect();
+      expect(f.storage.claimed).toBe(false);
+      expect(f.diagnostics.find((entry) => entry.event === 'acp.process.descendants_unavailable')).toMatchObject({ level: 'warn' });
+      // Without a snapshot the tool is not found; the gap is logged, not hidden.
+      expect(alive(tool.pid)).toBe(true);
+      process.kill(tool.pid, 'SIGKILL');
+    });
+
+    it('leaves nothing to stop after an agent without child processes', async () => {
+      const f = await fixture();
+      await f.session.connect(f.profile, { resume: false });
+      await f.session.send('hello');
+      await f.session.disconnect();
+      expect(f.diagnostics.find((entry) => entry.event === 'acp.process.descendants')).toMatchObject({ count: 0 });
+      expect(f.diagnostics.some((entry) => entry.event === 'acp.process.survivors')).toBe(false);
+    });
+  });
+
+  it('parses process lists from Linux and macOS and leaves out exited processes', () => {
+    const listed = parseProcessList(
+      [
+        '    812       1 Ss   Fri Nov 13 05:30:07 2026 /usr/bin/agy acp',
+        '   4411     812 S+   Fri Nov  3 05:30:09 2026 sleep 300',
+        '   4412     812 Z    Fri Nov 13 05:30:09 2026 [sh] <defunct>',
+        '  501   77 Ss   Thu Jan  1 09:00:00 2026 /bin/zsh -c pnpm test -- --watch',
+        'garbage line',
+        '',
+      ].join('\n'),
+    );
+    expect(listed).toEqual([
+      { pid: 812, ppid: 1, startedAt: 'Fri Nov 13 05:30:07 2026', command: '/usr/bin/agy acp' },
+      { pid: 4411, ppid: 812, startedAt: 'Fri Nov 3 05:30:09 2026', command: 'sleep 300' },
+      { pid: 501, ppid: 77, startedAt: 'Thu Jan 1 09:00:00 2026', command: '/bin/zsh -c pnpm test -- --watch' },
+    ]);
   });
 
   it('requires a new conversation when the agent cannot load and archives rather than silently resending the old transcript', async () => {
