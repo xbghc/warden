@@ -1,8 +1,8 @@
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { existsSync, readFileSync } from 'node:fs';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Hono } from 'hono';
 import type { CreateWorktreeResponse, FilesResponse } from '@warden/shared';
@@ -90,6 +90,54 @@ afterEach(async () => {
 });
 
 describe('a clone slot', () => {
+  // Maintenance in the main worktree's repository deletes loose objects while clone links them.
+  // A stand-in git fails the first clones the way git does when that race is lost.
+  describe.skipIf(process.platform === 'win32')('whose source object vanished during the clone', () => {
+    const original = process.env.PATH;
+    const racing = async (failures: number) => {
+      const bin = path.join(dataDir, 'bin');
+      const counter = path.join(dataDir, 'clone-attempts');
+      const real = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
+      await mkdir(bin);
+      await writeFile(
+        path.join(bin, 'git'),
+        `#!/bin/sh\nif [ "$1" = clone ]; then\n  n=$(cat '${counter}' 2>/dev/null || echo 0)\n  echo $((n + 1)) > '${counter}'\n  if [ "$n" -lt ${failures} ]; then\n    echo "fatal: failed to create link 'slot/.git/objects/9e/c665f4': No such file or directory" >&2\n    exit 128\n  fi\nfi\nexec '${real}' "$@"\n`,
+        { mode: 0o755 },
+      );
+      process.env.PATH = `${bin}${path.delimiter}${original}`;
+      return () => Number(readFileSync(counter, 'utf8'));
+    };
+    afterEach(() => {
+      process.env.PATH = original;
+    });
+
+    it('is cloned again', async () => {
+      const attempts = await racing(2);
+      const made = await checkout({ branch: 'agent/one', kind: 'clone' });
+      expect(made).toMatchObject({ slot: 1, worktree: { branch: 'agent/one', clone: true } });
+      expect(attempts()).toBe(3);
+      expect(git(await realpath(slotDir(1)), 'status', '--porcelain')).toBe('');
+    });
+
+    it('fails once the retries are used up, leaving no slot behind', async () => {
+      const attempts = await racing(3);
+      const res = await send('POST', '/api/worktrees', { branch: 'agent/one', kind: 'clone' });
+      expect(res.status).not.toBe(201);
+      expect(attempts()).toBe(3);
+      expect(existsSync(slotDir(1))).toBe(false);
+    });
+
+    it('does not repeat a clone that failed for another reason', async () => {
+      const attempts = await racing(0);
+      await mkdir(slotDir(1));
+      await writeFile(path.join(slotDir(1), 'occupied.txt'), 'not a clone\n');
+      const res = await send('POST', '/api/worktrees', { branch: 'agent/one', kind: 'clone', slot: 1 });
+      expect(res.status).not.toBe(201);
+      expect(existsSync(path.join(slotDir(1), 'occupied.txt'))).toBe(true);
+      if (existsSync(path.join(dataDir, 'clone-attempts'))) expect(attempts()).toBe(1);
+    });
+  });
+
   it('is a clone of the server, as the main worktree knows it, holding only the branch checked out', async () => {
     const made = await checkout({ branch: 'agent/one', kind: 'clone' });
     const dir = await realpath(slotDir(1));

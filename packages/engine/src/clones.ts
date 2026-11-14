@@ -16,6 +16,8 @@ import { CLONE_MARK, isCloneOf, readRemotes, remoteHeads, type RepoContext } fro
 /** A remote name that can be passed on and put in a refspec as it is. */
 const REMOTE_NAME = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
 
+const CLONE_ATTEMPTS = 3;
+
 /**
  * Makes a clone slot at `dir`. `git clone --local` hard-links the main worktree's objects, so even a
  * large repository is there in moments, `--no-checkout` leaves the files to the switch that follows,
@@ -29,27 +31,37 @@ export async function makeClone(ctx: RepoContext, dir: string): Promise<void> {
   const remotes = [...(await readRemotes(ctx.commonRoot))].filter(([, r]) => r.urls.length);
   const odd = remotes.find(([name]) => !REMOTE_NAME.test(name) || name.includes('..'));
   if (odd) throw new WardenError(409, `remote ${odd[0]} cannot be copied into a clone`, 'unsupported_remote');
-  await runGitWrite(
-    [
-      'clone',
-      '--quiet',
-      '--local',
-      '--no-checkout',
-      '--origin',
-      'origin',
-      '--config',
-      `${CLONE_MARK}=${ctx.commonRoot}`,
-      // An agent's commit must not leave maintenance running behind it in the task workspace.
-      ...FOREGROUND_MAINTENANCE.flatMap((field) => ['--config', `${field}=false`]),
-      '--',
-      ctx.commonRoot,
-      dir,
-    ],
-    {
-      cwd: path.dirname(dir),
-      timeoutMs: LONG_GIT_TIMEOUT_MS,
-    },
-  );
+  // Maintenance in the main worktree's repository can delete a loose object between clone listing it
+  // and linking it. Git then removes the unfinished clone, and the objects are intact in a pack.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await runGitWrite(
+        [
+          'clone',
+          '--quiet',
+          '--local',
+          '--no-checkout',
+          '--origin',
+          'origin',
+          '--config',
+          `${CLONE_MARK}=${ctx.commonRoot}`,
+          // An agent's commit must not leave maintenance running behind it in the task workspace.
+          ...FOREGROUND_MAINTENANCE.flatMap((field) => ['--config', `${field}=false`]),
+          '--',
+          ctx.commonRoot,
+          dir,
+        ],
+        {
+          cwd: path.dirname(dir),
+          timeoutMs: LONG_GIT_TIMEOUT_MS,
+        },
+      );
+      break;
+    } catch (error) {
+      const vanished = error instanceof GitError && /^fatal: failed to [^\n]*: No such file or directory$/m.test(error.stderr);
+      if (!vanished || attempt === CLONE_ATTEMPTS) throw error;
+    }
+  }
   // From here on the directory is the clone just made; one that `clone` itself refused — something
   // appeared there since the slot was picked — is left alone.
   try {

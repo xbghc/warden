@@ -190,7 +190,8 @@ one (detached, clean) when a branch is checked out there, `git switch --detach` 
 and `git reset --hard` plus `git clean -fd` only on the forced release the reviewer confirmed after
 a 409. A clone slot (see [Clone slots](worktrees.md#clone-slots)) is made at such a path by
 `git clone --local --no-checkout` with `warden.main` set and `maintenance.autoDetach` and
-`gc.autoDetach` off, then `git remote remove` / `add` /
+`gc.autoDetach` off, repeated up to three times when git reports that a source object vanished
+while it was being linked (maintenance in the main worktree's repository packed it meanwhile), then `git remote remove` / `add` /
 `set-url` / `set-head` with the names and URLs read from the main worktree's config, and a `git fetch`
 of the main worktree's remote-tracking branches; after that it is written like any slot, in the
 clone, plus a `git fetch --all` there when the checkout asks for one. A clone made for a checkout
