@@ -189,7 +189,8 @@ HEAD of an existing checkout are normally written inside such a slot: `git switc
 one (detached, clean) when a branch is checked out there, `git switch --detach` when it is released,
 and `git reset --hard` plus `git clean -fd` only on the forced release the reviewer confirmed after
 a 409. A clone slot (see [Clone slots](worktrees.md#clone-slots)) is made at such a path by
-`git clone --local --no-checkout` with `warden.main` set, then `git remote remove` / `add` /
+`git clone --local --no-checkout` with `warden.main` set and `maintenance.autoDetach` and
+`gc.autoDetach` off, then `git remote remove` / `add` /
 `set-url` / `set-head` with the names and URLs read from the main worktree's config, and a `git fetch`
 of the main worktree's remote-tracking branches; after that it is written like any slot, in the
 clone, plus a `git fetch --all` there when the checkout asks for one. A clone made for a checkout
@@ -383,7 +384,12 @@ already-incorporated target and repairs bookkeeping without executing rebase hoo
 
 Before composing, Warden copies primary's `info/exclude` and `info/attributes` and sets its resolved
 `core.autocrlf`, `core.eol`, `core.safecrlf` and `filter.*`/`merge.*`/`diff.*` driver values in the
-shared repository with `git config`. Recovery of an interrupted publication runs
+shared repository with `git config`. It also sets `maintenance.autoDetach` and `gc.autoDetach` to
+`false` there, on creation and on first use of an older repository. Git otherwise detaches automatic
+maintenance after a commit: the process keeps `objects/maintenance.lock` and may repack objects after
+the command returned, and a backup or allocation that inventories the repository right then stops on
+a change nobody made. Maintenance still runs, inside the command that triggered it. Primary keeps
+the user's own maintenance settings. Recovery of an interrupted publication runs
 `reset --hard HEAD` and `clean -fd` in the preview worktree only, after verifying that every path
 holds its previous or candidate content, and removes that worktree's `index.lock` once it has been
 unchanged for five seconds. Patches are read and written as bytes. Every `git log` read passes

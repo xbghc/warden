@@ -4,7 +4,7 @@ import type { RemoveWorktreeResponse, SafetyBackup, WorktreeInfo } from '@warden
 import { assertSafetyBackupCurrent, createSafetyBackup } from './backups.js';
 import type { StateStore } from './state.js';
 import { WardenError } from './errors.js';
-import { GitError, LONG_GIT_TIMEOUT_MS, refExists, runGit, runGitWrite } from './git.js';
+import { FOREGROUND_MAINTENANCE, GitError, LONG_GIT_TIMEOUT_MS, refExists, runGit, runGitWrite } from './git.js';
 import { CLONE_MARK, isCloneOf, readRemotes, remoteHeads, type RepoContext } from './repo.js';
 
 // Clone slots: for repositories whose tooling does not cope with linked worktrees — hooks set up
@@ -30,7 +30,21 @@ export async function makeClone(ctx: RepoContext, dir: string): Promise<void> {
   const odd = remotes.find(([name]) => !REMOTE_NAME.test(name) || name.includes('..'));
   if (odd) throw new WardenError(409, `remote ${odd[0]} cannot be copied into a clone`, 'unsupported_remote');
   await runGitWrite(
-    ['clone', '--quiet', '--local', '--no-checkout', '--origin', 'origin', '--config', `${CLONE_MARK}=${ctx.commonRoot}`, '--', ctx.commonRoot, dir],
+    [
+      'clone',
+      '--quiet',
+      '--local',
+      '--no-checkout',
+      '--origin',
+      'origin',
+      '--config',
+      `${CLONE_MARK}=${ctx.commonRoot}`,
+      // An agent's commit must not leave maintenance running behind it in the task workspace.
+      ...FOREGROUND_MAINTENANCE.flatMap((field) => ['--config', `${field}=false`]),
+      '--',
+      ctx.commonRoot,
+      dir,
+    ],
     {
       cwd: path.dirname(dir),
       timeoutMs: LONG_GIT_TIMEOUT_MS,

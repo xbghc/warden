@@ -30,6 +30,15 @@ const CONFIG_READS = new Set(['--get', '--get-all', '--get-regexp']);
 const FORBIDDEN_OPTION_PREFIXES = ['--output', '--ext-diff', '--textconv', '-c', '--config-env', '--exec-path', '--git-dir', '--work-tree'];
 
 export const DEFAULT_GIT_TIMEOUT_MS = 30_000;
+
+/**
+ * Git detaches automatic maintenance after commands such as commit, so it still holds
+ * `objects/maintenance.lock` and may repack objects after the command has returned. Backups and
+ * allocations that inventory the repository right afterwards then see a change nobody made.
+ * Maintenance keeps running, inside the command that triggered it.
+ */
+export const FOREGROUND_MAINTENANCE = ['maintenance.autoDetach', 'gc.autoDetach'] as const;
+
 export const EMPTY_TREE_SHA = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
 
 /**

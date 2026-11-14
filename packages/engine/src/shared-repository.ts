@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { lstat, mkdir, readFile, realpath, rm } from 'node:fs/promises';
 import { WardenError } from './errors.js';
-import { LONG_GIT_TIMEOUT_MS, runGit, runGitWrite } from './git.js';
+import { FOREGROUND_MAINTENANCE, LONG_GIT_TIMEOUT_MS, runGit, runGitWrite } from './git.js';
 import { StateStore } from './state.js';
 
 const PRIMARY_MARK = 'warden.sharedPrimary';
@@ -70,9 +70,20 @@ export async function validatedSharedRepository(primary: string): Promise<string
   return validate(owner);
 }
 
+async function foregroundMaintenance(repository: string): Promise<void> {
+  const current = await runGit(['config', '--get-regexp', '^(maintenance|gc)\\.autodetach$'], { cwd: repository, okCodes: [0, 1] });
+  for (const field of FOREGROUND_MAINTENANCE) {
+    if (!current.stdout.split('\n').includes(`${field.toLowerCase()} false`)) await runGitWrite(['config', field, 'false'], { cwd: repository });
+  }
+}
+
 async function initialize(primary: string): Promise<string> {
   const existing = await validate(primary);
-  if (existing) return existing;
+  if (existing) {
+    // Repositories created before this setting existed receive it on first use.
+    await foregroundMaintenance(existing);
+    return existing;
+  }
   const repository = sharedRepositoryPath(primary);
   const root = path.dirname(repository);
   await mkdir(root, { mode: 0o700 }).catch((error: NodeJS.ErrnoException) => {
@@ -97,6 +108,7 @@ async function initialize(primary: string): Promise<string> {
     }
     await runGitWrite(['config', PRIMARY_MARK, primary], { cwd: repository });
     await runGitWrite(['config', VERSION_MARK, '1'], { cwd: repository });
+    await foregroundMaintenance(repository);
     return repository;
   } catch (error) {
     await rm(repository, { recursive: true, force: true });

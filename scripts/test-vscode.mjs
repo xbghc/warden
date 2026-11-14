@@ -16,6 +16,9 @@ const git = (...args) =>
 let backend;
 try {
   git('init', '-b', 'main');
+  // Detached maintenance in the primary can repack objects while a task workspace is cloned from it.
+  git('config', 'maintenance.auto', 'false');
+  git('config', 'gc.auto', '0');
   git('config', 'user.name', 'Test');
   git('config', 'user.email', 'test@example.com');
   await writeFile(path.join(root, 'README.md'), 'Baseline\n');

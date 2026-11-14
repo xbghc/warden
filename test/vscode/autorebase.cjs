@@ -34,6 +34,9 @@ exports.checkAutoRebase = async (workbench, root, eventually) => {
   const isolated = await fs.mkdtemp(path.join(path.dirname(root), 'automatic-rebase-'));
   const git = (...args) => execFileSync('git', ['-C', isolated, ...args], { encoding: 'utf8', stdio: 'pipe' });
   git('init', '-q', '-b', 'main');
+  // Detached maintenance in the primary can repack objects while a task workspace is cloned from it.
+  git('config', 'maintenance.auto', 'false');
+  git('config', 'gc.auto', '0');
   git('config', 'user.name', 'Test');
   git('config', 'user.email', 'test@example.com');
   await fs.writeFile(path.join(isolated, 'README.md'), 'Automatic rebase fixture\n');

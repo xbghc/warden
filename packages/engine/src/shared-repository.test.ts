@@ -1,6 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { copyFile, lstat, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -177,6 +177,49 @@ describe('external shared task repository', () => {
       const result = await engine.execute('rebase.run', { items: checks.checks });
       expect(result.results).toEqual([{ changeId: task.id, status: 'updated' }]);
       expect(fx.git('-C', workspace, 'rev-parse', 'HEAD')).toBe(fx.git('-C', primary, 'rev-parse', 'HEAD'));
+    } finally {
+      await engine.close();
+    }
+  });
+
+  // Git 2.47+ names the choice on the maintenance command line; older versions never detach it here.
+  const maintenance = (cwd: string) => {
+    const trace = spawnSync('git', ['-C', cwd, 'commit', '-q', '--allow-empty', '-m', 'Trigger maintenance'], {
+      env: {
+        ...process.env,
+        GIT_TRACE: '1',
+        GIT_AUTHOR_NAME: 'F',
+        GIT_AUTHOR_EMAIL: 'f@example.com',
+        GIT_COMMITTER_NAME: 'F',
+        GIT_COMMITTER_EMAIL: 'f@example.com',
+      },
+      encoding: 'utf8',
+    });
+    expect(trace.status, trace.stderr).toBe(0);
+    return trace.stderr.split('\n').filter((line) => /run_command: git maintenance run/.test(line));
+  };
+
+  it('keeps automatic maintenance inside the command that triggers it in Warden repositories', async () => {
+    const repository = await ensureSharedRepository(fx.root);
+    const config = (cwd: string) => fx.git('-C', cwd, 'config', '--get-regexp', '^(maintenance|gc)\\.autodetach$').trim().split('\n').sort();
+    const foreground = ['gc.autodetach false', 'maintenance.autodetach false'];
+    expect(config(repository)).toEqual(foreground);
+    // A repository created before the setting existed receives it on the next use.
+    fx.git('-C', repository, 'config', '--unset', 'maintenance.autoDetach');
+    fx.git('-C', repository, 'config', 'gc.autoDetach', 'true');
+    expect(await ensureSharedRepository(fx.root)).toBe(repository);
+    expect(config(repository)).toEqual(foreground);
+
+    const engine = await Engine.open(fx.root, path.join(data, 'state.json'));
+    try {
+      await engine.execute('workflow.configure', { branch: 'main' });
+      const task = await engine.execute('task.create', { title: 'Foreground maintenance' });
+      expect(config(task.worktree!)).toEqual(foreground);
+      const preview = await engine.execute('preview.connect', { connectedIds: [task.id] });
+      // The fixture primary disables maintenance; these repositories are created by Warden.
+      for (const cwd of [task.worktree!, preview.worktree!]) {
+        for (const line of maintenance(cwd)) expect(line).toMatch(/--no-detach/);
+      }
     } finally {
       await engine.close();
     }
