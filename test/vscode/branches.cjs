@@ -98,6 +98,8 @@ exports.checkBranches = async (workbench, root, eventually) => {
   const create = async (label) => {
     await workbench.backend.execute('task.create', { title: `${label} first` });
     const task = await workbench.backend.execute('task.create', { title: `${label} selected` });
+    // A recoverable allocation failure returns the task without a workspace; name the reason here.
+    assert.ok(task.worktree, `workspace allocation failed: ${JSON.stringify(task.workspaceError)}`);
     await workbench.refresh(true);
     await workbench.selectTask({ kind: 'task', task }, 'select');
     await fs.writeFile(path.join(task.worktree, 'unfinished.txt'), `${label} unsaved delivery\n`);
