@@ -386,7 +386,8 @@ already-incorporated target and repairs bookkeeping without executing rebase hoo
 Before composing, Warden copies primary's `info/exclude` and `info/attributes` and sets its resolved
 `core.autocrlf`, `core.eol`, `core.safecrlf` and `filter.*`/`merge.*`/`diff.*` driver values in the
 shared repository with `git config`. It also sets `maintenance.autoDetach` and `gc.autoDetach` to
-`false` there, on creation and on first use of an older repository. Git otherwise detaches automatic
+`false` there, on creation and on first use of an older repository. A clone slot made before the
+setting existed receives it when it is next rebased, before the fetch and backup of that rebase. Git otherwise detaches automatic
 maintenance after a commit: the process keeps `objects/maintenance.lock` and may repack objects after
 the command returned, and a backup or allocation that inventories the repository right then stops on
 a change nobody made. Maintenance still runs, inside the command that triggered it. Primary keeps

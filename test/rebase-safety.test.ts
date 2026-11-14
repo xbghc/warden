@@ -53,6 +53,21 @@ async function advance(file = 'destination.txt', content = 'destination work\n')
 }
 
 describe('rebase safety', () => {
+  it('keeps maintenance in the foreground in a clone made before the setting existed', async () => {
+    const change = await source('clone');
+    const config = () => fx.git('-C', change.worktree, 'config', '--get-regexp', '^(maintenance|gc)\\.autodetach$').trim().split('\n').sort();
+    // Clones made by earlier versions carry neither field, and a user may have turned one back on.
+    fx.git('-C', change.worktree, 'config', '--unset', 'maintenance.autoDetach');
+    fx.git('-C', change.worktree, 'config', 'gc.autoDetach', 'true');
+    const before = head(change.worktree);
+    const target = await advance();
+    // The fetch that imports the target runs automatic maintenance right before the backup inventories
+    // the clone. The backup revalidation would refuse a config written after its inventory.
+    const updated = await workflow.sync(change.id, before, target);
+    expect(updated.base).toBe(target);
+    expect(config()).toEqual(['gc.autodetach false', 'maintenance.autodetach false']);
+  });
+
   it('rejects a previously checked legacy workspace whose Git file now names another task', async () => {
     const first = await source('worktree');
     const second = await workflow.start((await workflow.create({ title: 'Separate task with the same commit' })).id, { kind: 'worktree' });

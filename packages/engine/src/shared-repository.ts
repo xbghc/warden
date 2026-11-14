@@ -70,7 +70,8 @@ export async function validatedSharedRepository(primary: string): Promise<string
   return validate(owner);
 }
 
-async function foregroundMaintenance(repository: string): Promise<void> {
+/** Sets the fields only where they differ, so a repository that already has them is not written. */
+export async function foregroundMaintenance(repository: string): Promise<void> {
   const current = await runGit(['config', '--get-regexp', '^(maintenance|gc)\\.autodetach$'], { cwd: repository, okCodes: [0, 1] });
   for (const field of FOREGROUND_MAINTENANCE) {
     if (!current.stdout.split('\n').includes(`${field.toLowerCase()} false`)) await runGitWrite(['config', field, 'false'], { cwd: repository });

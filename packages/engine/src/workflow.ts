@@ -32,7 +32,7 @@ import { PreviewService } from './preview.js';
 import { assertSafetyBackupCurrent, createSafetyBackup, discardOperationBackup } from './backups.js';
 import { retireWorkflowRefs } from './retention.js';
 import { readWorktreeState } from './worktree-state.js';
-import { ensureSharedRepository } from './shared-repository.js';
+import { ensureSharedRepository, foregroundMaintenance } from './shared-repository.js';
 import { snapshotObjects, snapshotStore, snapshotWorktree } from './snapshots.js';
 import { withIdleTaskConnection } from './task-access.js';
 
@@ -474,6 +474,9 @@ export class WorkflowService {
     if (before !== sourceHead) fail('The workspace has new commits. Run the check again.', 'review_changed');
     const boundary = await deliveryBase(change, before, target, this.repo.commonRoot);
     if (!(await this.ancestor(checkout.path, boundary, before))) fail('Workspace history changed. Check the rebase boundary manually.', 'base_changed');
+    // A clone made before the setting existed would detach the maintenance this fetch triggers, and
+    // the backup below would meet its lock. Written before the backup, whose inventory includes config.
+    if (checkout.clone) await foregroundMaintenance(checkout.path);
     await this.importCommit(this.repo.commonRoot, checkout.path, target);
     // A completed rebase can outlive its state write. An explicit retry only repairs the
     // bookkeeping when the target is already an ancestor; it must not run hooks again.
