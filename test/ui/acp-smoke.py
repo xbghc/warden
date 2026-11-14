@@ -698,9 +698,16 @@ try:
         expect(composer).to_be_focused()
         composer.press('ArrowDown')
         expect(command_list.get_by_role('option', name='/review', exact=False)).to_have_attribute('aria-selected', 'true')
+        # A selection made right after completing is kept even when the next frame is late.
+        first.evaluate("() => { window.__frame = window.requestAnimationFrame; window.requestAnimationFrame = callback => setTimeout(() => window.__frame(callback), 150); }")
         composer.press('Enter')
         expect(composer).to_have_value('/review ')
         expect(command_list).to_have_count(0)
+        assert composer.evaluate('input => [input.selectionStart, input.selectionEnd]') == [8, 8]
+        composer.evaluate('input => input.select()')
+        first.wait_for_timeout(400)
+        assert composer.evaluate('input => [input.selectionStart, input.selectionEnd]') == [0, 8]
+        first.evaluate('() => { window.requestAnimationFrame = window.__frame; }')
         composer.fill('/ex')
         expect(command_list.get_by_role('option')).to_have_count(1)
         composer.press('Tab')

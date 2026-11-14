@@ -79,6 +79,7 @@ export function AcpApp({ model, send: dispatch }: Props) {
   const transcriptContent = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
   const commandList = useRef<HTMLDivElement>(null);
+  const completedCommand = useRef<{ text: string; caret: number }>();
   const commandListId = useId();
   const [composerFocused, setComposerFocused] = useState(false);
   const [composing, setComposing] = useState(false);
@@ -254,6 +255,18 @@ export function AcpApp({ model, send: dispatch }: Props) {
     input.style.height = `${input.scrollHeight}px`;
   }, [composerText]);
 
+  // Place the caret in the commit that renders the completed text. A later frame could land after
+  // the user has already selected or typed something else and would move their caret.
+  useLayoutEffect(() => {
+    const completed = completedCommand.current;
+    completedCommand.current = undefined;
+    const input = composer.current;
+    if (!completed || !input || input.value !== completed.text) return;
+    input.focus({ preventScroll: true });
+    input.setSelectionRange(completed.caret, completed.caret);
+    readSelection(input);
+  });
+
   useEffect(() => setCommandIndex(0), [commandKey]);
   useLayoutEffect(() => {
     commandList.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' });
@@ -278,11 +291,7 @@ export function AcpApp({ model, send: dispatch }: Props) {
     const completed = completeSlashCommand(composerText, commandQuery.tokenEnd, name);
     if (!completed) return false;
     updateDraft(completed.text);
-    requestAnimationFrame(() => {
-      if (switchingRef.current || draftRef.current !== completed.text) return;
-      composer.current?.focus({ preventScroll: true });
-      composer.current?.setSelectionRange(completed.caret, completed.caret);
-    });
+    completedCommand.current = completed;
     return true;
   };
   const submit = () => {
