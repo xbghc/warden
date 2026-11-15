@@ -29,13 +29,14 @@ async function directory(location: string): Promise<boolean> {
   return true;
 }
 
-async function validate(owner: string): Promise<string | undefined> {
+/** `detached` receives the maintenance fields still to be set, read with the ownership marks in one Git call. */
+async function validate(owner: string, detached?: string[]): Promise<string | undefined> {
   const repository = sharedRepositoryPath(owner);
   if (!(await directory(path.dirname(repository))) || !(await directory(repository))) return undefined;
   try {
     const [location, ownership] = await Promise.all([
       runGit(['rev-parse', '--is-bare-repository', '--absolute-git-dir'], { cwd: repository }),
-      runGit(['config', '--get-regexp', '^warden\\.(sharedprimary|sharedversion)$'], { cwd: repository, okCodes: [0, 1] }),
+      runGit(['config', '--get-regexp', '^(warden\\.(sharedprimary|sharedversion)|(maintenance|gc)\\.autodetach)$'], { cwd: repository, okCodes: [0, 1] }),
     ]);
     const [kind, common] = location.stdout.trim().split('\n');
     const values = new Map(
@@ -55,6 +56,7 @@ async function validate(owner: string): Promise<string | undefined> {
       values.get(VERSION_MARK.toLowerCase()) !== '1'
     )
       invalid(`Warden shared repository ownership mismatch: ${repository}`);
+    detached?.push(...FOREGROUND_MAINTENANCE.filter((field) => values.get(field.toLowerCase()) !== 'false'));
     return repository;
   } catch (error) {
     if (error instanceof WardenError && error.code === 'shared_repository_invalid') throw error;
@@ -79,10 +81,11 @@ export async function foregroundMaintenance(repository: string): Promise<void> {
 }
 
 async function initialize(primary: string): Promise<string> {
-  const existing = await validate(primary);
+  const detached: string[] = [];
+  const existing = await validate(primary, detached);
   if (existing) {
     // Repositories created before this setting existed receive it on first use.
-    await foregroundMaintenance(existing);
+    for (const field of detached) await runGitWrite(['config', field, 'false'], { cwd: existing });
     return existing;
   }
   const repository = sharedRepositoryPath(primary);
@@ -109,7 +112,7 @@ async function initialize(primary: string): Promise<string> {
     }
     await runGitWrite(['config', PRIMARY_MARK, primary], { cwd: repository });
     await runGitWrite(['config', VERSION_MARK, '1'], { cwd: repository });
-    await foregroundMaintenance(repository);
+    for (const field of FOREGROUND_MAINTENANCE) await runGitWrite(['config', field, 'false'], { cwd: repository });
     return repository;
   } catch (error) {
     await rm(repository, { recursive: true, force: true });

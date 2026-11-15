@@ -3,10 +3,11 @@ import path from 'node:path';
 import { execFile, spawnSync } from 'node:child_process';
 import { copyFile, lstat, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { taskReview } from '@warden/shared';
 import { makeFixtureRepo, type FixtureRepo } from '../../../test/fixtures/make-repo.js';
 import { Engine } from './engine.js';
+import * as git from './git.js';
 import { runGit } from './git.js';
 import { listWorktreesAll, resolveRepo } from './repo.js';
 import { StateStore } from './state.js';
@@ -222,6 +223,23 @@ describe('external shared task repository', () => {
       }
     } finally {
       await engine.close();
+    }
+  });
+
+  it('validates an existing repository and its maintenance settings with two Git reads and no write', async () => {
+    const repository = await ensureSharedRepository(fx.root);
+    const reads = vi.spyOn(git, 'runGit');
+    const writes = vi.spyOn(git, 'runGitWrite');
+    try {
+      expect(await ensureSharedRepository(fx.root)).toBe(repository);
+      expect(reads.mock.calls.map(([args]) => args.slice(0, 2).join(' '))).toEqual(
+        expect.arrayContaining(['rev-parse --is-bare-repository', 'config --get-regexp']),
+      );
+      expect(reads).toHaveBeenCalledTimes(2);
+      expect(writes).not.toHaveBeenCalled();
+    } finally {
+      reads.mockRestore();
+      writes.mockRestore();
     }
   });
 
