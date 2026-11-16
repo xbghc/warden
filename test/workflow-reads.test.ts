@@ -60,6 +60,26 @@ async function behind(kind: 'clone' | 'worktree' | 'shared' = 'worktree', confli
 const check = async (change: DevelopmentChange) => (await workflow.rebaseChecks()).checks.find((row) => row.changeId === change.id)!;
 
 describe('shared workflow reads', () => {
+  it('asks primary once for the history that tasks started from the same commit share', { timeout: longGitTimeout }, async () => {
+    const tasks = [await task('clone'), await task('clone'), await task('clone')];
+    for (const [index, change] of tasks.entries()) {
+      fx.git('-C', change.worktree, 'config', 'user.name', 'Fixture');
+      fx.git('-C', change.worktree, 'config', 'user.email', 'fixture@example.com');
+      await commit(change.worktree, `task-${index}.txt`, 'Task change\n');
+    }
+    await commit(fx.root, 'primary.txt', 'Primary change\n');
+    const target = fx.git('rev-parse', 'HEAD').trim();
+    const reads = vi.spyOn(git, 'runGit');
+    const response = await workflow.get();
+    const inPrimary = reads.mock.calls.filter(([, options]) => options.cwd === fx.root).map(([args]) => args.slice(0, 2).join(' '));
+    reads.mockRestore();
+    expect(inPrimary.filter((command) => command === 'rev-list --topo-order')).toHaveLength(1);
+    expect(inPrimary.filter((command) => command === 'rev-parse --verify')).toHaveLength(2);
+    // Each task is still resolved on its own: none has taken up the new primary commit.
+    expect(response.developmentHead).toBe(target);
+    for (const change of tasks) expect(response.workflow!.changes.find((row) => row.id === change.id)!.base).not.toBe(target);
+  });
+
   it('keeps unsupported attribute lookups uncached even when system attributes are disabled', { timeout: longGitTimeout }, async () => {
     const change = await behind();
     const create = vi.spyOn(GitSandbox, 'create');

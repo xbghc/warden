@@ -128,11 +128,12 @@ export class WorkflowService {
         (row): row is DevelopmentChange => !!row.worktree && !row.deletion && row.status === 'working' && row.developmentBranch === workflow.developmentBranch,
       );
       const checkouts = working.length ? (inventory ? inventory.then((rows) => new Map(rows.map((row) => [row.path, row]))) : this.listCheckouts()) : undefined;
+      const primaryReads = new Map<string, Promise<unknown>>();
       for (const row of working) {
         try {
           const checkout = await this.checkout(row, checkouts);
           // The effective boundary is what review, delivery, rebase and preview all compare from.
-          const boundary = await deliveryBase(row, await revParse(checkout.path, 'HEAD'), developmentHead, this.repo.commonRoot);
+          const boundary = await deliveryBase(row, await revParse(checkout.path, 'HEAD'), developmentHead, this.repo.commonRoot, primaryReads);
           if (boundary !== (row.sourceBase ?? row.base)) {
             row.base = boundary;
             delete row.sourceBase;

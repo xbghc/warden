@@ -10,8 +10,21 @@ export const gitMessage = (error: unknown) => (error instanceof Error ? error.me
 export async function oid(cwd: string, ref: string) {
   return (await runGit(['rev-parse', '--verify', ref], { cwd })).stdout.trim();
 }
-/** A manual rebase/merge may already have incorporated the new primary baseline. */
-export async function deliveryBase(change: DevelopmentChange, head: string, target: string, primary: string) {
+/**
+ * A manual rebase/merge may already have incorporated the new primary baseline. Tasks started from
+ * the same commit ask primary the same questions; a caller that resolves several in one request
+ * passes `primaryReads` so each is asked once.
+ */
+export async function deliveryBase(change: DevelopmentChange, head: string, target: string, primary: string, primaryReads?: Map<string, Promise<unknown>>) {
+  const once = <T>(key: string, read: () => Promise<T>): Promise<T> => {
+    if (!primaryReads) return read();
+    let pending = primaryReads.get(key) as Promise<T> | undefined;
+    if (!pending) {
+      pending = read();
+      primaryReads.set(key, pending);
+    }
+    return pending;
+  };
   const cwd = change.worktree;
   const contains = await runGit(['merge-base', '--is-ancestor', target, head], { cwd, okCodes: [0, 1, 128] });
   if (contains.code === 0) return target;
@@ -28,8 +41,9 @@ export async function deliveryBase(change: DevelopmentChange, head: string, targ
   // A delivered source tip exists only in the task. Primary's history since that delivery starts
   // at the commit the delivery created; without it, a sync made after a committed delivery would
   // be forgotten as soon as primary moved again.
-  const known = await runGit(['rev-parse', '--verify', '--quiet', `${stored}^{commit}`], { cwd: primary, okCodes: [0, 1, 128] });
-  const onPrimary = await since(primary, target, known.code === 0 ? stored : (change.deliveries?.at(-1)?.commit ?? stored));
+  const known = await once(`known ${stored}`, () => runGit(['rev-parse', '--verify', '--quiet', `${stored}^{commit}`], { cwd: primary, okCodes: [0, 1, 128] }));
+  const exclude = known.code === 0 ? stored : (change.deliveries?.at(-1)?.commit ?? stored);
+  const onPrimary = await once(`since ${target} ${exclude}`, () => since(primary, target, exclude));
   if (!onPrimary.length) return stored;
   const inTask = new Set(await since(cwd, head));
   return onPrimary.find((commit) => inTask.has(commit)) ?? stored;
