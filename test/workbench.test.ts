@@ -1,10 +1,11 @@
 import os from 'node:os';
 import path from 'node:path';
-import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import type { DevelopmentChange } from '@warden/shared';
 import { parseWorkbenchAction, taskReview } from '@warden/shared';
 import { createApp, resolveRepo, StateStore, WorkflowService } from './compat/index.js';
+import * as git from '../packages/engine/src/git.js';
 import { PreviewService } from '../packages/engine/src/preview.js';
 import { HistoryService } from '../packages/engine/src/history.js';
 import { listSafetyBackups } from '../packages/engine/src/backups.js';
@@ -624,6 +625,117 @@ describe('saved baseline and preview runtime', () => {
     });
     expect((await restarted.setup()).setup).toMatchObject({ status: 'succeeded', exitCode: 0 });
     expect(fx.git('status', '--porcelain')).toBe('');
+  });
+});
+
+describe('committing work folder edits', () => {
+  const primaryStatus = () => fx.git('status', '--porcelain').trim();
+  async function editedFolder() {
+    const a = await task('A');
+    await edit(a, 'a.txt', 'A\n');
+    const folder = (await preview.set([a.id])).worktree!;
+    await writeFile(path.join(folder, 'README.md'), 'Edited in the work folder\n');
+    await writeFile(path.join(folder, 'notes.txt'), 'New file in the work folder\n');
+    return { a, folder };
+  }
+  const review = async () => {
+    const changes = await preview.changes();
+    return { tree: changes.tree!, developmentHead: changes.developmentHead! };
+  };
+
+  it('commits only the user edits to the base branch and leaves connected task changes pending', { timeout: longGitTimeout }, async () => {
+    const { a, folder } = await editedFolder();
+    const before = head();
+    const changes = await preview.changes();
+    expect(changes).toMatchObject({ directory: folder, developmentHead: before });
+    expect(changes.files).toEqual([
+      { path: 'README.md', status: 'modified' },
+      { path: 'notes.txt', status: 'added' },
+    ]);
+    const after = await workflow.commitWorkFolder({ ...(await review()), message: 'Describe the work folder' });
+    expect(after.files).toEqual([]);
+    expect(fx.git('log', '-1', '--format=%s').trim()).toBe('Describe the work folder');
+    expect(fx.git('rev-parse', 'HEAD^').trim()).toBe(before);
+    expect(fx.git('diff', '--name-only', 'HEAD^', 'HEAD').trim().split('\n')).toEqual(['README.md', 'notes.txt']);
+    expect(primaryStatus()).toBe('');
+    expect(await file(fx.root, 'notes.txt')).toBe('New file in the work folder\n');
+    await expect(file(fx.root, 'a.txt')).rejects.toMatchObject({ code: 'ENOENT' });
+    // The folder now stands on the new commit: the task's change is still there, and nothing is the user's.
+    expect(await file(folder, 'a.txt')).toBe('A\n');
+    expect(fx.git('-C', folder, 'status', '--porcelain').trim()).toBe('');
+    expect((await preview.get()).connectedIds).toEqual([a.id]);
+    expect((await store.load()).workFolderCommit).toBeUndefined();
+  });
+
+  it('refuses edits that build on a connected task and changes nothing', { timeout: longGitTimeout }, async () => {
+    const { folder } = await editedFolder();
+    await writeFile(path.join(folder, 'a.txt'), 'A, corrected by the user\n');
+    const before = head();
+    await expect(workflow.commitWorkFolder({ ...(await review()), message: 'Correct the task' })).rejects.toMatchObject({
+      code: 'work_folder_depends',
+      message: expect.stringContaining('a.txt'),
+    });
+    expect(head()).toBe(before);
+    expect(primaryStatus()).toBe('');
+    expect(await file(folder, 'a.txt')).toBe('A, corrected by the user\n');
+    expect((await store.load()).workFolderCommit).toBeUndefined();
+  });
+
+  it('requires the reviewed content, a synced folder and a message', { timeout: longGitTimeout }, async () => {
+    const { folder } = await editedFolder();
+    const reviewed = await review();
+    await expect(workflow.commitWorkFolder({ ...reviewed, message: ' ' })).rejects.toMatchObject({ code: 'invalid_commit_message' });
+    await writeFile(path.join(folder, 'notes.txt'), 'Changed after review\n');
+    await expect(workflow.commitWorkFolder({ ...reviewed, message: 'Stale review' })).rejects.toMatchObject({ code: 'review_changed' });
+    await fx.write('primary.txt', 'Committed in primary\n');
+    fx.git('add', 'primary.txt');
+    fx.git('commit', '-qm', 'Advance the base branch');
+    await expect(workflow.commitWorkFolder({ ...(await review()), message: 'Behind the base branch' })).rejects.toMatchObject({ code: 'review_changed' });
+    await preview.refresh();
+    await writeFile(path.join(folder, 'notes.txt'), 'New file in the work folder\n');
+    await writeFile(path.join(folder, 'README.md'), fx.git('show', 'HEAD:README.md'));
+    await rm(path.join(folder, 'notes.txt'));
+    await expect(workflow.commitWorkFolder({ ...(await review()), message: 'Nothing left' })).rejects.toMatchObject({ code: 'empty_change' });
+    expect(primaryStatus()).toBe('');
+  });
+
+  it('returns primary to the base commit when a hook rejects the commit, and after an interrupted commit', { timeout: longGitTimeout }, async () => {
+    const { folder } = await editedFolder();
+    const before = head();
+    const hook = path.join(fx.root, '.git', 'hooks', 'commit-msg');
+    await mkdir(path.dirname(hook), { recursive: true });
+    await writeFile(hook, '#!/bin/sh\necho blocked-by-hook >&2\nexit 1\n');
+    await chmod(hook, 0o755);
+    await expect(workflow.commitWorkFolder({ ...(await review()), message: 'Rejected' })).rejects.toMatchObject({
+      code: 'commit_failed',
+      message: expect.stringContaining('blocked-by-hook'),
+    });
+    expect(head()).toBe(before);
+    expect(primaryStatus()).toBe('');
+    expect(await file(folder, 'README.md')).toBe('Edited in the work folder\n');
+    expect((await store.load()).workFolderCommit).toBeUndefined();
+    await rm(hook);
+
+    // Killed after staging: the patch is in primary's index and the journal names it.
+    const write = git.runGitWrite;
+    vi.spyOn(git, 'runGitWrite').mockImplementation(async (args, options) => {
+      if (args[0] === 'commit' && options.cwd === fx.root) throw new Error('killed');
+      if (args.includes('-R')) throw new Error('killed');
+      return write(args, options);
+    });
+    await expect(workflow.commitWorkFolder({ ...(await review()), message: 'Interrupted' })).rejects.toThrow('killed');
+    vi.restoreAllMocks();
+    expect(primaryStatus()).not.toBe('');
+    expect((await store.load()).workFolderCommit).toMatchObject({ parent: before });
+    // Staged content that is not the journaled patch is someone's work and stops the recovery.
+    await fx.write('other.txt', 'Unrelated\n');
+    await expect(workflow.commitWorkFolder({ ...(await review()), message: 'Blocked' })).rejects.toMatchObject({ code: 'development_dirty' });
+    await rm(path.join(fx.root, 'other.txt'));
+    await workflow.commitWorkFolder({ ...(await review()), message: 'Committed after recovery' });
+    expect(fx.git('log', '-1', '--format=%s').trim()).toBe('Committed after recovery');
+    expect(fx.git('rev-parse', 'HEAD^').trim()).toBe(before);
+    expect(primaryStatus()).toBe('');
+    expect(fx.git('-C', folder, 'status', '--porcelain').trim()).toBe('');
   });
 });
 

@@ -19,11 +19,12 @@ import type {
   RebaseCheck,
   RebaseBatchRequest,
   RebaseBatchResponse,
+  WorkFolderCommitRequest,
 } from '@warden/shared';
 import { moveBefore, isValidRef, taskReview } from '@warden/shared';
 import { assertSetupIdle, runWorkspaceHook, setupEnded, setupOwner } from './workspace.js';
 import { badRequest, WardenError, notFound } from './errors.js';
-import { GitError, LONG_GIT_TIMEOUT_MS, gitEnvironment, refExists, runGit, runGitWrite } from './git.js';
+import { DIFF_OUTPUT_ARGS, GitError, LONG_GIT_TIMEOUT_MS, gitEnvironment, refExists, runGit, runGitBuffer, runGitWrite } from './git.js';
 import { listWorktreesAll, type RepoContext } from './repo.js';
 import { forgetWorktreeTargets, type StateStore } from './state.js';
 import { checkoutState, checkoutWorktree, dirtyCount, listCheckoutIdentities, listWorktreesDetailed, nextSlot, type CheckoutIdentity } from './worktrees.js';
@@ -1106,6 +1107,104 @@ export class WorkflowService {
     } finally {
       await sandbox.dispose();
     }
+  }
+
+  /**
+   * Commits the user's own edits in the work folder to the base branch: the difference between the
+   * folder's composition and its saved content, applied to the base branch commit alone and
+   * committed in primary with its hooks and signing. Edits that only apply on top of a connected
+   * task's changes are refused; that task is committed first.
+   */
+  commitWorkFolder(request: WorkFolderCommitRequest) {
+    return this.store.withRepositoryLock(async () => {
+      if (typeof request?.message !== 'string' || !request.message.trim() || request.message.length > 10000)
+        throw badRequest('Enter a commit message.', 'invalid_commit_message');
+      if (!gitOid(request.tree) || !gitOid(request.developmentHead)) throw badRequest('Invalid work folder review.', 'invalid_request');
+      const workflow = workflowOf(await this.store.load());
+      await this.recoverWorkFolderCommit(workflow.developmentBranch);
+      if (workflow.changes.some((row) => row.status === 'integrating'))
+        fail('Finish the commit being prepared in the primary folder first.', 'development_in_use');
+      const preview = new PreviewService(this.repo, this.store);
+      const current = await preview.folder();
+      if (!current) fail('The work folder is not synced. Sync it and review your changes again.', 'work_folder_unsynced');
+      const head = await this.developmentHead(workflow.developmentBranch);
+      if (head !== current.saved.developmentHead || head !== request.developmentHead)
+        fail('The base branch changed. Sync the work folder and review your changes again.', 'review_changed');
+      const destination = await this.destination(workflow.developmentBranch, true);
+      const objects = await current.folder.objects();
+      const actual = await current.folder.snapshot();
+      if (actual !== request.tree) fail('The work folder changed. Review your changes again.', 'review_changed');
+      if (actual === current.tree) fail('The work folder has no changes of yours to commit.', 'empty_change');
+      const sandbox = await GitSandbox.create(this.store, this.repo.commonRoot, head);
+      try {
+        await sandbox.fetch(current.folder.path, current.snapshot);
+        try {
+          await sandbox.apply(await patchBetween(current.folder.path, current.tree, actual, objects), true, true, {
+            cwd: current.folder.path,
+            snapshot: objects,
+          });
+        } catch (error) {
+          // Name the edited files that connected tasks changed too; those are what the edits rest on.
+          const names = async (from: string, to: string) =>
+            (await runGit(['diff', '--name-only', '--no-renames', '-z', from, to, '--'], { cwd: current.folder.path, snapshot: objects })).stdout
+              .split('\0')
+              .filter(Boolean);
+          const composedPaths = new Set(await names(head, current.tree));
+          const shared = (await names(current.tree, actual)).filter((file) => composedPaths.has(file));
+          fail(
+            `Your edits build on changes from connected tasks: ${shared.join(', ') || errorMessage(error)}. Commit those tasks first, or have their agents make the change.`,
+            'work_folder_depends',
+          );
+        }
+        const composed = await sandbox.commit();
+        const patch = await patchBetween(sandbox.path, head, composed);
+        if (!patch.length) fail('The work folder has no changes of yours to commit.', 'empty_change');
+        const expected = await runGit(['diff', ...INDEX_DIFF_FLAGS, head, composed, '--'], { cwd: sandbox.path });
+        await this.store.update((state) => {
+          state.workFolderCommit = { parent: head, indexFingerprint: fingerprint(expected.stdout) };
+        });
+        await applyPatch(destination.path, patch, true);
+        try {
+          // The same ordinary commit a task delivery makes: hooks, identity and signing apply.
+          await runGitWrite(['commit', '-m', request.message.trim()], { cwd: destination.path, timeoutMs: LONG_GIT_TIMEOUT_MS });
+        } catch (error) {
+          const output = (error instanceof GitError ? error.stderr.trim() || error.message : errorMessage(error)).slice(0, 8000);
+          // Nothing was committed, so primary goes back to the base commit and the edits stay in the work folder.
+          await this.recoverWorkFolderCommit(workflow.developmentBranch);
+          fail(`The commit did not finish. Your edits are still in the work folder. ${output}`, 'commit_failed');
+        }
+        await this.store.update((state) => {
+          delete state.workFolderCommit;
+        });
+      } finally {
+        await sandbox.dispose();
+      }
+      // The folder moves to a composition on the new commit, where the committed edits are no longer changes.
+      await preview.resume();
+      return preview.changes();
+    });
+  }
+
+  /** Returns primary to the base commit after a work folder commit that staged its patch and did not commit. */
+  private async recoverWorkFolderCommit(branch: string) {
+    const journal = (await this.store.load()).workFolderCommit;
+    if (!journal) return;
+    const destination = await this.destination(branch);
+    if ((await this.developmentHead(branch)) === journal.parent && (await dirtyCount(destination.path))) {
+      const index = await this.indexState(destination.path);
+      if (index.unstaged || index.fingerprint !== journal.indexFingerprint)
+        fail(
+          'A commit of your work folder edits was interrupted and the primary folder has other changes. Handle them there before retrying.',
+          'development_dirty',
+        );
+      const staged = await runGitBuffer(['diff', '--cached', ...DIFF_OUTPUT_ARGS, '--binary', '--full-index', '--no-renames', journal.parent, '--'], {
+        cwd: destination.path,
+      });
+      await applyPatch(destination.path, staged.stdout, true, false, undefined, true);
+    }
+    await this.store.update((state) => {
+      delete state.workFolderCommit;
+    });
   }
 
   /** Normal delivery keeps preparation and commit under one lock; failures retain the journal. */

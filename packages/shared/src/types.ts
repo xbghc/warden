@@ -114,6 +114,8 @@ export interface ReviewState {
     snapshot?: string;
     pending?: { from: string; merged: string; mergedTree: string; tree: string; sandbox: string; snapshot: string; response: PreviewResponse };
   };
+  /** A commit of the user's work folder edits whose patch is staged in primary; cleared once it is committed or undone. */
+  workFolderCommit?: { parent: string; indexFingerprint: string };
   historyDraft?: HistoryPreviewResponse & {
     sandbox: string;
     branch: string;
@@ -313,6 +315,23 @@ export interface PreviewResponse {
   syncStatus?: 'pending' | 'updating' | 'synced' | 'conflict' | 'error';
   sources?: { changeId: string; observedTree: string; appliedTree?: string; status: 'pending' | 'updating' | 'synced' | 'conflict' | 'error' }[];
   setup?: PreviewSetup;
+}
+
+/** What the user changed in the work folder since its composition. */
+export interface WorkFolderChanges {
+  directory?: string;
+  /** The composition commit the folder's HEAD is on; the left side of every comparison. */
+  composition?: string;
+  developmentHead?: string;
+  /** The folder's saved content; a commit request names it so that only reviewed content is committed. */
+  tree?: string;
+  files: { path: string; status: 'added' | 'modified' | 'deleted' }[];
+}
+
+export interface WorkFolderCommitRequest {
+  tree: string;
+  developmentHead: string;
+  message: string;
 }
 
 export interface HistoryEntry {

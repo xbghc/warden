@@ -17,6 +17,7 @@ import type {
   WorktreeDetail,
   WorkspaceConfig,
   WorktreesResponse,
+  WorkFolderCommitRequest,
 } from '@warden/shared';
 import { WardenError, badRequest } from './errors.js';
 import { resolveRepo, listWorktreesAll, type RepoContext } from './repo.js';
@@ -135,6 +136,8 @@ function commands(repo: RepoContext, store: StateStore) {
       'preview.connect': ({ connectedIds }: { connectedIds: string[] }) => preview.set(connectedIds),
       'preview.refresh': () => preview.refresh(),
       'preview.setup': () => preview.setup(),
+      'workfolder.changes': () => preview.changes(),
+      'workfolder.commit': (request: WorkFolderCommitRequest) => workflow.commitWorkFolder(request),
       'rebase.check': () => workflow.rebaseChecks(),
       'rebase.run': (request: RebaseBatchRequest) => workflow.rebaseBatch(request),
       'history.get': () => history.get(),
@@ -180,6 +183,7 @@ const reads = new Set<EngineCommand>([
   'workflow.get',
   'workflow.context',
   'preview.get',
+  'workfolder.changes',
   'history.get',
   'workspaces.list',
   'review.files',

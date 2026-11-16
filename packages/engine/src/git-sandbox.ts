@@ -81,13 +81,14 @@ export async function applyPatch(
   index: boolean,
   threeWay = false,
   write: (args: string[]) => Promise<unknown> = (args) => runGitWrite(args, { cwd }),
+  reverse = false,
 ) {
   if (!patch.length) return;
   const tmp = await mkdtemp(path.join((await import('node:os')).tmpdir(), 'warden-patch-'));
   try {
     const file = path.join(tmp, 'change.patch');
     await writeFile(file, patch, { mode: 0o600 });
-    const flags = ['--whitespace=nowarn', ...(index ? ['--index'] : []), ...(threeWay ? ['--3way'] : [])];
+    const flags = ['--whitespace=nowarn', ...(index ? ['--index'] : []), ...(threeWay ? ['--3way'] : []), ...(reverse ? ['-R'] : [])];
     // Preview intentionally leaves index stat data untouched. Once staging is explicitly
     // requested, refresh it so restored-but-identical files satisfy apply --index's check.
     if (index) await write(['update-index', '--refresh']);

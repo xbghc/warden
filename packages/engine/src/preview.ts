@@ -1,4 +1,4 @@
-import type { DevelopmentChange, PreviewResponse, ReviewState } from '@warden/shared';
+import type { DevelopmentChange, PreviewResponse, ReviewState, WorkFolderChanges } from '@warden/shared';
 import { snapshotObjects, snapshotStore, snapshotWorktree } from './snapshots.js';
 import { WorkFolder, workFolderPath } from './work-folder.js';
 import { badRequest, WardenError } from './errors.js';
@@ -237,6 +237,28 @@ export class PreviewService {
           'preview_setup_changed',
         ),
       );
+  }
+
+  /** The synced work folder and its composition, for reading or committing the user's edits. */
+  async folder() {
+    const saved = (await this.store.load()).connectionPreview;
+    if (!saved?.directory || !saved.tree || !saved.snapshot || saved.pending) return undefined;
+    return { saved, folder: await WorkFolder.open(this.repo.commonRoot, this.store.file, saved.directory), tree: saved.tree, snapshot: saved.snapshot };
+  }
+
+  async changes(): Promise<WorkFolderChanges> {
+    const current = await this.folder();
+    if (!current) return { files: [] };
+    const tree = await current.folder.snapshot();
+    const listed = await runGit(['diff', '--name-status', '--no-renames', '-z', current.tree, tree, '--'], {
+      cwd: current.folder.path,
+      snapshot: await current.folder.objects(),
+    });
+    const fields = listed.stdout.split('\0');
+    const files: WorkFolderChanges['files'] = [];
+    for (let index = 0; index + 1 < fields.length; index += 2)
+      files.push({ path: fields[index + 1]!, status: fields[index] === 'A' ? 'added' : fields[index] === 'D' ? 'deleted' : 'modified' });
+    return { directory: current.folder.path, composition: current.snapshot, developmentHead: current.saved.developmentHead, tree, files };
   }
 
   /** Finishes or drops an update that was interrupted between its journal and its last write. */
