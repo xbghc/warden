@@ -81,8 +81,17 @@ export interface AcpRecord {
   updatedAt: string;
   interrupted?: boolean;
 }
+/**
+ * Where a copy of the transcript stands. `epoch` changes whenever anything but a streamed update
+ * changed the transcript; `sequence` counts the streamed updates within it.
+ */
+export interface AcpTranscriptPosition {
+  epoch: number;
+  sequence: number;
+}
 export interface AcpSnapshot {
   record: AcpRecord;
+  transcript: AcpTranscriptPosition;
   status: AcpStatus;
   error?: string;
   permissions: AcpPermission[];
@@ -119,6 +128,28 @@ export interface AcpModel extends AcpSnapshot {
   draftChanges: AcpDraftChange[];
   presentation?: 'sidebar' | 'editor';
   viewState?: AcpViewState;
+}
+/**
+ * A model for a view that already holds the transcript as of `base`: `model.record.messages` lists
+ * only the messages streamed since, each replacing the message with its ID or following the last one.
+ */
+export interface AcpModelUpdate {
+  base: AcpTranscriptPosition;
+  model: AcpModel;
+}
+/** The complete model after `update`; undefined when `current` is not the model the update was made for. */
+export function applyAcpUpdate(current: AcpModel, update: AcpModelUpdate): AcpModel | undefined {
+  if (current.panelId !== update.model.panelId || current.transcript.epoch !== update.base.epoch || current.transcript.sequence !== update.base.sequence)
+    return undefined;
+  const messages = current.record.messages.slice();
+  for (const message of update.model.record.messages) {
+    // Streaming changes the newest messages, so the search starts there.
+    let index = messages.length - 1;
+    while (index >= 0 && messages[index]!.id !== message.id) index--;
+    if (index < 0) messages.push(message);
+    else messages[index] = message;
+  }
+  return { ...update.model, record: { ...update.model.record, messages } };
 }
 export type AcpAction =
   | ({ type: 'send'; profileId: string } & AcpDraftEdit)

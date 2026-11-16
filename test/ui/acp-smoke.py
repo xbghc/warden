@@ -294,6 +294,11 @@ try:
 
         # Hold an already posted edit across the host append. Its late arrival must
         # neither remove the excerpt nor replace the user's more recent wording.
+        # Earlier turns reached the app as streamed updates, and it shows exactly the merged transcript.
+        assert first.evaluate('window.__updates') > 0
+        # The app asked for a whole model once, when it started: no update failed to apply.
+        assert first.evaluate('window.__readies') == 1
+        assert first.locator('.acp-message').count() == first.evaluate('window.__model.record.messages.length')
         first.evaluate('window.__fixture.pauseModels()')
         first.evaluate('window.__fixture.holdDrafts()')
         old_model = first.evaluate('window.__model')

@@ -3,7 +3,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { Engine } from '@warden/engine';
 import { DiagnosticLog, diagnosticError, parseAcpAction } from '@warden/shared';
-import type { AcpAction, AcpBinding, AcpConfiguration, AcpModel, AcpStatus, AcpViewState } from '@warden/shared';
+import type { AcpAction, AcpBinding, AcpConfiguration, AcpModel, AcpModelUpdate, AcpStatus, AcpTranscriptPosition, AcpViewState } from '@warden/shared';
 import type { AcpProfile, AgentProcessInfo } from './contracts.js';
 import { resolveAcpBinding, validateAcpBinding } from './binding.js';
 import { autoApproveRepositoryReads, readAcpProfiles } from './setup.js';
@@ -17,6 +17,8 @@ interface ChatSurface {
   webview: vscode.Webview;
   location: 'sidebar' | 'editor';
   ready: boolean;
+  /** The transcript this view holds; undefined until a whole model reached it. */
+  sent?: AcpTranscriptPosition;
   capture?: { id: string; finish(error?: Error): void };
 }
 
@@ -547,6 +549,8 @@ export class AcpConversations {
       if (!message || typeof message !== 'object' || Array.isArray(message)) throw new Error('Invalid conversation view message.');
       const envelope = message as Record<string, unknown>;
       if (envelope.type === 'ready') {
+        // A view that starts, or that could not apply an update, holds no transcript to build on.
+        surface.sent = undefined;
         this.render(entry);
         return;
       }
@@ -624,8 +628,10 @@ export class AcpConversations {
     }, 40);
   }
   private render(entry: Conversation) {
-    if (!entry.surface || this.closed) return;
-    const snapshot = entry.session.snapshot();
+    const surface = entry.surface;
+    if (!surface || this.closed) return;
+    // Streaming renders many times a second; a view that is up to date receives only the changed messages.
+    const { base, ...snapshot } = entry.session.snapshot(surface.sent);
     let profiles: AcpModel['profiles'] = [];
     let error = entry.error ?? snapshot.error;
     try {
@@ -642,10 +648,23 @@ export class AcpConversations {
       sending: entry.sending,
       submittedDraft: entry.submittedDraft,
       ...entry.draft.snapshot(),
-      presentation: entry.surface.location,
+      presentation: surface.location,
       viewState: entry.viewState,
     };
-    void entry.surface.webview.postMessage({ type: 'acp-model', model });
+    const position = snapshot.transcript;
+    surface.sent = position;
+    const message: { type: 'acp-model'; model: AcpModel } | { type: 'acp-update'; update: AcpModelUpdate } = base
+      ? { type: 'acp-update', update: { base, model } }
+      : { type: 'acp-model', model };
+    void surface.webview.postMessage(message).then(
+      (delivered) => {
+        // A hidden view drops messages, so the next one must not build on this one.
+        if (!delivered && surface.sent === position) surface.sent = undefined;
+      },
+      () => {
+        if (surface.sent === position) surface.sent = undefined;
+      },
+    );
   }
   private saveDraft(entry: Conversation) {
     const text = entry.draft.text;

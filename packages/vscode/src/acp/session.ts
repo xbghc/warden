@@ -19,7 +19,7 @@ import {
 } from '@agentclientprotocol/sdk';
 // System prompts are an opt-in draft capability; keep the rest of the client on stable types.
 import type { SessionCapabilities as DraftSessionCapabilities, SystemPrompt } from '@agentclientprotocol/sdk/unstable';
-import type { AcpControls, AcpMessage, AcpPermission, AcpRecord, AcpSnapshot, AcpStatus } from '@warden/shared';
+import type { AcpControls, AcpMessage, AcpPermission, AcpRecord, AcpSnapshot, AcpStatus, AcpTranscriptPosition } from '@warden/shared';
 import { DiagnosticLog, diagnosticError, diagnosticOutcome } from '@warden/shared';
 import type { DiagnosticOutcome } from '@warden/shared';
 import type { AcpProfile, AcpSessionOptions, AgentProcessInfo } from './contracts.js';
@@ -127,6 +127,9 @@ export class AcpSession {
   private history: History;
   private toolDisplays = new WeakMap<AcpMessage, ToolDisplay>();
   private measured = new WeakMap<AcpMessage, { size: number; bytes: number }>();
+  private transcript: AcpTranscriptPosition = { epoch: 0, sequence: 0 };
+  /** Messages named by streamed updates in this epoch, in the order they first appeared, with their latest sequence. */
+  private streamed = new Map<AcpMessage, number>();
   private permissions = new Map<string, Permission>();
   private authMethods: AuthMethod[] = [];
   private controls: AcpControls = emptyControls();
@@ -211,12 +214,22 @@ export class AcpSession {
     return { pid: runtime.child.pid, profile: runtime.profile, startedAt: runtime.startedAt };
   }
 
-  snapshot(): AcpSnapshot {
+  /**
+   * The whole conversation, or for a view that holds the transcript as of `seen` only the messages
+   * streamed since. The result names the position it was built from as `base` in that case.
+   */
+  snapshot(seen?: AcpTranscriptPosition): AcpSnapshot & { base?: AcpTranscriptPosition } {
     const runtime = this.runtime;
+    const incremental = !!seen && seen.epoch === this.transcript.epoch && seen.sequence <= this.transcript.sequence;
+    const record = incremental
+      ? { ...this.record, messages: [...this.streamed].filter(([, sequence]) => sequence > seen.sequence).map(([message]) => message) }
+      : this.record;
     // Advertising a login method does not mean the agent needs authentication.
     const needsAuthentication = this.status === 'error' && runtime?.authenticationRequired && runtime.initialized && !runtime.exited && this.current(runtime);
     return structuredClone({
-      record: this.record,
+      record,
+      transcript: this.transcript,
+      ...(incremental ? { base: seen } : {}),
       status: this.resetting ? 'resetting' : this.status,
       ...(this.error ? { error: this.error } : {}),
       permissions: [...this.permissions.values()].filter((permission) => !permission.checking).map((permission) => permission.view),
@@ -263,7 +276,19 @@ export class AcpSession {
     return this.runtime === runtime && this.generation === runtime.generation && !runtime.stopping;
   }
 
+  // Only a streamed update that named its message lets a view keep the rest of its transcript.
+  // Every other notification may follow any change, so views take the whole transcript again.
   private notify() {
+    this.restructured();
+    this.emit();
+  }
+
+  private restructured() {
+    this.transcript = { epoch: this.transcript.epoch + 1, sequence: 0 };
+    this.streamed.clear();
+  }
+
+  private emit() {
     if (this.status !== this.loggedStatus) {
       (this.runtime?.log ?? this.log).write('debug', 'acp.session.state', { previous: this.loggedStatus, status: this.status });
       this.loggedStatus = this.status;
@@ -336,6 +361,8 @@ export class AcpSession {
         text: 'Earlier conversation history exceeded the storage limit. Only recent content has been retained.',
         status: 'history_truncated',
       });
+    // Removed messages cannot be described to a view as streamed ones.
+    if (trimmed && history === this.history) this.restructured();
   }
 
   private persist(): Promise<void> {
@@ -353,8 +380,13 @@ export class AcpSession {
   }
 
   private changed(touched?: AcpMessage) {
+    const epoch = this.transcript.epoch;
     this.boundHistory(this.history, touched);
-    this.notify();
+    if (touched && epoch === this.transcript.epoch) {
+      this.transcript = { epoch, sequence: this.transcript.sequence + 1 };
+      this.streamed.set(touched, this.transcript.sequence);
+      this.emit();
+    } else this.notify();
     if (this.flush) return;
     this.flush = setTimeout(() => {
       this.flush = undefined;

@@ -24,6 +24,7 @@ const model: AcpModel = {
   defaultProfileId: 'configured-agent',
   status: 'disconnected',
   sending: false,
+  transcript: { epoch: 0, sequence: 0 },
   permissions: [],
   authMethods: [],
   draft: '为订单列表增加筛选参数，保留旧调用方式。',

@@ -3,8 +3,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mkdtemp, mkdir, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AcpBinding, AcpModelSelection, AcpRecord } from '@warden/shared';
-import { DiagnosticLog } from '@warden/shared';
+import type { AcpBinding, AcpModel, AcpModelSelection, AcpRecord } from '@warden/shared';
+import { applyAcpUpdate, DiagnosticLog } from '@warden/shared';
 import type { AcpProfile, AcpSessionOptions, AcpStorage } from '../packages/vscode/src/acp/contracts.js';
 import { parseProcessList, processTree } from '../packages/vscode/src/acp/process-tree.js';
 import { AcpSession } from '../packages/vscode/src/acp/session.js';
@@ -12,6 +12,21 @@ import { AcpSessionStorage } from '../packages/vscode/src/acp/storage.js';
 
 const agent = fileURLToPath(new URL('./fixtures/acp-agent.mjs', import.meta.url));
 const sessions: AcpSession[] = [];
+// Every session in this file also feeds a view the way the host does: whole models and streamed
+// updates, applied in order. The view must always equal a whole snapshot taken at that moment.
+const viewMismatches: string[] = [];
+function mirrorView(session: () => AcpSession) {
+  let view: AcpModel | undefined;
+  return () => {
+    const { base, ...snapshot } = session().snapshot(view?.transcript);
+    const model = { ...snapshot, panelId: 'mirror' } as AcpModel;
+    const next = base ? applyAcpUpdate(view!, { base, model }) : model;
+    if (!next) viewMismatches.push('an update was made for a model the view does not hold');
+    else if (JSON.stringify(next) !== JSON.stringify({ ...session().snapshot(), panelId: 'mirror' }))
+      viewMismatches.push(`view differs after ${base ? 'an update' : 'a whole model'}`);
+    view = next;
+  };
+}
 let directory: string;
 let primary: string;
 
@@ -89,13 +104,17 @@ async function fixture(name = 'task', mode = 'normal', timeoutMs = 15_000) {
     models: AcpSessionOptions['modelPreferences'] = modelPreferences,
     extra: Partial<AcpSessionOptions> = {},
   ) => {
-    const session = new AcpSession({
+    const mirror = mirrorView(() => session);
+    const session: AcpSession = new AcpSession({
       binding,
       storage: persistence,
       modelPreferences: models,
       validate,
       readRoots,
-      changed,
+      changed: () => {
+        changed();
+        mirror();
+      },
       connectionFailed,
       report,
       timeoutMs,
@@ -126,6 +145,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await Promise.all(sessions.splice(0).map((session) => session.close()));
+  expect(viewMismatches.splice(0)).toEqual([]);
   await rm(directory, { recursive: true, force: true });
 });
 
@@ -1218,6 +1238,51 @@ describe('ACP subprocess conversations', () => {
     const reopened = f.create();
     await reopened.initialize();
     expect(transcript(reopened)).toEqual(transcript(restored));
+  });
+
+  it('gives an up-to-date view only the streamed messages, and the same transcript as a whole snapshot', async () => {
+    const f = await fixture('task', 'load-without-replay');
+    await f.session.connect(f.profile, { resume: false });
+    await f.session.send('remember me');
+    await f.session.disconnect();
+    const seeded = 300;
+    f.storage.record!.messages.unshift(
+      ...Array.from({ length: seeded }, (_, index) => ({ id: `seed-${index}`, role: 'notice' as const, text: `Earlier message ${index}` })),
+    );
+    // The view is rendered the way the host renders it: on every change, from what it already holds.
+    let view: AcpModel | undefined;
+    let whole = 0;
+    let streamed = 0;
+    let sent = 0;
+    let restored: AcpSession;
+    const render = () => {
+      const { base, ...snapshot } = restored.snapshot(view?.transcript);
+      const model = { ...snapshot, panelId: 'view' } as AcpModel;
+      sent += model.record.messages.length;
+      if (base) streamed++;
+      else whole++;
+      view = base ? applyAcpUpdate(view!, { base, model }) : model;
+      expect(view, 'an update is always made for the model the view holds').toBeDefined();
+      const expected = restored.snapshot();
+      expect(view!.record).toEqual(expected.record);
+      expect(view!.status).toBe(expected.status);
+    };
+    restored = f.create(undefined, undefined, { changed: () => render() });
+    await restored.initialize();
+    await restored.connect(f.profile, { resume: true });
+    whole = streamed = sent = 0;
+    await restored.send('stream-chunks');
+    expect(view!.record.messages.at(-2)?.text).toBe(Array.from({ length: 60 }, (_, index) => `part ${index} `).join(''));
+    expect(view!.record.messages.at(-1)?.text).toBe('Stream complete');
+    // 62 chunks arrive; each used to send all of the 300-message history again.
+    expect(streamed).toBeGreaterThanOrEqual(60);
+    expect(whole).toBeLessThan(10);
+    expect(sent).toBeLessThan(10 * (seeded + 4));
+    // A view that fell behind or belongs to another model is told so instead of being patched.
+    const stale = { ...view!, transcript: { epoch: view!.transcript.epoch - 1, sequence: 0 } };
+    expect(applyAcpUpdate(stale, { base: view!.transcript, model: view! })).toBeUndefined();
+    expect(applyAcpUpdate({ ...view!, panelId: 'other' }, { base: view!.transcript, model: view! })).toBeUndefined();
+    expect(restored.snapshot(stale.transcript).base).toBeUndefined();
   });
 
   const toolState = async (workspace: string) => {

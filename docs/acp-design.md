@@ -252,6 +252,12 @@ and the original request remain available without interpretation or execution. A
 explicitly labeled as a preview, including its hover text, and the disclosure retains the original
 request. No shell unescaping or recursive decoding is applied.
 
+The host sends Task Chat a whole model when the view starts and after any change other than a
+streamed agent update. While an agent streams, a view that is up to date receives the model with
+only the messages changed since the transcript position it holds; it replaces those by ID or appends
+them. A view that cannot apply an update, because it holds another position or panel, asks for a
+whole model again. A hidden view drops messages, so the host sends the next one whole.
+
 The webview receives a finite, validated action vocabulary. Repository/session identity comes from
 the host-owned view binding, not arbitrary message fields. View-state messages contain only bounded
 reading positions and profile IDs; they cannot change the binding or execute commands. Agent content

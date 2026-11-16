@@ -86,6 +86,7 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   let renamedModel;
   webview.postMessage = (message) => {
     if (message.type === 'acp-model') renamedModel = message.model;
+    else if (message.type === 'acp-update') renamedModel = message.update.model;
     return post.call(webview, message);
   };
   try {

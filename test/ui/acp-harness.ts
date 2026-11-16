@@ -7,7 +7,7 @@ import os from 'node:os';
 import { unzipSync } from 'fflate';
 import { Engine } from '@warden/engine';
 import { parseAcpAction } from '@warden/shared';
-import type { AcpAction, AcpBinding, AcpModel, AcpRecord, AcpViewState } from '@warden/shared';
+import type { AcpAction, AcpBinding, AcpModel, AcpRecord, AcpSnapshot, AcpTranscriptPosition, AcpViewState } from '@warden/shared';
 import type { AcpProfile } from '../../packages/vscode/src/acp/contracts.js';
 import { AcpDraft } from '../../packages/vscode/src/acp/draft.js';
 import { acpErrorMessage } from '../../packages/vscode/src/acp/diagnostics.js';
@@ -139,9 +139,14 @@ for (const [index, title] of ['订单筛选参数', '分页默认值'].entries()
   });
 }
 
-const model = (entry: Entry): AcpModel => ({
-  ...entry.session.snapshot(),
-  error: entry.error ?? entry.session.snapshot().error,
+// Like the host: a page that says which transcript it holds receives only the messages streamed since.
+const view = (entry: Entry, seen?: AcpTranscriptPosition) => {
+  const { base, ...snapshot } = entry.session.snapshot(seen);
+  return base ? { type: 'acp-update', update: { base, model: model(entry, snapshot) } } : { type: 'acp-model', model: model(entry, snapshot) };
+};
+const model = (entry: Entry, snapshot: AcpSnapshot = entry.session.snapshot()): AcpModel => ({
+  ...snapshot,
+  error: entry.error ?? snapshot.error,
   panelId: entry.panelId,
   presentation: 'sidebar',
   viewState: entry.viewState,
@@ -236,6 +241,12 @@ const server = createServer(async (request, response) => {
     if (url.pathname === '/model') {
       response.setHeader('Content-Type', 'application/json');
       response.end(JSON.stringify(model(entry)));
+      return;
+    }
+    if (url.pathname === '/view') {
+      const epoch = url.searchParams.get('epoch');
+      response.setHeader('Content-Type', 'application/json');
+      response.end(JSON.stringify(view(entry, epoch === null ? undefined : { epoch: Number(epoch), sequence: Number(url.searchParams.get('sequence')) })));
       return;
     }
     if (url.pathname === '/default-profile' && request.method === 'POST') {
@@ -343,16 +354,32 @@ const server = createServer(async (request, response) => {
       let saved, refreshing, modelsPaused = false;
       let queue = Promise.resolve();
       let draftGate, releaseDrafts;
+      let whole = true;
       const publish = model => {
         window.__model = model;
         window.dispatchEvent(new MessageEvent('message', { data: { type: 'acp-model', model } }));
+      };
+      // window.__model mirrors what the app holds, so an update is merged here as the app merges it.
+      const update = update => {
+        const messages = window.__model.record.messages.slice();
+        for (const message of update.model.record.messages) {
+          const index = messages.findLastIndex(item => item.id === message.id);
+          if (index < 0) messages.push(message);
+          else messages[index] = message;
+        }
+        window.__model = { ...update.model, record: { ...update.model.record, messages } };
+        window.__updates = (window.__updates || 0) + 1;
+        window.dispatchEvent(new MessageEvent('message', { data: { type: 'acp-update', update } }));
       };
       const refresh = () => {
         if (modelsPaused) return Promise.resolve();
         if (refreshing) return refreshing;
         refreshing = (async () => {
-          const model = await (await fetch('/model?task=' + task)).json();
-          publish(model);
+          const held = !whole && window.__model?.transcript;
+          whole = false;
+          const next = await (await fetch('/view?task=' + task + (held ? '&epoch=' + held.epoch + '&sequence=' + held.sequence : ''))).json();
+          if (next.type === 'acp-update') update(next.update);
+          else publish(next.model);
         })().finally(() => { refreshing = undefined; });
         return refreshing;
       };
@@ -376,7 +403,8 @@ const server = createServer(async (request, response) => {
         },
       };
       window.acquireVsCodeApi = () => ({ getState: () => saved, setState: value => saved = value, postMessage: message => {
-        if (message.type === 'ready') { void refresh(); return; }
+        // The app asks for a whole model when it starts and when it could not apply an update.
+        if (message.type === 'ready') { window.__readies = (window.__readies || 0) + 1; whole = true; void refresh(); return; }
         window.__actions.push(message);
         queue = queue.then(async () => {
           if (message.action?.type === 'draft' && draftGate) await draftGate;
