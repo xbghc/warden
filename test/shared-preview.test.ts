@@ -156,13 +156,12 @@ describe('shared preview worktrees', () => {
     expect(await readdir(path.join(data, 'operations'))).toEqual([]);
   });
 
-  it('publishes dirty primary and task content through a shared preview and preserves its last coherent version', { timeout }, async () => {
+  it('publishes task content to a work folder linked to primary and preserves its last coherent version', { timeout }, async () => {
     const repo = await resolveRepo(fx.root);
     const workflow = new WorkflowService(repo, store);
     await workflow.configure('main');
     const a = await workflow.start((await workflow.create({ title: 'A' })).id, { kind: 'shared' });
     const b = await workflow.start((await workflow.create({ title: 'B' })).id, { kind: 'shared' });
-    await fx.write('mock.txt', 'Human mock\n');
     await writeFile(path.join(a.worktree, 'src/b.ts'), 'export const b = 10;\n');
     await writeFile(path.join(b.worktree, 'src/b.ts'), 'export const b = 20;\n');
     const index = await readFile(path.join(fx.root, '.git', 'index'));
@@ -171,9 +170,12 @@ describe('shared preview worktrees', () => {
     const aIndex = await readFile(path.resolve(a.worktree, fx.git('-C', a.worktree, 'rev-parse', '--git-path', 'index').trim()));
     const preview = new PreviewService(repo, store);
     const first = await preview.set([a.id]);
-    expect(common(first.worktree!)).toBe(common(a.worktree));
-    expect(common(first.worktree!)).toBe(common(b.worktree));
-    expect(await readFile(path.join(first.worktree!, 'mock.txt'), 'utf8')).toBe('Human mock\n');
+    // The folder belongs to primary's repository, so its remotes and branches are at hand there;
+    // task workspaces and compositions stay in Warden's shared repository.
+    expect(first.worktree).toBe(`${fx.root}-work`);
+    expect(common(first.worktree!)).toBe(path.join(fx.root, '.git'));
+    expect(common(first.worktree!)).not.toBe(common(a.worktree));
+    expect(fx.git('-C', first.worktree!, 'rev-parse', '--abbrev-ref', 'HEAD').trim()).toBe('HEAD');
     expect(await readFile(path.join(first.worktree!, 'src/b.ts'), 'utf8')).toBe('export const b = 10;\n');
     await expect(preview.set([a.id, b.id])).rejects.toMatchObject({ code: 'preview_conflict' });
     expect((await preview.get()).connectedIds).toEqual([a.id]);
@@ -182,7 +184,8 @@ describe('shared preview worktrees', () => {
     expect(await readFile(path.resolve(a.worktree, fx.git('-C', a.worktree, 'rev-parse', '--git-path', 'index').trim()))).toEqual(aIndex);
     expect(fx.git('rev-parse', 'HEAD')).toBe(head);
     expect(fx.git('show-ref')).toBe(refs);
-    expect(await readdir(path.join(data, 'operations'))).toEqual([path.basename(first.worktree!)]);
+    expect(fx.git('-C', first.worktree!, 'reflog').trim()).toBe('');
+    expect(await readdir(path.join(data, 'operations'))).toEqual([]);
 
     const previewGitfile = path.join(first.worktree!, '.git');
     const original = await readFile(previewGitfile);
@@ -199,7 +202,7 @@ describe('shared preview worktrees', () => {
     expect((await preview.refresh()).syncStatus).toBe('synced');
   });
 
-  it('refreshes an existing standalone preview without moving its runtime or replacing ignored dependencies', { timeout }, async () => {
+  it('replaces a preview that an earlier version kept in the data directory with the work folder', { timeout }, async () => {
     const repo = await resolveRepo(fx.root);
     const workflow = new WorkflowService(repo, store);
     await workflow.configure('main');
@@ -211,9 +214,6 @@ describe('shared preview worktrees', () => {
     fx.git('init', '-q', '--template=', runtime);
     fx.git('-C', runtime, 'fetch', '-q', '--no-tags', fx.root, head);
     fx.git('-C', runtime, 'checkout', '-q', '--detach', head);
-    await mkdir(path.join(runtime, '.git', 'info'));
-    await writeFile(path.join(runtime, '.git', 'info', 'exclude'), 'runtime-cache.txt\n');
-    await writeFile(path.join(runtime, 'runtime-cache.txt'), 'Keep environment\n');
     await store.update((state) => {
       state.connectionPreview = {
         connectedIds: [],
@@ -224,18 +224,14 @@ describe('shared preview worktrees', () => {
         developmentHead: head,
         worktree: runtime,
         directory: runtime,
-        baselineTree: tree,
         tree,
         snapshot: head,
       };
     });
-    await fx.write('human.txt', 'Saved human content\n');
     const preview = new PreviewService(repo, store);
     const result = await preview.refresh();
-    expect(result).toMatchObject({ worktree: runtime, status: 'disconnected', syncStatus: 'synced' });
-    expect(common(runtime)).toBe(path.join(runtime, '.git'));
-    expect(await readFile(path.join(runtime, 'human.txt'), 'utf8')).toBe('Saved human content\n');
-    expect(await readFile(path.join(runtime, 'runtime-cache.txt'), 'utf8')).toBe('Keep environment\n');
-    expect(await readdir(operations)).toEqual([path.basename(runtime)]);
+    expect(result).toMatchObject({ worktree: `${fx.root}-work`, status: 'disconnected', syncStatus: 'synced' });
+    expect(common(result.worktree!)).toBe(path.join(fx.root, '.git'));
+    expect(await readdir(operations)).toEqual([]);
   });
 });

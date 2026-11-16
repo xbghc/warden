@@ -129,7 +129,6 @@ export class HistoryService {
         fail('Finish the commit in the primary folder before editing history.', 'development_in_use');
       if ((await oid(this.repo.commonRoot, `refs/heads/${draft.branch}`)) !== draft.head) fail('The base branch has new commits. Recreate the arrangement.');
       const preview = new PreviewService(this.repo, this.store);
-      await preview.suspend();
       try {
         const primary = await primaryCheckout(this.repo, draft.branch);
         if (await dirtyCount(primary.path)) fail('The primary folder has other changes. Handle them before retrying.', 'development_dirty');

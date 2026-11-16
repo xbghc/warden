@@ -110,13 +110,13 @@ describe('confirmed task deletion', () => {
     expect(await readFile(path.join(created.worktree!, 'README.md'), 'utf8')).toBe('Other version\n');
   });
 
-  it('removes only this contribution from preview and preserves ordinary primary edits', async () => {
+  it('removes only this contribution from the work folder and preserves the edits made there', async () => {
     const a = await task('A');
     const b = await task('B');
     await writeFile(path.join(a.worktree!, 'a.txt'), 'A\n');
     await writeFile(path.join(b.worktree!, 'b.txt'), 'B\n');
-    await fixture.write('human.txt', 'Saved human work\n');
     const preview = await engine.execute('preview.connect', { connectedIds: [a.id, b.id] });
+    await writeFile(path.join(preview.worktree!, 'human.txt'), 'Saved human work\n');
     const primaryIndex = await readFile(path.join(fixture.root, '.git', 'index'));
     await remove(a.id);
     expect((await engine.execute('preview.get', undefined)).connectedIds).toEqual([b.id]);
@@ -124,20 +124,21 @@ describe('confirmed task deletion', () => {
     expect(await readFile(path.join(preview.worktree!, 'b.txt'), 'utf8')).toBe('B\n');
     expect(await readFile(path.join(preview.worktree!, 'human.txt'), 'utf8')).toBe('Saved human work\n');
     expect(await readFile(path.join(fixture.root, '.git', 'index'))).toEqual(primaryIndex);
-    expect(await readFile(path.join(fixture.root, 'human.txt'), 'utf8')).toBe('Saved human work\n');
+    expect(fixture.git('status', '--porcelain').trim()).toBe('');
   });
 
   it('retains the task and source after failed preview disconnection and completes an explicit retry', async () => {
     const a = await task();
     await writeFile(path.join(a.worktree!, 'change.txt'), 'Task work\n');
     const preview = await engine.execute('preview.connect', { connectedIds: [a.id] });
-    await writeFile(path.join(preview.worktree!, 'README.md'), 'Unexpected preview edit\n');
-    await expect(remove(a.id)).rejects.toMatchObject({ code: 'preview_dirty' });
+    // An edit to a file only the task provides cannot be kept once the task's change is taken away.
+    await writeFile(path.join(preview.worktree!, 'change.txt'), 'Edited in the work folder\n');
+    await expect(remove(a.id)).rejects.toMatchObject({ code: 'preview_conflict' });
     expect((await currentTasks())[0]!.deletion).toMatchObject({ phase: 'disconnecting', error: expect.any(String) });
     expect((await engine.execute('preview.get', undefined)).connectedIds).toEqual([a.id]);
     expect(await readFile(path.join(a.worktree!, 'change.txt'), 'utf8')).toBe('Task work\n');
     await expect(engine.execute('task.update', { taskId: a.id, title: 'Changed' })).rejects.toMatchObject({ code: 'task_deleting' });
-    await writeFile(path.join(preview.worktree!, 'README.md'), '# fixture\n');
+    await writeFile(path.join(preview.worktree!, 'change.txt'), 'Task work\n');
     await remove(a.id);
     expect(await currentTasks()).toEqual([]);
     expect((await engine.execute('preview.get', undefined)).connectedIds).toEqual([]);
@@ -247,11 +248,11 @@ describe('confirmed task deletion', () => {
     const created = await task();
     await writeFile(path.join(created.worktree!, 'pending.txt'), 'Task work\n');
     const preview = await engine.execute('preview.connect', { connectedIds: [created.id] });
-    await writeFile(path.join(preview.worktree!, 'README.md'), 'Unexpected edit\n');
-    await expect(remove(created.id)).rejects.toMatchObject({ code: 'preview_dirty' });
+    await writeFile(path.join(preview.worktree!, 'pending.txt'), 'Edited in the work folder\n');
+    await expect(remove(created.id)).rejects.toMatchObject({ code: 'preview_conflict' });
     fixture.git('-C', created.worktree!, 'add', 'pending.txt');
     fixture.git('-C', created.worktree!, 'commit', '-qm', 'Changed source after failed disconnection');
-    await writeFile(path.join(preview.worktree!, 'README.md'), '# fixture\n');
+    await writeFile(path.join(preview.worktree!, 'pending.txt'), 'Task work\n');
     await remove(created.id);
     expect(await currentTasks()).toEqual([]);
   });

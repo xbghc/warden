@@ -104,14 +104,15 @@ export interface ReviewState {
   /** A base branch and the small changes that are integrated into it. */
   workflow?: DevelopmentWorkflow;
   workspaceConfig?: WorkspaceConfig;
-  /** Durable ownership record for the independent preview and an interrupted publication. */
+  /**
+   * The work folder: `tree` and `snapshot` are the composition its HEAD is on, so its other content
+   * is the user's. `pending` journals an update from the folder content `from` to `mergedTree`.
+   */
   connectionPreview?: PreviewResponse & {
     directory?: string;
     tree?: string;
-    sandbox?: string;
     snapshot?: string;
-    migrating?: boolean;
-    pending?: { tree: string; sandbox: string; snapshot: string; response: PreviewResponse };
+    pending?: { from: string; merged: string; mergedTree: string; tree: string; sandbox: string; snapshot: string; response: PreviewResponse };
   };
   historyDraft?: HistoryPreviewResponse & {
     sandbox: string;
@@ -310,7 +311,6 @@ export interface PreviewResponse {
   files: { path: string; changeIds: string[] }[];
   conflicts?: string[];
   syncStatus?: 'pending' | 'updating' | 'synced' | 'conflict' | 'error';
-  baselineTree?: string;
   sources?: { changeId: string; observedTree: string; appliedTree?: string; status: 'pending' | 'updating' | 'synced' | 'conflict' | 'error' }[];
   setup?: PreviewSetup;
 }

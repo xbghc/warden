@@ -24,6 +24,12 @@ exports.checkPreviewLineEndings = async (workbench, root, eventually) => {
   assert.equal(await fs.readFile(file, 'utf8'), original, 'preview initialization preserves committed CRLF bytes');
   await fs.writeFile(file, '@echo off\r\necho Preview edit\r\n');
   await vscode.commands.executeCommand('warden.refreshPreview');
+  await eventually(() => workbench.preview?.syncStatus === 'synced');
+  assert.match(await fs.readFile(file, 'utf8'), /Preview edit/, 'an edit in the work folder survives a sync');
+  // A folder that is no longer primary's worktree cannot be updated.
+  const gitfile = path.join(workbench.preview.worktree, '.git');
+  await fs.rename(gitfile, `${gitfile}.away`);
+  await vscode.commands.executeCommand('warden.refreshPreview');
   await eventually(() => workbench.preview?.syncStatus === 'error');
   assert.match(workbench.status.text, /Sync Failed/);
   assert.match(workbench.sidebar.view.message, /Sync Failed/);
@@ -61,7 +67,8 @@ exports.checkPreviewLineEndings = async (workbench, root, eventually) => {
     workbench.output = output;
     workbench.backend.execute = execute;
   }
-  assert.match(await fs.readFile(file, 'utf8'), /Preview edit/, 'real preview edits are retained');
+  assert.match(await fs.readFile(file, 'utf8'), /Preview edit/, 'a failed sync leaves the edit alone');
+  await fs.rename(`${gitfile}.away`, gitfile);
   await fs.writeFile(file, original);
   await vscode.commands.executeCommand('warden.refreshPreview');
   await eventually(() => workbench.preview?.syncStatus === 'synced');

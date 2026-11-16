@@ -2,8 +2,9 @@
 
 Warden follows the [workflow contract](workflow.md) and [terminology](terminology.md).
 Choose an explicit local **base branch**, such as `feature/order`, for one requirement.
-Human edits belong in primary and agent edits in task
-workspaces. Dependencies, development servers and user-run validation belong in the independent preview directory.
+The user edits and runs code in the work folder, `<primary>-work`, and agents edit task workspaces.
+Primary only carries commits to and from the remote: its working files are not an input, and nothing
+is developed there. Dependencies, development servers and user-run validation belong in the work folder.
 Workspace creation does not install dependencies or launch an agent.
 
 ## Development workflow
@@ -52,15 +53,17 @@ The primary checkout retains its own Git repository. Warden creates a separate b
 such as `<primary>-1` and `<primary>-2`; new ones are independent clones, while tasks created by
 earlier versions may still be worktrees of the shared repository. Opening Warden inside a clone
 Warden made (marked by `warden.main`) uses its primary's state; a sibling clone made by hand is its own
-primary. Newly created preview and temporary composition worktrees live in Warden's
-external data directory and use the shared repository. Each worktree has independent files,
-HEAD and index. Branch references and Git objects are shared among these Warden worktrees.
+primary. Temporary composition worktrees live in Warden's external data directory and use the shared
+repository. The work folder is a linked worktree of primary itself, with a detached HEAD: primary's
+remotes, branches and history are available there, and fetching or pushing from it works as in
+primary. Each worktree has independent files, HEAD and index.
 
-Primary commits are imported locally when needed. Saved uncommitted primary and task content is
-captured without changing the real indexes. Composition uses a separate worktree and publishes only
-a complete candidate to the persistent preview. Delivery applies only the reviewed final patch to
-primary and commits there with its ordinary hooks and signing. Agent and preview histories do not
-enter primary.
+Primary commits are imported locally when needed. Saved uncommitted task content is captured without
+changing the real indexes. Composition uses a separate worktree; only a complete composition is
+fetched into primary's repository and written to the work folder. Those composition commits are
+unreachable from any branch, so no push sends them, and Git prunes them once the folder has moved on.
+Delivery applies only the reviewed final patch to primary and commits there with its ordinary hooks
+and signing. Agent histories do not enter primary.
 
 The shared repository outlives temporary operations and preview worktrees. Existing clones,
 primary-linked worktrees and standalone runtime previews keep their paths and repositories;
@@ -113,9 +116,17 @@ and the script keeps the inherited locale and pager settings.
 
 Use the connection switches in the left *Tasks* list to select one or more task workspaces. Warden snapshots their live committed and
 uncommitted changes relative to each workspace's undelivered baseline. It composes them with
-three-way patch application in a temporary worktree of the external shared repository. Only a complete, successful
-composition is published to the independent preview directory, including saved primary content
-as its baseline. Primary files, index and HEAD are unchanged by connections.
+three-way patch application in a temporary worktree of the external shared repository, on top of the
+base branch commit. Only a complete, successful composition reaches the work folder. Primary files,
+index and HEAD are unchanged by connections, and primary's uncommitted files are not composed.
+
+The work folder's HEAD is that composition, so everything `git status` shows there is the user's own
+edit. A new composition is merged into those edits: Warden replays them on the new composition in the
+temporary worktree first, and writes to the folder only the paths the merge changed. An edit that
+conflicts with a connected change leaves the folder exactly as it is and reports the conflicting
+paths; ask the agent to make the change in its workspace, or undo the edit. The index is reset to the
+composition on every update, so staging in the work folder does not last. Ignored dependencies and
+caches persist.
 
 Preview synchronization stays visible in the status bar. Its tooltip and **Show Preview Output**
 provide the current combination, runtime path and last successful sync; output also includes conflict
@@ -130,16 +141,14 @@ One extension session owns background preview synchronization; it checks content
 debounces saved edits. Other windows observe shared state and can take over when the owner closes. Initial conflicts fail
 the connection attempt and preserve the previous set and files. A later conflict preserves the last
 coherent preview and marks it stale. Adjust the source edits or selection, then choose *Sync Preview*.
-The same sources, baseline and preview content are not composed again automatically; a change to any
-of them, or *Sync Preview*, retries. Disconnecting
-recomposes the remaining contributions; it does not discard unexpected user or tool edits.
+The same sources, base commit and folder content are not composed again automatically; a change to any
+of them, or *Sync Preview*, retries. Disconnecting recomposes the remaining contributions and keeps
+the user's edits.
 
-Before replacing preview files, Warden verifies its saved ownership tree. Unexpected preview edits
-block synchronization and remain available for manual repair. A publication interrupted midway is
-returned to the previous preview when every path still holds its previous or its candidate content;
-any other content is kept for manual repair. Edit human code in primary and agent
-code in task workspaces. Ignored dependencies and caches persist in preview. Saved primary edits
-are observed by content and debounced into preview; they are not unexpected edits to discard.
+An update interrupted midway is finished on the next sync when every path it was writing still holds
+its previous or its new content; a path holding anything else stops the update and is kept for manual
+repair. A file saved in the folder while an update was being prepared postpones that update to the
+next sync, so the save is never overwritten.
 
 ## Squash delivery
 

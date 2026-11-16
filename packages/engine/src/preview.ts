@@ -1,12 +1,11 @@
-import path from 'node:path';
-import { rm, stat } from 'node:fs/promises';
 import type { DevelopmentChange, PreviewResponse, ReviewState } from '@warden/shared';
 import { snapshotObjects, snapshotStore, snapshotWorktree } from './snapshots.js';
+import { WorkFolder, workFolderPath } from './work-folder.js';
 import { badRequest, WardenError } from './errors.js';
 import { runGit } from './git.js';
 import { mirrorLocalSetup } from './clones.js';
 import { ensureSharedRepository, validatedSharedRepository } from './shared-repository.js';
-import { applyPatch, GitSandbox, gitMessage, oid, patchBetween, deliveryBase, deliveryContentBase, deliveredTree } from './git-sandbox.js';
+import { GitSandbox, gitMessage, oid, patchBetween, deliveryBase, deliveryContentBase, deliveredTree } from './git-sandbox.js';
 import { listWorktreesAll, type RepoContext } from './repo.js';
 import type { StateStore } from './state.js';
 import { checkoutState, listWorktreesDetailed } from './worktrees.js';
@@ -32,7 +31,10 @@ export async function primaryCheckout(repo: RepoContext, branch: string) {
 
 type Inputs = Awaited<ReturnType<PreviewService['inputs']>>;
 
-/** A persistent preview worktree; composition never stages or writes primary-directory files. */
+/**
+ * Keeps the work folder on the base branch commit plus the connected tasks' changes. The user's
+ * edits there are merged into every new composition; primary's files and index are never written.
+ */
 export class PreviewService {
   private observed?: { key: string; since: number };
   /** Inputs whose automatic composition already failed; only new inputs or a request retry them. */
@@ -47,7 +49,7 @@ export class PreviewService {
     const state = await this.store.load();
     const saved = state.connectionPreview;
     if (saved) {
-      const { tree: _tree, directory: _directory, sandbox: _sandbox, snapshot: _snapshot, pending: _pending, migrating: _migrating, ...response } = saved;
+      const { tree: _tree, directory: _directory, snapshot: _snapshot, pending: _pending, ...response } = saved;
       return response;
     }
     return { developmentBranch: state.workflow?.developmentBranch, connectedIds: [], status: 'disconnected', files: [] };
@@ -62,10 +64,7 @@ export class PreviewService {
         return await this.compose(ids);
       } catch (error) {
         const saved = (await this.store.load()).connectionPreview;
-        if (
-          JSON.stringify(saved?.connectedIds) === JSON.stringify(ids) ||
-          (error instanceof WardenError && ['preview_dirty', 'preview_interrupted'].includes(error.code ?? ''))
-        )
+        if (JSON.stringify(saved?.connectedIds) === JSON.stringify(ids) || (error instanceof WardenError && error.code === 'preview_interrupted'))
           await this.failed(error);
         throw error;
       }
@@ -105,7 +104,7 @@ export class PreviewService {
       saved.syncStatus = error instanceof WardenError && error.code === 'preview_conflict' ? 'conflict' : 'error';
       saved.message = gitMessage(error);
       for (const source of saved.sources ?? []) {
-        if (source.status !== 'synced' || (error instanceof WardenError && ['preview_dirty', 'preview_interrupted'].includes(error.code ?? '')))
+        if (source.status !== 'synced' || (error instanceof WardenError && error.code === 'preview_interrupted'))
           source.status = error instanceof WardenError && error.code === 'preview_conflict' ? 'conflict' : 'error';
       }
     };
@@ -149,25 +148,15 @@ export class PreviewService {
         await this.mirrorSetup(false);
         const inputs = await this.inputs(state, state.connectionPreview.connectedIds);
         const saved = state.connectionPreview;
-        const target = GitSandbox.open(this.store, saved.directory!);
-        await target.validate();
-        const actual = await snapshotWorktree(target.path, snapshotStore(this.store.file));
+        const folder = await WorkFolder.open(this.repo.commonRoot, this.store.file, saved.directory!);
+        const actual = await folder.snapshot();
         const command = state.workspaceConfig?.previewSetup;
-        key = JSON.stringify([
-          state.workflow?.developmentBranch,
-          inputs.head,
-          inputs.baseline,
-          inputs.sources.map((s) => [s.change.id, s.from, s.tree]),
-          command,
-          actual,
-        ]);
-        // The same sources, baseline and preview content would fail the same way. Retrying each
+        key = JSON.stringify([state.workflow?.developmentBranch, inputs.head, inputs.sources.map((s) => [s.change.id, s.from, s.tree]), command, actual]);
+        // The same sources, base commit and folder content would fail the same way. Retrying each
         // second would rebuild a whole worktree and hold the repository lock for nothing.
         if (key === this.rejected) return;
-        if (actual !== saved.tree) conflict('The preview folder has unexpected changes. Sync stopped; edit code in the primary folder.', 'preview_dirty');
         const unchanged =
           saved.developmentBranch === state.workflow?.developmentBranch &&
-          saved.baselineTree === inputs.baseline &&
           saved.developmentHead === inputs.head &&
           inputs.sources.every((source) => saved.sources?.some((s) => s.changeId === source.change.id && s.appliedTree === source.tree));
         if (unchanged && saved.status !== 'stale' && (!command || (saved.setup?.command === command && !['pending', 'running'].includes(saved.setup.status))))
@@ -183,18 +172,12 @@ export class PreviewService {
       } catch (error) {
         // Busy checkouts and locks clear without changing any observed input, so only failures
         // decided by content are remembered.
-        if (key && error instanceof WardenError && ['preview_conflict', 'preview_dirty', 'preview_interrupted', 'git_failed'].includes(error.code ?? ''))
-          this.rejected = key;
+        if (key && error instanceof WardenError && ['preview_conflict', 'preview_interrupted', 'git_failed'].includes(error.code ?? '')) this.rejected = key;
         await this.failed(error);
       }
     });
   }
 
-  /** Legacy callers prepare/commit in primary; only old primary-directory previews need removal. */
-  async suspend() {
-    const state = await this.store.load();
-    if (state.connectionPreview && !state.connectionPreview.directory) await this.migrateLegacy(state);
-  }
   /** Caller holds the repository lock. Recompose against the new saved primary content. */
   async resume() {
     if ((await this.store.load()).connectionPreview) await this.refreshLocked();
@@ -219,9 +202,9 @@ export class PreviewService {
     const command = state.workspaceConfig?.previewSetup;
     assertPreviewSetupIdle(saved?.setup);
     if (!saved?.directory || !command) return;
-    const target = GitSandbox.open(this.store, saved.directory);
-    await target.validate();
-    const directory = target.path;
+    const folder = await WorkFolder.open(this.repo.commonRoot, this.store.file, saved.directory);
+    const directory = folder.path;
+    const before = await folder.snapshot();
     const owner = setupOwner();
     await this.store.update((s) => {
       s.connectionPreview!.setup = { command, status: 'running', owner };
@@ -245,136 +228,38 @@ export class PreviewService {
     await this.store.update((s) => {
       s.connectionPreview!.setup = { command, ...result };
     });
-    if ((await snapshotWorktree(directory, snapshotStore(this.store.file))) !== saved.tree)
+    // The user's own edits are expected here; only what changed while the script ran is reported.
+    if ((await folder.snapshot()) !== before)
       await this.failed(
         new WardenError(
           409,
-          'The preview setup script changed source files. Restrict it to ignored environment files, restore the preview code and retry.',
-          'preview_dirty',
+          'Source files changed while the setup script ran. Restrict it to ignored environment files and review the work folder.',
+          'preview_setup_changed',
         ),
       );
   }
 
-  /** Upgrade only a proven old composition; never silently turn agent preview files into the user's baseline. */
-  private async migrateLegacy(state: ReviewState) {
-    const saved = state.connectionPreview;
-    if (!saved || saved.directory) return;
-    const branch = saved.developmentBranch ?? state.workflow?.developmentBranch;
-    if (!branch) return;
-    const primary = await primaryCheckout(this.repo, branch);
-    if (saved.pending) {
-      const pending = saved.pending;
-      const oldSandbox = saved.sandbox;
-      const actual = await snapshotWorktree(primary.path, snapshotStore(this.store.file));
-      if (actual === pending.tree) {
-        Object.assign(saved, pending.response, { tree: pending.tree, sandbox: pending.sandbox, snapshot: pending.snapshot });
-      } else if (actual !== saved.tree)
-        conflict('A legacy preview sync was interrupted. Handle primary-folder changes before migrating.', 'preview_interrupted');
-      delete saved.pending;
-      await this.store.update((s) => {
-        s.connectionPreview = saved;
-      });
-      const obsolete = actual === pending.tree ? oldSandbox : pending.sandbox;
-      if (obsolete && obsolete !== saved.sandbox) await GitSandbox.open(this.store, obsolete).dispose();
-    }
-    if (saved.tree && saved.developmentHead) {
-      const baseline = await oid(primary.path, `${saved.developmentHead}^{tree}`);
-      if (saved.tree !== baseline) {
-        const actual = await snapshotWorktree(primary.path, snapshotStore(this.store.file));
-        if (
-          !saved.sandbox ||
-          (await oid(primary.path, 'HEAD')) !== saved.developmentHead ||
-          (actual !== saved.tree && !(saved.migrating && actual === baseline)) ||
-          (await runGit(['diff', '--cached', '--quiet', saved.developmentHead, '--'], { cwd: primary.path, okCodes: [0, 1] })).code !== 0
-        )
-          conflict(
-            'The legacy preview is still in the primary folder with other changes. Disconnect it or restore the original preview in the older version before retrying migration.',
-            'preview_migration_required',
-          );
-        await this.store.update((s) => {
-          s.connectionPreview!.migrating = true;
-        });
-        if (actual !== baseline)
-          await applyPatch(primary.path, await patchBetween(GitSandbox.open(this.store, saved.sandbox).path, saved.tree, baseline), false);
-      }
-    }
-    // Save the legacy baseline before allocating a new runtime. An interrupted upgrade can retry safely.
-    await this.store.update((s) => {
-      s.connectionPreview = { connectedIds: saved.connectedIds, files: [], status: 'disconnected' };
-    });
-    if (saved.sandbox) await GitSandbox.open(this.store, saved.sandbox).dispose();
-  }
-
+  /** Finishes or drops an update that was interrupted between its journal and its last write. */
   private async recover(state: ReviewState) {
     const saved = state.connectionPreview;
     if (!saved?.pending || !saved.directory) return;
     assertPreviewSetupIdle(saved.setup);
-    const target = GitSandbox.open(this.store, saved.directory);
-    await target.validate();
-    const actual = await snapshotWorktree(target.path, snapshotStore(this.store.file));
     const pending = saved.pending;
-    if (actual === pending.tree) {
-      await target.fetch(GitSandbox.open(this.store, pending.sandbox).path, pending.snapshot);
-      await target.write(['update-ref', 'HEAD', pending.snapshot]);
-      await this.store.update((s) => {
-        s.connectionPreview = { ...pending.response, directory: target.path, tree: pending.tree, snapshot: pending.snapshot };
-      });
-    } else if (actual === saved.tree) {
-      await this.store.update((s) => {
-        delete s.connectionPreview!.pending;
-      });
-    } else {
-      await this.rollBack(target, saved.tree!, pending.tree);
-      await this.store.update((s) => {
-        delete s.connectionPreview!.pending;
-      });
-    }
+    const folder = await WorkFolder.open(this.repo.commonRoot, this.store.file, saved.directory);
+    // The journal is written after the objects arrive, so the folder can read every tree it names.
+    await folder.publish(pending.from, pending.merged, pending.mergedTree);
+    await folder.settle(pending.snapshot);
+    await this.store.update((s) => {
+      s.connectionPreview = { ...pending.response, directory: folder.path, tree: pending.tree, snapshot: pending.snapshot };
+    });
     await GitSandbox.open(this.store, pending.sandbox).dispose();
-  }
-
-  /** An interrupted publication leaves each path at its previous or its candidate content. Only
-   * then is the folder entirely Warden's own writing and safe to return to the previous tree;
-   * any third content is someone else's edit and stays for manual repair. Ignored files are
-   * never touched: reset rewrites tracked paths and clean skips ignored ones.
-   */
-  private async rollBack(target: GitSandbox, previous: string, candidate: string) {
-    const interrupted = () =>
-      conflict(
-        'A preview sync was interrupted and the folder has unexpected changes. Inspect the preview folder and retry. The primary folder was not changed.',
-        'preview_interrupted',
-      );
-    const store = snapshotStore(this.store.file);
-    const actual = await snapshotWorktree(target.path, store);
-    const objects = await snapshotObjects(target.path, store);
-    const differing = async (tree: string) =>
-      new Set(
-        (await runGit(['diff', '--name-only', '--no-renames', '-z', actual, tree, '--'], { cwd: target.path, snapshot: objects })).stdout
-          .split('\0')
-          .filter(Boolean),
-      );
-    const [fromPrevious, fromCandidate] = await Promise.all([differing(previous), differing(candidate)]);
-    for (const file of fromPrevious) if (fromCandidate.has(file)) interrupted();
-    // A killed apply leaves its index lock behind. Publication runs under the repository lock
-    // with setup idle, so a lock that has not changed for several seconds has no live owner.
-    const lock = path.resolve(target.path, (await runGit(['rev-parse', '--git-path', 'index.lock'], { cwd: target.path })).stdout.trim());
-    const age = await stat(lock).then(
-      (info) => Date.now() - info.mtimeMs,
-      () => undefined,
-    );
-    if (age !== undefined) {
-      if (age < 5000) interrupted();
-      await rm(lock, { force: true });
-    }
-    await target.write(['reset', '--quiet', '--hard', 'HEAD']);
-    await target.write(['clean', '--quiet', '-fd']);
-    if ((await snapshotWorktree(target.path, store)) !== previous) interrupted();
   }
 
   private async inputs(state: ReviewState, ids: string[]) {
     const workflow = state.workflow!;
     const primary = await primaryCheckout(this.repo, workflow.developmentBranch);
+    // Primary only carries commits to and from the remote; its working files are not an input.
     const head = await oid(primary.path, 'HEAD');
-    const baseline = await snapshotWorktree(primary.path, snapshotStore(this.store.file));
     const checkouts = ids.length ? await listWorktreesDetailed(this.repo) : [];
     const sources = [];
     for (const id of ids) {
@@ -388,7 +273,7 @@ export class PreviewService {
       const tree = await snapshotWorktree(checkout.path, snapshotStore(this.store.file));
       sources.push({ change, from, tree });
     }
-    return { primary, head, baseline, sources };
+    return { primary, head, sources };
   }
   private sourceStates(inputs: Inputs, previous: ReviewState['connectionPreview'], status: 'pending' | 'updating'): NonNullable<PreviewResponse['sources']> {
     return inputs.sources.map(({ change, tree }) => {
@@ -397,7 +282,7 @@ export class PreviewService {
         changeId: change.id,
         observedTree: tree,
         appliedTree,
-        status: appliedTree === tree && previous?.baselineTree === inputs.baseline ? 'synced' : status,
+        status: appliedTree === tree && previous?.developmentHead === inputs.head ? 'synced' : status,
       };
     });
   }
@@ -411,18 +296,30 @@ export class PreviewService {
     assertPreviewSetupIdle(state.connectionPreview?.setup);
     // Before recovery and every snapshot below: they must see primary's current ignore rules.
     await this.mirrorSetup(true);
-    await this.migrateLegacy(state);
-    state = await this.store.load();
+    // A preview kept in Warden's data directory by an earlier version is not carried over.
+    if (
+      state.connectionPreview &&
+      state.connectionPreview.directory !== undefined &&
+      state.connectionPreview.directory !== workFolderPath(this.repo.commonRoot)
+    ) {
+      const obsolete = state.connectionPreview.directory;
+      await this.store.update((s) => {
+        s.connectionPreview = { connectedIds: s.connectionPreview!.connectedIds, files: [], status: 'disconnected' };
+      });
+      await GitSandbox.open(this.store, obsolete)
+        .dispose()
+        .catch(() => {});
+      state = await this.store.load();
+    }
     await this.recover(state);
     state = await this.store.load();
     const ids = requestedIds ?? state.connectionPreview?.connectedIds ?? [];
     const inputs = await this.inputs(state, ids);
-    const { primary, head, baseline } = inputs;
+    const { primary, head } = inputs;
     let previous = state.connectionPreview;
     const sandbox = await GitSandbox.create(this.store, primary.path, head);
     let retained = false;
     try {
-      await sandbox.apply(await patchBetween(primary.path, head, baseline, await snapshotObjects(primary.path, snapshotStore(this.store.file))), true);
       if (previous?.directory && JSON.stringify(ids) === JSON.stringify(previous.connectedIds))
         await this.store.update((s) => {
           s.connectionPreview!.sources = this.sourceStates(inputs, previous, 'updating');
@@ -442,37 +339,48 @@ export class PreviewService {
         } catch (error) {
           const conflicts = await sandbox.conflicts();
           conflict(
-            `Cannot connect ${change.title}: its changes could not be combined${conflicts.length ? `: ${conflicts.join(', ')}` : `: ${gitMessage(error)}`}. The previous preview is unchanged.`,
+            `Cannot connect ${change.title}: its changes could not be combined${conflicts.length ? `: ${conflicts.join(', ')}` : `: ${gitMessage(error)}`}. The work folder is unchanged.`,
           );
         }
       }
       const snapshot = await sandbox.commit();
       const tree = await oid(sandbox.path, 'HEAD^{tree}');
+      const folder = await WorkFolder.ensure(this.repo.commonRoot, this.store.file, head);
       if (!previous?.directory) {
-        const target = await GitSandbox.create(this.store, primary.path, head);
+        // A folder that already exists keeps whatever the user has in it; it is merged like any edit.
+        const current = await folder.head();
         previous = {
           connectedIds: [],
           files: [],
           status: 'disconnected',
-          directory: target.path,
-          worktree: target.path,
-          tree: await oid(target.path, 'HEAD^{tree}'),
+          directory: folder.path,
+          worktree: folder.path,
+          tree: await oid(folder.path, `${current}^{tree}`),
+          snapshot: current,
         };
-        try {
-          await this.store.update((s) => {
-            s.connectionPreview = previous;
-          });
-        } catch (error) {
-          await target.dispose();
-          throw error;
-        }
+        await this.store.update((s) => {
+          s.connectionPreview = previous;
+        });
       }
-      const target = GitSandbox.open(this.store, previous.directory!);
-      await target.validate();
-      if ((await snapshotWorktree(target.path, snapshotStore(this.store.file))) !== previous.tree)
-        conflict('The preview folder has unexpected changes. Sync stopped to preserve them; edit code in the primary folder.', 'preview_dirty');
-      await sandbox.fetch(target.path, await oid(target.path, 'HEAD'));
-      const patch = await patchBetween(sandbox.path, previous.tree!, tree);
+      const from = await folder.snapshot();
+      let merged = snapshot;
+      let mergedTree = tree;
+      if (from !== previous.tree) {
+        // The user's edits are replayed on the new composition before the folder is touched, so a
+        // conflict leaves every file as it is.
+        const objects = await folder.objects();
+        await sandbox.fetch(folder.path, previous.snapshot!);
+        try {
+          await sandbox.apply(await patchBetween(folder.path, previous.tree!, from, objects), true, true, { cwd: folder.path, snapshot: objects });
+        } catch (error) {
+          const conflicts = await sandbox.conflicts();
+          conflict(
+            `Your edits in the work folder conflict with the connected changes${conflicts.length ? `: ${conflicts.join(', ')}` : `: ${gitMessage(error)}`}. The work folder is unchanged.`,
+          );
+        }
+        merged = await sandbox.commit('Warden temporary composition with work folder edits');
+        mergedTree = await oid(sandbox.path, 'HEAD^{tree}');
+      }
       const command = state.workspaceConfig?.previewSetup;
       const needsSetup =
         !!command &&
@@ -483,28 +391,27 @@ export class PreviewService {
       const response: PreviewResponse = {
         developmentBranch: state.workflow!.developmentBranch,
         developmentHead: head,
-        worktree: target.path,
+        worktree: folder.path,
         connectedIds: ids,
         status: ids.length ? 'current' : 'disconnected',
         syncStatus: 'synced',
         updatedAt: new Date().toISOString(),
         files: [],
-        baselineTree: baseline,
         sources: inputs.sources.map(({ change, tree }) => ({ changeId: change.id, observedTree: tree, appliedTree: tree, status: 'synced' })),
         setup: needsSetup ? { command: command!, status: 'pending' } : previous.setup,
       };
-      // Publish a complete candidate only. Source edits after capture will be observed in the next batch.
-      await target.fetch(sandbox.path, snapshot);
+      // Source edits after capture will be observed in the next batch. An edit saved in the folder
+      // since its snapshot would not be in `merged`; the next tick starts over from it.
+      await folder.fetch(sandbox.path, merged);
+      if ((await folder.snapshot()) !== from) conflict('The work folder changed while its update was prepared. It will be retried.', 'preview_source_busy');
       await this.store.update((s) => {
-        s.connectionPreview = { ...previous!, pending: { tree, sandbox: sandbox.path, snapshot, response } };
+        s.connectionPreview = { ...previous!, pending: { from, merged, mergedTree, tree, sandbox: sandbox.path, snapshot, response } };
       });
       retained = true;
-      await target.apply(patch, true);
-      if ((await snapshotWorktree(target.path, snapshotStore(this.store.file))) !== tree)
-        conflict('The preview folder changed during sync. Sync stopped; inspect the files.', 'preview_interrupted');
-      await target.write(['update-ref', 'HEAD', snapshot]);
+      await folder.publish(from, merged, mergedTree);
+      await folder.settle(snapshot);
       await this.store.update((s) => {
-        s.connectionPreview = { ...response, directory: target.path, tree, snapshot };
+        s.connectionPreview = { ...response, directory: folder.path, tree, snapshot };
       });
       retained = false;
       if (needsSetup) await this.runSetup();

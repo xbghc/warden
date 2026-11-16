@@ -6,6 +6,7 @@ import { Engine } from '../packages/engine/src/engine.js';
 import { createSafetyBackup, discardOperationBackup } from '../packages/engine/src/backups.js';
 import { GitSandbox } from '../packages/engine/src/git-sandbox.js';
 import { PreviewService } from '../packages/engine/src/preview.js';
+import { WorkFolder } from '../packages/engine/src/work-folder.js';
 import { sharedRepositoryPath } from '../packages/engine/src/shared-repository.js';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
@@ -207,40 +208,47 @@ describe('delivery and preview regressions', () => {
     expect((await preview.get()).syncStatus).toBe('synced');
   });
 
-  it('returns an interrupted publication to the previous preview and continues', { timeout }, async () => {
+  it('finishes an interrupted update of the work folder and keeps what the user wrote meanwhile', { timeout }, async () => {
     const created = await createTask('Interrupted publication');
     await writeFile(path.join(created.worktree, 'one.txt'), 'One\n');
     const preview = await engine.execute('preview.connect', { connectedIds: [created.id] });
     await writeFile(path.join(created.worktree, 'two.txt'), 'Two\n');
     await writeFile(path.join(created.worktree, 'three.txt'), 'Three\n');
-    // Stop publication the way a killed `git apply` does: one candidate file written, the
-    // index untouched, the pending record and the candidate sandbox retained.
-    const original = GitSandbox.prototype.apply;
-    vi.spyOn(GitSandbox.prototype, 'apply').mockImplementation(async function (this: GitSandbox, ...args: Parameters<GitSandbox['apply']>) {
-      if (this.path !== preview.worktree) return original.apply(this, args);
+    // Stop the update the way a killed process does: one of its files written, HEAD and the index
+    // untouched, the journal and the composition retained.
+    vi.spyOn(WorkFolder.prototype, 'publish').mockImplementation(async function (this: WorkFolder) {
       await writeFile(path.join(this.path, 'two.txt'), 'Two\n');
       throw new Error('killed');
     });
     await engine.execute('preview.refresh', undefined as never);
     vi.restoreAllMocks();
     expect((await engine.store.load()).connectionPreview?.pending).toBeTruthy();
+    await writeFile(path.join(preview.worktree!, 'mine.txt'), 'User edit\n');
 
     const recovered = await engine.execute('preview.refresh', undefined as never);
     expect(recovered.syncStatus).toBe('synced');
+    expect(await readFile(path.join(preview.worktree!, 'two.txt'), 'utf8')).toBe('Two\n');
     expect(await readFile(path.join(preview.worktree!, 'three.txt'), 'utf8')).toBe('Three\n');
+    expect(await readFile(path.join(preview.worktree!, 'mine.txt'), 'utf8')).toBe('User edit\n');
+    expect(fx.git('-C', preview.worktree!, 'status', '--porcelain').trim()).toBe('?? mine.txt');
+    expect((await engine.store.load()).connectionPreview?.pending).toBeUndefined();
 
-    // Content that is neither the previous nor the candidate version is never removed.
+    // A file the update was writing that holds neither its previous nor its new content stays.
     await writeFile(path.join(created.worktree, 'four.txt'), 'Four\n');
-    vi.spyOn(GitSandbox.prototype, 'apply').mockImplementation(async function (this: GitSandbox, ...args: Parameters<GitSandbox['apply']>) {
-      if (this.path !== preview.worktree) return original.apply(this, args);
-      await writeFile(path.join(this.path, 'mine.txt'), 'User edit\n');
+    vi.spyOn(WorkFolder.prototype, 'publish').mockImplementation(async function (this: WorkFolder) {
+      await writeFile(path.join(this.path, 'four.txt'), 'Written by someone else\n');
       throw new Error('killed');
     });
     await engine.execute('preview.refresh', undefined as never);
     vi.restoreAllMocks();
     const blocked = await engine.execute('preview.refresh', undefined as never);
-    expect(blocked.status).toBe('stale');
+    expect(blocked).toMatchObject({ status: 'stale', syncStatus: 'error' });
+    expect(await readFile(path.join(preview.worktree!, 'four.txt'), 'utf8')).toBe('Written by someone else\n');
     expect(await readFile(path.join(preview.worktree!, 'mine.txt'), 'utf8')).toBe('User edit\n');
+    // Removing it lets the same update finish.
+    await rm(path.join(preview.worktree!, 'four.txt'));
+    expect((await engine.execute('preview.refresh', undefined as never)).syncStatus).toBe('synced');
+    expect(await readFile(path.join(preview.worktree!, 'four.txt'), 'utf8')).toBe('Four\n');
   });
 
   it('finishes removing a temporary backup whose removal was interrupted', async () => {

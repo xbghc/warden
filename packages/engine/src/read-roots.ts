@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { lstat, readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { runGit } from './git.js';
-import { GitSandbox } from './git-sandbox.js';
+import { WorkFolder } from './work-folder.js';
 import type { RepoContext } from './repo.js';
 import { listWorktreesAll } from './repo.js';
 import type { StateStore } from './state.js';
@@ -26,9 +26,9 @@ export async function repositoryReadRoots(repo: RepoContext, store: StateStore):
     candidates.push({ path: task.worktree, allocation: JSON.stringify([task.id, task.createdAt, task.branch]) });
   }
   const preview = state.connectionPreview;
-  if (preview?.directory && preview.worktree === preview.directory && !preview.migrating) {
+  if (preview?.directory && preview.worktree === preview.directory) {
     try {
-      await GitSandbox.open(store, preview.directory).validate();
+      await WorkFolder.open(repo.commonRoot, store.file, preview.directory);
       candidates.push({ path: preview.directory, allocation: JSON.stringify(['preview', preview.developmentBranch]) });
     } catch {
       // Invalid or replaced previews remain available for manual inspection only.

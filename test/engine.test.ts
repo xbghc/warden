@@ -151,6 +151,7 @@ describe('desktop engine', () => {
     vi.stubEnv('GIT_CONFIG_GLOBAL', config);
     try {
       await fixture.write('README.md', 'Saved primary edit\n');
+      fixture.git('commit', '-qam', 'Edit the README');
       const index = await readFile(path.join(fixture.root, '.git', 'index'));
       const head = fixture.git('rev-parse', 'HEAD');
       const first = await engine.execute('preview.refresh', undefined);
@@ -164,8 +165,9 @@ describe('desktop engine', () => {
       });
       expect(await engine.execute('preview.refresh', undefined)).toMatchObject({ worktree: first.worktree, syncStatus: 'synced' });
       await writeFile(path.join(first.worktree!, 'gradlew.bat'), '@echo off\r\necho Preview edit\r\n');
-      await expect(engine.execute('preview.connect', { connectedIds: [] })).rejects.toMatchObject({ code: 'preview_dirty' });
-      expect(await readFile(path.join(first.worktree!, 'gradlew.bat'), 'utf8')).toContain('Preview edit');
+      // An edit in the work folder is the user's and survives updates with its line endings.
+      expect(await engine.execute('preview.connect', { connectedIds: [] })).toMatchObject({ syncStatus: 'synced' });
+      expect(await readFile(path.join(first.worktree!, 'gradlew.bat'), 'utf8')).toBe('@echo off\r\necho Preview edit\r\n');
       await writeFile(path.join(first.worktree!, 'gradlew.bat'), original);
       expect(await engine.execute('preview.refresh', undefined)).toMatchObject({ worktree: first.worktree, syncStatus: 'synced' });
       expect(await readFile(path.join(fixture.root, '.git', 'index'))).toEqual(index);
@@ -251,6 +253,8 @@ describe('desktop engine', () => {
     });
     const state = await readFile(engine.store.file, 'utf8');
     await fixture.write('later.txt', 'Primary changes after migration\n');
+    fixture.git('add', 'later.txt');
+    fixture.git('commit', '-qm', 'Commit after migration');
     await new PreviewService(engine.repo, engine.store, 0).tick();
     expect((await engine.execute('workflow.get', undefined)).workflow?.trackedBranches).toEqual([]);
     expect(await readFile(engine.store.file, 'utf8')).toBe(state);

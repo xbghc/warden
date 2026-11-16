@@ -393,27 +393,30 @@ setting existed receives it when it is next rebased, before the fetch and backup
 maintenance after a commit: the process keeps `objects/maintenance.lock` and may repack objects after
 the command returned, and a backup or allocation that inventories the repository right then stops on
 a change nobody made. Maintenance still runs, inside the command that triggered it. Primary keeps
-the user's own maintenance settings. Recovery of an interrupted publication runs
-`reset --hard HEAD` and `clean -fd` in the preview worktree only, after verifying that every path
-holds its previous or candidate content, and removes that worktree's `index.lock` once it has been
-unchanged for five seconds. Patches are read and written as bytes. Every `git log` read passes
+the user's own maintenance settings. In the work folder Warden removes an `index.lock` only after it
+has been unchanged for thirty seconds, since the user runs Git there too. Patches are read and written as bytes. Every `git log` read passes
 `--no-show-signature`.
 
-`PUT /preview` and the refresh timer snapshot saved primary content and selected workspaces into
+`PUT /preview` and the refresh timer snapshot the selected workspaces and the work folder into
 Warden's external snapshot store. Binary patches compose with `apply --index --3way` in a temporary
-worktree of the external shared repository. A persistent runtime worktree reads the complete candidate,
-checks its previous ownership tree, applies the old/new patch with `apply --index`, and advances its
-own detached HEAD and index. Each task has its own HEAD and index. Primary files, HEAD and index are not touched. Ignored runtime dependencies and
-caches survive; source files modified outside publication stop synchronization without being discarded.
+worktree of the external shared repository, on the base branch commit; the user's edits in the work
+folder are then replayed there the same way. Each task has its own HEAD and index. Primary's files,
+index, branches and base-branch HEAD are not touched.
 
-`connectionPreview.directory` identifies the persistent runtime (validated as an operation directory).
-The record journals old/new trees and the candidate worktree before publication. Recovery accepts
-a complete old or new tree; ambiguous partial changes remain blocked for manual repair. Complete
-publication disposes its temporary candidate worktree; the runtime retains the installed snapshot.
-The shared bare repository is persistent and is not removed with a preview or operation worktree. Legacy
-standalone runtime repositories remain at their original paths and continue receiving complete
-candidates through local fetches. Existing standalone operation journals remain recoverable.
-Legacy primary-directory previews migrate only after proving ownership, with a separate migration journal.
+The work folder is created with `git worktree add --detach` in primary at `<primary>-work`, and is
+validated on every use as a linked worktree of primary at exactly that path. Warden writes there with
+`fetch` of the finished composition from the temporary worktree (the only objects it adds to primary's
+repository), `checkout <composition> -- <paths>` for the paths the merge changed, file removal for
+paths it deleted, `update-ref --no-deref HEAD` and `read-tree` to move the folder's detached HEAD and
+index to the composition. These run with hooks disabled and `core.logAllRefUpdates=false`, so the
+HEAD reflog does not keep old compositions alive. It never resets or cleans the folder.
+
+`connectionPreview.directory` identifies the work folder. The record journals the folder content the
+update started from, the merged tree and the temporary worktree before any file is written, after the
+objects have been fetched. Recovery writes the remaining paths when each still holds its previous or
+merged content; any other content blocks the update for manual repair. A finished update disposes its
+temporary worktree. The shared bare repository is persistent and is not removed with an operation
+worktree. A preview that an earlier version kept in the data directory is discarded and replaced.
 Initial conflicts preserve the previous selection; later failures expose stale status. Content hashes
 and a debounce window drive per-workspace observed/applied versions, never agent-idleness inference.
 

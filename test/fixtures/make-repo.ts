@@ -56,6 +56,7 @@ export async function makeFixtureRepo(prefix = 'warden-fixture-', options: { obj
     write,
     cleanup: async () => {
       await rm(`${root}-warden`, { recursive: true, force: true });
+      await rm(`${root}-work`, { recursive: true, force: true });
       await rm(root, { recursive: true, force: true });
     },
   };

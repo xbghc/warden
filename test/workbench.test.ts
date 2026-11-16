@@ -5,7 +5,6 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import type { DevelopmentChange } from '@warden/shared';
 import { parseWorkbenchAction, taskReview } from '@warden/shared';
 import { createApp, resolveRepo, StateStore, WorkflowService } from './compat/index.js';
-import { GitSandbox, applyPatch, oid, patchBetween } from '../packages/engine/src/git-sandbox.js';
 import { PreviewService } from '../packages/engine/src/preview.js';
 import { HistoryService } from '../packages/engine/src/history.js';
 import { listSafetyBackups } from '../packages/engine/src/backups.js';
@@ -392,7 +391,8 @@ describe('persistent independent preview connections', () => {
     expect(fx.git('status', '--porcelain').trim()).toBe('');
     expect(fx.git('for-each-ref', '--format=%(refname)', 'refs/warden/').trim()).toBe('');
     expect(await listSafetyBackups(store)).toEqual([]);
-    expect(await readdir(path.join(data, 'operations'))).toEqual([path.basename((await preview.get()).worktree!)]);
+    expect((await preview.get()).worktree).toBe(`${fx.root}-work`);
+    expect(await readdir(path.join(data, 'operations'))).toEqual([]);
   });
 
   it('preserves binary changes, renames and deletions across connection and disconnection', async () => {
@@ -454,14 +454,67 @@ describe('persistent independent preview connections', () => {
     await preview.set([a.id]);
   });
 
-  it('refuses to overwrite unexpected edits in the preview directory', async () => {
+  it('keeps the edits made in the work folder when connections change, and shows them as its only changes', async () => {
     const a = await task('A');
     await edit(a, 'a.txt', 'A\n');
-    await preview.set([a.id]);
-    await writeFile(path.join((await preview.get()).worktree!, 'a.txt'), 'user fix\n');
-    await expect(preview.set([])).rejects.toMatchObject({ code: 'preview_dirty' });
-    expect(await file((await preview.get()).worktree!, 'a.txt')).toBe('user fix\n');
+    const folder = (await preview.set([a.id])).worktree!;
+    const status = () =>
+      fx
+        .git('-C', folder, 'status', '--porcelain')
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => line.trim())
+        .sort();
+    expect(status()).toEqual([]);
+    await writeFile(path.join(folder, 'README.md'), 'Edited in the work folder\n');
+    await writeFile(path.join(folder, 'notes.txt'), 'New file in the work folder\n');
+    fx.git('-C', folder, 'add', 'notes.txt');
+    await edit(a, 'a.txt', 'A again\n');
+    expect((await preview.refresh()).status).toBe('current');
+    expect(await file(folder, 'a.txt')).toBe('A again\n');
+    expect(await file(folder, 'README.md')).toBe('Edited in the work folder\n');
+    // The index follows the composition, so a file staged by the user is theirs again, unstaged.
+    expect(status()).toEqual(['?? notes.txt', 'M README.md']);
+    await preview.set([]);
+    await expect(file(folder, 'a.txt')).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await file(folder, 'README.md')).toBe('Edited in the work folder\n');
+    expect(await file(folder, 'notes.txt')).toBe('New file in the work folder\n');
+    expect(status()).toEqual(['?? notes.txt', 'M README.md']);
+    expect(fx.git('status', '--porcelain').trim()).toBe('');
+  });
+
+  it('merges a task change into a file the user edited elsewhere', async () => {
+    const lines = Array.from({ length: 12 }, (_, index) => `line ${index}`);
+    await fx.write('long.txt', `${lines.join('\n')}\n`);
+    fx.git('add', 'long.txt');
+    fx.git('commit', '-qm', 'Add a long file');
+    const a = await task('A');
+    const folder = (await preview.set([a.id])).worktree!;
+    await writeFile(path.join(folder, 'long.txt'), `${['user first line', ...lines.slice(1)].join('\n')}\n`);
+    await edit(a, 'long.txt', `${[...lines.slice(0, 11), 'agent last line'].join('\n')}\n`);
+    expect((await preview.refresh()).status).toBe('current');
+    expect(await file(folder, 'long.txt')).toBe(`${['user first line', ...lines.slice(1, 11), 'agent last line'].join('\n')}\n`);
+    expect(fx.git('-C', folder, 'status', '--porcelain').trim()).toBe('M long.txt');
+  });
+
+  it('leaves the work folder alone when an edit there conflicts with a connected change', async () => {
+    const a = await task('A');
+    await edit(a, 'a.txt', 'A\n');
+    const folder = (await preview.set([a.id])).worktree!;
+    await writeFile(path.join(folder, 'a.txt'), 'user fix\n');
+    // The edit builds on a file only the task provides, so the task cannot be taken away under it.
+    await expect(preview.set([])).rejects.toMatchObject({ code: 'preview_conflict' });
+    expect(await file(folder, 'a.txt')).toBe('user fix\n');
     expect((await preview.get()).connectedIds).toEqual([a.id]);
+    await edit(a, 'a.txt', 'A changed by the agent\n');
+    const result = await preview.refresh();
+    expect(result).toMatchObject({ status: 'stale', syncStatus: 'conflict' });
+    expect(result.message).toContain('a.txt');
+    expect(await file(folder, 'a.txt')).toBe('user fix\n');
+    // Once the agent has taken the fix over, the same content on both sides is no conflict.
+    await edit(a, 'a.txt', 'user fix\n');
+    expect((await preview.refresh()).status).toBe('current');
+    expect(fx.git('-C', folder, 'status', '--porcelain').trim()).toBe('');
   });
 
   it('isolates delivery from other connections and resumes remaining live edits afterwards', { timeout: longGitTimeout }, async () => {
@@ -482,83 +535,24 @@ describe('persistent independent preview connections', () => {
   });
 });
 
-describe('primary-preview migration', () => {
-  async function oldPreview() {
-    const a = await task('Old connected task');
-    await edit(a, 'agent.txt', 'Old preview\n', true);
-    const sandbox = await GitSandbox.create(store, a.worktree, sourceHead(a));
-    const tree = await oid(sandbox.path, 'HEAD^{tree}');
-    await applyPatch(fx.root, await patchBetween(sandbox.path, head(), tree), false);
-    await store.update((s) => {
-      s.connectionPreview = {
-        worktree: fx.root,
-        developmentBranch: 'feature/order',
-        developmentHead: head(),
-        connectedIds: [a.id],
-        status: 'current',
-        files: [],
-        tree,
-        sandbox: sandbox.path,
-        snapshot: sourceHead(a),
-      };
-    });
-    return a;
-  }
-  it('moves a proven legacy composition out of primary and retries after interrupted baseline bookkeeping', async () => {
-    const a = await oldPreview();
-    const update = store.update.bind(store);
-    const spy = vi.spyOn(store, 'update').mockImplementation(async (mutate) =>
-      update((s) => {
-        const result = mutate(s);
-        if (s.connectionPreview?.status === 'disconnected' && !s.connectionPreview.directory) throw new Error('migration interrupted');
-        return result;
-      }),
-    );
-    expect((await preview.refresh()).status).toBe('stale');
-    spy.mockRestore();
-    expect(fx.git('status', '--porcelain')).toBe('');
-    const result = await preview.refresh();
-    expect(result).toMatchObject({ connectedIds: [a.id], status: 'current' });
-    expect(result.worktree).not.toBe(fx.root);
-    expect(await file(result.worktree!, 'agent.txt')).toBe('Old preview\n');
-    expect(fx.git('status', '--porcelain')).toBe('');
-  });
-  it('preserves unexpected human edits and blocks legacy migration', async () => {
-    const a = await oldPreview();
-    await fx.write('human.txt', 'Keep me\n');
-    await expect(preview.set([a.id])).rejects.toMatchObject({ code: 'preview_migration_required' });
-    expect(await file(fx.root, 'human.txt')).toBe('Keep me\n');
-    expect(await file(fx.root, 'agent.txt')).toBe('Old preview\n');
-    expect((await store.load()).connectionPreview?.directory).toBeUndefined();
-  });
-});
-
 describe('saved baseline and preview runtime', () => {
-  it('includes staged, unstaged and untracked primary edits without changing the primary index or admitting them to a delivery', async () => {
+  it('composes from the base branch commit and leaves uncommitted primary files out and untouched', async () => {
     const a = await task('A');
     await edit(a, 'agent.txt', 'agent\n', true);
     await fx.write('src/b.ts', 'export const b = 200;\n');
     fx.git('add', 'src/b.ts');
-    await fx.write('README.md', 'Human edits\n');
-    await fx.write('human.txt', 'Untracked human file\n');
+    await fx.write('human.txt', 'Untracked file in primary\n');
     const before = fx.git('status', '--porcelain');
     const index = await readFile(path.join(fx.root, '.git/index'));
     const result = await preview.set([a.id]);
-    expect(result.worktree).not.toBe(fx.root);
-    expect(await file(result.worktree!, 'src/b.ts')).toBe('export const b = 200;\n');
-    expect(await file(result.worktree!, 'README.md')).toBe('Human edits\n');
-    expect(await file(result.worktree!, 'human.txt')).toBe('Untracked human file\n');
+    expect(result.worktree).toBe(`${fx.root}-work`);
+    expect(await file(result.worktree!, 'src/b.ts')).toBe(fx.git('show', 'HEAD:src/b.ts'));
+    await expect(file(result.worktree!, 'human.txt')).rejects.toMatchObject({ code: 'ENOENT' });
     expect(await file(result.worktree!, 'agent.txt')).toBe('agent\n');
     expect(fx.git('status', '--porcelain')).toBe(before);
     expect(await readFile(path.join(fx.root, '.git/index'))).toEqual(index);
     await expect(workflow.prepare(a.id, { sourceHead: sourceHead(a), developmentHead: head() })).rejects.toMatchObject({ code: 'development_dirty' });
     expect(fx.git('status', '--porcelain')).toBe(before);
-    await fx.write('human.txt', 'Saved again\n');
-    await preview.refresh();
-    expect(await file(result.worktree!, 'human.txt')).toBe('Saved again\n');
-    await preview.set([]);
-    await expect(file(result.worktree!, 'agent.txt')).rejects.toMatchObject({ code: 'ENOENT' });
-    expect(await file(result.worktree!, 'human.txt')).toBe('Saved again\n');
   });
 
   it('keeps other connections running while a delivery is prepared in primary', async () => {
@@ -574,20 +568,6 @@ describe('saved baseline and preview runtime', () => {
     expect(await file(first.worktree!, 'b.txt')).toBe('B\n');
     expect(fx.git('diff', '--cached', '--name-only').trim()).toBe('src/b.ts');
     await expect(file(fx.root, 'b.txt')).rejects.toMatchObject({ code: 'ENOENT' });
-  });
-
-  it('keeps the last preview when a human baseline change conflicts with an agent change', async () => {
-    const a = await task('A');
-    await edit(a, 'src/b.ts', 'export const b = 10;\n');
-    const first = await preview.set([a.id]);
-    await fx.write('src/b.ts', 'export const b = 20;\n');
-    const result = await preview.refresh();
-    expect(result.status).toBe('stale');
-    expect(result.sources?.[0]?.status).toBe('conflict');
-    expect(await file(first.worktree!, 'src/b.ts')).toBe('export const b = 10;\n');
-    expect(await file(fx.root, 'src/b.ts')).toBe('export const b = 20;\n');
-    await preview.set([]);
-    expect(await file(first.worktree!, 'src/b.ts')).toBe('export const b = 20;\n');
   });
 
   it('debounces actual content changes and reports whether each captured source has reached preview', async () => {

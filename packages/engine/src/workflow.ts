@@ -1049,7 +1049,6 @@ export class WorkflowService {
       const patch = await patchBetween(sandbox.path, target, composed);
       if (!patch.length) fail('The workspace has no pending changes to commit to the base branch.', 'empty_change');
       await validateSource();
-      await preview.suspend();
       const destination = await this.destination(change.developmentBranch, !change.integration, change.integration?.worktree);
       if (change.integration && (await dirtyCount(destination.path))) {
         const index = await this.indexState(destination.path);

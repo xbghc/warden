@@ -58,8 +58,8 @@ exports.checkTaskDeletion = async (workbench, extension, fixture, eventually) =>
     await fs.writeFile(path.join(retry.worktree, 'retry.txt'), 'Keep until confirmed\n');
     await workbench.backend.execute('preview.connect', { connectedIds: [retry.id] });
     const preview = await workbench.backend.execute('preview.get');
-    const readme = await fs.readFile(path.join(preview.worktree, 'README.md'));
-    await fs.writeFile(path.join(preview.worktree, 'README.md'), 'Unexpected edit\n');
+    // An edit to a file only the task provides cannot survive taking the task's change away.
+    await fs.writeFile(path.join(preview.worktree, 'retry.txt'), 'Edited in the work folder\n');
     await workbench.refresh(true);
     let retryNode = (await workbench.getChildren()).find((row) => row.task.id === retry.id);
     await vscode.commands.executeCommand('warden.deleteTask', retryNode);
@@ -70,7 +70,7 @@ exports.checkTaskDeletion = async (workbench, extension, fixture, eventually) =>
     const item = workbench.sidebar.getTreeItem(retryNode);
     assert(item.contextValue.startsWith('wardenTask:deleting'));
     assert(item.description.includes('Delete Failed'));
-    await fs.writeFile(path.join(preview.worktree, 'README.md'), readme);
+    await fs.writeFile(path.join(preview.worktree, 'retry.txt'), 'Keep until confirmed\n');
     await vscode.commands.executeCommand('warden.retryDeleteTask', retryNode);
     assert.deepEqual(
       (await workbench.backend.store.load()).workflow.changes.map((task) => task.id),

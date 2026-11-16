@@ -110,8 +110,8 @@ exports.run = async () => {
       fs.realpath(path.resolve(cwd, execFileSync('git', ['-C', cwd, 'rev-parse', '--git-common-dir'], { encoding: 'utf8' }).trim()));
     const taskGit = await commonGit(tasks[0].task.worktree);
     assert.equal(taskGit, await fs.realpath(path.join(tasks[0].task.worktree, '.git')), 'tasks are independent clones with their own Git directory');
-    assert.notEqual(await commonGit(preview.worktree), taskGit, 'preview uses the external shared repository');
-    assert.notEqual(await commonGit(preview.worktree), await commonGit(fixture.root), 'primary Git storage stays independent');
+    assert.notEqual(await commonGit(preview.worktree), taskGit, 'task clones keep their own repository');
+    assert.equal(await commonGit(preview.worktree), await commonGit(fixture.root), 'the work folder is a linked worktree of primary');
     assert.equal(textLines(await fs.readFile(path.join(preview.worktree, 'agent.txt'), 'utf8')), 'Agent addition\n');
     await assert.rejects(fs.access(path.join(fixture.root, 'agent.txt')));
     await workbench.rememberExpansion(tasks[0], false);
@@ -211,8 +211,12 @@ exports.run = async () => {
     await assert.rejects(workbench.deliver(tasks[0]), /Reopen/, 'a changed primary baseline also needs renewed review');
     // A background composition can own the repository lock longer than the command's
     // wait budget. A reported refusal does not mean the requested version was published.
+    const primaryGit = (...args) => execFileSync('git', ['-C', fixture.root, ...args], { encoding: 'utf8' }).trim();
     await workbench.backend.store.withRepositoryLock(async () => {
+      // Only commits on the base branch reach the work folder; primary's files are not an input.
       await fs.writeFile(path.join(fixture.root, 'human.txt'), 'Human code\n');
+      primaryGit('add', 'human.txt');
+      primaryGit('-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-qm', 'Human development');
       assert.equal(await vscode.commands.executeCommand('warden.refreshPreview'), undefined);
       assert.equal(workbench.errors.get('repository')?.code, 'operation_locked');
     });
@@ -238,9 +242,6 @@ exports.run = async () => {
     assert.equal((await state()).connectionPreview.connectedIds.length, 0);
     assert.equal(await fs.readFile(path.join(fixture.root, 'human.txt'), 'utf8'), 'Human code\n');
     // The packaged host must preserve normal hooks and recover its exact staged version.
-    const primaryGit = (...args) => execFileSync('git', ['-C', fixture.root, ...args], { encoding: 'utf8' }).trim();
-    primaryGit('add', 'human.txt');
-    primaryGit('commit', '-qm', 'Human development');
     await workbench.refresh();
     currentFiles = await workbench.getChildren(tasks[0]);
     await workbench.openDiff(currentFiles[0]);

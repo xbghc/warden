@@ -41,6 +41,7 @@ describe('preview setup ownership', () => {
     const previewHead = fx.git('-C', saved.worktree!, 'rev-parse', 'HEAD');
     const previewIndex = await readFile(path.resolve(saved.worktree!, fx.git('-C', saved.worktree!, 'rev-parse', '--git-path', 'index').trim()));
     await fx.write('README.md', 'Next primary version\n');
+    fx.git('commit', '-qam', 'Advance the base branch');
 
     await expect(engine.execute('preview.setup', undefined)).rejects.toMatchObject({ code: 'setup_running' });
     await expect(engine.execute('preview.connect', { connectedIds: [] })).rejects.toMatchObject({ code: 'setup_running' });
@@ -79,6 +80,7 @@ describe('preview setup ownership', () => {
       state.connectionPreview!.setup = { command: 'printf legacy-recovered', status: 'running' };
     });
     await fx.write('README.md', 'Recovered legacy preview\n');
+    fx.git('commit', '-qam', 'Advance the base branch');
     const runner = vi.spyOn(workspace, 'runSetupCommand');
     const recovered = await engine.execute('preview.refresh', undefined);
     expect(recovered).toMatchObject({ syncStatus: 'synced', setup: { status: 'succeeded', output: 'legacy-recovered' } });
