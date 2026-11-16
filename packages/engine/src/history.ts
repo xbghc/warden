@@ -154,7 +154,17 @@ export class HistoryService {
           s.historyDraft!.applying = true;
         });
         // The final tree is identical: changing the ref leaves the real index and all files intact.
-        await runGitWrite(['update-ref', `refs/heads/${draft.branch}`, draft.newHead, draft.head], { cwd: primary.path });
+        try {
+          await runGitWrite(['update-ref', `refs/heads/${draft.branch}`, draft.newHead, draft.head], { cwd: primary.path });
+        } catch (error) {
+          // Git moves the branch only from the previewed commit. A refusal published nothing, and
+          // a journal still marked as applying would make recovery reject the branch from now on.
+          if ((await oid(primary.path, `refs/heads/${draft.branch}`)) !== draft.newHead)
+            await this.store.update((s) => {
+              delete s.historyDraft!.applying;
+            });
+          throw error;
+        }
         await this.recover();
       } finally {
         await preview.resume();

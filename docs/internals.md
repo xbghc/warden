@@ -474,6 +474,8 @@ graph is fetched locally; `update-ref <branch> <new> <old>` publishes it.
 An independent filesystem backup is also required before fetching/publishing the candidate.
 The real files/index need no change. `historyDraft` journals publication and subsequent delivery-SHA
 mapping. The temporary worktree and operation backup are removed after that mapping is durable.
+When Git refuses to move the branch because it no longer points at the previewed commit, the
+journal's publication mark is cleared, so the history can be previewed again from the branch as it is.
 No remote push or user-facing undo/restore operation is provided.
 
 All mutation arguments are composed by the engine; requests cannot supply raw Git commands or

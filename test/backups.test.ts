@@ -417,6 +417,33 @@ describe('verified safety backups', () => {
     expect(await listSafetyBackups(store)).toEqual([]);
   });
 
+  it('leaves history editable when the branch moved before the arrangement was published', async () => {
+    const repo = await resolveRepo(fx.root);
+    await new WorkflowService(repo, store).configure('main');
+    const history = new HistoryService(repo, store);
+    const original = await history.get();
+    const last = original.commits.at(-1)!;
+    const draft = await history.preview({ head: original.head, start: last.sha, commits: [{ sha: last.sha, message: 'Clarified message' }] });
+    // A commit lands in the primary folder after the last check and before the branch is moved.
+    const verify = backups.assertSafetyBackupCurrent;
+    vi.spyOn(backups, 'assertSafetyBackupCurrent').mockImplementationOnce(async (backup) => {
+      await verify(backup);
+      fx.git('commit', '-q', '--allow-empty', '-m', 'Landed meanwhile');
+    });
+    await expect(history.apply({ id: draft.id!, head: original.head })).rejects.toThrow();
+    const moved = await history.get();
+    expect(moved.commits.at(-1)!.message).toBe('Landed meanwhile');
+    expect(moved.commits.at(-2)!.sha).toBe(last.sha);
+    // Nothing was published, so the next arrangement starts from the branch as it is now.
+    const latest = moved.commits.at(-1)!;
+    const next = await history.preview({ head: moved.head, start: latest.sha, commits: [{ sha: latest.sha, message: 'Landed later' }] });
+    expect(next.canApply).toBe(true);
+    expect(await listSafetyBackups(store)).toEqual([]);
+    const published = await history.apply({ id: next.id!, head: moved.head });
+    expect(published.commits.at(-1)!.message).toBe('Landed later');
+    expect(await listSafetyBackups(store)).toEqual([]);
+  });
+
   it('retires only a journaled temporary backup and permits cleanup retries', async () => {
     const retained = await createSafetyBackup(store, fx.root, 'remove');
     const temporary = await createSafetyBackup(store, fx.root, 'rebase');
