@@ -70,6 +70,9 @@ export class HistoryService {
       if (request.commits.length !== range.length || selected.size !== range.length || range.some((c) => !selected.has(c.sha)))
         throw badRequest('The draft must include every commit from the starting point to HEAD exactly once.');
       const previous = (await this.store.load()).historyDraft;
+      // Recovery above completed any published arrangement, so this one never moved the branch.
+      // Its copies protect nothing, and the draft is the only record that could retire them.
+      for (const backup of previous?.backups ?? []) await discardOperationBackup(this.store, backup);
       await this.store.update((s) => {
         delete s.historyDraft;
       });
@@ -134,9 +137,15 @@ export class HistoryService {
         if ((await oid(sandbox.path, `${draft.newHead}^{tree}`)) !== (await oid(primary.path, 'HEAD^{tree}')))
           fail('The preview does not match the current contents. Recreate the arrangement.');
         const backup = await createSafetyBackup(this.store, primary.path, 'history');
-        if ((await oid(primary.path, 'HEAD')) !== draft.head || (await dirtyCount(primary.path)))
-          fail('The primary folder changed during backup. Recreate the arrangement.');
-        await assertSafetyBackupCurrent(backup);
+        try {
+          if ((await oid(primary.path, 'HEAD')) !== draft.head || (await dirtyCount(primary.path)))
+            fail('The primary folder changed during backup. Recreate the arrangement.');
+          await assertSafetyBackupCurrent(backup);
+        } catch (error) {
+          // Nothing was published, so this copy protects nothing and no journal would ever retire it.
+          await discardOperationBackup(this.store, backup).catch(() => {});
+          throw error;
+        }
         await this.store.update((s) => {
           s.historyDraft!.backups = [...(s.historyDraft!.backups ?? []), backup];
         });

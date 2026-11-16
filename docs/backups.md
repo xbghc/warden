@@ -26,6 +26,8 @@ Cleanup validates the backup's external path, directory type, manifest identity 
 reason, and is idempotent if the files were removed before the final journal update.
 A verified backup is first renamed to `.discarding-<id>` beside it and removed from there, so an
 interrupted removal is finished by the next retry instead of leaving a copy without its manifest.
+A history backup whose arrangement was never published is removed as well: at once when the primary
+folder changed before the copy could be journaled, otherwise when the arrangement is previewed again.
 
 Release/removal backups remain available because their original workspace may no longer exist.
 Older backups without an active operation journal are also preserved. These retained backups can

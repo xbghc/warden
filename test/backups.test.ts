@@ -381,6 +381,42 @@ describe('verified safety backups', () => {
     expect(fx.git('rev-parse', 'HEAD^{tree}')).toBe(tree);
   });
 
+  it('keeps no history backup when the arrangement was not published', async () => {
+    const repo = await resolveRepo(fx.root);
+    await new WorkflowService(repo, store).configure('main');
+    const history = new HistoryService(repo, store);
+    const original = await history.get();
+    const last = original.commits.at(-1)!;
+    const request = { head: original.head, start: last.sha, commits: [{ sha: last.sha, message: 'Clarified message' }] };
+    const draft = await history.preview(request);
+    // The primary folder changes after the copy was verified against it.
+    const verify = backups.assertSafetyBackupCurrent;
+    vi.spyOn(backups, 'assertSafetyBackupCurrent').mockImplementationOnce(async (backup) => {
+      await fx.write('late.txt', 'saved during backup\n');
+      await verify(backup);
+    });
+    await expect(history.apply({ id: draft.id!, head: original.head })).rejects.toMatchObject({ code: 'backup_stale' });
+    expect(await listSafetyBackups(store)).toEqual([]);
+    await fs.rm(path.join(fx.root, 'late.txt'));
+
+    // The copy is journaled, then Git cannot bring the rewritten commits into primary.
+    const write = gitCommands.runGitWrite;
+    const fetch = vi.spyOn(gitCommands, 'runGitWrite').mockImplementation(async (args, options) => {
+      if (args[0] === 'fetch' && options?.cwd === fx.root) throw new Error('fetch interrupted');
+      return write(args, options);
+    });
+    await expect(history.apply({ id: draft.id!, head: original.head })).rejects.toThrow('fetch interrupted');
+    fetch.mockRestore();
+    expect(await listSafetyBackups(store)).toHaveLength(1);
+    expect(fx.git('rev-parse', 'HEAD').trim()).toBe(original.head);
+    // Replacing the arrangement drops the only record of that copy.
+    const replaced = await history.preview(request);
+    expect(await listSafetyBackups(store)).toEqual([]);
+    const published = await history.apply({ id: replaced.id!, head: original.head });
+    expect(published.head).toBe(replaced.newHead);
+    expect(await listSafetyBackups(store)).toEqual([]);
+  });
+
   it('retires only a journaled temporary backup and permits cleanup retries', async () => {
     const retained = await createSafetyBackup(store, fx.root, 'remove');
     const temporary = await createSafetyBackup(store, fx.root, 'rebase');
