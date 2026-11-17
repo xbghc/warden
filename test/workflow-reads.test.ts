@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DevelopmentChange } from '@warden/shared';
 import { resolveRepo, StateStore, WorkflowService } from './compat/index.js';
 import { GitSandbox } from '../packages/engine/src/git-sandbox.js';
+import { PreviewService } from '../packages/engine/src/preview.js';
 import * as git from '../packages/engine/src/git.js';
 import * as worktrees from '../packages/engine/src/worktrees.js';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
@@ -119,6 +120,27 @@ describe('shared workflow reads', () => {
     const scanned = reads.mock.calls.filter(([args]) => args[0] === 'status').map(([, options]) => options.cwd);
     reads.mockRestore();
     expect(scanned.sort()).toEqual(tasks.map((row) => row.worktree).sort());
+  });
+
+  it('reads no checkout status to keep the work folder current', { timeout: longGitTimeout }, async () => {
+    const tasks = [await task(), await task(), await task('clone')];
+    const preview = new PreviewService(await resolveRepo(fx.root), store, 0);
+    checkouts.push(`${fx.root}-work`);
+    expect(await preview.set([tasks[0]!.id])).toMatchObject({ syncStatus: 'synced' });
+    const statuses = (reads: { mock: { calls: unknown[][] } }) => reads.mock.calls.filter(([args]) => (args as string[])[0] === 'status').length;
+    // An idle tick, as the engine runs every second, then one that publishes a saved edit.
+    let reads = vi.spyOn(git, 'runGitBuffer');
+    await preview.tick();
+    expect(statuses(reads)).toBe(0);
+    reads.mockRestore();
+    await writeFile(path.join(tasks[0]!.worktree, 'task.txt'), 'Saved edit\n');
+    reads = vi.spyOn(git, 'runGitBuffer');
+    await preview.tick();
+    await preview.tick();
+    expect(statuses(reads)).toBe(0);
+    reads.mockRestore();
+    expect(await preview.get()).toMatchObject({ syncStatus: 'synced' });
+    expect(await readFile(path.join(`${fx.root}-work`, 'task.txt'), 'utf8')).toBe('Saved edit\n');
   });
 
   it('reuses a trial while still detecting edits, commits, branch switches and unfinished operations', { timeout: longGitTimeout }, async () => {

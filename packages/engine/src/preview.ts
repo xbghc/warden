@@ -8,7 +8,7 @@ import { ensureSharedRepository, validatedSharedRepository } from './shared-repo
 import { GitSandbox, gitMessage, oid, patchBetween, deliveryBase, deliveryContentBase, deliveredTree } from './git-sandbox.js';
 import { listWorktreesAll, type RepoContext } from './repo.js';
 import type { StateStore } from './state.js';
-import { checkoutState, listWorktreesDetailed } from './worktrees.js';
+import { checkoutState, listCheckoutIdentities } from './worktrees.js';
 import { assertSetupIdle, runSetupCommand, setupOwner } from './workspace.js';
 
 function conflict(message: string, code = 'preview_conflict'): never {
@@ -282,7 +282,9 @@ export class PreviewService {
     const primary = await primaryCheckout(this.repo, workflow.developmentBranch);
     // Primary only carries commits to and from the remote; its working files are not an input.
     const head = await oid(primary.path, 'HEAD');
-    const checkouts = ids.length ? await listWorktreesDetailed(this.repo) : [];
+    // Sources are matched by identity and snapshotted below; a status scan of every checkout,
+    // the work folder included, on each tick would answer nothing asked here.
+    const checkouts = ids.length ? await listCheckoutIdentities(this.repo) : [];
     const sources = [];
     for (const id of ids) {
       const change = workflow.changes.find((c): c is DevelopmentChange => c.id === id && !!c.worktree);

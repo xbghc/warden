@@ -355,7 +355,9 @@ canonical directory; allowing a parent alias does not permit an ACP-directory sy
 Workflow reads share one checkout inventory per request instead of rebuilding every workspace's
 inventory for each task. Rebase checks and the guards of rebase and delivery use an inventory
 without `git status`: it identifies checkouts and their unfinished operations, and each guard reads
-the status of the one workspace it acts on. The extension follows observed primary checkout branch changes only for
+the status of the one workspace it acts on. Work folder composition and its once-a-second observation
+use the same inventory and read no status at all: connected workspaces and the work folder are
+compared by snapshot. The extension follows observed primary checkout branch changes only for
 `workflow.trackedBranches`, through `workflow.configure` with its existing integration and connection
 guards. Untracked branches and detached HEAD project an empty workbench without changing saved workflow
 or work folder state. Explicit branch selection pins the stored engine context even while the visible
