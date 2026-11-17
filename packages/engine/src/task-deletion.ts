@@ -245,7 +245,8 @@ export class TaskDeletionService {
         const latest = await this.inspect(taskId);
         // The journal is the only expected change while preview was being recomposed.
         // Recheck source bytes immediately before the first destructive operation.
-        if (latest.sourceVersion !== details.sourceVersion) fail('The workspace changed while disconnecting preview. Confirm deletion again.');
+        if (latest.sourceVersion !== details.sourceVersion)
+          fail('The workspace changed while it was disconnected from the work folder. Confirm deletion again.');
         details = latest;
         await this.phase(taskId, 'releasing');
         const retainedBranch = await this.release(details);

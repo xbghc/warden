@@ -57,7 +57,7 @@ export class PreviewService {
 
   set(ids: string[]) {
     if (!Array.isArray(ids) || ids.some((id) => typeof id !== 'string') || new Set(ids).size !== ids.length)
-      throw badRequest('Invalid preview connection list.');
+      throw badRequest('Invalid work folder connection list.');
     return this.store.withRepositoryLock(async () => {
       this.rejected = undefined;
       try {

@@ -47,7 +47,7 @@ describe('preview setup ownership', () => {
     await expect(engine.execute('preview.connect', { connectedIds: [] })).rejects.toMatchObject({ code: 'setup_running' });
     const tick = new PreviewService(engine.repo, engine.store, 0);
     await tick.tick();
-    expect(await engine.execute('preview.get', undefined)).toMatchObject({ syncStatus: 'error', message: expect.stringContaining('preview setup') });
+    expect(await engine.execute('preview.get', undefined)).toMatchObject({ syncStatus: 'error', message: expect.stringContaining('work folder setup') });
     // Removing or changing configuration cannot abandon a still-owned setup process.
     await engine.execute('config.save', { hooks: {} });
     expect(await engine.execute('preview.refresh', undefined)).toMatchObject({ syncStatus: 'error', setup: { status: 'running' } });

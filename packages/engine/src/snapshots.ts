@@ -31,7 +31,7 @@ async function repoIndex(cwd: string) {
  * Asking Git for --shared-index-path would already freshen the source shared index's mtime.
  */
 function sharedIndex(bytes: Buffer, hashBytes: number): string | undefined {
-  const invalid = () => new WardenError(409, 'Invalid Git index format. Unable to create a preview snapshot.', 'snapshot_index_invalid');
+  const invalid = () => new WardenError(409, 'Invalid Git index format. Unable to create a snapshot.', 'snapshot_index_invalid');
   const end = bytes.length - hashBytes;
   if (end < 12 || bytes.toString('ascii', 0, 4) !== 'DIRC') throw invalid();
   const version = bytes.readUInt32BE(4);
@@ -151,7 +151,7 @@ async function seedIndexedBlobs(cwd: string, snapshot: Required<SnapshotEnv>) {
     const file = path.join(path.dirname(snapshot.index), 'blob');
     await writeFile(file, blob.stdout, { mode: 0o600 });
     const stored = await runGitSnapshot(['hash-object', '-w', '--no-filters', '--', file], { cwd, ...snapshot });
-    if (stored.stdout.trim() !== oid) throw new WardenError(409, 'Git index object mismatch. Unable to create a preview snapshot.', 'snapshot_object_invalid');
+    if (stored.stdout.trim() !== oid) throw new WardenError(409, 'Git index object mismatch. Unable to create a snapshot.', 'snapshot_object_invalid');
   };
   // Missing working-tree attributes still apply through the index, including in sparse checkouts.
   for (const entry of entries) if (entry.file === '.gitattributes' || entry.file.endsWith('/.gitattributes')) await copy(entry.oid);

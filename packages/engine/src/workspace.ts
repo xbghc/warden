@@ -13,7 +13,7 @@ export function assertSetupIdle(hook: Pick<WorkspaceHookResult, 'status' | 'owne
   if (setupEnded(hook.owner)) return;
   throw new WardenError(
     409,
-    `The ${kind} setup script is still running or its process state is unknown. Wait for it to finish. If cleanup failed, stop its commands and close the owning Warden window before retrying.`,
+    `The ${kind === 'preview' ? 'work folder' : 'workspace'} setup script is still running or its process state is unknown. Wait for it to finish. If cleanup failed, stop its commands and close the owning Warden window before retrying.`,
     'setup_running',
   );
 }
@@ -47,7 +47,7 @@ export function workspaceConfig(value: unknown): WorkspaceConfig {
   }
   const previewSetup = row.previewSetup;
   if (previewSetup !== undefined && (typeof previewSetup !== 'string' || previewSetup.length > 20000 || previewSetup.includes('\0')))
-    throw badRequest('The preview setup script must be a shell command string.');
+    throw badRequest('The work folder setup script must be a shell command string.');
   return { hooks, ...(previewSetup?.trim() ? { previewSetup } : {}) };
 }
 

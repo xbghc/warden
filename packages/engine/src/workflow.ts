@@ -202,7 +202,7 @@ export class WorkflowService {
           return;
         }
         if (state.workflow?.changes.some((c) => c.status === 'integrating') || state.connectionPreview?.connectedIds.length)
-          fail('Finish the primary-folder commit and disconnect preview connections before switching base branches.', 'development_in_use');
+          fail('Finish the primary-folder commit and disconnect work folder connections before switching base branches.', 'development_in_use');
         state.workflow = {
           ...state.workflow,
           developmentBranch: branch,
@@ -213,7 +213,7 @@ export class WorkflowService {
         if (state.connectionPreview?.directory) {
           state.connectionPreview.status = 'stale';
           state.connectionPreview.syncStatus = 'pending';
-          state.connectionPreview.message = 'The base branch changed. Preview sync is pending.';
+          state.connectionPreview.message = 'The base branch changed. Work folder sync is pending.';
         } else delete state.connectionPreview;
       });
       return this.get();
