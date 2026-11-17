@@ -2,13 +2,14 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const vscode = require('vscode');
+const { openWork } = require('./work-folder.cjs');
 const { execFileSync } = require('node:child_process');
 const { checkChats } = require('./chat.cjs');
 const { checkTaskDeletion } = require('./deletion.cjs');
 const { checkBranches } = require('./branches.cjs');
 const { checkSettings } = require('./settings.cjs');
 const { checkSidebar } = require('./sidebar.cjs');
-const { checkPreviewLineEndings, checkPreviewActions, checkPreviewTerminals } = require('./preview.cjs');
+const { checkPreviewLineEndings, checkPreviewActions, checkWorkFolderEntry } = require('./preview.cjs');
 const { checkRepositoryLoading } = require('./repository.cjs');
 const { checkAgentSetup, checkAgentPresets, verifyAgent } = require('./agent-setup.cjs');
 // Git may materialize preview text with CRLF under the user's Windows configuration.
@@ -32,7 +33,7 @@ exports.run = async () => {
     await checkTaskDeletion(workbench, extension, fixture, eventually);
     console.log('Checking repository loading');
     await checkRepositoryLoading(workbench, extension, fixture, eventually);
-    await workbench.open(fixture.unconfigured);
+    await openWork(workbench, fixture.unconfigured);
     assert.equal(workbench.model('workspaces').workflow.workflow, null, 'opening a repository does not choose its requirement branch');
     assert.deepEqual(await workbench.getChildren(), [], 'unconfigured repositories show setup instead of operational navigation');
     console.log('Checking agent setup before branch selection');
@@ -74,10 +75,10 @@ exports.run = async () => {
     await checkBranches(workbench, fixture.unconfigured, eventually);
     console.log('Checking native task sidebar');
     await checkSidebar(workbench, extension, fixture.unconfigured, eventually);
-    await workbench.open(fixture.root);
+    await openWork(workbench, fixture.root);
     assert.equal(workbench.backend.store.file, fixture.state);
-    console.log('Checking preview terminal reuse');
-    await checkPreviewTerminals(workbench, fixture, eventually);
+    console.log('Checking work folder entry and commit');
+    await checkWorkFolderEntry(workbench, eventually);
     const tasks = await workbench.getChildren();
     assert.equal(tasks.length, 1);
     const attention = workbench.workspaceRow({
@@ -115,7 +116,7 @@ exports.run = async () => {
     assert.equal(textLines(await fs.readFile(path.join(preview.worktree, 'agent.txt'), 'utf8')), 'Agent addition\n');
     await assert.rejects(fs.access(path.join(fixture.root, 'agent.txt')));
     await workbench.rememberExpansion(tasks[0], false);
-    await workbench.open(fixture.root);
+    await openWork(workbench, fixture.root);
     assert.equal(workbench.workspaceRow(tasks[0].task).expanded, false, 'collapsed state survives reopening the repository');
     const files = await workbench.getChildren(tasks[0]);
     assert.equal(files.length, 1);
@@ -231,11 +232,6 @@ exports.run = async () => {
     }
     assert.equal(preview.syncStatus, 'synced', JSON.stringify(preview));
     assert.equal(textLines(await fs.readFile(path.join(preview.worktree, 'human.txt'), 'utf8')), 'Human code\n');
-    await vscode.commands.executeCommand('warden.previewTerminal');
-    const terminal = vscode.window.terminals.find((t) => t.name === 'Warden · Preview');
-    assert(terminal, 'preview terminal exists');
-    assert.equal(terminal.creationOptions.cwd, preview.worktree);
-    terminal.dispose();
     await vscode.commands.executeCommand('warden.setup');
     assert.equal((await state()).connectionPreview.setup.status, 'succeeded');
     await vscode.commands.executeCommand('warden.connect', tasks[0]);
@@ -370,7 +366,7 @@ exports.run = async () => {
     assert.equal((await state()).workflow.changes[0].deliveries[0].id, accepted.id, 'existing delivery records remain available');
     workbench.documents.contents.clear();
     assert.equal(await workbench.documents.provideTextDocumentContent(pinnedDoc.uri), pinnedContent, 'saved native snapshots survive memory eviction');
-    await workbench.open(fixture.root);
+    await openWork(workbench, fixture.root);
     assert.notEqual(workbench.session, session, 'reopening the repository creates a new session');
     await assert.rejects(workbench.handleAction({ type: 'task.create', title: 'Stale view' }, session), /The repository or base branch changed/);
     assert.equal((await state()).workflow.changes.length, count + 1);

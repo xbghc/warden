@@ -5,22 +5,22 @@ or another supported interface, and the agent may be managed by Warden or by an 
 The product depends on messaging and workspace binding, not on a particular protocol or process owner.
 Warden does not supply the agent's file or command tools.
 
-Work happens in the assigned task worktree. The user runs tests in the preview directory and reviews
+Work happens in the assigned task worktree. The user runs tests in the work folder and reviews
 changes before squash. Warden does not require an agent test command, structured delivery report or
 readiness signal.
 
 Default task workspaces are numbered directories beside primary, each an independent clone with its
 own `.git` directory, so tools that do not support linked worktrees work unchanged. Agent edits and
-commits belong only in the assigned task workspace. The user edits primary and runs the combined
-code in preview. Ordinary agent commits retain their Git hooks and signing; Warden's temporary
+commits belong only in the assigned task workspace. The user edits and runs the combined
+code in the work folder and does not edit an agent's code there; changes to it are requested from the agent. Ordinary agent commits retain their Git hooks and signing; Warden's temporary
 composition commands do not change that configuration.
 
 ## Reading repository context
 
-Agents may read source files in primary, other allocated task workspaces and preview in the same
+Agents may read source files in primary, other allocated task workspaces and the work folder in the same
 repository. Edits and commits belong to the assigned task workspace. Other tasks' undelivered changes
-are reference material, not the current task's baseline. Preview may retain the last successful
-composition; check its synchronization status and connected tasks before relying on its contents.
+are reference material, not the current task's baseline. The work folder may retain the last successful
+composition and also holds the user's own edits; check its synchronization status and connected tasks before relying on its contents.
 Read access does not automatically attach those directories or files to a prompt.
 
 The ACP client automatically selects an offered `allow_once` option for a structured `read` request
@@ -58,7 +58,7 @@ Warden need not own the agent process, authentication, model selection, transcri
 approvals. An external application may own these. Streaming replies, cancellation, session restoration
 and other controls depend on the integration; expose only capabilities it actually supports. Closing
 a Warden view must not terminate an externally owned process. A reply ending never initiates Git or
-preview operations.
+work folder operations.
 
 The workbench prerequisite is a verified integration capable of messaging and workspace binding.
 Its check must use the integration's supported interface, send no work prompt and create no Warden
@@ -82,7 +82,7 @@ channel and are not evidence that an agent is available.
 Configure an ACP profile once. Warden connects automatically at startup and after configuration
 changes, without a separate connection-check page. The last successfully selected profile is reused
 when available; otherwise Warden uses the first configured profile. Saving a new preset selects it.
-Branch, task, workspace and preview controls appear once ACP initialization and an empty session
+Branch, task, workspace and work folder controls appear once ACP initialization and an empty session
 succeed. Settings show connection progress, errors, authentication and **Connect ACP** / **Reconnect ACP**.
 
 The workbench connection stays open. Startup sends no prompt and creates no Warden task. Disconnect,
@@ -141,18 +141,18 @@ Task Chat automatically resumes the saved session when the agent supports loadin
 **New Session**, retaining the previous record. Warden never silently resends an uncertain prompt or
 claims that saved text restores the agent's model state. Reopening an active chat reuses its connection.
 **New Session** explicitly resets the conversation and connects after preserving the previous record.
-A completed turn does not connect preview, commit, deliver or authorize a rebase. Separately enabled
+A completed turn does not connect to the work folder, commit, deliver or authorize a rebase. Separately enabled
 automatic rebase may proceed once the task becomes idle and its existing check qualifies.
 See the [ACP boundary](acp-design.md) for ownership and recovery details.
 
 ## Task briefs
 
 Task Chat automatically supplies [task environment instructions](acp-design.md#task-environment-instructions)
-with the workspace and branch assignment and Warden's primary/preview workflow. Agents advertising
+with the workspace and branch assignment and Warden's primary/work folder workflow. Agents advertising
 client system prompt support receive these as appended system instructions on creation and restoration.
 Other agents receive a labelled ordinary-context block with each user message, visible through
 **Show Full Message**. Opening a chat sends no work prompt. Task text stays user content, and current
-preview connection/synchronization state is not inferred from these instructions.
+work folder connection/synchronization state is not inferred from these instructions.
 
 Add and order small tasks in the left navigation. Warden automatically assigns each task a workspace.
 Task Chat does not insert task briefs: the environment instructions already carry the assignment and

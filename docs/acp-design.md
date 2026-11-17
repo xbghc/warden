@@ -23,19 +23,19 @@ scope. Displaying a reported tool call does not execute it in Warden.
 
 For task conversations, the task workspace is the process and session cwd. This supplies project context; it does not
 confine a local agent's filesystem or process privileges. Agent permissions and execution policies
-remain the agent's responsibility. Existing workspace initialization hooks and user-run preview
+remain the agent's responsibility. Existing workspace initialization hooks and user-run work folder
 terminals are separate facilities, not ACP tool implementations.
 
 ## Task environment instructions
 
 Every task conversation receives Warden-generated environment instructions describing its assigned
 workspace, task branch, base branch and primary folder. These explain source-editing locations,
-the generated preview and its shared validation environment, saved uncommitted changes, ordinary
+the work folder and its shared validation environment, saved uncommitted changes, ordinary
 commit hooks, user-initiated integration and rebase, and the conversation's fixed assignment.
 Read-only reference to other allocated directories remains subject to the agent's permissions.
 Directory and branch values are quoted as data. Task titles, credentials,
-preview paths, connection/sync state and current revisions are not included in system instructions.
-Live preview facts need current verification; this context neither authorizes tools nor supplies a sandbox.
+work folder paths, connection/sync state and current revisions are not included in system instructions.
+Live work folder facts need current verification; this context neither authorizes tools nor supplies a sandbox.
 
 If `initialize` advertises an object at `agentCapabilities.sessionCapabilities.systemPrompt`,
 the task client sends `systemPrompt: { mode: "append", content: [{ type: "text", text: ... }] }`
@@ -205,11 +205,11 @@ stale profile choices for new conversations. Repeated opens share a pending conn
 the active session, without delaying navigation. Sending after a disconnect also restores the session
 before submitting the new message. One executable connection
 is allowed per task; separate tasks can have separate conversations. Each connection accepts one
-prompt at a time while other tasks, diff review and preview remain usable.
+prompt at a time while other tasks, diff review and the work folder remain usable.
 
 The client includes text prompts, streamed agent text and thoughts, reported tool activity, user
 permission requests, authentication, cancellation, disconnect, new sessions and supported session loading.
-It does not automatically attach editor buffers, diagnostics, primary code or preview output.
+It does not automatically attach editor buffers, diagnostics, primary code or work folder output.
 Users can paste chosen context or use **Warden: Add Selection to Task Chat** to append selected editor text to
 the task's draft without sending it. The excerpt identifies its file or immutable review snapshot,
 line range and any unsaved content. Rich context attachments, MCP forwarding
@@ -230,7 +230,7 @@ moves remap the submission revision so neither a sent draft nor newer typing is 
 Permission requests retain the agent's supplied description and choices. With the User or Remote User
 `warden.acpAutoApproveReads` policy enabled (the default), Warden automatically selects an offered
 `allow_once` for an explicit structured file read inside the same repository's validated primary,
-allocated task workspaces or preview. It uses the operation kind and every reported path, never the
+allocated task workspaces or the work folder. It uses the operation kind and every reported path, never the
 title or option label. Commands, directories, known sensitive paths and ambiguous or unverifiable
 requests remain interactive. See [repository read access](agent.md#reading-repository-context).
 Warden returns only an offered option identifier or the protocol's cancelled outcome; it never
@@ -376,7 +376,7 @@ that lock. Pending/deleted tasks cannot receive new prompts or recreate saved co
 Chat draft/view capture still completes while executable actions are blocked. After release, only
 that task's Warden-local records and archives are removed; external agent histories remain external.
 Retained conversation engines observe state changes for deletion cleanup without starting repository
-watchers or preview synchronization. Task Chat cannot take over the workbench's preview-owner lease
+watchers or work folder synchronization. Task Chat cannot take over the workbench's work folder owner lease
 when the repository is reopened or selected elsewhere.
 
 **Stop Turn** sends `session/cancel` and cancels pending permission requests. Warden continues to
@@ -385,7 +385,7 @@ closes the owned connection and its agent process. The list holds only this wind
 (the workbench connection and task conversations), excluding retiring ones. Ending is bound to the
 listed PID, so a stale row cannot end a replacement process. Neither a cancelled response, a completed
 prompt nor an exited stdio process proves that all agent-started background commands have stopped.
-Warden does not supervise those commands or kill unrelated terminals and preview servers.
+Warden does not supervise those commands or kill unrelated terminals and development servers.
 Stopping never resets, cleans or rolls back task files.
 
 Session metadata and conversation records are stored outside the source repository and bound to
@@ -413,10 +413,10 @@ While the new record is saved and its temporary ownership claim is released, the
 only after reset cleanup finishes, then connects automatically, so a newly visible record cannot race
 that cleanup. **New Session** remains an explicit reset, not a prerequisite for first use.
 
-## Git and preview remain user-operated
+## Git and the work folder remain user-operated
 
 ACP activity does not approve or complete a task. A prompt ending, permission being granted or an
-agent reporting success never connects preview, commits source changes, delivers to primary or
+agent reporting success never connects to the work folder, commits source changes, delivers to primary or
 authorizes a rebase. The separately configured [automatic rebase](worktrees.md#automatic-rebase)
 can proceed once an already eligible task becomes idle; cancellation or an error label does not prove
 that its turn ended. Failed operations are not retried because an agent reports success.
@@ -429,7 +429,7 @@ claims from other windows. This coordinates Warden's own operations, not the chi
 Existing Git operation locks, workspace identity checks and source/HEAD/index checks remain in force. Delivery
 still requires complete review of the pinned source HEAD, saved content tree when applicable,
 delivery boundary and primary HEAD. Saved uncommitted task content can be delivered directly;
-changed source content or baseline versions require fresh review. Connection previews continue to
+changed source content or baseline versions require fresh review. Work folder connections continue to
 observe live content.
 
 Renaming a task updates the live conversation binding, persisted record and emitted Task Chat title
@@ -446,13 +446,13 @@ branch; replacement workspaces and unrelated branches still invalidate the bindi
 | `packages/vscode/src/acp` | Profile validation, stdio/session lifecycle, task binding, connection ownership and external records |
 | `packages/shared/src/acp.ts` | Conversation models and validated panel actions |
 | `packages/webview/src/acp.tsx` | Task conversation, tool activity, permission choices and session controls |
-| Existing Engine and native review | Repository operations, preview composition and immutable delivery review |
+| Existing Engine and native review | Repository operations, work folder composition and immutable delivery review |
 
 Tests use an SDK-compatible child-agent fixture that performs its own file operations and reports
 updates over ACP. They exercise capability negotiation without client tools, task routing,
 permission/cancel behavior, connection ownership, interruption and automatic restoration on opening. Packaged
 extension-host and webview checks cover the actual shipped bridge and UI while retaining native
-review, preview and delivery regression coverage.
+review, work folder and delivery regression coverage.
 
 These tests establish the implemented protocol and packaging behavior. They do not establish
 compatibility with a third-party authenticated agent or every adapter. A vendor-specific support

@@ -67,8 +67,8 @@ Directories are also flushed on POSIX; Node cannot perform directory fsync on Wi
 leave an unpublished `.pending-*` directory, which is never listed as a completed backup.
 
 Shared-repository backups validate the selected checkout's HEAD, index, files, operation metadata,
-branch reflog and common configuration. New objects and ref updates from sibling tasks or preview
-publication do not invalidate that checkout's backup. Previously copied objects must remain unchanged;
+branch reflog and common configuration. New objects and ref updates from sibling tasks or work folder
+updates do not invalidate that checkout's backup. Previously copied objects must remain unchanged;
 concurrent object pruning/repacking may therefore stop the operation safely. The captured refs and
 stash reflog describe their captured versions, not a later sibling update. Repositories using reftable
 retain their table files and conservative table validation. A backup is independently recoverable and
@@ -118,5 +118,5 @@ to bring back into the active project. This is an incident-recovery procedure, n
 The automated recovery test deletes a clone and its original object source, reconstructs a fresh
 repository, and verifies binary staged/unstaged bytes, deletions, ignored and Unicode paths, detached
 HEAD, branches and multiple stash entries. Other tests cover linked-worktree indexes, shared-worktree recovery after its object store is removed,
-sibling commits during copying, preview publication after a backup, selected-checkout changes,
+sibling commits during copying, work folder updates after a backup, selected-checkout changes,
 unwritable backup storage, restart discovery and rebase failures.

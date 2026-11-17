@@ -3,6 +3,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const vscode = require('vscode');
+const { openWork } = require('./work-folder.cjs');
 const { checkAgentSetup, checkAgentPresets, verifyAgent } = require('./agent-setup.cjs');
 const { checkRepositoryLoading } = require('./repository.cjs');
 
@@ -20,7 +21,7 @@ exports.run = async () => {
   try {
     await verifyAgent(workbench, fixture);
     await checkRepositoryLoading(workbench, extension, fixture, eventually);
-    await workbench.open(fixture.unconfigured);
+    await openWork(workbench, fixture.unconfigured);
     await checkAgentSetup(workbench, extension, fixture, eventually);
     await checkAgentPresets(workbench, fixture, eventually);
     await verifyAgent(workbench, fixture);
@@ -85,7 +86,7 @@ exports.checkSettings = async (workbench, extension, fixture, eventually) => {
     const scriptRowId = workbench.settings.getTreeItem(scripts[0]).id;
     assert.deepEqual(
       scripts.map((node) => node.label),
-      ['Workspace Setup Script', 'Legacy Workspace Reuse Script', 'Preview Setup Script', 'Preview Command'],
+      ['Workspace Setup Script', 'Legacy Workspace Reuse Script', 'Work Folder Setup Script', 'Work Folder Command'],
     );
     assert.equal(scripts[0].command.arguments[1], session, 'script rows capture their repository session');
     assert.equal(scripts[2].contextValue, 'wardenPreviewSetup');
@@ -133,7 +134,7 @@ exports.checkSettings = async (workbench, extension, fixture, eventually) => {
     await open('workspace');
     await eventually(() => text(document) === 'echo changed-elsewhere');
 
-    await workbench.open(fixture.root);
+    await openWork(workbench, fixture.root);
     assert.equal(workbench.settings.getTreeItem(roots[1]).id, scriptRootId, 'retained Settings roots keep their original identity');
     assert.equal(workbench.settings.getTreeItem(scripts[0]).id, scriptRowId, 'retained Settings rows keep their original identity');
     assert.deepEqual(workbench.settings.getChildren(roots[1]), [], 'an obsolete Settings root cannot publish old script rows');
@@ -156,7 +157,7 @@ exports.checkSettings = async (workbench, extension, fixture, eventually) => {
     } finally {
       workbench.backend.execute = execute;
     }
-    await workbench.open(repository);
+    await openWork(workbench, repository);
     const cleared = await open('preview');
     await replace(cleared, '');
     assert(await cleared.save());
@@ -171,7 +172,7 @@ exports.checkSettings = async (workbench, extension, fixture, eventually) => {
     assert.equal((await config()).hooks.reuse, 'echo updated-legacy');
     assert.equal(text(await open('workspace')), '', 'a cleared workspace script does not fall back to the separate legacy script');
   } finally {
-    if (workbench.backend.root !== repository) await workbench.open(repository);
+    if (workbench.backend.root !== repository) await openWork(workbench, repository);
     await workbench.backend.execute('config.save', original ?? { hooks: {} });
     workbench.errors.delete('settings');
     await workbench.refresh(true);

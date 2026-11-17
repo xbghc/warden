@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const vscode = require('vscode');
+const { openWork } = require('./work-folder.cjs');
 const { checkStartup } = require('./startup.cjs');
 
 exports.checkRepositoryLoading = async (workbench, extension, fixture, eventually) => {
@@ -47,7 +48,7 @@ async function checkRepositoryLoading(workbench, extension, fixture, eventually,
       await gate;
       return open.apply(this, args);
     };
-    const pending = operation === 'initialize' ? workbench.initialize() : workbench.open(fixture.unconfigured);
+    const pending = operation === 'initialize' ? workbench.initialize() : openWork(workbench, fixture.unconfigured);
     try {
       await eventually(() => entered, 30_000);
       const opening = timings.slice(first).find((row) => row.stage === 'engine.open');
@@ -100,7 +101,7 @@ async function checkRepositoryLoading(workbench, extension, fixture, eventually,
     assert(timings.slice(beforeFailure).some((row) => row.stage === stage && row.event === 'end' && row.outcome === 'error'));
   assert.equal(workbench.model('workspaces').repositoryState, 'unselected', 'failed opening exits loading and restores the selection action');
   assert.deepEqual(await workbench.sidebar.getChildren(), []);
-  await workbench.open(fixture.root);
+  await openWork(workbench, fixture.root);
   assert.equal(workbench.model('workspaces').repositoryState, 'ready', 'a later successful open recovers normally');
   await workbench.agentSetup.check();
   for (const stage of ['acp.connect', 'acp.cleanup', 'acp.spawn', 'acp.initialize', 'acp.session.new'])

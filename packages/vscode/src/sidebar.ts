@@ -91,7 +91,7 @@ export class Sidebar implements vscode.TreeDataProvider<SidebarNode>, vscode.Tre
     } else {
       const preview = model.preview;
       const status = preview?.syncStatus ?? preview?.status;
-      const previewProblem = status && ['stale', 'conflict', 'error', 'paused'].includes(status);
+      const previewProblem = status && ['stale', 'conflict', 'error'].includes(status);
       message =
         model.repositoryState === 'loading'
           ? undefined
@@ -99,9 +99,9 @@ export class Sidebar implements vscode.TreeDataProvider<SidebarNode>, vscode.Tre
               model.busy,
               ...model.errors.filter((error) => ['repository', 'preview'].includes(error.scope)).map((error) => error.message),
               previewProblem
-                ? `${previewStatusLabels[status]}: ${preview?.message ?? 'Preview content is not current. Open Show Preview Output for details.'}`
+                ? `${previewStatusLabels[status]}: ${preview?.message ?? 'The work folder is not current. Open Show Work Folder Output for details.'}`
                 : '',
-              preview?.setup?.status === 'failed' ? 'Preview setup failed. Open Show Preview Output for details, then retry setup.' : '',
+              preview?.setup?.status === 'failed' ? 'Work folder setup failed. Open Show Work Folder Output for details, then retry setup.' : '',
             ]
               .filter(Boolean)
               .join('\n') || undefined;

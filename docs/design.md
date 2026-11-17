@@ -2,7 +2,7 @@
 
 The VS Code extension implements the [workflow](workflow.md) using the [canonical terminology](terminology.md).
 See [VS Code](vscode.md) for the workspace sidebar, native review editors and packaged webview forms.
-Human editing uses primary; runtime composition uses the independent preview directory.
+The user edits and runs code in the work folder, whose window hosts the workbench; primary only carries commits to and from the remote.
 Wireframes describe intent rather than exact labels.
 
 ## Product principles
@@ -40,19 +40,19 @@ The title bar offers **View as Tree** / **View as List**, matching Source Contro
 List view shows file names with relative parent paths; tree view adds expandable directories.
 The choice persists in VS Code workspace state and leaves task order, expansion and open diffs intact.
 The title action follows the applied layout even while background repository reads are pending.
-Common actions (Agent, preview connection and commit) are inline tree actions. The context menu
+Common actions (Agent, work folder connection and commit) are inline tree actions. The context menu
 contains editing, opening the assigned workspace, delivery records, synchronization, copying and recovery.
 Drag tasks or use Alt+Up/Down to reorder the plan; the Command Palette offers a move picker.
 The view heading places synchronization beside task creation and refresh. Its native **More Actions**
 menu reveals **Settings**, a native TreeView stacked beneath Workbench for workspace initialization,
-preview setup and Agent configuration. Both views appear by default and retain VS Code's native
+work folder setup and Agent configuration. Both views appear by default and retain VS Code's native
 collapse, resize, movement and keyboard controls.
 Tree item actions derive availability from the row rather than global branch or connection keys,
 which can rerender obsolete native rows during navigation. Palette and title actions retain their
 connection gates; command handlers still validate agent readiness and the originating session.
 Background checks that find no sidebar changes leave the native tree untouched, without starting
 its loading animation. Refresh the tree when task/file content, connection state or error feedback
-changes; keep actual preview synchronization progress visible.
+changes; keep actual work folder synchronization progress visible.
 
 New-task entry and commit-message entry use native input boxes. Escape preserves the input draft
 without changing Git. Commit keeps its original task, repository and review version; changes while
@@ -63,8 +63,8 @@ Like an item in a to-do list, a task is only its title: tasks are small units of
 no description, notes field or task editor page. **Rename Task** opens a native input box with the
 saved title; Escape or an unchanged title writes nothing. Batch rebase retains a dedicated editor panel. Script rows in Settings open native text editors with
 multiline editing and normal Save. Saving is bound to the original repository and script version,
-and preserves other script settings. Workspace scripts run on allocation; preview setup keeps its
-normal automatic triggers. Preview diagnostics use native output. The primary sidebar navigation
+and preserves other script settings. Workspace scripts run on allocation; work folder setup keeps its
+normal automatic triggers. Work folder diagnostics use native output. The primary sidebar navigation
 contains no webview. **Task Chat** is a separate webview in the Secondary Side Bar by default.
 Selecting a task opens its Task Chat while keeping any open diff intact; expanding a task and selecting a file or choosing **Review Current Changes** opens its diff, and **Chat with Agent** also switches the displayed chat.
 The view title offers **Switch Task Chat** and **Open Chat in Editor**. An expanded chat offers
@@ -104,10 +104,10 @@ layout controls; Warden does not reset their chosen layout.
 
 ## Interface copy
 
-These rules apply across navigation, task review, preview, synchronization, settings and
+These rules apply across navigation, task review, work folder, synchronization, settings and
 shared review controls. The wireframes below describe workflows, not required literal strings.
 The [terminology contract](terminology.md) owns the vocabulary and status labels. In particular,
-tasks describe planned work, workspaces hold its execution, preview synchronization composes files, and
+tasks describe planned work, workspaces hold its execution, work folder synchronization composes files, and
 Git rebase replays task commits onto the base branch.
 
 - Give each fact one primary location. Delivery counts belong to the delivery disclosure; file
@@ -122,7 +122,7 @@ Git rebase replays task commits onto the base branch.
   whose scope needs explanation, such as integration, Rebase, ending an Agent process,
   permission decisions. Menus retain their readable action names.
 - Omit page headings that repeat the native tab title. Show branches, paths, timestamps and
-  task associations directly, using icons, monospace and muted text for hierarchy. Preview
+  task associations directly, using icons, monospace and muted text for hierarchy. Work folder
   synchronization uses the native status bar, with composition and timing in its tooltip and output.
   Observable states use text and VS Code theme colors. Color never carries state by itself.
 - Compact task edits, executor inputs and the conversation composer
@@ -135,11 +135,13 @@ Git rebase replays task commits onto the base branch.
   and tooltips on icon buttons. Errors and recovery actions must remain visible.
 - Task rows show at most two facts, prioritizing permission requests, failures and stale reviews;
   the tooltip retains the complete context. Delivery records retain native commit-file review.
-- More Actions shows Run Preview when a command is configured, otherwise Open Preview Terminal.
-  Sync Preview appears there only for stale, conflicting, failed or paused synchronization;
-  Rerun Preview Setup appears only for a failed configured script. Recovery actions stay visible
-  until the problem clears. The configured Preview Setup Script row also offers manual rerun.
-  The Command Palette retains sync, terminal, copy-path and output commands, including with no task connections.
+- More Actions shows Run in Work Folder, which opens the `warden.previewCommand` setting when no
+  command is configured, and Pull Base Branch. There is no Warden terminal command: the window's own
+  terminal is already in the work folder.
+  Sync Work Folder appears there only for stale, conflicting or failed synchronization;
+  Rerun Work Folder Setup appears only for a failed configured script. Recovery actions stay visible
+  until the problem clears. The configured Work Folder Setup Script row also offers manual rerun.
+  The Command Palette retains sync, copy-path and output commands, including with no task connections.
   A failed check still offers retry. A visible form owns its scoped error;
   native notifications draw attention to errors whose form is not visible.
 - Task copy actions use the more-actions menu; workspace storage, directory and branch choices
@@ -161,7 +163,7 @@ Git rebase replays task commits onto the base branch.
 | Review content | Changes for changed content; Diff for its comparison |
 | Delivery history and current scope | Commits / Pending Changes / Pending Commit |
 | Workspace hooks | Workspace Setup Script; show script configuration, output and exit status |
-| Preview synchronization | Sync Preview; Out of Date / Syncing / Synced / Preview Conflict / Sync Failed |
+| Work folder synchronization | Sync Work Folder; Out of Date / Syncing / Synced / Work Folder Conflict / Sync Failed |
 | Rebase checks | Up to Date / Can Rebase / Conflicts Expected / Blocked / Unknown / Not Checked |
 | Unusable check results | Check Failed / Check Again, with a reason or recovery action |
 
@@ -170,20 +172,25 @@ interaction checks must continue to find controls by their accessible names afte
 
 ## One navigation area, one ordered work plan
 
+The workbench belongs to the window opened on the work folder. A window opened on primary shows
+**Configure ACP** or **Select Base Branch** while those are needed, and afterwards only
+**Open Work Folder**, which creates `<primary>-work` if needed and opens it; it has no task rows,
+toolbar actions or chats.
+
 The selected base branch is the current context. Ordered tasks are top-level items in the native
-sidebar, with no Preview row or Tasks parent. Each task owns its connection controls, commands and
+sidebar, with no Work Folder row or Tasks parent. Each task owns its connection controls, commands and
 changed files. An empty workbench offers **New Task**.
 
 **Settings** is a native view stacked below Workbench. In a healthy single-repository workbench,
-**More Actions** contains one preview execution action and Settings. Select Repository appears only
+**More Actions** contains Run in Work Folder, Pull Base Branch and Settings. Select Repository appears only
 when selection is needed or multiple roots are open. Select Base Branch remains in initial setup and
 the Command Palette; subsequent branch changes follow primary only for explicitly tracked branches.
 Untracked branches and detached HEAD show the Select Base Branch entry point without task rows,
-preview status, synchronization checks or recovery messages. Returning restores saved work; it does
-not require clearing preview connections merely to leave for an unrelated branch. Configure ACP remains the unavailable-agent
-welcome action and does not duplicate Settings in the menu. Preview
+work folder status, synchronization checks or recovery messages. Returning restores saved work; it does
+not require clearing work folder connections merely to leave for an unrelated branch. Configure ACP remains the unavailable-agent
+welcome action and does not duplicate Settings in the menu. Work folder
 synchronization is visible in the status bar; its tooltip shows the composition, directory and last
-successful sync. Clicking it opens **Show Preview Output**, including conflicts and setup logs.
+successful sync. Clicking it opens **Show Work Folder Output**, including conflicts and setup logs.
 Synchronization and setup failures stay visible above the task list without adding navigation rows.
 
 The list itself is the orchestration entry point, not another page to enter before reaching work.
@@ -195,14 +202,14 @@ There is no separate review mode, allocation dashboard or delivery center.
 │ Warden                     │ Task diff                                           │
 │                            │                                                     │
 │ feature/order      ...     │ No second workspace picker or global page tabs      │
-│ /project                   │                                                     │
+│ /project-work              │                                                     │
 │                            │                                                     │
 │ 1 Order API                │                                                     │
 │   4 changed files          │                                                     │
 │ 2 Form Validation          │                                                     │
 │   Rebase Available         │                                                     │
 │ 3 Integration              │                                                     │
-│   Not in Preview           │                                                     │
+│   Not in Work Folder       │                                                     │
 │                            │                                                     │
 │                            │                                                     │
 └────────────────────────────┴─────────────────────────────────────────────────────┘
@@ -235,7 +242,7 @@ or check page. Opening Settings does not create an additional connection.
 
 Keep the connection open after successful initialization. Then show repository selection when needed
 and base-branch selection, or restore the existing workbench. Hide repository/branch controls, tasks,
-workspaces, preview, rebase and script controls while ACP is unavailable; direct commands and old views
+workspaces, work folder, rebase and script controls while ACP is unavailable; direct commands and old views
 enforce the same rule. Saved tasks and drafts survive failure and recovery. Disconnect and shutdown
 clean up owned connections and processes without initiating task work or Git operations.
 
@@ -265,8 +272,8 @@ The native input owns its creation draft and consumes the created task ID direct
 ```text
 Order API
 
-Not in Preview
-[Chat with Agent] [Connect Preview] [Open Workspace]
+Not in Work Folder
+[Chat with Agent] [Connect to Work Folder] [Open Workspace]
 ```
 
 Task creation allocates a fresh independent clone without a separate setup action or storage,
@@ -295,30 +302,30 @@ remain. Existing base-branch commits remain. The action creates no backup. A loc
 changes the affirmative action to **End Agent Process and Delete**; another window's connection
 requires disconnection in that window. Unsaved workspace editors must be saved or discarded first.
 
-Deletion removes the task's preview contribution before releasing its workspace. A failed operation
+Deletion removes the task's work folder contribution before releasing its workspace. A failed operation
 keeps the task visible with **Delete Failed** or **Deletion Pending**, its concrete error and
 **Retry Delete**. Other task operations cannot restart work in a partially released allocation.
 Successful deletion closes its chat editors and clears task selections and drafts. Reusable
 physical directories are internal resources and do not become new sidebar rows.
 
-## Compose the independent preview
+## Compose the work folder
 
 The sidebar's task list is the one place to manage workspace connections. Each allocated task
-has an action for connecting to the independent preview, available while reviewing any task.
+has an action for connecting to the work folder, available while reviewing any task.
 Failed allocations have no connection switch until retried. Selecting a task still opens its Task Chat;
 changing its connection does not change the selected task or plan order.
 
-There is no Preview page. **Show Preview Output** shows the current combination, runtime path,
+There is no Work Folder page. **Show Work Folder Output** shows the current combination, folder path,
 last successful sync, errors, conflicting paths and environment setup output. The status bar
 keeps freshness visible; failure messages also appear above the task list. File review belongs
-to the selected task. Preview commands remain available in the heading menu and Command Palette.
+to the selected task. Work folder commands remain available in the heading menu and Command Palette.
 
 ```text
 Warden output
-Preview: Synced
+Work folder: Synced
 Base branch: feature/order
-Preview folder: /warden-data/preview
-Preview contents: Saved primary content + Order API + Form Validation
+Work folder path: /project-work
+Work folder contents: feature/order + Order API + Form Validation
 Last successful sync: 10:42:16
 ```
 
@@ -326,37 +333,52 @@ Connection membership, review selection and rebase batch selection are separate 
 separate controls. Connecting does not stage, squash or accept changes.
 
 **Agreed:** if establishing a connection would introduce a conflict, notify the user and fail that
-connection attempt. Do not show it as connected or partially apply its contribution. Preserve the
-previous valid preview and identify the conflicting files. Warden does not resolve the conflict
+connection attempt. Do not show it as connected or partially apply its contribution. Leave the
+work folder unchanged and identify the conflicting files. Warden does not resolve the conflict
 or require a conflict-resolution workflow before the user can do anything else.
 
-Other proposed behavior, including later updates to an already established connection:
+Later updates to an already established connection:
 
 - Turning a connection on attempts to add its live contribution. Turning it off attempts to remove
-  that contribution while preserving the remaining combination.
+  that contribution while preserving the remaining combination and the user's edits.
 - Show pending requests explicitly. Failed connection must not look connected; failed disconnection
   must not claim the contribution is gone.
 - If an established connection cannot apply newer source changes, keep the relationship visible but
-  mark its content stale. Show the last successfully presented snapshot and affected files.
+  mark its content stale. Show the last successful sync and affected files.
 - Two workspaces touching one file do not automatically conflict. Show the composition result,
   including unknown or failed checks.
-- Preserve unexpected preview-directory edits and pause writes that could overwrite them. Name the
-  affected files. Dependencies, ignored files and the user's running processes are not contributions.
+- The user's edits in the work folder are kept. Each update merges them onto the new composition;
+  an edit that conflicts with a connected change leaves the folder unchanged and names the affected
+  files. Dependencies, ignored files and the user's running processes are not contributions.
 
 ```text
-Preview Out of Date
-The preview still contains the composition from 10:42:16.
+Work Folder Out of Date
+The work folder still contains the composition from 10:42:16.
 
 New Form Validation changes conflict with Order API:
 src/types/order.ts
 
-[Sync Preview]
+[Sync Work Folder]
 ```
 
-Human code is edited in primary and agent code in task workspaces. Users run dev servers, lint
-and tests in preview. Saved primary content forms the baseline; content-based observation and
-debouncing update each workspace’s synchronization status. Connection health cannot establish that
-tests passed. Preview files are generated and cannot be edited through Warden.
+The user edits code in the work folder and agents edit theirs in task workspaces. Users run dev
+servers, lint and tests in the work folder. The base branch commit forms the baseline; content-based
+observation and debouncing update each workspace’s synchronization status. Connection health cannot
+establish that tests passed.
+
+## Commit work folder edits and pull
+
+The user's own edits need no Warden list: in the work folder window they are exactly the
+working-tree changes of the native Source Control view, with its diffs and discard actions.
+**Commit Work Folder to Base Branch**, in the Source Control title menu and the Command Palette,
+opens a native input prefilled from the Source Control message box and commits those edits to the
+base branch in primary with normal hooks and signing. Edits that only apply on top of a connected
+task's changes are refused with the affected files until that task is committed. There is no action
+that sends an edit to a task; agents make every change to their own code.
+
+**Pull Base Branch** runs `git pull --ff-only` in primary as a terminal task, so credential prompts
+and Git output are native. The work folder then updates to the new base commit. Fetch and push have
+no Warden command; run Git in primary.
 
 ## Selecting a file is review
 
@@ -388,7 +410,7 @@ diff as A2. Recompute the range without asking for task-completion declarations.
 For A1 already delivered and A2 now under development, the next scope must exclude A1. The first implementation delivers all reliably identified, reviewed and not-yet-delivered
 changes from saved workspace content, without a file or local-commit picker or a required task commit.
 `sourceBase` records the last delivered source HEAD and `sourceTree` its saved content when captured.
-Review and preview exclude that content from the next increment without changing task files or history.
+Review and the work folder exclude that content from the next increment without changing task files or history.
 
 ## Integrate a reviewed delivery
 
@@ -399,14 +421,14 @@ silently move this version; changes require refreshing the comparison and review
 No read markers, checkpoints, test-passed checkboxes or agent-idle declarations are required.
 
 Submitting the message composes and commits the reviewed increment in one action. Canceling before
-submission leaves Git untouched. Other connections remain in the independent preview, where tests
-and dev servers keep running. Unrelated primary edits or Git operations block delivery and are
+submission leaves Git untouched. Other connections remain in the work folder, where tests
+and dev servers keep running. Uncommitted primary files or Git operations block delivery and are
 preserved. Warden does not stage them into the task’s commit.
 
 Preparation is journaled internally. A failed hook or interrupted operation leaves its contents
 available, with the error and a recovery action. Recovery reviews the retained index fingerprint
 or exact manual commit before accepting it. Successful commit advances the baseline and records
-the delivery; the task workspace remains available for A2 and A3. Preview sync failure is reported
+the delivery; the task workspace remains available for A2 and A3. Work folder sync failure is reported
 separately and cannot turn a successful commit into an apparent failed delivery.
 
 ## Check automatically; rebase on request
@@ -446,7 +468,7 @@ Use facts such as “Up to Date”, “Skipped: uncommitted changes” and “Re
 ## Commit history
 
 Commit browsing belongs to VS Code's native Source Control Graph. History arrangement is deferred
-so development can focus on connecting workspace changes and testing them in the independent preview.
+so development can focus on connecting workspace changes and testing them in the work folder.
 Task delivery records remain accessible from the task context menu.
 
 ## Observable facts and persistent errors
@@ -458,7 +480,7 @@ Avoid an omnibus task status. Each surface shows only facts it can establish:
 | Plan item | Title, order, associated workspace | Started, finished or dependencies satisfied |
 | Git workspace | Branch, path, changed files, relation to base branch, Git operation | Agent activity or code correctness |
 | Hook | Result, output, exit code | Environment fully prepared or dependencies installed |
-| Preview | Applied combination, last successful snapshot, pending/failed update | A failed or unknown check means current content |
+| Work folder | Applied combination, last successful sync, pending/failed update | A failed or unknown check means current content |
 | Rebase check | Forecast, checked revisions, freshness | Clean means idle; forecast conflict is an actual conflict |
 | Delivery | Recorded contribution, current range, commit result | Task completion or requirement approval |
 
@@ -491,15 +513,15 @@ width without a second navigation system. Rebase rows wrap without hiding select
 
 The implementation follows these bounded choices:
 
-1. Later connection conflicts preserve the last coherent preview and mark it stale. Unexpected
-   preview-directory edits block replacement; saved primary edits are baseline inputs.
+1. Later connection conflicts keep the work folder on its last composition and mark it stale. The
+   user's work folder edits are merged into every update; primary's working files are not an input.
 2. Each delivery includes all undelivered saved workspace changes, whether committed or not. Delivery records
    preserve source boundaries independently of squash/rewrite SHAs. There is no subset picker.
 3. The page creates the primary commit with ordinary Git hooks. No terminal-only commit requirement.
 4. Rebase checks run in isolated temporary worktrees; explicit execution leaves actual
    conflicts for manual handling. Batch results are per workspace.
 5. The Git mechanism remains an internal engine package. Tasks are independent clones; Warden's external shared Git repository
-   backs preview and operation worktrees; primary remains separate. External backups and
+   backs composition and operation worktrees; the work folder is a linked worktree of primary, which receives only finished compositions and final commits. External backups and
    operation journals support interrupted operations, not undo UI.
 
 Do not add task branching, dependency scheduling, completion declarations, vendor-specific agent SDKs,
@@ -508,8 +530,8 @@ automatic force-push or general project management.
 
 ## Design review
 
-Connection actions on top-level task rows stay available while reviewing work. Preview's status bar
-and output explain the current combination and runtime path. The task list opens work directly
+Connection actions on top-level task rows stay available while reviewing work. The work folder's status bar
+and output explain the current combination and folder path. The task list opens work directly
 without planning/allocation/review/delivery navigation layers.
 
 The proposal keeps these operations independent:
@@ -520,7 +542,7 @@ The proposal keeps these operations independent:
 - Commit-message input and Git writes.
 - A successful delivery and an assertion that a task ended.
 
-Remaining complexity explains real operations: stale preview content, source ranges and rebase conflicts. It must not become extra lifecycle bookkeeping. Implementation and
+Remaining complexity explains real operations: stale work folder content, source ranges and rebase conflicts. It must not become extra lifecycle bookkeeping. Implementation and
 extension-host and webview browser verification follow these boundaries.
 
 ## Research references
@@ -534,7 +556,7 @@ engine mechanisms, including the deferred history implementation, rather than th
 | [Git cherry-pick documentation](https://github.com/git/git/blob/master/Documentation/git-cherry-pick.adoc) | Replay can conflict; merge commits and commits that become empty require explicit handling. | A temporary branch is a plausible basis, but “replay succeeded” and “the requested history is correct” are separate conclusions. |
 | [git-branchless](https://github.com/arxanas/git-branchless), [move](https://github.com/arxanas/git-branchless/wiki/Command:-git-move), [restack](https://github.com/arxanas/git-branchless/wiki/Command:-git-restack) | Commit movement, undo and repairing descendants after rewriting are established workflows. | Study rewrite mapping and subsequent work; its undo feature is outside Warden's scope. This is a tool, not a ready-made TypeScript history-editing API. |
 | [GitButler](https://github.com/gitbutlerapp/gitbutler) | Commit reword/move operations, parallel branches and an operation timeline are presented together. | Useful interaction reference. It is a larger Rust application; reuse is a separate technical and license decision. |
-| [simple-git](https://github.com/steveukx/git-js/tree/main/simple-git) | Provides a JavaScript interface to the installed Git executable, including raw commands and rebase. | A command wrapper does not supply Warden's delivery mapping, preview isolation or operation-result handling. |
+| [simple-git](https://github.com/steveukx/git-js/tree/main/simple-git) | Provides a JavaScript interface to the installed Git executable, including raw commands and rebase. | A command wrapper does not supply Warden's delivery mapping, composition isolation or operation-result handling. |
 | [libgit2 cherry-pick APIs](https://libgit2.org/docs/reference/main/cherrypick/index.html) | Exposes native cherry-pick operations. | An alternative building block, not a solution for the complete interaction; native integration needs evaluation later. |
 | [Git rebase: update-refs](https://github.com/git/git/blob/master/Documentation/git-rebase.adoc) | Branches checked out in another worktree are excluded from automatic reference updates. | Sibling workspace synchronization cannot be assumed to happen just by enabling this option. |
 | [Git update-ref](https://github.com/git/git/blob/master/Documentation/git-update-ref.adoc) | Reference updates can require an expected old value and participate in transactions. | There is support for detecting a moved branch, but reference updates alone do not coordinate checkout files and Warden state. |

@@ -307,7 +307,7 @@ export interface PreviewResponse {
   developmentHead?: string;
   worktree?: string;
   connectedIds: string[];
-  status: 'disconnected' | 'current' | 'stale' | 'paused';
+  status: 'disconnected' | 'current' | 'stale';
   updatedAt?: string;
   message?: string;
   files: { path: string; changeIds: string[] }[];

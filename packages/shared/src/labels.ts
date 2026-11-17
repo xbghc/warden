@@ -6,12 +6,11 @@ export const previewStatusLabels = {
   pending: 'Out of Date',
   updating: 'Syncing',
   synced: 'Synced',
-  conflict: 'Preview Conflict',
+  conflict: 'Work Folder Conflict',
   error: 'Sync Failed',
-  disconnected: 'Primary Only',
+  disconnected: 'Base Branch Only',
   current: 'Synced',
   stale: 'Out of Date',
-  paused: 'Migration Required',
 } satisfies Record<PreviewResponse['status'] | NonNullable<PreviewResponse['syncStatus']>, string>;
 
 export const rebaseCheckLabels = {

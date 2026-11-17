@@ -1,7 +1,7 @@
 {
   "name": "warden",
   "displayName": "Warden Workspace Review",
-  "description": "Plan parallel workspaces, review with native diffs, and run an isolated live preview.",
+  "description": "Plan parallel workspaces, review with native diffs, and work in one folder that combines them.",
   "version": "0.26.16",
   "publisher": "xbghc",
   "license": "MIT",
@@ -155,7 +155,7 @@
       },
       {
         "command": "warden.connect",
-        "title": "Connect / Disconnect Preview",
+        "title": "Connect to / Disconnect from Work Folder",
         "category": "Warden",
         "icon": "$(plug)"
       },
@@ -182,32 +182,45 @@
         "category": "Warden"
       },
       {
-        "command": "warden.previewTerminal",
-        "title": "Open Preview Terminal",
+        "command": "warden.openWorkFolder",
+        "title": "Open Work Folder",
+        "category": "Warden",
+        "enablement": "warden.agentReady"
+      },
+      {
+        "command": "warden.commitWorkFolder",
+        "title": "Commit Work Folder to Base Branch",
+        "category": "Warden",
+        "icon": "$(git-commit)",
+        "enablement": "warden.agentReady"
+      },
+      {
+        "command": "warden.pullBase",
+        "title": "Pull Base Branch",
         "category": "Warden",
         "enablement": "warden.agentReady"
       },
       {
         "command": "warden.runPreview",
-        "title": "Run Preview",
+        "title": "Run in Work Folder",
         "category": "Warden",
         "enablement": "warden.agentReady"
       },
       {
         "command": "warden.previewPath",
-        "title": "Copy Preview Path",
+        "title": "Copy Work Folder Path",
         "category": "Warden",
         "enablement": "warden.agentReady"
       },
       {
         "command": "warden.refreshPreview",
-        "title": "Sync Preview",
+        "title": "Sync Work Folder",
         "category": "Warden",
         "enablement": "warden.agentReady"
       },
       {
         "command": "warden.setup",
-        "title": "Rerun Preview Setup",
+        "title": "Rerun Work Folder Setup",
         "category": "Warden",
         "icon": "$(debug-restart)"
       },
@@ -241,7 +254,7 @@
       },
       {
         "command": "warden.showPreview",
-        "title": "Show Preview Output",
+        "title": "Show Work Folder Output",
         "category": "Warden",
         "enablement": "warden.agentReady"
       },
@@ -441,18 +454,18 @@
         },
         {
           "command": "warden.runPreview",
-          "when": "warden.agentReady && view == warden.task && warden.hasDevelopmentBranch && warden.hasPreviewCommand",
-          "group": "2_preview@1"
-        },
-        {
-          "command": "warden.previewTerminal",
-          "when": "warden.agentReady && view == warden.task && warden.hasDevelopmentBranch && !warden.hasPreviewCommand",
+          "when": "warden.agentReady && view == warden.task && warden.hasDevelopmentBranch",
           "group": "2_preview@1"
         },
         {
           "command": "warden.setup",
           "when": "warden.agentReady && view == warden.task && warden.hasDevelopmentBranch && warden.hasPreviewSetup && warden.previewSetupFailed",
           "group": "3_recovery@2"
+        },
+        {
+          "command": "warden.pullBase",
+          "when": "warden.agentReady && view == warden.task && warden.hasDevelopmentBranch",
+          "group": "2_preview@2"
         }
       ],
       "commandPalette": [
@@ -565,10 +578,6 @@
           "when": "warden.agentReady"
         },
         {
-          "command": "warden.previewTerminal",
-          "when": "warden.agentReady"
-        },
-        {
           "command": "warden.runPreview",
           "when": "warden.agentReady"
         },
@@ -643,6 +652,18 @@
         {
           "command": "warden.retryDeleteTask",
           "when": "false"
+        },
+        {
+          "command": "warden.openWorkFolder",
+          "when": "warden.agentReady"
+        },
+        {
+          "command": "warden.commitWorkFolder",
+          "when": "warden.agentReady && warden.workFolderEntry"
+        },
+        {
+          "command": "warden.pullBase",
+          "when": "warden.agentReady"
         }
       ],
       "editor/context": [
@@ -773,6 +794,13 @@
           "when": "view == warden.task && viewItem =~ /^wardenTask:deleting/",
           "group": "9_delete@1"
         }
+      ],
+      "scm/title": [
+        {
+          "command": "warden.commitWorkFolder",
+          "when": "scmProvider == git && warden.agentReady && warden.workFolderEntry && warden.hasDevelopmentBranch",
+          "group": "navigation"
+        }
       ]
     },
     "configuration": {
@@ -782,7 +810,7 @@
           "type": "boolean",
           "default": true,
           "scope": "machine",
-          "markdownDescription": "Automatically approve explicit ACP reads of existing files in this repository's primary, allocated task workspaces and preview. Directory reads, known credential files and ambiguous requests still require a choice. Uses only the agent's allow-once option; agent sandbox policies still apply. Configure in User or Remote User settings."
+          "markdownDescription": "Automatically approve explicit ACP reads of existing files in this repository's primary, allocated task workspaces and the work folder. Directory reads, known credential files and ambiguous requests still require a choice. Uses only the agent's allow-once option; agent sandbox policies still apply. Configure in User or Remote User settings."
         },
         "warden.autoRebase": {
           "type": "boolean",
@@ -794,7 +822,7 @@
           "type": "string",
           "default": "",
           "scope": "resource",
-          "description": "Command to run in the preview folder. You can also use the Warden preview terminal directly."
+          "description": "Command for Run in Work Folder. It runs in the work folder."
         },
         "warden.acpAgents": {
           "type": [
@@ -939,12 +967,17 @@
       {
         "view": "warden.task",
         "contents": "[Select Base Branch](command:warden.configure)",
-        "when": "warden.agentReady && (warden.repositoryState == ready && !warden.hasDevelopmentBranch)"
+        "when": "warden.agentReady && (warden.repositoryState == ready && !warden.hasDevelopmentBranch && !warden.primaryEntry)"
       },
       {
         "view": "warden.task",
         "contents": "[New Task](command:warden.createTask)",
         "when": "warden.agentReady && warden.repositoryState == ready && warden.hasDevelopmentBranch"
+      },
+      {
+        "view": "warden.task",
+        "contents": "[Open Work Folder](command:warden.openWorkFolder)",
+        "when": "warden.agentReady && warden.repositoryState == ready && warden.primaryEntry"
       }
     ]
   }

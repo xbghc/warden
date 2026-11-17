@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const vscode = require('vscode');
+const { openWork } = require('./work-folder.cjs');
 const { execFileSync } = require('node:child_process');
 const { verifyAgent } = require('./agent-setup.cjs');
 
@@ -18,7 +19,7 @@ exports.run = async () => {
   };
   try {
     await verifyAgent(workbench, fixture);
-    await workbench.open(fixture.root);
+    await openWork(workbench, fixture.root);
     await exports.checkAutoRebase(workbench, fixture.root, eventually);
     console.log('Packaged automatic rebase passed: idle tasks, uncertain cancellation, queued reservations, once per check, setting off');
   } finally {
@@ -43,14 +44,14 @@ exports.checkAutoRebase = async (workbench, root, eventually) => {
   git('add', '.');
   git('commit', '-qm', 'Initial');
   try {
-    await workbench.open(isolated);
+    await openWork(workbench, isolated);
     await workbench.backend.execute('workflow.configure', { branch: 'main' });
     await workbench.refresh(true);
     await eventually(() => workbench.agentReady, 30_000);
     await checkAutoRebase(workbench, isolated, eventually);
   } finally {
     // The launcher removes this fixture and its numbered siblings after all engines close.
-    await workbench.open(previous);
+    await openWork(workbench, previous);
   }
 };
 

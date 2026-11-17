@@ -12,3 +12,4 @@ export { HistoryService } from './history.js';
 export { inspectTaskWorktree } from './worktrees.js';
 export { taskConnectionPaths } from './task-access.js';
 export { processExited } from './liveness.js';
+export { workFolderPath } from './work-folder.js';

@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { chmod, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
@@ -642,6 +643,34 @@ describe('committing work folder edits', () => {
     const changes = await preview.changes();
     return { tree: changes.tree!, developmentHead: changes.developmentHead! };
   };
+
+  it('keeps edits committed or staged natively in the work folder as edits', { timeout: longGitTimeout }, async () => {
+    const { a, folder } = await editedFolder();
+    const base = head();
+    const run = (...args: string[]) =>
+      execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', ...args], { cwd: folder, encoding: 'utf8' }).trim();
+    const composition = run('rev-parse', 'HEAD');
+    // The Source Control view offers Git's own commit; on the detached HEAD it reaches no branch.
+    run('add', 'README.md');
+    run('commit', '-qm', 'Native commit in the work folder');
+    run('add', 'notes.txt');
+    expect(run('rev-parse', 'HEAD')).not.toBe(composition);
+    expect((await preview.changes()).files).toEqual([
+      { path: 'README.md', status: 'modified' },
+      { path: 'notes.txt', status: 'added' },
+    ]);
+    await edit(a, 'a.txt', 'A again\n');
+    expect(await preview.refresh()).toMatchObject({ syncStatus: 'synced' });
+    expect(await file(folder, 'a.txt')).toBe('A again\n');
+    expect(run('log', '-1', '--format=%s')).not.toBe('Native commit in the work folder');
+    expect(head()).toBe(base);
+    expect((await preview.changes()).files).toEqual([
+      { path: 'README.md', status: 'modified' },
+      { path: 'notes.txt', status: 'added' },
+    ]);
+    await workflow.commitWorkFolder({ ...(await review()), message: 'Describe the work folder' });
+    expect(fx.git('diff', '--name-only', 'HEAD^', 'HEAD').trim().split('\n')).toEqual(['README.md', 'notes.txt']);
+  });
 
   it('commits only the user edits to the base branch and leaves connected task changes pending', { timeout: longGitTimeout }, async () => {
     const { a, folder } = await editedFolder();

@@ -21,7 +21,7 @@ Read-only refresh never allocates workspaces. Script failure retains the assigne
 script output, with a separate script retry action.
 The default is an independent clone with its own `.git` directory, because many tools and build
 systems do not support linked worktrees. Agent development objects stay outside the primary
-repository; preview composition imports the task commits it needs into Warden's external shared
+repository; work folder composition imports the task commits it needs into Warden's external shared
 repository. Existing shared-repository worktrees and primary-linked worktrees remain usable. Ordering never enforces dependencies.
 
 A workspace corresponds to one linear task. It can contain multiple local commits and make multiple
@@ -31,25 +31,25 @@ historical metadata are retained as unread data; old checked items migrate as ar
 
 Selecting a base branch explicitly starts tracking it in Warden, even before it has tasks.
 Switching the primary checkout in Git or VS Code restores only previously tracked branches.
-An untracked branch or detached HEAD hides tasks, checks, preview status and preview recovery actions;
-it does not configure a requirement or update the retained preview. **Select Base Branch** is the
+An untracked branch or detached HEAD hides tasks, checks, work folder status and work folder recovery actions;
+it does not configure a requirement or update the work folder. **Select Base Branch** is the
 explicit entry point for using Warden on another branch. Switching back restores the previously selected
-task and retained preview connections. Branch names define the context even if their commits are identical. Tasks
+task and retained work folder connections. Branch names define the context even if their commits are identical. Tasks
 remain associated with their original branch; following the primary checkout never rebases, replaces
 or recycles their workspaces, and it does not redirect existing ACP conversations.
 
-Finish any delivery preparation and disconnect the preview before switching between tracked requirements. If an
+Finish any delivery preparation and disconnect the work folder's tasks before switching between tracked requirements. If an
 external checkout selects another tracked branch while either is active, Warden retains the previous context and explains
 the mismatch. Switch back to resolve the outstanding operation first. Leaving for an untracked branch
 quietly suspends the workbench without clearing either operation. Unfinished Git operations do not
-select another requirement. The independent preview directory and its ignored
+select another requirement. The work folder and its ignored
 dependencies persist across switches; its synchronization status becomes pending until refreshed for
 the new branch, and the configured setup script receives the new base branch.
 
 ## Shared repository
 
 The primary checkout retains its own Git repository. Warden creates a separate bare repository at
-`<primary>-warden/repo.git` for preview and composition. Task directories remain numbered siblings
+`<primary>-warden/repo.git` for composition. Task directories remain numbered siblings
 such as `<primary>-1` and `<primary>-2`; new ones are independent clones, while tasks created by
 earlier versions may still be worktrees of the shared repository. Opening Warden inside a clone
 Warden made (marked by `warden.main`) uses its primary's state; a sibling clone made by hand is its own
@@ -65,15 +65,16 @@ unreachable from any branch, so no push sends them, and Git prunes them once the
 Delivery applies only the reviewed final patch to primary and commits there with its ordinary hooks
 and signing. Agent histories do not enter primary.
 
-The shared repository outlives temporary operations and preview worktrees. Existing clones,
-primary-linked worktrees and standalone runtime previews keep their paths and repositories;
-Warden does not relocate active tasks or existing previews. Old operation journals remain recoverable.
+The shared repository outlives temporary operations. Existing clones and
+primary-linked worktrees keep their paths and repositories;
+Warden does not relocate active tasks. A preview directory kept in Warden's data directory by an
+earlier version is discarded and its connections are recomposed into the work folder. Old operation journals remain recoverable.
 Warden started from a shared task still resolves to the primary repository's state and lock.
 Internal composition disables hooks and signing only for its own commands, without changing the
 shared repository's configuration or ordinary agent commits.
 The shared repository mirrors primary's `info/exclude`, `info/attributes`, line-ending settings and
-filter/merge/diff drivers before each composition and preview check, so a file ignored only locally
-in primary is ignored in preview too. Hooks, identity and signing are not mirrored.
+filter/merge/diff drivers before each composition and work folder check, so a file ignored only locally
+in primary is ignored in compositions too. Hooks, identity and signing are not mirrored.
 Shallow primary clones retain their shallow boundary when imported into the shared repository. This
 keeps task history and review usable after agent commits without downloading additional remote history.
 
@@ -94,7 +95,7 @@ On timeout or output overflow, Warden terminates the setup process group on Linu
 tree on Windows, and waits for cleanup before reporting a retryable failure. If cleanup cannot be
 confirmed, setup remains running and blocks retry, rebase and deletion while its host owner is live
 or uncertain. Stop the identified commands and close their owning Warden window before recovering.
-Preview setup uses the same cleanup rule and blocks recomposition while cleanup is uncertain.
+Work folder setup uses the same cleanup rule and blocks recomposition while cleanup is uncertain.
 Scripts that deliberately detach into a new POSIX session are outside the owned process group;
 setup scripts should finish their foreground work rather than launch persistent daemons.
 A run interrupted by a closed window or host restart is reported as failed once its recorded owner
@@ -112,7 +113,7 @@ Inherited Git repository/index/object-store overrides are removed before running
 command in it operates on the assigned workspace. Normal identity and configuration still apply,
 and the script keeps the inherited locale and pager settings.
 
-## Connected previews
+## Work folder connections
 
 Use the connection switches in the left *Tasks* list to select one or more task workspaces. Warden snapshots their live committed and
 uncommitted changes relative to each workspace's undelivered baseline. It composes them with
@@ -128,21 +129,32 @@ paths; ask the agent to make the change in its workspace, or undo the edit. The 
 composition on every update, so staging in the work folder does not last. Ignored dependencies and
 caches persist.
 
-Preview synchronization stays visible in the status bar. Its tooltip and **Show Preview Output**
-provide the current combination, runtime path and last successful sync; output also includes conflict
-paths and setup logs. The workbench heading's **More Actions** menu offers Run Preview when a command
-is configured, otherwise Open Preview Terminal. Sync Preview appears for synchronization problems,
-and Rerun Preview Setup for a failed configured script; both remain available until recovery.
-The configured Preview Setup Script row also offers rerun. The Command Palette retains all preview
-commands, including copy-path and output. Tasks are top-level sidebar items, and each task owns its connection and file review.
-There is no Preview editor page. Synchronization and setup failures remain visible above the task list.
+The user's own edits are committed with **Commit Work Folder to Base Branch**: the difference between
+the composition and the folder's saved content is applied to the base branch commit alone and
+committed in primary with its hooks and signing. Edits that only apply on top of a connected task's
+changes are refused; commit that task first. Nothing sends an edit to a task workspace. A commit made
+directly on the folder's detached HEAD is not on the base branch; the next update returns HEAD to the
+composition and keeps the content as edits. **Pull Base Branch** runs `git pull --ff-only` in primary
+as a terminal task; fetch and push are done with Git in primary.
 
-One extension session owns background preview synchronization; it checks content each second and
+A window opened on primary offers only **Open Work Folder** once a base branch is selected; tasks,
+connections, review, rebase and chats belong to the window opened on the work folder.
+
+Work folder synchronization stays visible in the status bar. Its tooltip and **Show Work Folder Output**
+provide the current combination, folder path and last successful sync; output also includes conflict
+paths and setup logs. The workbench heading's **More Actions** menu offers Run in Work Folder, which
+opens the `warden.previewCommand` setting when no command is configured. Sync Work Folder appears for synchronization problems,
+and Rerun Work Folder Setup for a failed configured script; both remain available until recovery.
+The configured Work Folder Setup Script row also offers rerun. The Command Palette retains all work folder
+commands, including copy-path and output. Tasks are top-level sidebar items, and each task owns its connection and file review.
+There is no Work Folder editor page. Synchronization and setup failures remain visible above the task list.
+
+One extension session owns background work folder synchronization; it checks content each second and
 debounces saved edits. Other windows observe shared state and can take over when the owner closes. Initial conflicts fail
 the connection attempt and preserve the previous set and files. A later conflict preserves the last
-coherent preview and marks it stale. Adjust the source edits or selection, then choose *Sync Preview*.
+composition in the work folder and marks it stale. Adjust the source edits, your edits or the selection, then choose *Sync Work Folder*.
 The same sources, base commit and folder content are not composed again automatically; a change to any
-of them, or *Sync Preview*, retries. Disconnecting recomposes the remaining contributions and keeps
+of them, or *Sync Work Folder*, retries. Disconnecting recomposes the remaining contributions and keeps
 the user's edits.
 
 An update interrupted midway is finished on the next sync when every path it was writing still holds
@@ -158,19 +170,19 @@ is required. The source HEAD, saved content, delivery boundary and primary HEAD 
 continue from the previous delivery without first rebasing. `sourceBase` records that previous
 source tip, and `sourceTree` records delivered saved content, so A1 is excluded when delivering A2 even
 without a new task commit. Delivery leaves the task files, index and branch unchanged. After a manual rebase or merge incorporates
-primary commits newer than the recorded boundary, refreshed review, delivery, rebase and preview use
+primary commits newer than the recorded boundary, refreshed review, delivery, rebase and the work folder use
 the newest incorporated primary commit as the effective boundary, even after primary moves on or
 reverts one of them; a request with the previous boundary requires a new review.
 
-Preparation first composes the delivery in an isolated worktree. It leaves the independent preview running and stages only that delivery in the checked-out
-base branch. Existing primary user edits must be handled first.
+Preparation first composes the delivery in an isolated worktree. It leaves the work folder untouched and stages only that delivery in the checked-out
+base branch. Uncommitted files in primary must be handled first.
 Only one preparation uses that directory at a time. Other connected workspaces cannot enter the
 resulting commit. Review takes place before preparation; normal delivery prepares and commits
 in one operation. The staged diff is shown for recovery after an interrupted operation.
 
 Only saved file contents are included; unsaved editor buffers and ignored files are excluded.
 For a partially staged file, the saved working copy is the reviewed content, not only its index version.
-Run tests in the preview directory when needed, review the complete delivery, enter a message,
+Run tests in the work folder when needed, review the complete delivery, enter a message,
 and choose *Commit to Base Branch*. Editing a message does not stage anything.
 There is no test-passed checkbox. Warden runs ordinary `git commit -m` with the checkout's identity,
 signing, `core.hooksPath`, `pre-commit`, `prepare-commit-msg`, `commit-msg` and `post-commit` behavior.
@@ -260,7 +272,7 @@ They still refuse to release or reuse an assigned task's slot. The extension all
 ## Clone slots
 
 New tasks use independent clones, providing their own `.git` directories and branch refs.
-Preview and replay import the required clone commits into the external shared repository; primary
+Composition and replay import the required clone commits into the external shared repository; primary
 still receives only the final reviewed patch. Explicit rebase
 imports exact primary commits into the clone from validated local repositories, without remote
 fetches or remote-tracking ref updates. Clone ownership and branch

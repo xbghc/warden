@@ -1,7 +1,7 @@
 # Warden
 
 A VS Code workbench for developing one requirement on a **base branch**, with independent
-task workspaces, native read-only review and an isolated live preview.
+task workspaces, native read-only review and a work folder that combines them for testing.
 Development currently prioritizes connecting changes from multiple workspaces and testing them together.
 Warden supplies the workspaces and Git operations; you choose and run your own coding tools.
 Agent integrations need messaging and task-workspace binding; ACP is the current implementation.
@@ -10,7 +10,9 @@ Agent integrations need messaging and task-workspace binding; ACP is the current
 
 Install **Warden Workspace Review** (`xbghc.warden`) in VS Code and open the primary directory.
 Configure an agent through **Warden: Configure ACP**. Warden connects automatically at startup and
-after configuration changes. Once connected, choose **Warden: Select Base Branch**. Unavailable agents
+after configuration changes. Once connected, choose **Warden: Select Base Branch**, then
+**Open Work Folder**: Warden creates `<primary>-work` and opens it. You work in that window;
+primary only carries commits to and from the remote. Unavailable agents
 keep workspace controls hidden, with configuration and recovery in Settings.
 Only explicitly selected branches are tracked. Other branches stay quiet; switching back restores saved work.
 For custom agents, use **Custom Agent Example** in Settings or the [configuration examples](docs/vscode.md#custom-agent-examples).
@@ -33,17 +35,21 @@ code --install-extension packages/vscode/warden-0.26.16.vsix
    configured initialization script. A task is just its title; keep tasks small. Dragging tasks changes plan order only.
 2. **Develop.** Open Task Chat in the auxiliary sidebar, expand it into an editor when needed, or use external tools in its workspace. The same task
    keeps its workspace across multiple deliveries.
-3. **Connect for preview.** Use each task's connection action. Saved primary content and connected
-   task changes appear in a persistent independent preview directory for tests and dev servers.
-   Tasks sit directly in the sidebar; preview commands use its menu, and synchronization stays in the status bar.
+3. **Connect to the work folder.** Use each task's connection action. The base branch commit and
+   connected task changes are composed into the work folder, where you edit, run tests and dev servers.
+   Your own edits there are kept across updates. Tasks sit directly in the sidebar; work folder
+   commands use its menu, and synchronization stays in the status bar.
 4. **Review and commit.** Open task files in native read-only diffs. Use the workspace commit icon, enter a message in
    VS Code’s top input box and submit the reviewed increment with ordinary Git hooks and signing.
    Saved workspace edits can be squashed directly; no task-branch commit is required.
-5. **Synchronize.** Explicitly rebase selected workspaces when needed. Use VS Code’s native
+   Your own work folder edits appear in the native Source Control view; **Commit Work Folder to Base Branch**
+   commits them the same way.
+5. **Synchronize.** **Pull Base Branch** fast-forwards primary from its remote; fetch and push with
+   Git in primary. Explicitly rebase selected workspaces when needed. Use VS Code’s native
    Source Control Graph to inspect base-branch commit history.
 
-Edit human code in primary and agent code in task workspaces. Preview is generated runtime input.
-A failed connection preserves the previous preview; a failed commit preserves recoverable content.
+Edit your own code in the work folder; agents edit theirs in task workspaces and make every change to it.
+A failed connection leaves the work folder unchanged; a failed commit preserves recoverable content.
 No readiness declarations, task-completion checkboxes or agent-process inference are required.
 Use **Delete Task…** to discard a task after confirmation. It releases the workspace without a
 backup, normally retaining its directory and ignored environment files for later reuse.
@@ -58,7 +64,7 @@ All normal VS Code diff navigation and accessibility features remain available.
 
 | Guide | Contents |
 | --- | --- |
-| [VS Code](docs/vscode.md) | Native navigation, forms, preview runtime, scripts and migration |
+| [VS Code](docs/vscode.md) | Native navigation, forms, work folder runtime, scripts and migration |
 | [Workflow](docs/workflow.md) | Product responsibilities and Git operation semantics |
 | [Terminology](docs/terminology.md) | Canonical names, operation directions and status vocabulary |
 | [Interaction design](docs/design.md) | Interaction contract and desktop adaptation |

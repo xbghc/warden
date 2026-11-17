@@ -55,7 +55,7 @@ export type WorkbenchAction =
   | { type: 'task.move'; taskId: string; before: string | null }
   | { type: 'task.deliver'; taskId: string; message: string }
   | { type: 'task.message'; taskId: string; message: string }
-  | { type: 'preview.refresh' | 'preview.setup' | 'preview.terminal' | 'preview.run' | 'preview.copy' | 'rebase.check' }
+  | { type: 'preview.refresh' | 'preview.setup' | 'preview.run' | 'preview.copy' | 'rebase.check' }
   | { type: 'settings.save'; config: WorkspaceConfig }
   | { type: 'rebase.run'; items: { changeId: string; sourceHead: string; developmentHead: string }[] };
 
@@ -131,7 +131,6 @@ export function parseWorkbenchAction(value: unknown): WorkbenchAction {
       return { type: action.type, taskId: identity(action.taskId), message: string(action.message) };
     case 'preview.refresh':
     case 'preview.setup':
-    case 'preview.terminal':
     case 'preview.run':
     case 'preview.copy':
     case 'rebase.check':

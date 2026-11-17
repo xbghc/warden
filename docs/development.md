@@ -33,7 +33,7 @@ for Git binding validation and observed prompt submission, then start the permis
 
 `WARDEN_VSCODE_SUITE=deletion pnpm test:vscode` runs the packaged task deletion flow: native menu
 contributions, confirmation/cancellation, local agent disconnection, chat cleanup, directory
-reuse and visible retry after failed preview disconnection. The full native suite also includes it.
+reuse and visible retry after failed work folder disconnection. The full native suite also includes it.
 
 `WARDEN_VSCODE_SUITE=autorebase pnpm test:vscode` runs automatic rebase in the packaged host: idle
 Can Rebase tasks only, busy tasks resuming after their turn, one attempt per check and the setting
@@ -54,7 +54,7 @@ The extension manifest owns the release version. The repository root is private 
 
 | Directory | Responsibility |
 | --- | --- |
-| `packages/engine` | Repository sessions, workflow, Git adapters, state, preview and history |
+| `packages/engine` | Repository sessions, workflow, Git adapters, state, work folder and history |
 | `packages/shared` | Domain types, review versions and validated webview actions |
 | `packages/vscode` | Native views, immutable documents, commands and webview controllers |
 | `packages/webview` | React/shadcn forms using packaged resources and VS Code theme colors |
@@ -94,8 +94,8 @@ loading and cross-window ownership; an unchanged transcript alone does not prove
 
 The extension invokes named typed engine commands; UI and transport code never bypass the engine's
 operation validation. Engine errors retain stable codes. `Engine.close()` rejects new requests and drains
-pending operations and observers. The preview-owner lease is independent of the mutation lock.
-State, repository and preview locks retain permanent `.lock/v2/` containers and atomically publish
+pending operations and observers. The work folder owner lease is independent of the mutation lock.
+State, repository and work folder locks retain permanent `.lock/v2/` containers and atomically publish
 their `active` directory containing one unique owner file. Ownership tests must preserve the actual filesystem operations when controlling
 reclaimer interleavings. Dead locks from the older plain-file format intentionally fail with
 `legacy_lock_requires_cleanup`; follow the named-file recovery instructions in
@@ -134,7 +134,7 @@ Debug or Trace, then reproduce the problem. VS Code manages the local log files 
 use **Developer: Open Logs Folder** to locate host logs. In SSH, WSL and container windows, Warden
 runs and logs on the workspace extension host. Logs are not uploaded or stored in repository state.
 
-- **Info** records activation, repository lifetime, engine mutations, preview status changes,
+- **Info** records activation, repository lifetime, engine mutations, work folder status changes,
   ACP connection/session/turn lifetime, permission waits and disconnect requests.
 - **Debug** adds ACP startup phases, process IDs, negotiated protocol capabilities, request methods,
   durations, first streamed update, tool status, session restoration and view routing.
@@ -157,7 +157,7 @@ details and recent stderr to explain generic provider errors. Structured payload
 known environment secrets and common credential formats are redacted before output. Stderr is
 buffered across chunks; oversized lines are dropped whole. Agent-supplied free-form error messages
 and stderr can still contain other project-specific context. Logging failures cannot replace the
-operation's result. Explicit **Show Preview Output** and **Show Setup Script Output** retain their
+operation's result. Explicit **Show Work Folder Output** and **Show Setup Script Output** retain their
 user-requested script output.
 
 ### Startup performance
@@ -185,7 +185,7 @@ host). Logging failures do not fail the measured operation.
 - `activation` includes workbench construction, repository opening and the initial refresh.
 - `repository.open` includes waiting for previous work (`repository.wait`), `engine.open`,
   `repository.refresh` and restoring expanded reviews (`review.restore`). The refresh measures
-  the combined workflow/preview/workspace read (`repository.get`), `workflow.context`, optional
+  the combined workflow/work folder/workspace read (`repository.get`), `workflow.context`, optional
   branch following (`workflow.configure`) and observer startup (`engine.start`) separately.
   `context.update` measures ordered context publication; unchanged values do not cross the host boundary again.
 - Initial advisory synchronization checks (`rebase.check`) run separately and may finish after
@@ -215,7 +215,7 @@ operations. Cover stable protocol initialization with no client filesystem/termi
 streamed updates, permission answers, cancellation, explicit authentication, automatic session restoration on opening, stale task
 bindings and cross-window connection ownership. The fixture must exercise real stdio and its own tools;
 client file callbacks or Warden-run agent commands would test an unsupported architecture.
-Automatic read approvals cover primary/task/preview files, manual fallback for ambiguous or sensitive
+Automatic read approvals cover primary/task/work folder files, manual fallback for ambiguous or sensitive
 targets, replaced roots and files, user-policy changes, cancellation during ownership checks and late
 results after reconnect. The packaged chat suite verifies the real engine scope and rejects workspace
 settings that attempt to override the User read policy.
@@ -232,7 +232,7 @@ Browser navigation drains queued host actions before replacing the page, so it c
 base-branch selection that the following view is meant to verify.
 Packaged authentication-state checks use the same connection wait budget as successful startup,
 including task-binding validation and process creation on Windows.
-Conversation state observers must still clean up deleted tasks without acquiring preview ownership,
+Conversation state observers must still clean up deleted tasks without acquiring work folder ownership,
 including after workbench replacement and while state notifications are draining during shutdown.
 Also cover initial and between-turn configuration, grouped/boolean selectors, legacy mode fallback,
 complete selector replacement, command updates, thought streaming, usage and compaction patch semantics.
@@ -326,18 +326,18 @@ In environments requiring an HTTP proxy, configure the test downloader's `npm_co
 
 The suite checks native tree setup with top-level tasks, tree/list layout switching and saved preference,
 nested-file navigation and refresh, row menus, drag/keyboard ordering, input cancellation, stale-session rejection,
-independent expansion and native read-only snapshots, stale review rejection, preview isolation/setup/terminal,
-native preview status, compact execution menus with and without a configured command, persistent sync/setup
-recovery actions, Settings-row reruns and stale-row rejection, preview terminal reuse across repository
-switches and recreation after closure, and diagnostic output without a Preview editor page,
+independent expansion and native read-only snapshots, stale review rejection, work folder isolation/setup, the primary window's single Open Work Folder entry,
+native work folder status, the Run in Work Folder menu with and without a configured command, persistent sync/setup
+recovery actions, Settings-row reruns and stale-row rejection, committing work folder edits to the base branch,
+and diagnostic output without a Work Folder editor page,
 ordinary commit hooks and retained-stage recovery, native commit-input cancellation and stale-version
 rejection while typing, multiline delivery, fresh workspaces, stale-session
 rejection and preservation of delivery records. History rewriting remains covered by engine tests. CI runs the same VSIX in minimum and
 stable hosts on Windows, Linux and macOS. Branch-following coverage switches the primary checkout
 through Git, including branches at the same commit, verifies per-branch task/draft restoration and
 stale action rejection, quiet untracked/detached checkouts, explicit tracking of empty branches and
-inactive reloads. It preserves dirty task workspaces and preview connections while away, as well as
-connected-preview guards when switching between tracked branches.
+inactive reloads. It preserves dirty task workspaces and work folder connections while away, as well as
+connected-work-folder guards when switching between tracked branches.
 On Linux with ImageMagick installed, set `WARDEN_VSCODE_BRANCH_SCREENSHOTS` to save native screenshots
 of untracked, explicitly tracked empty and restored connected branches.
 CI packages the VSIX after quality checks so browser and extension-host tests run alongside the engine

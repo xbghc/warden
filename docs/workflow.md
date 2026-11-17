@@ -6,8 +6,8 @@ Warden supplies workspaces, configurable hooks, task-bound agent interactions,
 diff review and local squash integration. Keep the current version simple enough to support
 that loop without turning it into an autonomous agent orchestrator or a project approval system.
 
-The current development priority is reliable connections: combine workspace changes in the independent
-preview and run tests there. History arrangement is deferred; other existing operations remain available
+The current development priority is reliable connections: combine workspace changes in the work
+folder and run tests there. History arrangement is deferred; other existing operations remain available
 while their value is assessed against that core loop.
 
 This document records the product contract. [Workspaces and tasks](worktrees.md) describes the
@@ -21,7 +21,8 @@ automatic rebase is limited to idle, conflict-free workspaces as described in [W
 ## Scope and responsibilities
 
 The primary setting is one developer responsible for a company requirement on a **base branch**, such as `feature/order`. This role does not imply the repository's `main` or default branch.
-The primary directory is that branch's checkout; temporary task branches live in worktrees.
+The primary directory is that branch's checkout and the channel to its remote; the user works in the
+work folder, `<primary>-work`, and temporary task branches live in task workspaces.
 The developer decomposes that requirement into small changes, develops them in separate
 worktrees, reviews them and adds them to the base branch as commits. Publishing or
 merging that branch into the company's main branch remains outside Warden's core workflow.
@@ -31,9 +32,9 @@ merging that branch into the company's main branch remains outside Warden's core
 | Plan | Decompose the requirement and arrange the work sequence. | Keep one ordered plan of intended commits; TODO and orchestration are the same thing. |
 | Prepare | Configure initialization scripts when needed. | Automatically allocate one fresh workspace from the base branch when a task is added and run its configured initialization script. |
 | Execute | Choose an agent, send prompts and answer its permission requests, or use external tools. | Bind messages and agent sessions to the assigned task workspace through a supported integration; agents execute their own tools and commands. |
-| Preview and test | Choose connected worktrees and edit primary code and run the development server, lint or tests in the preview directory. | Compose their live changes in a persistent independent preview, preserving primary Git state. |
+| Combine and test | Open the work folder, choose connected workspaces, edit code and run the development server, lint or tests there. | Compose the base branch commit and their live changes in the work folder, keeping the user's edits and leaving primary's files, index and branch untouched. |
 | Review | Inspect the worktree's changes and decide whether they are ready to integrate. | Show the complete delivery diff before squash; let the user copy code locations for their own tools. |
-| Integrate | Initiate squash, decide what testing is needed, and commit after validation. | Perform the requested Git operations, preserve normal commit hooks, and report their results. |
+| Integrate | Initiate squash, decide what testing is needed, and commit after validation; commit own work folder edits and pull the base branch when needed. | Perform the requested Git operations, preserve normal commit hooks, and report their results. |
 | Continue | Continue the task and choose when to synchronize its workspace. | Keep the workspace available, show synchronization conditions and rebase only when requested. |
 | Accept the requirement | Inspect commit history and decide whether the requirement is complete. | Use VS Code’s native history view; no separate final-approval feature. |
 
@@ -49,10 +50,10 @@ readiness, idleness or task completion just to keep Warden's records up to date.
 Git state, selected connections and operation results instead. A clean worktree is not an idle agent.
 
 Branch tracking is explicit: **Select Base Branch** opts that branch into Warden. Git checkout alone
-never tracks a new branch. Untracked branches and detached HEAD show no task, synchronization or preview
-status, and automatic preview updates pause without warnings. Returning to a tracked branch restores
+never tracks a new branch. Untracked branches and detached HEAD show no task, synchronization or work folder
+status, and automatic work folder updates pause without warnings. Returning to a tracked branch restores
 its saved context, including tasks, drafts and connections; switching between tracked requirements
-retains the existing commit-preparation and preview-connection guards.
+retains the existing commit-preparation and work-folder-connection guards.
 
 An available agent integration is a prerequisite for using the workbench. Warden automatically
 connects to the configured ACP server at startup in a trusted workspace and after profile changes.
@@ -62,12 +63,17 @@ connections hide **Configure ACP**. If the agent still needs user action after l
 contains just **Configure ACP**, revealing the native Settings view stacked below it for presets,
 connection status, authentication and recovery. Installation or configuration alone does not establish availability.
 
-Connection initialization sends no prompt, grants no tool permission and initiates no Git or preview
+The workbench lives in the window opened on the work folder. A window opened on primary offers
+**Configure ACP** and **Select Base Branch** as above, and once a base branch is selected only
+**Open Work Folder**, which creates `<primary>-work` if needed and opens it. Tasks, connections,
+review, rebase and chats are not offered in the primary window.
+
+Connection initialization sends no prompt, grants no tool permission and initiates no Git or work folder
 operation. Disconnect, replacement, failure and shutdown retire the owned connection process. Task
 agents retain separate workspace-bound connections; shutdown closes them and persists their local
 records. Opening a task's chat automatically resumes its session or creates the first session;
 reopening the workbench alone does not resume task work or replay prompts automatically.
-Failures do not trigger a restart loop. Existing tasks, drafts and preview connections are retained.
+Failures do not trigger a restart loop. Existing tasks, drafts and work folder connections are retained.
 Other integrations must verify their supported interface without requiring ACP configuration or
 Warden ownership of their agent process.
 
@@ -90,7 +96,8 @@ external shared repository or data directory. Deliveries apply the reviewed fina
 commit graph. Successful operations retire their temporary worktrees and recovery backups;
 interrupted operations retain the data their recovery journals still need. User branches and
 reflogs are never expired automatically. Default tasks are independent clones with their own object
-stores; preview and composition use a Warden-owned shared Git repository outside primary. Existing
+stores; composition uses a Warden-owned shared Git repository outside primary, and only a complete
+composition is fetched into primary's repository for the work folder, unreachable from any branch. Existing
 shared-repository task worktrees remain supported, and primary-linked worktrees deliberately share primary's objects.
 
 The list's order expresses the user's intended work sequence. It does **not** assert that each
@@ -108,7 +115,7 @@ mandatory acceptance templates or agent-generated reports.
 
 Users may explicitly delete a task, including one with undelivered source commits or saved edits.
 One native confirmation identifies the task, workspace folder, branch treatment and discarded work.
-Deletion creates no recovery backup. It closes the task's owned agent connection, removes its preview
+Deletion creates no recovery backup. It closes the task's owned agent connection, removes its work folder
 contribution, releases the workspace and removes the task. Commits already contributed to the base
 branch and their minimal historical associations remain. Task drafts and Warden-local chat
 records are deleted; the agent application's own history is not managed by this operation.
@@ -120,13 +127,13 @@ not release a workspace. Pending deletion is an operation record, not a task-com
 
 A connection owned by another window must be disconnected there first. A pending primary commit
 belonging to the deleted task must be finished or cancelled before deletion; ordinary primary edits
-and unrelated task conversations do not block it. Preview disconnection failure preserves the task
+and unrelated task conversations do not block it. Work folder disconnection failure preserves the task
 and its workspace. Later cleanup failures retain an explicit retry action and report any already
 completed disconnection. Restart never silently resumes destructive cleanup.
 
 A workspace is an execution resource, normally an independent clone of primary with its own `.git`
-directory, on a task branch based on the base branch. Preview and temporary operations use Warden's
-external shared bare repository at `<primary>-warden/repo.git`.
+directory, on a task branch based on the base branch. Composition and temporary operations use Warden's
+external shared bare repository at `<primary>-warden/repo.git`; the work folder is a linked worktree of primary.
 Task paths remain `<primary>-<n>`. Task creation allocates fresh logical workspaces and runs configured initialization hooks. Reusing a free physical directory is an internal implementation detail; users never select or adopt an old workspace.
 Workspace creation does not launch an agent. Opening Task Chat connects its agent session; users can also run
 external tools in that directory. In the current ACP integration, Warden owns only the agent process
@@ -164,44 +171,58 @@ necessary; Warden introduces no agent-idle declaration.
 Conversation records and session metadata live outside source control. Reload or connection loss
 never automatically relaunches a task agent or resends an uncertain prompt. Restoration is explicit and
 uses the same agent's supported session-loading capability; otherwise a new session retains the old
-record without claiming to restore model state. Turn completion never automatically connects preview,
+record without claiming to restore model state. Turn completion never automatically connects to the work folder,
 commits, accepts a delivery, rebases or retries an operation.
 
-## Primary directory and temporary connections
+## Work folder and temporary connections
 
-Human code is edited and saved in the primary directory; agents edit task workspaces. The baseline
-is the primary directory's saved working content, including staged and untracked non-ignored files.
-Unsaved editor buffers are not published. New generated previews are persistent worktrees outside
-primary, sharing the external Git repository with default task workspaces. Existing standalone
-previews keep their directory and repository. Run development servers, tests and debug sessions
-there. Shared Git objects do not replace snapshots of uncommitted content.
+The user edits and saves code in the work folder; agents edit task workspaces and make every change
+to their own code. The work folder is `<primary>-work`, a linked worktree of primary with a detached
+HEAD on Warden's composition: the base branch commit plus the connected workspaces' undelivered live
+changes. Primary is only the channel to the remote. Its working files are not an input, and nothing
+is developed there. Run development servers, tests and debug sessions in the work folder, using the
+window's own terminal. Unsaved editor buffers are not part of anything Warden reads.
 
-Connecting workspaces composes their undelivered live changes against that saved baseline. Preview
-never modifies primary files, HEAD, index or refs. A conflicting initial connection fails without
-changing the selected connections. A later conflict preserves the previous coherent preview and
-reports stale/conflict status. Disconnecting removes the selected contributions; with no connections,
-the preview still follows saved primary content. Warden does not require isolated delivery testing.
+Connecting workspaces composes their undelivered live changes on the base branch commit. Whatever
+differs from the composition in the work folder is the user's own edit. Every update replays those
+edits on the new composition first and writes only the paths the merge changed; a conflict leaves
+the folder exactly as it is and reports the conflicting paths. Composition never modifies primary
+files, HEAD, index or refs. A conflicting initial connection fails without changing the selected
+connections. A later conflict keeps the folder on its previous composition and reports
+stale/conflict status. Disconnecting removes the selected contributions and keeps the user's edits;
+with no connections, the folder follows the base branch commit. Warden does not require isolated
+delivery testing.
+
+The user's edits never flow back into a task workspace. To change an agent's code, ask the agent.
+The user's own edits are reviewed in the work folder window's native Source Control view, where they
+are exactly the working-tree changes, and **Commit Work Folder to Base Branch** commits them in
+primary with normal hooks and signing. Edits that only apply on top of a connected task's changes are
+refused until that task is committed.
+
+**Pull Base Branch** runs `git pull --ff-only` in primary as a terminal task, so credential prompts
+and output are native; the work folder then updates to the new base commit. Fetch and push are done
+with Git in primary. Warden adds no commands for them.
 
 Changes are observed by content hashes and debounced. Each workspace reports pending, updating,
 synced, conflict or error based on captured/applied versions. Source edits arriving during composition
-are captured by a later update; an agent's clean Git state never establishes idleness. Preview files
-are generated and must not be edited. Unexpected runtime edits stop publication without overwriting
-them. Publication is journaled and recoverable after a complete old/new write; ambiguous partial
-writes remain visible for manual repair.
+are captured by a later update; an agent's clean Git state never establishes idleness. A file saved
+in the work folder while an update is being prepared postpones that update, so the save is never
+overwritten. Updates are journaled and finished after an interruption when every path being written
+still holds its previous or new content; anything else stops the update and remains for manual repair.
 
-The runtime directory retains ignored dependencies and caches. A user-configured idempotent setup
+The work folder retains ignored dependencies and caches. A user-configured idempotent setup
 script runs on initialization and successful code updates, with manual retry and output/exit status.
-It is serialized with publication and receives the primary and preview paths. Scripts decide whether
+It is serialized with updates and receives the primary and work folder paths. Scripts decide whether
 the environment needs updating; Warden does not interpret dependency manifests.
 
 VS Code is the product entry point. It provides native task diffs, task navigation, review, delivery,
-scripts, explicit rebase, preview terminals/tasks and task-bound ACP
-conversations for agents that execute their own tools. A preview-versus-baseline or provenance
-view is deliberately omitted. See [VS Code](vscode.md) for installation and runtime configuration.
+scripts, explicit rebase, a work folder run task and task-bound ACP
+conversations for agents that execute their own tools. A provenance view of the composition
+is deliberately omitted. See [VS Code](vscode.md) for installation and runtime configuration.
 
 ## Review first, then squash
 
-Live review and connection previews include uncommitted workspace content. Delivery review pins
+Live review and the composition include uncommitted workspace content. Delivery review pins
 the source HEAD, saved content tree when applicable, delivery boundary and primary HEAD. Saved
 uncommitted changes can be delivered without first committing in the task workspace. Review has
 one complete file list. Users must review all content they intend to commit.
@@ -215,7 +236,7 @@ explicit comparisons. Formal delivery continues to use the primary checkout's Gi
 flowchart LR
   P[User adds a task] --> W[Warden automatically prepares its workspace]
   W --> E[User develops through task conversations or external tools]
-  E --> V[User connects worktrees and tests in the preview directory]
+  E --> V[User connects worktrees and tests in the work folder]
   E --> R[User reviews worktree changes]
   V --> R[User reviews worktree changes]
   R -->|More work needed| E
@@ -244,8 +265,8 @@ operation checks and visible errors, not an additional agent-delivery or approva
 After complete review, one delivery action composes the increment and commits it in the primary
 checkout with normal Git hooks and signing. Message entry happens before any staging; cancellation
 leaves Git untouched. Source, delivery boundary or primary-version changes require fresh review.
-Tests and dev servers continue in the independent preview, whose connection set stays intact.
-Human primary edits must be handled before delivery and cannot be silently included.
+Tests and dev servers continue in the work folder, whose connection set stays intact.
+Uncommitted files in primary must be handled before delivery and cannot be silently included.
 
 Preparation remains an internal journaled step, with explicit recovery after interruption or hook
 failure. Recovery shows the retained staged contents or manual commit for review before accepting
@@ -265,7 +286,7 @@ belong to that branch, even when two branches point to the same commit. Returnin
 its selected task. Task workspaces keep their original branches, baselines and files;
 existing ACP conversations keep their original task. Untracked branches and detached HEAD suspend the
 workbench quietly. An unfinished Git operation does not select a new requirement. An unfinished delivery
-preparation or active preview connection blocks switching to another tracked requirement with a visible
+preparation or active work folder connection blocks switching to another tracked requirement with a visible
 explanation; return to the original branch to resolve it first.
 
 When the base branch advances, Warden automatically updates synchronization indicators.
@@ -302,7 +323,7 @@ operation journals are preserved. Task ordering continues to express the work pl
 
 ## Current-version boundaries
 
-Prioritize workspace creation, connections, preview setup and testing. The existing ordered plan,
+Prioritize workspace creation, connections, work folder setup and testing. The existing ordered plan,
 read-only review and delivery/synchronization operations remain available. In particular, do not add:
 
 - Agent-driven task decomposition or special scope-change approval features.
@@ -310,7 +331,7 @@ read-only review and delivery/synchronization operations remain available. In pa
 - Mandatory agent handoff commands, delivery reports or automatic completion detection.
 - Task-complete/idle declarations, automatic workspace recycling or rebase triggered by acceptance.
 - ACP client file/terminal tools, an agent shell runner, sandbox or execution guard. Agents own their execution; Warden owns the stdio connection process.
-- A custom code editor or preview-versus-baseline diff; native VS Code editing/review is used.
+- A custom code editor, a Warden list of work folder edits or a way to send them to a task; native VS Code editing, Source Control and review are used.
 - A separate requirement approval or final acceptance workflow.
 - A generic project-management state machine for every pause, interruption or reassignment.
 
@@ -326,20 +347,21 @@ The working copy implements the workflow above. It has not been published as a r
 | Plan and workspace | Ordered task titles, automatic allocation on creation, persistent workspaces and repeated deliveries. No completion declaration or automatic recycling. |
 | Workspace hooks | Generic creation/reuse scripts with cwd, environment, output and status. Allocation does not launch an agent. |
 | ACP conversation | Explicit task-bound text prompts, updates, permissions, authentication, cancel, disconnect and supported session loading. One executable connection per task; agents execute their own tools. |
-| Connection | Live committed/uncommitted changes composed in an isolated worktree of the external shared Git repository, then published only to the persistent preview directory. Failed initial connections preserve the prior set and files. |
-| Later connection conflict | Preserve the last coherent preview and display stale status; user changes the connections or source work. |
+| Connection | Live committed/uncommitted changes composed in an isolated worktree of the external shared Git repository, then written only to the work folder with the user's edits merged in. Failed initial connections preserve the prior set and files. |
+| Later connection conflict | Keep the work folder on its last composition and display stale status; user changes the connections, source work or their own edits. |
+| Work folder commit | The user's edits relative to the composition, pinned by reviewed content and base commit, applied to the base commit alone and committed in primary with hooks/signing. Edits resting on connected task changes are refused. |
 | Delivery | All current undelivered saved workspace changes, pinned by source HEAD, saved content tree, delivery boundary and primary HEAD. No task commit prerequisite or file/commit subset picking. |
 | Extension commit | Normal primary-directory Git commit with hooks/signing. Failed hooks retain files/index. No test-passed checkbox or agent handoff. |
 | Rebase | Isolated checks and explicit single/selected/all execution, with per-workspace results and pinned heads. Actual conflicts are left for the user to handle. |
-| Navigation | Ordered tasks are top-level sidebar items. Settings is a native collapsible view stacked below Workbench. More Actions offers one preview execution action and Settings, with repository selection and persistent recovery actions when needed. Preview diagnostics use the status bar and output; secondary commands remain in the Command Palette. Selecting a task opens its Task Chat; selecting a file directly opens review. Preview has no editor page. |
+| Navigation | Ordered tasks are top-level sidebar items. Settings is a native collapsible view stacked below Workbench. More Actions offers Run in Work Folder, Pull Base Branch and Settings, with repository selection and persistent recovery actions when needed. Work folder diagnostics use the status bar and output; secondary commands remain in the Command Palette. Selecting a task opens its Task Chat; selecting a file directly opens review. The work folder has no editor page. A window on primary offers only Open Work Folder. |
 
 `sourceBase` records the last delivered source tip, independently of the squash commit SHA.
 Each delivery has a stable identifier and a source range, primary parent, commit, message and
 review record. The retained history engine preserves delivery-to-commit associations for compatibility; it is not
 invoked by the extension’s navigation or refresh path.
 
-Independent preview files have a durable ownership record. An unexpected preview file/index change
-blocks replacement rather than being discarded. Interrupted operations recognize only their known
+The work folder has a durable ownership record. Its files are the user's: an update writes only the
+paths its merge changed and stops rather than overwrite other content. Interrupted operations recognize only their known
 old/new snapshots. This operation bookkeeping is not an undo feature. Users handle unexpected
 edits and actual rebase conflicts themselves.
 

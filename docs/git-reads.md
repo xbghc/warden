@@ -59,7 +59,7 @@ itself queried every checkout. `get()` and `rebaseChecks()` now build one map fo
 look up every task in it. Writes continue to obtain a fresh inventory under the existing repository
 lock; a map from a prior response is never mutation authority.
 
-The typed `repository.get` read combines workflow, preview and workspace responses for a workbench
+The typed `repository.get` read combines workflow, work folder and workspace responses for a workbench
 refresh, sharing one detailed checkout inventory between workflow and workspace readers. Each call
 owns its inventory, drains all component reads on failure, and discards it on completion. Concurrent
 or later calls do not share completed observations. Standalone queries and mutations keep their fresh
@@ -120,7 +120,7 @@ The script creates disposable linked workspaces and an isolated state directory.
 Each operation records wall time, process CPU time, and direct Git process starts from Git Trace2.
 Git's own child processes are counted separately. Process CPU and peak RSS exclude Git
 child-process CPU and memory. Measurements use warm filesystem caches,
-include Trace2 overhead and have no preview connections. Run timing comparisons sequentially on
+include Trace2 overhead and have no work folder connections. Run timing comparisons sequentially on
 an otherwise idle machine; do not time them alongside compilation or the full test suite.
 
 `--source-root` imports an older source checkout for a real baseline rather than reimplementing
@@ -139,7 +139,7 @@ backend and are retained as historical evidence, not measurements of the current
 and the then-available optimized Rust + Git backend. They were collected sequentially in a
 Linux x64 container with 8 available CPUs (AMD EPYC 9V74), Node 24.19.0 and Git 2.51.1.
 These synthetic linked-worktree measurements establish a local baseline, not a latency promise
-for arbitrary repositories, filesystems, clone workspaces or connected previews.
+for arbitrary repositories, filesystems, clone workspaces or connected work folders.
 
 All times below are median milliseconds over 12 samples. Each fixture adds 1,000 tracked files;
 N counts task workspaces and excludes the primary checkout. Git starts are direct invocations
@@ -193,11 +193,11 @@ a reduction in total CPU or total memory.
 
 ## Further optimization
 
-Diff generation, preview composition, snapshots, delivery, explicit rebase and history replay
+Diff generation, work folder composition, snapshots, delivery, explicit rebase and history replay
 use TypeScript coordination and validated Git commands. Their safety and recovery contracts
 remain independent of read-performance optimization.
 
-The next performance decisions should measure unchanged connected previews, large diffs and
+The next performance decisions should measure unchanged connected work folders, large diffs and
 object reads. Batching or a persistent `git cat-file` process can be evaluated per operation
 behind typed interfaces. Changes must preserve tested semantics and outperform the organized
 CLI baseline on representative inputs. State persistence and mutations must retain the existing

@@ -3,6 +3,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const vscode = require('vscode');
+const { openWork } = require('./work-folder.cjs');
 
 exports.checkBranchChats = async (workbench, root, eventually) => {
   const fixture = JSON.parse(await fs.readFile(process.env.WARDEN_VSCODE_FIXTURE, 'utf8'));
@@ -134,7 +135,7 @@ exports.checkBranchChats = async (workbench, root, eventually) => {
       assert.equal(chat.draft.text, 'Unsent original-branch follow-up');
       assert.equal(chat.binding.identity, identity);
     }
-    await workbench.open(root);
+    await openWork(workbench, root);
     await follow(undefined);
     assert.equal(chat.session.snapshot().status, 'waiting_permission', 'reopening an inactive workbench retains the live task connection');
     await conversations.handle(chat, { type: 'permission', requestId: permission.id, optionId: 'allow-once' });

@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const vscode = require('vscode');
+const { openWork } = require('./work-folder.cjs');
 const { execFileSync } = require('node:child_process');
 const { checkFileViews } = require('./file-views.cjs');
 
@@ -79,7 +80,7 @@ async function checkQuietRefresh(workbench, workspace) {
       };
       workbench.render();
       assert.match(workbench.sidebar.view.message, /last successful composition/, 'stale content is visible without opening an editor');
-      assert.match(workbench.sidebar.view.message, /Preview setup failed/);
+      assert.match(workbench.sidebar.view.message, /Work folder setup failed/);
       assert.match(workbench.status.tooltip, /conflicting-file.ts/);
       assert.equal(workbench.status.backgroundColor.id, 'statusBarItem.warningBackground');
     } finally {
@@ -108,9 +109,8 @@ exports.checkSidebar = async (workbench, extension, repository, eventually) => {
     contributions.viewsWelcome.some((row) => row.contents === '[New Task](command:warden.createTask)' && row.when.includes('warden.hasDevelopmentBranch')),
   );
   const previewMenu = contributions.menus['view/title'].filter((item) => item.group?.startsWith('2_preview@'));
-  assert.deepEqual(previewMenu.map((item) => item.command).sort(), ['warden.previewTerminal', 'warden.runPreview']);
-  assert(previewMenu.find((item) => item.command === 'warden.runPreview').when.includes('warden.hasPreviewCommand'));
-  assert(previewMenu.find((item) => item.command === 'warden.previewTerminal').when.includes('!warden.hasPreviewCommand'));
+  assert.deepEqual(previewMenu.map((item) => item.command).sort(), ['warden.pullBase', 'warden.runPreview']);
+  assert(!previewMenu.find((item) => item.command === 'warden.runPreview').when.includes('warden.hasPreviewCommand'), 'Run in Work Folder is always offered');
   assert(!contributions.menus['view/item/context'].some((item) => /viewItem == (preview|tasks)/.test(item.when)), 'retired grouping rows have no menu entries');
   assert(contributions.menus['view/item/context'].some((row) => row.command === 'warden.deliver'));
   assert(!contributions.menus['view/item/context'].some((row) => row.command === 'warden.taskOptions'), 'allocation details are not task actions');
@@ -253,7 +253,7 @@ exports.checkSidebar = async (workbench, extension, repository, eventually) => {
   workbench.taskInput.value = 'Keep this repository draft';
   const staleTransfer = new vscode.DataTransfer();
   workbench.sidebar.handleDrag([second], staleTransfer, token.token);
-  await workbench.open(repository);
+  await openWork(workbench, repository);
   await draft;
   const order = workbench.tasks().map((task) => task.id);
   await workbench.sidebar.handleDrop(undefined, staleTransfer, token.token);

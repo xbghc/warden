@@ -3,6 +3,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const vscode = require('vscode');
+const { openWork } = require('./work-folder.cjs');
 const { checkAgentPresets, checkAgentSetup } = require('./agent-setup.cjs');
 
 const checkChats = async (workbench, extension, fixture, eventually) => {
@@ -290,7 +291,7 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
     chat.session.snapshot().record.messages.some((item) => item.role === 'thought'),
     'the packaged host retains streamed thoughts',
   );
-  await workbench.open(fixture.root);
+  await openWork(workbench, fixture.root);
   assert.equal(chat.binding.taskId, newTask.id, 'workbench navigation does not retarget the conversation');
   assert.equal(chat.session.snapshot().status, 'connected');
   await conversations.handle(chat, { type: 'new' });
@@ -531,10 +532,10 @@ exports.run = async () => {
     }
   };
   try {
-    await workbench.open(fixture.unconfigured);
+    await openWork(workbench, fixture.unconfigured);
     await checkAgentSetup(workbench, extension, fixture, eventually);
     await checkAgentPresets(workbench, fixture, eventually);
-    await workbench.open(fixture.root);
+    await openWork(workbench, fixture.root);
     await checkAgentSetup(workbench, extension, fixture, eventually);
     await checkChats(workbench, extension, fixture, eventually);
     console.log(

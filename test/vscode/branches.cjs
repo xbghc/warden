@@ -4,6 +4,7 @@ const { writeFileSync } = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const vscode = require('vscode');
+const { openWork } = require('./work-folder.cjs');
 const { verifyAgent } = require('./agent-setup.cjs');
 const { checkStartup } = require('./startup.cjs');
 const { checkBranchChats } = require('./branch-chats.cjs');
@@ -159,7 +160,7 @@ exports.checkBranches = async (workbench, root, eventually) => {
   const retained = (await workbench.backend.execute('workflow.get')).workflow;
   assert.equal(retained.developmentBranch, 'main');
   assert(!retained.trackedBranches.includes('feature/other'), 'visiting a Git branch does not enroll it');
-  await workbench.open(root);
+  await openWork(workbench, root);
   await inactive();
   await screenshot('untracked-branch');
   await workbench.api('config.save', (await workbench.backend.execute('workflow.get')).workspaceConfig);
@@ -217,7 +218,7 @@ exports.checkBranches = async (workbench, root, eventually) => {
     assert.equal(saved.base, task.base);
     assert.equal(saved.sourceBase, task.sourceBase);
   }
-  await workbench.open(root);
+  await openWork(workbench, root);
   assert.equal(workbench.model('workspaces').task.id, a.id, 'the branch selection survives reopening the repository');
 
   await workbench.api('preview.connect', { connectedIds: [a.id] });
@@ -235,7 +236,7 @@ exports.checkBranches = async (workbench, root, eventually) => {
   git('switch', '-c', 'another-unrelated');
   await eventually(() => workbench.session !== inactiveSession);
   await inactive();
-  await workbench.open(root);
+  await openWork(workbench, root);
   await inactive();
   git('switch', 'main');
   await follow('main');

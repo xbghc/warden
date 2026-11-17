@@ -74,7 +74,9 @@ branch clears its historical target metadata.
 
 Ordered tasks are top-level items in the left sidebar. Within a task, its file list selects the diff
 directly. Connection selection is independent and remains available in each task's action row.
-Preview commands and settings use the view heading's menu; preview status remains in the status bar.
+Work folder commands and settings use the view heading's menu; work folder status remains in the status bar.
+The user's own work folder edits are not task review: they are the working-tree changes in the native
+Source Control view of the work folder window, committed with **Commit Work Folder to Base Branch**.
 
 Review presents the complete file list for the current comparison. Staging does not establish that
 a file has been reviewed.
@@ -114,7 +116,7 @@ Warden recommends small deliveries that can be reviewed in full. An accepted com
 primary baseline; the next delivery excludes the previous one. There is no “since I last looked”
 checkpoint comparison. Checkpoint routes return 404 and checkpoint target keys are unsupported.
 Old checkpoint selections migrate to the full working-tree comparison in the same workspace.
-Internal snapshots still support preview composition and recovery; they are not review controls.
+Internal snapshots still support work folder composition and recovery; they are not review controls.
 
 Mock code is edited in primary alongside other human code. Content already incorporated by a task
 belongs to its baseline. Uncommitted primary edits block task delivery until the user handles them.

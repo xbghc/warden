@@ -16,16 +16,16 @@ operation and its scope; they do not introduce additional domain concepts.
 | --- | --- |
 | Base Branch | The explicitly selected local branch for the current work, such as `feature/order`. Task branches start from it, rebase onto it and contribute reviewed commits back to it. This role does not imply the repository's default branch or a permanent parent-child hierarchy. |
 | Task / Tasks | One small, linear piece of work identified by its title alone / the ordered task list. Creating a task automatically allocates its workspace. A task can contribute several commits over time; order does not establish dependencies or automatic scheduling. |
-| Workbench | Warden's native sidebar containing ordered tasks as top-level items; not an execution directory or lifecycle object. Preview controls use native menus and the status bar. |
-| Primary Folder | The user's checkout of the base branch. Human edits and final commits belong here. Switching its branch changes the work context, not the folder's role. Use “primary directory” in technical prose if needed. |
+| Workbench | Warden's native sidebar containing ordered tasks as top-level items; not an execution directory or lifecycle object. It is available in the window opened on the work folder; work folder controls use native menus and the status bar. |
+| Primary Folder | The user's checkout of the base branch and the channel to the remote: final commits are made here, and fetch, pull and push run here. Its working files are not an input to the work folder and nothing is developed here. Switching its branch changes the work context, not the folder's role. Use “primary directory” in technical prose if needed. |
 | Workspace | A task's allocated execution context, including its branch and assigned directory, retained across commits. Deleting a task releases this allocation; its physical directory can serve a new workspace later. Qualify it as “task workspace” when distinguishing it from a VS Code workspace. |
 | Workspace Folder | The physical task directory. It normally survives task deletion with its Git checkout structure and ignored local environment files. |
 | Task Branch | The branch inside a task workspace, holding source commits independently of the base branch. |
-| Preview | Saved primary content combined with connected workspaces' pending changes for testing. Connecting a workspace does not commit its changes to the base branch. |
-| Preview Folder | The separate directory containing composed files, dependencies and runtime files. User-run tests and development servers run here. |
+| Work Folder | `<primary>-work`, the folder the user opens in VS Code and works in: a linked worktree of primary whose detached HEAD is Warden's composition, the base branch commit plus connected workspaces' pending changes. The user's edits, dependencies, tests and development servers live here; whatever differs from the composition is the user's own edit and is kept across updates. Connecting a workspace does not commit its changes to the base branch. |
+| Composition | The commit Warden builds from the base branch commit and the connected workspaces' pending changes. It is the work folder's HEAD and is not part of any branch. |
 | Commits | Within a task, the recorded commits contributed to the base branch. Prefer **Commits to <branch>** for the history picker title. These are not all source commits in the workspace. |
 | Pending Changes | Task changes not yet committed to the base branch. They may already have source commits in the task workspace, so do not call all of them “uncommitted.” |
-| Baseline | Reference content for an operation. The preview baseline includes saved primary edits, which may be uncommitted. A task's incorporated baseline is an identified commit. |
+| Baseline | Reference content for an operation. The work folder's baseline is the base branch commit in primary; primary's uncommitted files are not part of it. A task's incorporated baseline is an identified commit. |
 | Source Boundary | The source revision and, for saved workspace deliveries, content tree separating a previous contribution from the next increment. It is distinct from the final squash commit. |
 | Agent | The tool receiving task messages in its assigned workspace. It owns its tools and execution policies; Warden need not own its process or communicate through ACP. A legacy Executor label is only a label, not evidence of a connection or activity. |
 | Task Chat | The persistent conversation bound to one repository, task and workspace. Opening it automatically resumes its agent session or creates the first session, without sending a prompt. |
@@ -44,14 +44,17 @@ complete the task, recycle its workspace or prove that an agent is idle.
 | Rename Task / Reorder Tasks | Change a task's title or order without changing Git. Tasks have no description or notes field. |
 | Copy Task Brief | Copy the task title, workspace, base branch and working instructions for an external agent. |
 | Delete Task… / Retry Delete | Confirm discarding task work and releasing its workspace while retaining the directory / explicitly finish an interrupted deletion. No recovery backup is created. Commits already on the base branch remain. |
+| Open Work Folder | In a window opened on the primary folder, create the work folder if needed and open it. It is the only workbench action there once a base branch is selected. |
 | Open Workspace | Open the assigned directory. Legacy plans are prepared automatically on use. |
 | Retry Workspace Allocation | Retry for the same task after a failed allocation. |
-| Connect / Disconnect Preview | Include or remove a workspace's contribution in the preview. |
-| Sync Preview | Synchronize the preview folder with saved primary content and connected task changes by recomposing them. Automatic synchronization uses the same operation. |
-| Run Preview | Run the configured command in the preview folder; separate from synchronizing files. |
-| Open Preview Terminal | Open or reveal a native terminal for the current repository's preview folder. |
-| Rerun Preview Setup | Explicitly rerun the configured preview setup script; available on its Settings row and in the failure menu. |
-| Show Preview Output | Show the current composition, path, synchronization details and setup output in the Warden output channel. |
+| Connect to / Disconnect from Work Folder | Include or remove a workspace's contribution in the work folder. |
+| Sync Work Folder | Synchronize the work folder with the base branch commit and connected task changes by recomposing them and merging the user's edits. Automatic synchronization uses the same operation. |
+| Run in Work Folder | Run the configured command in the work folder; separate from synchronizing files. Without a configured command it opens the `warden.previewCommand` setting. |
+| Copy Work Folder Path | Copy the work folder's path. |
+| Rerun Work Folder Setup | Explicitly rerun the configured work folder setup script; available on its Settings row and in the failure menu. |
+| Show Work Folder Output | Show the current composition, path, synchronization details and setup output in the Warden output channel. |
+| Commit Work Folder to Base Branch | Commit the user's own work folder edits, as shown in the native Source Control view, to the base branch in primary. The message is prefilled from the Source Control input box. |
+| Pull Base Branch | Run `git pull --ff-only` in the primary folder as a terminal task. Fetch and push have no Warden command; use Git in primary. |
 | Rebase | Open Git rebase controls for task branches. Warden supplies the selected workspace paths and base branch. |
 | Check Again | Repeat read-only rebase checks; do not execute a rebase. |
 | Rebase Selected | Run Git rebase in the selected workspaces, targeting the base branch. |
@@ -63,15 +66,18 @@ complete the task, recycle its workspace or prove that an agent is idle.
 | Connect ACP / Reconnect ACP / Cancel Connection | Explicitly connect or retry from Settings / replace the connection / stop a pending connection attempt. Startup and profile changes connect automatically. Initialization creates no Warden task or work prompt. |
 | Disconnect ACP | Close the workbench ACP connection and its owned process. Task conversations retain their own connections, ended from Agent Processes. |
 | Workspace Setup Script | The user script run on task workspace allocation; distinct from Git commit hooks. |
-| Preview Setup Script | The user script preparing the preview environment; distinct from the command running a development server. |
+| Work Folder Setup Script | The user script preparing the work folder environment; distinct from the command running a development server. |
+| Work Folder Command | The `warden.previewCommand` setting: the command Run in Work Folder executes. |
 
 In rebase controls, Workspace identifies the execution context, not a separate kind of rebase.
 The [operation guide](worktrees.md#synchronization) describes how Warden chooses the source boundary
 and target and checks each workspace before invoking Git.
 
-Use **Refresh** for rereading visible state, **Sync Preview** for composing preview files, and
-**Rebase** for changing task branches. Preview synchronization flows from the primary
-folder and connected workspaces into the preview folder; it does not copy preview edits back.
+Use **Refresh** for rereading visible state, **Sync Work Folder** for composing work folder files, and
+**Rebase** for changing task branches. Synchronization flows from the base branch commit and connected
+workspaces into the work folder. The user's edits there never flow back to a task: agents make every
+change to their own code, and the user's edits reach the base branch only through
+**Commit Work Folder to Base Branch**.
 Use **Commit message** and **Commits** in their respective contexts. Use **Stop Turn**
 for cancellation and **End Agent Process** when closing an active agent process. Stop Turn does not
 claim that commands started by the agent have stopped; End Agent Process stops the ones still attached to it.
@@ -79,13 +85,12 @@ claim that commands started by the agent have stopped; End Agent Process stops t
 ## Observable status vocabulary
 
 The same protocol value can have different meanings by context. Keep the shared mappings in
-`packages/shared/src/labels.ts` scoped to preview synchronization, rebase checks and execution results.
+`packages/shared/src/labels.ts` scoped to work folder synchronization, rebase checks and execution results.
 
 | Context | Labels |
 | --- | --- |
-| Preview sync | Out of Date / Syncing / Synced / Preview Conflict / Sync Failed |
-| Preview fallback without task connections | Primary Only; freshness can still be shown separately |
-| Legacy preview awaiting migration | Migration Required |
+| Work folder sync | Out of Date / Syncing / Synced / Work Folder Conflict / Sync Failed |
+| Work folder without task connections | Base Branch Only; freshness can still be shown separately |
 | Rebase check | Up to Date / Can Rebase / Conflicts Expected / Blocked / Unknown |
 | Missing check | Not Checked |
 | Rebase execution result | Rebased / Skipped / Failed, with per-workspace details |
@@ -96,7 +101,7 @@ The same protocol value can have different meanings by context. Keep the shared 
 | Task allocation | Workspace Allocation Failed with retry; legacy plans show Prepared on first use; archived plans show Archived |
 | Interrupted commit with prepared content | Pending Commit; this does not certify review or testing |
 
-**Conflicts Expected** is a forecast. **Preview Conflict** concerns composing the preview.
+**Conflicts Expected** is a forecast. **Work Folder Conflict** concerns composing the work folder, including merging the user's edits.
 Actual rebase conflicts are reported through the execution result and Git state. Keep failures,
 unknown states and stale checks distinct from success.
 
@@ -119,9 +124,10 @@ Existing persisted fields, command IDs, error codes and hook environment variabl
 | `worktree`, `slot`, `Surface: 'workspaces'` | Workspace path, internal physical allocation and workbench surface |
 | `sourceBase`, `ChangeDelivery`, `deliveries`, `integration` | Source boundary, recorded base-branch commits and in-progress commit preparation |
 | `warden.deliver`, `task.deliver`, `warden.taskHistory` | Commit to base branch and task commit history |
-| Preview `syncStatus`, `synced`, `sources` | Preview sync status and composed contributions |
-| `preview.refresh`, `warden.refreshPreview` | Sync Preview; existing action and command IDs remain compatible |
-| `warden.showPreview`, `workspaces.show` with `surface: 'preview'` | Show Preview Output; retained entry points open native output instead of an editor page |
+| `PreviewResponse`, `connectionPreview`, `syncStatus`, `synced`, `sources` | Work folder state, sync status and composed contributions |
+| `preview.*`, `preview_*` error codes, `warden.refreshPreview`, `warden.runPreview`, `warden.previewPath`, `warden.showPreview` | Work folder engine commands, errors and host commands |
+| `warden.previewCommand`, `previewSetup`, `WARDEN_PREVIEW` | Work Folder Command, Work Folder Setup Script and the work folder path given to that script |
+| `workfolder.changes`, `workfolder.commit`, `warden.commitWorkFolder`, `warden.openWorkFolder`, `warden.pullBase` | The user's work folder edits, their commit to the base branch, opening the work folder and pulling the base branch |
 | `rebase.*`, `RebaseCheck`, `RebaseBatchResponse` | Git rebase checks and execution in task workspaces |
 
 Use these concepts for new internal names where compatibility does not constrain them. Update this

@@ -3,6 +3,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const vscode = require('vscode');
+const { openWork } = require('./work-folder.cjs');
 
 exports.checkPreviewLineEndings = async (workbench, root, eventually) => {
   const git = (...args) =>
@@ -84,7 +85,7 @@ exports.checkPreviewActions = async (workbench, extension, eventually) => {
   const overflow = menus['view/title'].filter((item) => !item.group?.startsWith('navigation'));
   assert.deepEqual(
     overflow.map((item) => item.command).sort(),
-    ['warden.configureScripts', 'warden.previewTerminal', 'warden.refreshPreview', 'warden.runPreview', 'warden.selectRepository', 'warden.setup'],
+    ['warden.configureScripts', 'warden.pullBase', 'warden.refreshPreview', 'warden.runPreview', 'warden.selectRepository', 'warden.setup'],
     'More Actions contains execution, Settings, repository selection and conditional recovery',
   );
   assert.equal(
@@ -95,7 +96,7 @@ exports.checkPreviewActions = async (workbench, extension, eventually) => {
     overflow.find((item) => item.command === 'warden.setup').when,
     'warden.agentReady && view == warden.task && warden.hasDevelopmentBranch && warden.hasPreviewSetup && warden.previewSetupFailed',
   );
-  for (const name of ['previewTerminal', 'runPreview', 'previewPath', 'showPreview', 'refreshPreview', 'setup', 'configure'])
+  for (const name of ['openWorkFolder', 'pullBase', 'runPreview', 'previewPath', 'showPreview', 'refreshPreview', 'setup', 'configure'])
     assert.equal(menus.commandPalette.find((item) => item.command === `warden.${name}`).when, 'warden.agentReady', 'secondary commands remain discoverable');
   assert.equal(workbench.status.command, 'warden.showPreview', 'status-bar activation keeps the diagnostic entry point');
 
@@ -112,12 +113,12 @@ exports.checkPreviewActions = async (workbench, extension, eventually) => {
     // Hold background reads while exercising the native menu's failure-state transitions.
     workbench.refresh = async () => {};
     try {
-      for (const syncStatus of ['pending', 'updating', 'synced', 'stale', 'conflict', 'error', 'paused', 'synced']) {
+      for (const syncStatus of ['pending', 'updating', 'synced', 'stale', 'conflict', 'error', 'synced']) {
         workbench.preview = { ...preview, syncStatus };
         await workbench.updateContext();
-        assert.equal(workbench.contextValues.get('warden.previewNeedsSync'), ['stale', 'conflict', 'error', 'paused'].includes(syncStatus));
+        assert.equal(workbench.contextValues.get('warden.previewNeedsSync'), ['stale', 'conflict', 'error'].includes(syncStatus));
         await vscode.commands.executeCommand('notifications.clearAll');
-        assert.equal(workbench.contextValues.get('warden.previewNeedsSync'), ['stale', 'conflict', 'error', 'paused'].includes(syncStatus));
+        assert.equal(workbench.contextValues.get('warden.previewNeedsSync'), ['stale', 'conflict', 'error'].includes(syncStatus));
       }
     } finally {
       workbench.refresh = refresh;
@@ -133,7 +134,7 @@ exports.checkPreviewActions = async (workbench, extension, eventually) => {
     await vscode.commands.executeCommand('warden.setup', row);
     await eventually(() => workbench.contextValues.get('warden.previewSetupFailed') === true);
     assert.equal(workbench.contextValues.get('warden.hasPreviewSetup'), true);
-    assert.match(workbench.sidebar.view.message, /Preview setup failed/);
+    assert.match(workbench.sidebar.view.message, /Work folder setup failed/);
     await vscode.commands.executeCommand('notifications.clearAll');
     assert.equal(workbench.contextValues.get('warden.previewSetupFailed'), true, 'dismissing notifications does not hide recovery');
     await workbench.backend.execute('config.save', { ...config, previewSetup: 'echo recovered' });
@@ -163,44 +164,57 @@ exports.checkPreviewActions = async (workbench, extension, eventually) => {
   }
 };
 
-exports.checkPreviewTerminals = async (workbench, fixture, eventually) => {
+exports.checkWorkFolderEntry = async (workbench, eventually) => {
   const repository = workbench.backend.root;
-  const original = new Set(vscode.window.terminals);
-  const matching = () => vscode.window.terminals.filter((terminal) => terminal.creationOptions.env?.WARDEN_REPO === workbench.backend.root);
+  const folder = `${repository}-work`;
+  const git = (...args) => execFileSync('git', args, { cwd: repository, encoding: 'utf8' }).trim();
   try {
-    const preview = await workbench.ensurePreview();
-    const foreign = vscode.window.createTerminal({
-      name: 'Warden · Preview',
-      cwd: preview.worktree,
-      env: { WARDEN_REPO: fixture.unconfigured, WARDEN_PREVIEW: preview.worktree },
-    });
-    await vscode.commands.executeCommand('warden.previewTerminal');
-    assert.equal(matching().length, 1, 'a same-name terminal for another repository is not reused');
-    const terminal = matching()[0];
-    assert.equal(terminal.creationOptions.cwd, preview.worktree);
-    assert.equal(terminal.creationOptions.env.WARDEN_PREVIEW, preview.worktree);
-    await vscode.commands.executeCommand('warden.previewTerminal');
-    assert.deepEqual(matching(), [terminal], 'repeated opens reuse the live preview terminal');
-    terminal.dispose();
-    await eventually(() => !vscode.window.terminals.includes(terminal));
-    await vscode.commands.executeCommand('warden.previewTerminal');
-    assert.equal(matching().length, 1);
-    const replacement = matching()[0];
-    assert.notEqual(replacement, terminal, 'closing a terminal allows a new one');
-    await workbench.open(fixture.unconfigured);
-    await eventually(() => workbench.agentReady);
-    await vscode.commands.executeCommand('warden.previewTerminal');
-    const other = matching().filter((item) => item !== foreign);
-    assert.equal(other.length, 1, 'another preview path gets its own terminal even with the same repository marker');
-    assert.equal(other[0].creationOptions.cwd, workbench.preview.worktree);
-    assert.notEqual(other[0], replacement);
+    // A window on primary leads to the work folder and offers nothing else.
     await workbench.open(repository);
     await eventually(() => workbench.agentReady);
-    await vscode.commands.executeCommand('warden.previewTerminal');
-    assert.deepEqual(matching(), [replacement], 'returning to a repository reuses its retained terminal');
+    assert.equal(workbench.contextValues.get('warden.primaryEntry'), true);
+    assert.equal(workbench.contextValues.get('warden.workFolderEntry'), false);
+    assert.equal(workbench.contextValues.get('warden.hasDevelopmentBranch'), false, 'primary exposes no workbench actions');
+    assert.deepEqual(await workbench.getChildren(), [], 'primary lists no tasks');
+    assert.equal(await vscode.commands.executeCommand('warden.previewPath'), folder, 'primary can still locate the work folder');
+    await openWork(workbench, repository);
+    await eventually(() => workbench.agentReady);
+    assert.equal(workbench.contextValues.get('warden.primaryEntry'), false);
+    assert.equal(workbench.contextValues.get('warden.workFolderEntry'), true);
+    assert.equal(workbench.contextValues.get('warden.hasDevelopmentBranch'), true);
+    assert.notEqual((await workbench.getChildren()).length, 0, 'the work folder window lists tasks');
+
+    // The user's own edit is committed to the base branch from the work folder.
+    await vscode.commands.executeCommand('warden.refreshPreview');
+    await eventually(() => workbench.preview?.syncStatus === 'synced');
+    const before = git('rev-parse', 'HEAD');
+    await workbench.commitWorkFolder('Nothing to commit');
+    assert.equal(git('rev-parse', 'HEAD'), before, 'a folder without edits commits nothing');
+    await fs.writeFile(path.join(folder, 'own-edit.txt'), 'Own edit\n');
+    await workbench.commitWorkFolder('   ');
+    assert.equal(git('rev-parse', 'HEAD'), before, 'an empty message commits nothing');
+    await workbench.commitWorkFolder('Commit own edit');
+    assert.equal(git('log', '-1', '--format=%s'), 'Commit own edit');
+    assert.equal(git('rev-parse', 'HEAD~1'), before);
+    assert.equal(git('show', 'HEAD:own-edit.txt'), 'Own edit');
+    assert.equal(git('status', '--porcelain'), '', 'primary is clean after the commit');
+    assert.equal(await fs.readFile(path.join(folder, 'own-edit.txt'), 'utf8'), 'Own edit\n');
+    assert.deepEqual((await workbench.backend.execute('workfolder.changes')).files, [], 'committed edits are no longer changes of the work folder');
+
+    const started = new Promise((resolve) => {
+      const subscription = vscode.tasks.onDidStartTask((event) => {
+        if (event.execution.task.name !== `Pull ${workbench.branch}`) return;
+        subscription.dispose();
+        resolve(event.execution);
+      });
+    });
+    await vscode.commands.executeCommand('warden.pullBase');
+    const execution = await started;
+    assert.equal(execution.task.execution.process, 'git');
+    assert.deepEqual(execution.task.execution.args, ['pull', '--ff-only']);
+    assert.equal(execution.task.execution.options.cwd, repository, 'the pull runs in primary');
+    execution.terminate();
   } finally {
-    for (const terminal of vscode.window.terminals) if (!original.has(terminal)) terminal.dispose();
-    await eventually(() => vscode.window.terminals.every((terminal) => original.has(terminal)));
-    if (workbench.backend.root !== repository) await workbench.open(repository);
+    if (!workbench.workFolderEntry) await openWork(workbench, repository);
   }
 };

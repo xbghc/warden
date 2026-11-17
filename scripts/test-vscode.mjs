@@ -41,6 +41,8 @@ try {
   await writeFile(path.join(task.worktree, 'agent.txt'), 'Agent addition\n');
   await backend.close();
   backend = undefined;
+  // The workbench is used from the window opened on the work folder.
+  git('worktree', 'add', '--quiet', '--detach', '--', `${root}-work`, 'HEAD');
   const fixture = path.join(directory, 'fixture.json');
   await writeFile(
     fixture,
@@ -90,7 +92,7 @@ try {
     ),
     extensionTestsEnv: { XDG_DATA_HOME: process.env.XDG_DATA_HOME, WARDEN_VSCODE_FIXTURE: fixture },
     launchArgs: [
-      root,
+      `${root}-work`,
       '--no-sandbox',
       '--disable-gpu',
       '--disable-workspace-trust',

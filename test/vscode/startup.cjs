@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const { execFileSync } = require('node:child_process');
 const vscode = require('vscode');
+const { openWork } = require('./work-folder.cjs');
 
 exports.checkStartup = async (workbench, fixture, eventually) => {
   while (workbench.checkReading) await workbench.checkReading;
@@ -62,7 +63,7 @@ exports.checkStartup = async (workbench, fixture, eventually) => {
     return result;
   };
   let loaded = false;
-  const loading = workbench.open(fixture.root).then(() => {
+  const loading = openWork(workbench, fixture.root).then(() => {
     loaded = true;
   });
   try {
@@ -78,7 +79,7 @@ exports.checkStartup = async (workbench, fixture, eventually) => {
       await new Promise((resolve) => setTimeout(resolve, 300));
       execFileSync('import', ['-display', process.env.DISPLAY, '-window', 'root', process.env.WARDEN_VSCODE_STARTUP_SCREENSHOT]);
     }
-    await workbench.open(fixture.unconfigured);
+    await openWork(workbench, fixture.unconfigured);
     releaseCheck();
     while (workbench.checkReading) await workbench.checkReading;
     assert.equal(workbench.checks, undefined, 'late checks cannot populate a different repository');
@@ -88,7 +89,7 @@ exports.checkStartup = async (workbench, fixture, eventually) => {
     releaseCheck();
     await loading;
     while (workbench.checkReading) await workbench.checkReading;
-    await workbench.open(fixture.root);
+    await openWork(workbench, fixture.root);
   }
 
   while (workbench.checkReading) await workbench.checkReading;
@@ -160,7 +161,7 @@ exports.checkStartup = async (workbench, fixture, eventually) => {
     let switching;
     try {
       await eventually(() => observed);
-      switching = workbench.open(fixture.unconfigured);
+      switching = openWork(workbench, fixture.unconfigured);
       await eventually(() => workbench.switching);
       releaseRead();
       await switching;
@@ -174,7 +175,7 @@ exports.checkStartup = async (workbench, fixture, eventually) => {
       releaseRead();
       await reading;
       await switching;
-      await workbench.open(fixture.root);
+      await openWork(workbench, fixture.root);
     }
   }
 };

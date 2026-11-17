@@ -182,10 +182,10 @@ export class Settings implements vscode.TreeDataProvider<SettingsNode>, vscode.D
       // Row eligibility avoids global menu updates rerendering removed tree items during navigation.
       if (kind === 'preview' && scriptValue(config, kind).trim()) item.contextValue = 'wardenPreviewSetup';
       item.description = scriptValue(config, kind).trim() ? 'Configured' : 'Not Set';
-      item.tooltip = `${scriptLabels[kind]}\n${model.repository}\nOpen in the text editor. Save to update configuration. ${kind === 'preview' ? 'Runs on preview initialization, updates and configuration changes.' : 'Runs when a task workspace is allocated.'}`;
+      item.tooltip = `${scriptLabels[kind]}\n${model.repository}\nOpen in the text editor. Save to update configuration. ${kind === 'preview' ? 'Runs when the work folder is created, updated or reconfigured.' : 'Runs when a task workspace is allocated.'}`;
       return item;
     });
-    scripts.children.push(this.row('preview-command', 'Preview Command', 'terminal', 'workbench.action.openSettings', ['warden.previewCommand']));
+    scripts.children.push(this.row('preview-command', 'Work Folder Command', 'terminal', 'workbench.action.openSettings', ['warden.previewCommand']));
     for (const child of scripts.children) child.session = model.session;
     roots.push(scripts);
     return roots;

@@ -6,7 +6,7 @@ export type ScriptKind = 'workspace' | 'reuse' | 'preview';
 export const scriptLabels: Record<ScriptKind, string> = {
   workspace: 'Workspace Setup Script',
   reuse: 'Legacy Workspace Reuse Script',
-  preview: 'Preview Setup Script',
+  preview: 'Work Folder Setup Script',
 };
 export interface ScriptBinding {
   session: string;

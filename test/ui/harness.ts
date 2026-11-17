@@ -39,7 +39,7 @@ const model = async (surface: Surface): Promise<WorkbenchModel> => {
         return {
           task: row,
           expanded: !!expanded[row.id],
-          description: row.worktree ? 'Not in Preview' : 'Prepared on first use',
+          description: row.worktree ? 'Not in Work Folder' : 'Prepared on first use',
           tooltip: [row.title, row.worktree].filter(Boolean).join('\n'),
           files: expanded[row.id] && review ? (await engine.execute('review.files', { key: review.targetKey })).files : undefined,
         };

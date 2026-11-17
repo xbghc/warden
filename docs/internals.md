@@ -3,7 +3,7 @@
 Where the review state lives, and what warden will and will not do to the repository.
 
 High-risk operations also create [verified independent backups](backups.md) before changing Git
-history or discarding a checkout. These are separate from preview snapshots and ordinary Git reflogs.
+history or discarding a checkout. These are separate from work folder snapshots and ordinary Git reflogs.
 
 ## State
 
@@ -18,7 +18,7 @@ whose lock was taken over meanwhile writes nothing. A file written by a newer wa
 rather than read as empty; one that is not a state file at all is set aside as `.corrupt-<time>`;
 top-level fields this version does not know are kept when it writes. `schemaVersion` stays 1: every
 warden up to 0.16 replaces a file with any other version by an empty state. Delete the directory to reset. Internal snapshot objects live beside it in `checkpoints/objects`. This historical directory name
-is retained because preview and recovery journals can still reference its trees.
+is retained because work folder and recovery journals can still reference its trees.
 
 Recovery removes only the dead owner's unique file and then the empty `active` directory. A delayed
 reclaimer cannot remove a newer owner's nonempty directory, and a crash between these steps leaves
@@ -38,15 +38,15 @@ backoff. Each attempt rechecks the ownership token and reuses the same fsynced t
 the mutation callback runs once. The previous state remains intact if replacement keeps failing,
 and only the writer's own temporary file is removed. Publication never unlinks the current state.
 
-Requested engine writes wait for that engine's active preview tick before entering the repository
+Requested engine writes wait for that engine's active work folder tick before entering the repository
 lock wait. Further ticks pause while such writes are pending, so a slow local composition cannot
 consume their cross-window wait budget. Reads remain available, and another window's ownership
 still uses the ordinary bounded lock wait.
 
 Conversation engines start with state-only observation to receive task deletion notifications.
 They watch the state directory and retain periodic state reads, but do not watch repository checkouts,
-acquire the preview-owner lease or run preview synchronization. Reopening or replacing the workbench
-therefore leaves preview ownership with its repository observer, rather than a retained chat engine
+acquire the work folder owner lease or run work folder synchronization. Reopening or replacing the workbench
+therefore leaves work folder ownership with its repository observer, rather than a retained chat engine
 whose background writes could exhaust the workbench's repository-lock wait.
 Concurrent starts share the first initialization and its observation scope. Closing drains pending
 initialization as well as notifications, so a late startup cannot replace callbacks or outlive shutdown.
@@ -97,7 +97,7 @@ The editor supplies an expected configuration; `config.save` compares it under t
 write locks and rejects a concurrent update with `config_changed` before writing. Existing callers
 without an expected configuration retain their explicit full-configuration save behavior.
 Unknown URIs, renames, directory creation and deletion are rejected. The editor adds no Git writes or direct shell
-execution; preview setup retains its existing automatic configuration-change trigger. Agent profiles still use only User or
+execution; work folder setup retains its existing automatic configuration-change trigger. Agent profiles still use only User or
 Remote User settings. Legacy webview settings navigation reveals the same native Settings view.
 Named ACP objects and legacy profile arrays pass through the same executable, argument and environment
 validation. Object keys become stable profile IDs, not paths or commands. Unknown client-specific
@@ -112,7 +112,7 @@ profile ID is kept in extension global state; if it is absent, the first configu
 No executable or credential is stored there. The client negotiates ACP and requests an empty session,
 with no filesystem or terminal capabilities, no work prompt and cancelled startup permission requests.
 Authentication is explicit and uses only methods advertised by that connection. Startup creates no
-Warden task, workspace or conversation record, and issues no Git or preview command.
+Warden task, workspace or conversation record, and issues no Git or work folder command.
 
 The stdio connection remains open after initialization. Disconnect, failure, replacement and shutdown
 close its stream and terminate the owned process, escalating from SIGTERM to SIGKILL after a bounded
@@ -157,15 +157,15 @@ flag; requests that would need anything else receive a structured engine error. 
 own arguments. Diff review is read-only: the legacy `POST /api/targets/:key/stage` endpoint and its
 partial index-patch writer have been removed. The `PUT /api/targets/:key/viewed` endpoint is also
 removed and returns 404.
-The read-only `repository.get` command composes existing workflow, preview and workspace readers,
+The read-only `repository.get` command composes existing workflow, work folder and workspace readers,
 sharing a detailed checkout inventory only within that observation. It introduces no additional
 Git command shapes or writes. Background rebase checks keep fresh reads; their results are accepted
 only for the current repository, task binding and observed version. Actual mutations never use a
 UI observation as authority and retain their repository locks and fresh validation.
 The read-only `repository.readRoots` command observes primary, currently allocated task checkouts and
-the validated persistent preview. It reuses the guarded inventory, `rev-parse --absolute-git-dir` and
-preview ownership checks, plus filesystem identity reads; it introduces no Git writes. Deleting,
-unassigned, foreign or redirected workspaces and invalid previews are excluded. ACP reads check this
+the validated work folder. It reuses the guarded inventory, `rev-parse --absolute-git-dir` and
+work folder ownership checks, plus filesystem identity reads; it introduces no Git writes. Deleting,
+unassigned, foreign or redirected workspaces and an invalid work folder are excluded. ACP reads check this
 scope twice around task-binding validation and compare root/allocation and resolved file identities.
 Registered parent-directory aliases, including macOS `/var`, retain their canonical identity; a
 symlink replacing the checkout itself or a file escaping that canonical root remains ineligible.
@@ -314,7 +314,7 @@ lock serializes connection acquisition with publishing `deletion`; new claims re
 inside that lock. Live or uncertain owners block deletion. Session record writes also reject deleted
 or deleting tasks. The journal reserves the physical allocation throughout failures and restart.
 
-Deletion first publishes preview without the task, using preview's existing recovery journal. It
+Deletion first updates the work folder without the task, using its existing recovery journal. It
 then validates the checkout again, quits any stopped Git operation, runs `git clean -fd` under the
 original ignore rules, detaches the exact observed HEAD with `update-ref --no-deref`, and runs
 `reset --hard` at that same commit. It never uses `clean -x`, recursively deletes the workspace folder,
@@ -358,8 +358,8 @@ without `git status`: it identifies checkouts and their unfinished operations, a
 the status of the one workspace it acts on. The extension follows observed primary checkout branch changes only for
 `workflow.trackedBranches`, through `workflow.configure` with its existing integration and connection
 guards. Untracked branches and detached HEAD project an empty workbench without changing saved workflow
-or preview state. Explicit branch selection pins the stored engine context even while the visible
-workbench is inactive. Background preview ticks read `rev-parse --symbolic-full-name HEAD` through the
+or work folder state. Explicit branch selection pins the stored engine context even while the visible
+workbench is inactive. Background work folder ticks read `rev-parse --symbolic-full-name HEAD` through the
 existing validated Git API and skip composition, recovery and setup whenever primary is off the selected
 base branch; no new Git write shape is introduced. Returning resumes ordinary content checks.
 Branch changes, including entering and leaving an untracked branch, rotate
@@ -422,10 +422,26 @@ and a debounce window drive per-workspace observed/applied versions, never agent
 
 `POST /preview/setup` reruns the user's explicit `workspaceConfig.previewSetup`. The same command
 runs after initialization or code/config changes, serialized by the repository lock. It receives
-preview/primary paths and exposes bounded output and exit status. It may manage ignored environment
-files; source mutations make the preview stale. The VS Code workspace extension calls the existing
-Hono API in process, registers read-only native review documents, and opens terminals/tasks with the
-preview cwd. Workspace Trust is required. It does not add preview to the editor's workspace roots.
+work folder/primary paths and exposes bounded output and exit status. It may manage ignored environment
+files; source changes made while it runs mark the work folder stale. The VS Code workspace extension calls the existing
+Hono API in process, registers read-only native review documents, and runs the configured command as a task with the
+work folder as cwd. Workspace Trust is required. The user opens the work folder as the window's folder;
+a window on primary offers only **Open Work Folder**, which runs the same composition to create the
+folder and then opens it.
+
+The read-only `workfolder.changes` command snapshots the work folder into the external snapshot store
+and lists `diff --name-status --no-renames -z <composition tree> <snapshot>`: the user's own edits.
+`workfolder.commit` holds the repository lock and requires the reviewed snapshot tree and base commit
+to be current. It applies the binary patch between the composition tree and the snapshot with
+`apply --index --3way` in a temporary worktree at the base branch commit alone, so an edit that rests
+on a connected task's change is refused with the shared paths. The resulting patch is journaled in
+`workFolderCommit` (parent commit and staged-diff fingerprint), applied to primary's index and files
+with `apply --index`, and committed there with ordinary `git commit -m`, hooks and signing included.
+A failed commit, or an interrupted one found by the next attempt, reverses exactly that staged patch
+when the index still matches the fingerprint and primary has no other changes; otherwise it stops
+with `development_dirty`. The work folder is then recomposed on the new base commit. The host's
+**Pull Base Branch** is not an engine command: it runs `git pull --ff-only` in primary as a VS Code
+task, with the user's own Git configuration, credentials and hooks.
 
 `POST /workflow/changes/:id/deliver` validates the message, then prepares and commits under one
 repository lock. The client sends its reviewed source, source boundary and primary HEAD. Preparation
@@ -438,9 +454,9 @@ task index, HEAD, branch, hooks or files are changed. The `snapshot:<base>..<tre
 only full object IDs and reads exact trees through that task repository and the external snapshot
 store, with no merge-base substitution. Source HEAD and the current snapshot are rechecked during
 preparation and again before staging. A saved edit after review fails with `review_changed`.
-Preparation and delivery records retain `sourceTree`; future review and preview subtract that tree
+Preparation and delivery records retain `sourceTree`; future review and the work folder subtract that tree
 instead of replaying the same uncommitted contribution. The tree belongs only to its recorded source
-boundary. If a manual merge or rebase advances the effective boundary, review, preparation and preview
+boundary. If a manual merge or rebase advances the effective boundary, review, preparation and the work folder
 all use that new commit even when primary has subsequently advanced again. Read-only normalization
 does not save state or authorize reuse of the obsolete snapshot. Rebase still requires a clean task
 checkout and retains normal Git conflict handling.
@@ -450,8 +466,8 @@ validated sandbox repository, checking the resulting object ID. This never impor
 
 `POST /workflow/changes/:id/prepare` remains for recovery and compatibility. It pins reviewed saved content and primary HEAD, composes the undelivered
 range in isolation, and stages only that delivery. Existing primary user edits are rejected without
-being changed. The independent runtime remains available throughout delivery. `update-index --refresh`
-refreshes stat metadata before explicit `apply --index`; preview never refreshes the primary index.
+being changed. The work folder remains available throughout delivery. `update-index --refresh`
+refreshes stat metadata before explicit `apply --index`; work folder composition never refreshes the primary index.
 Preparation is journaled after its final read-only checks and before staging. A refused staging that
 left primary clean removes the journal again. An unprepared journal staged nothing: it never offers
 a later base commit for recording, and resuming work discards it whatever the base branch has become.
@@ -463,7 +479,7 @@ Only the final binary patch enters the primary index. Neither the agent's source
 temporary composition commits are fetched into the primary repository. Interrupted preparation
 compares NUL-delimited raw index changes with the isolated candidate, without importing its tree
 or depending on display-only diff configuration.
-Preview and delivery patches share the review diff's fixed `a/` and `b/` prefixes, disabled color,
+Work folder and delivery patches share the review diff's fixed `a/` and `b/` prefixes, disabled color,
 three context lines and short submodule format, with external diff and textconv disabled. Local
 and global Git display settings cannot redirect delivered paths or replace the file bytes.
 
@@ -492,7 +508,7 @@ older versions' exact generated `refs/warden/changes/<id>/{source,accepted}`,
 `update-ref -d <ref> <observed-old-value>`. Other refs and user reflogs are preserved; ordinary Git
 maintenance decides when previously retained, now-unreachable objects can be collected. Default
 clone workspaces retain separate object stores outside primary; shared workspaces keep agent objects
-in the shared repository with preview and composition; legacy primary-linked worktrees share the primary
+in the shared repository with composition; legacy primary-linked worktrees share the primary
 object store by Git's design. Workflow writes share
 a cross-process repository-operation lock; short JSON updates have their own lock. Stale-heartbeat
 recovery also requires the recorded owner process to be gone. A live owner, incomplete owner record,
@@ -514,8 +530,8 @@ Completion waits for successful termination and process close before releasing t
 operation. Execution retains its ten-minute limit, 128 KiB per output stream and 16,000-character
 display tail. Cleanup itself has a bounded wait; failure throws `setup_cleanup_failed` and retains
 the persisted running owner. Task deletion, hook retry and rebase reject a live or uncertain setup
-owner. Preview setup records the same owner and blocks retry/composition after an uncertain cleanup;
-legacy preview records without an owner retain their existing interrupted-run recovery. A confirmed
+owner. Work folder setup records the same owner and blocks retry/composition after an uncertain cleanup;
+legacy records without an owner retain their existing interrupted-run recovery. A confirmed
 dead owner permits recovery. These checks do not supervise ACP children or deliberately detached
 POSIX sessions.
 
@@ -524,9 +540,9 @@ its message boundary; session tokens reject messages from a previous repository,
 can invoke only its own actions. Scripts and styles are packaged locally with a restrictive content
 security policy. The extension requires workspace trust before opening an engine or running actions.
 It does not expose arbitrary Git, filesystem or shell execution to a webview. User-configured hooks
-and the preview command remain explicit shell entry points.
+the work folder command and **Pull Base Branch** remain explicit shell entry points.
 
-A separate token-owned preview lease elects one background synchronizer per repository. The existing
+A separate token-owned work folder lease elects one background synchronizer per repository. The existing
 repository mutation lock still serializes writes from all windows. Watch notifications are hints;
 content fingerprints and periodic reads cover missed events. Closing a session drains in-flight
 operations and releases watchers and leases before another repository is opened.
@@ -537,5 +553,5 @@ history drafts remain untouched; Git operation journals stay in the existing
 Warden state location. Old HTTP host/origin checks remain only in `test/compat`, which is not bundled.
 
 Updates are managed by VS Code and the Marketplace. There is no npm update request or CLI launcher.
-Workspace allocation and preview composition use local Git operations. Clone fetch from
+Workspace allocation and work folder composition use local Git operations; only **Pull Base Branch** contacts a remote, at the user's request. Clone fetch from
 remotes is retained for regression coverage and is not exposed in the task-creation flow.

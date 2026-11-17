@@ -15,7 +15,8 @@ code --install-extension packages/vscode/warden-0.26.16.vsix
 Warden automatically uses the Git repository of the single open folder; there is no separate project selector.
 Open the primary directory and configure an agent through **Warden: Configure ACP**. Warden connects
 automatically at startup and after profile changes. Once connected, choose **Warden: Select Base Branch**. The branch must be checked out in
-primary. In a multi-root window, **Warden: Select Repository** selects one repository; the selection is remembered.
+primary. Then choose **Open Work Folder**: Warden creates `<primary>-work`, a linked worktree of primary, and opens it.
+Work in that window from then on; a window on primary offers only **Open Work Folder**. In a multi-root window, **Warden: Select Repository** selects one repository; the selection is remembered.
 Git and user-script dependencies must exist where the workspace lives. VS Code 1.106 or newer and Workspace Trust are required;
 browser-only virtual filesystems are unsupported. SSH, WSL and containers use the workspace extension host.
 
@@ -24,8 +25,8 @@ browser-only virtual filesystems are unsupported. SSH, WSL and containers use th
 The Warden sidebar stacks two native collapsible views: **Workbench** and **Settings**. Both appear
 by default; Settings uses a native tree for ACP controls and scripts. Workbench contains ordered tasks as
 top-level items, without grouping rows. A task describes planned work; its
-**Workspace** is its allocated execution context, with an assigned directory and branch. **Sync Preview** composes saved content into the
-preview directory; **Rebase** brings a task workspace forward through an explicit rebase.
+**Workspace** is its allocated execution context, with an assigned directory and branch. **Sync Work Folder** composes the base branch commit and connected task changes into the
+work folder and keeps your edits there; **Rebase** brings a task workspace forward through an explicit rebase.
 
 Task context menus and the Command Palette offer **Delete Task…**. Confirmation discards the task's
 pending work and releases its workspace without a backup, normally retaining the directory and
@@ -42,27 +43,31 @@ Repository discovery shows **Opening repository…**. Once connected, it offers 
 **Select Base Branch**. An existing branch resumes its saved workbench. Other workflow panels link to
 Settings while unavailable, and ordinary commands remain blocked until connected.
 
+Tasks, connections, review, rebase and chats are available only in the window opened on the work
+folder. In a window opened on primary, Workbench shows **Configure ACP** or **Select Base Branch**
+while they are needed and then only **Open Work Folder**, which creates the folder if needed and opens it.
+
 Selecting a base branch starts tracking it in Warden, including branches without tasks. Switching
 the primary checkout in Git or VS Code automatically restores previously tracked branches.
-Untracked branches and detached HEAD show no tasks, preview status, synchronization checks or recovery
-messages. Automatic preview updates pause, and **Select Base Branch** remains available to start using
+Untracked branches and detached HEAD show no tasks, work folder status, synchronization checks or recovery
+messages. Automatic work folder updates pause, and **Select Base Branch** remains available to start using
 Warden there. Selection is remembered per
 repository and base branch. Existing tasks and commit drafts remain
 with their tasks. Branches at the same commit are still separate contexts; old page actions are rejected
 after a switch. Existing native diffs and ACP conversations retain their original task.
 
-Finish delivery preparation and disconnect preview connections before switching between tracked branches.
+Finish delivery preparation and disconnect work folder connections before switching between tracked branches.
 If Git switches to another tracked branch while either is still active, the sidebar explains why Warden
 remains on the previous branch and asks you to return there to resolve it. Untracked branches quietly
 retain that work for your return. Unfinished Git operations never select another requirement.
 
 The native workbench tree opens directly into tasks and their changed files. With no tasks, **New Task**
 is available in the empty view and heading. The heading exposes refresh, add-task and rebase; its
-**More Actions** (⋯) offers the configured **Run Preview** command, otherwise **Open Preview Terminal**,
+**More Actions** (⋯) offers **Run in Work Folder** and **Pull Base Branch**,
 and reveals **Settings** in the sidebar. Repository selection appears only when needed or in multi-root
-windows; preview recovery actions appear while their failures persist. Preview has no editor page or tree row.
-The status bar shows preview synchronization; conflicts and setup failures remain visible above the task list.
-Each allocated task offers Agent, preview connection and commit as inline actions; its context menu holds opening the workspace,
+windows; work folder recovery actions appear while their failures persist. The work folder has no editor page or tree row.
+The status bar shows work folder synchronization; conflicts and setup failures remain visible above the task list.
+Each allocated task offers Agent, work folder connection and commit as inline actions; its context menu holds opening the workspace,
 renaming, delivery records, synchronization, copying and recovery. Allocation failures expose
 retry on the same task; script failure rows expose script output and retry.
 
@@ -88,7 +93,7 @@ output channel. **Rename Task** uses a native input box prefilled with the saved
 no notes. Batch rebase retains a dedicated editor panel. Settings opens setup scripts in native text editors;
 Save updates the script for its original repository, preserving unrelated script configuration and
 distinct legacy reuse scripts. Unsaved edits stay in the editor; stale repository or script versions
-cannot overwrite current configuration. Workspace scripts run on allocation; preview setup retains its normal automatic triggers. Preview diagnostics use the Warden output channel. Task Chat uses the Secondary Side Bar. Prefer native controls
+cannot overwrite current configuration. Workspace scripts run on allocation; work folder setup retains its normal automatic triggers. Work folder diagnostics use the Warden output channel. Task Chat uses the Secondary Side Bar. Prefer native controls
 for future interactions and choose a webview only when its particular layout warrants one.
 
 Packaged webviews follow VS Code themes and send a finite validated action vocabulary to the host.
@@ -268,7 +273,7 @@ does nothing. Other windows list their own processes. Ending a process also stop
 still running; if one cannot be stopped, the action fails, names it and keeps the conversation's
 ownership. Commands that detached from the agent earlier, and all commands on Windows, are not found.
 While it runs, the agent owns its child commands and execution policies; coordinate ongoing work before
-Git mutations. A turn ending never connects preview, commits, delivers or rebases.
+Git mutations. A turn ending never connects to the work folder, commits, delivers or rebases.
 Native review and its source/baseline pins remain unchanged.
 
 The implementation is tested with an SDK-compatible child-agent fixture and packaged extension flows.
@@ -277,7 +282,7 @@ That does not establish support for an untested authenticated third-party agent.
 
 ## Edit, review and run
 
-Edit and save human code in primary. Agents edit task workspaces through their own tools. Both sides of native
+Edit and save your own code in the work folder. Agents edit task workspaces through their own tools and make every change to their code. Both sides of native
 `warden-review` diffs are read-only snapshots. **Warden: Copy Review Location**, also available from the editor
 context menu and Ctrl+Alt+C / Cmd+Alt+C, copies the original relative path and selected line range.
 Snapshots can be read after a window reload, but a restored tab does not authorize a delivery.
@@ -285,56 +290,68 @@ Snapshots can be read after a window reload, but a restored tab does not authori
 Task review pins the source HEAD, saved content tree when applicable, delivery boundary and primary
 HEAD. Changed saved content, a newer source commit or a changed baseline requires reopening the
 current diff. Background refresh cannot advance the version the user reviewed. Saved uncommitted
-changes can be connected to preview and delivered directly without a task commit. Binary changes
+changes can be connected to the work folder and delivered directly without a task commit. Binary changes
 identify the pinned version for external review.
 There are no read markers, staging controls or review-completion declarations.
 
-Task workspaces are independent clones beside primary. Preview uses an external shared repository at
-`<primary>-warden/repo.git`; primary remains independent. Preview is never added as a workspace root.
-Its directory retains ignored dependencies and caches. Unexpected source edits there stop publication
-and remain available for manual handling. A conflicting initial connection fails without changing the
-selected combination; later conflicts keep the last coherent preview and report stale content.
+Task workspaces are independent clones beside primary. The work folder, `<primary>-work`, is a linked
+worktree of primary with a detached HEAD on Warden's composition; compositions are built in an external
+shared repository at `<primary>-warden/repo.git` and only complete ones reach the folder.
+The folder retains ignored dependencies and caches. Whatever differs from the composition is your own
+edit and is kept: each update merges it onto the new composition, and a conflict leaves the folder
+unchanged and reports the paths. A conflicting initial connection fails without changing the
+selected combination; later conflicts keep the last composition and report stale content.
+The index is reset to the composition on every update, so staging there does not last.
 
-**Open Preview Terminal** opens or reveals a native terminal for the current repository and preview
-directory. It reuses a live matching terminal; a closed terminal or a different repository or directory
-gets a new one. When shell integration reports a changed cwd, that terminal is not reused.
-**Run Preview** executes the optional
-`warden.previewCommand` through VS Code Tasks there. Other user terminals, tasks and debug sessions
-are not redirected. Use the displayed preview path or `${command:warden.previewPath}` where supported.
-The workbench's **More Actions** menu shows **Run Preview** when that command is configured, otherwise
-**Open Preview Terminal**. Normal saved changes synchronize automatically. **Sync Preview** appears
-in the menu for stale, conflicting, failed or paused synchronization; **Rerun Preview Setup** appears
+The window's own terminals, tasks and debug sessions already run in the work folder, so Warden has no
+terminal command. **Run in Work Folder** executes the optional
+`warden.previewCommand` through VS Code Tasks there; without a configured command it opens that setting.
+Use `${command:warden.previewPath}` where a path is needed.
+Normal saved changes synchronize automatically. **Sync Work Folder** appears
+in the **More Actions** menu for stale, conflicting or failed synchronization; **Rerun Work Folder Setup** appears
 for a failed configured setup script. Recovery entries remain visible until the problem clears.
-Conflicts still require inspecting the affected paths and adjusting the sources or connections.
-The Command Palette retains all preview commands, including **Open Preview Terminal**, **Sync Preview**,
-**Copy Preview Path** and **Show Preview Output**, regardless of the compact menu's selection.
-Clicking the preview status bar opens **Show Preview Output**: current composition, directory, last
+Conflicts still require inspecting the affected paths and adjusting the sources, connections or your edits.
+The Command Palette retains all work folder commands, including **Sync Work Folder**,
+**Copy Work Folder Path** and **Show Work Folder Output**, regardless of the compact menu's selection.
+Clicking the work folder status bar opens **Show Work Folder Output**: current composition, directory, last
 successful sync, conflict paths and recorded setup status, output and exit code. Reading output does
-not synchronize or run setup. **Refresh** only rereads visible state; it does not invoke **Sync Preview**.
+not synchronize or run setup. **Refresh** only rereads visible state; it does not invoke **Sync Work Folder**.
 **Select Base Branch** remains in initial setup and the Command Palette. Later context changes follow
 tracked branches checked out through Git in primary. Settings is the single configuration entry in More Actions;
 the unavailable-agent welcome still offers **Configure ACP**.
 
-The engine combines repository-change hints, state-file notifications and periodic checks. Preview
-publication still compares content hashes and debounces updates. A separate background-owner lease
-prevents duplicate preview writers in multiple windows; writes retain the existing repository lock.
+Your own edits appear in the native Source Control view of the work folder window as its working-tree
+changes. **Commit Work Folder to Base Branch**, in the Source Control title menu and the Command
+Palette, asks for a message, prefilled from the Source Control input box, and commits those edits to
+the base branch in primary with ordinary hooks and signing. Edits that only apply on top of a
+connected task's changes are refused until that task is committed. No action sends an edit to a
+task; ask its agent instead. A commit made with the native Source Control button stays on the
+folder's detached HEAD and does not reach the base branch.
+
+**Pull Base Branch** runs `git pull --ff-only` in primary as a VS Code task in the terminal, with
+native credential prompts and output; the work folder then updates to the new base commit. Fetch and
+push with Git in primary; Warden adds no commands for them.
+
+The engine combines repository-change hints, state-file notifications and periodic checks. Work folder
+updates still compare content hashes and debounce. A separate background-owner lease
+prevents duplicate work folder writers in multiple windows; writes retain the existing repository lock.
 Closing the final Warden window stops synchronization. On reopening, journals and actual content are
-checked before preview synchronization resumes. Existing preview programs are not restarted or killed by Warden.
+checked before synchronization resumes. Programs running in the work folder are not restarted or killed by Warden.
 
 ## Environment setup
 
 Expand **Settings** below Workbench, use **More Actions (⋯) → Settings**, or run **Warden: Settings**.
-Select **Workspace Setup Script** or **Preview Setup Script** to edit a multiline shell script in the
+Select **Workspace Setup Script** or **Work Folder Setup Script** to edit a multiline shell script in the
 native text editor. Save updates the original repository's configuration; clearing and saving removes
 the script. Initialization runs for every fresh allocation, including when an internally available
 directory is used. A distinct legacy reuse script has its own row and is preserved when editing the
-workspace setup script. **Preview Command** opens the native VS Code setting for the development server.
+workspace setup script. **Work Folder Command** opens the native VS Code setting for the development server.
 
-Preview setup runs on initialization, successful code updates, configuration changes and explicit retry.
+Work folder setup runs on initialization, successful code updates, configuration changes and explicit retry.
 Its success, output and exit code are separate from code synchronization. It receives `WARDEN_REPO`,
 `WARDEN_WORKTREE`, `WARDEN_PREVIEW`, `WARDEN_DEVELOPMENT_BRANCH` and `WARDEN_HOOK_EVENT=preview`.
 Workspace initialization receives the task context documented in [Working with agents](agent.md).
-Use **Rerun Preview Setup** on the configured **Preview Setup Script** row for an explicit rerun,
+Use **Rerun Work Folder Setup** on the configured **Work Folder Setup Script** row for an explicit rerun,
 including after a successful run. The action remains bound to that row's repository and branch context.
 Scripts use the existing POSIX shell selection, ten-minute timeout and bounded output. Windows uses
 Git for Windows' shell. Task descriptions never become executable script configuration.
@@ -343,14 +360,14 @@ Git for Windows' shell. Task descriptions never become executable script configu
 
 Review the intended version, then use the commit action on its task row. VS Code opens its
 top input box for the commit message; Enter submits and Escape cancels while preserving the draft.
-Cancellation does not stage files. The submitted message and reviewed versions are fixed for that operation. Unrelated primary
-edits block delivery. Other connections remain in the independent preview. Ordinary commit hooks and
+Cancellation does not stage files. The submitted message and reviewed versions are fixed for that operation. Uncommitted primary
+files block delivery. Other connections remain in the work folder. Ordinary commit hooks and
 signing run in primary; success records the exact commit and delivery association.
 
 A hook failure retains the prepared contents. Fix the cause, reopen the retained staged diff, and retry.
 A manually created commit must be reopened before recording it. Interrupted preparation has an explicit
 recovery action. **Finish Recovered Commit Preparation** remains available only after the original primary content has
-been restored and verified; it does not reset or clean user files. Commit success and subsequent preview
+been restored and verified; it does not reset or clean user files. Commit success and subsequent work folder
 failure are separate results.
 
 **Rebase** displays checks with their revisions and times. Select one, several or all, then request
@@ -369,10 +386,10 @@ records still open their commits through the native picker and diff flow.
 The extension keeps the existing state-file path, schema version 1, unknown historical metadata,
 numbered task directories, external Git storage and operation journals. It does not move task state
 into a window-local store. Only UI selection and drafts use VS Code workspace storage. Native review
-snapshots use extension storage. Older primary-directory previews retain their ownership-checked migration.
+snapshots use extension storage. A preview directory kept in Warden's data directory by an earlier version is not carried over; connections are recomposed into the work folder.
 
 Stop old Warden CLI processes before adopting this version. Old versions cannot interpret all current
-preview and recovery semantics; a new compatibility marker cannot make old code enforce them. The
+work folder and recovery semantics; a new compatibility marker cannot make old code enforce them. The
 repository contains a legacy in-process HTTP adapter only under `test/compat`, for regression tests.
 It is not packaged or runnable as a product server. Existing external initialization scripts keep their
 context, but scripts that used retired Warden CLI commands must be updated to use their own tools.

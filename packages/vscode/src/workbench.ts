@@ -13,7 +13,7 @@ import type {
   WorktreesResponse,
   WorkspaceConfig,
 } from '@warden/shared';
-import { Engine, WardenError } from '@warden/engine';
+import { Engine, WardenError, workFolderPath } from '@warden/engine';
 import type { EngineCommand, EngineInput, EngineOutput } from '@warden/engine';
 import type { WorkbenchAction, WorkbenchModel, Surface, WorkspaceRow, WorkbenchError, RebaseBatchResponse } from '@warden/shared';
 import type { AcpBinding } from '@warden/shared';
@@ -231,7 +231,9 @@ export class Workbench {
       openWorkspace: (node) => this.openWorkspace(node),
       retryHook: (node) => this.taskOperation(node, 'task.hook'),
       resumeTask: (node) => this.taskOperation(node, 'task.resume'),
-      previewTerminal: () => this.previewTerminal(),
+      openWorkFolder: () => this.openWorkFolder(),
+      commitWorkFolder: () => this.commitWorkFolder(),
+      pullBase: () => this.pullBase(),
       runPreview: () => this.runPreview(),
       previewPath: () => this.previewPath(),
       refreshPreview: () => this.api('preview.refresh', undefined),
@@ -327,7 +329,7 @@ export class Workbench {
       this.taskInput?.hide();
       this.renameInput?.hide();
     }
-    if (this.agentReady && this.repositoryState === 'ready' && !this.branchTransition && this.data?.workflow) {
+    if (this.agentReady && this.repositoryState === 'ready' && !this.branchTransition && this.data?.workflow && this.workFolderEntry) {
       if (this.backend)
         this.conversations.prewarm(
           this.backend.root,
@@ -337,10 +339,10 @@ export class Workbench {
         );
       const preview = this.preview;
       const sync = preview?.syncStatus ?? preview?.status ?? 'disconnected';
-      const problem = ['stale', 'conflict', 'error', 'paused'].includes(sync) || preview?.setup?.status === 'failed';
-      this.status.text = `$(${problem ? 'warning' : sync === 'updating' ? 'sync~spin' : 'layers'}) Warden: ${previewStatusLabels[sync]}${preview?.setup?.status === 'failed' ? ' · Preview setup failed' : ''}`;
+      const problem = ['stale', 'conflict', 'error'].includes(sync) || preview?.setup?.status === 'failed';
+      this.status.text = `$(${problem ? 'warning' : sync === 'updating' ? 'sync~spin' : 'layers'}) Warden: ${previewStatusLabels[sync]}${preview?.setup?.status === 'failed' ? ' · Work folder setup failed' : ''}`;
       this.status.backgroundColor = problem ? new vscode.ThemeColor('statusBarItem.warningBackground') : undefined;
-      this.status.tooltip = `${this.previewSummary()}\nShow Preview Output`;
+      this.status.tooltip = `${this.previewSummary()}\nShow Work Folder Output`;
       this.status.show();
     } else this.status.hide();
     this.sidebar?.refresh();
@@ -535,6 +537,10 @@ export class Workbench {
     const selected = await vscode.window.showWorkspaceFolderPick({ placeHolder: 'Select the repository containing the primary folder' });
     if (selected) await this.open(selected.uri.fsPath);
   }
+  /** Whether this window was opened on the work folder rather than on primary or a task workspace. */
+  private get workFolderEntry() {
+    return !!this.backend && this.backend.repo.root === workFolderPath(this.backend.root);
+  }
   private get repositoryState(): WorkbenchModel['repositoryState'] {
     if (this.initializing || this.switching) return 'loading';
     return this.backend ? 'ready' : 'unselected';
@@ -557,12 +563,15 @@ export class Workbench {
       if (state === 'loading') await publish('warden.repositoryState', state);
       const published = await Promise.allSettled([
         publish('warden.hasRepository', hasRepository),
-        publish('warden.hasDevelopmentBranch', hasRepository && !!this.data?.workflow),
+        // A window on primary only leads to the work folder; the workbench lives in that window.
+        publish('warden.hasDevelopmentBranch', hasRepository && !!this.data?.workflow && this.workFolderEntry),
+        publish('warden.primaryEntry', hasRepository && !!this.data?.workflow && !this.workFolderEntry),
+        publish('warden.workFolderEntry', hasRepository && this.workFolderEntry),
         publish('warden.fileViewMode', this.sidebar.fileViewMode),
         publish('warden.multipleRoots', (vscode.workspace.workspaceFolders?.length ?? 0) > 1),
         publish('warden.hasPreviewCommand', hasRepository && !!this.previewCommand()?.trim()),
         publish('warden.hasPreviewSetup', hasRepository && !!this.data?.workspaceConfig?.previewSetup?.trim()),
-        publish('warden.previewNeedsSync', !!sync && ['stale', 'conflict', 'error', 'paused'].includes(sync)),
+        publish('warden.previewNeedsSync', !!sync && ['stale', 'conflict', 'error'].includes(sync)),
         publish('warden.previewSetupFailed', preview?.setup?.status === 'failed'),
       ]);
       const failed = published.find((result) => result.status === 'rejected');
@@ -733,7 +742,7 @@ export class Workbench {
               code: error.code,
               message: `The primary folder switched to ${primary.branch}, but Warden is still on ${previous}. ${
                 error.code === 'development_in_use'
-                  ? `Switch back to ${previous} to finish commit preparation and disconnect preview connections.`
+                  ? `Switch back to ${previous} to finish commit preparation and disconnect work folder connections.`
                   : error.message
               }`,
             };
@@ -927,8 +936,8 @@ export class Workbench {
     const sync = this.checks?.checks.find((check) => check.changeId === task.id);
     const connection = task.worktree
       ? connected
-        ? `Preview: ${source ? previewStatusLabels[source.status] : 'Out of Date'}`
-        : 'Not in Preview'
+        ? `Work folder: ${source ? previewStatusLabels[source.status] : 'Out of Date'}`
+        : 'Not in Work Folder'
       : task.status === 'archived'
         ? 'Archived'
         : task.workspaceError
@@ -971,7 +980,7 @@ export class Workbench {
   }
   async getChildren(node?: Node): Promise<SidebarNode[]> {
     if (!this.agentReady) return [];
-    if (this.repositoryState !== 'ready' || this.branchTransition || !this.data?.workflow) return [];
+    if (this.repositoryState !== 'ready' || this.branchTransition || !this.data?.workflow || !this.workFolderEntry) return [];
     const session = this.session;
     if (node?.session && node.session !== session) return [];
     if (node?.kind === 'task' && !this.tasks().some((task) => task.id === node.task.id)) return [];
@@ -1553,14 +1562,14 @@ export class Workbench {
   private previewSummary(preview = this.preview) {
     const names = preview?.connectedIds.map((id) => this.tasks().find((task) => task.id === id)?.title ?? id);
     return [
-      `Preview: ${previewStatusLabels[preview?.syncStatus ?? preview?.status ?? 'disconnected']}`,
+      `Work folder: ${previewStatusLabels[preview?.syncStatus ?? preview?.status ?? 'disconnected']}`,
       `Base branch: ${this.branch ?? 'Not selected'}`,
-      `Preview folder: ${preview?.worktree ?? 'Not initialized'}`,
-      `Preview contents: Saved primary content${names?.length ? ` + ${names.join(' + ')}` : ''}`,
+      `Work folder path: ${preview?.worktree ?? 'Not created'}`,
+      `Work folder contents: ${this.branch ?? 'Base branch'}${names?.length ? ` + ${names.join(' + ')}` : ''} + your edits`,
       preview?.updatedAt ? `Last successful sync: ${new Date(preview.updatedAt).toLocaleString('en-US')}` : '',
       preview?.message,
       preview?.conflicts?.length ? `Conflicting paths:\n${preview.conflicts.join('\n')}` : '',
-      preview?.setup ? `Preview setup: ${scriptStatusLabels[preview.setup.status]} · Exit code ${preview.setup.exitCode ?? '—'}` : '',
+      preview?.setup ? `Work folder setup: ${scriptStatusLabels[preview.setup.status]} · Exit code ${preview.setup.exitCode ?? '—'}` : '',
     ]
       .filter(Boolean)
       .join('\n');
@@ -1576,30 +1585,8 @@ export class Workbench {
     if (!this.data?.workflow) throw new Error('Select a base branch first.');
     let preview = await this.api('preview.get', undefined);
     if (!preview.worktree) preview = await this.api('preview.refresh', undefined);
-    if (!preview.worktree) throw new Error(preview.message ?? 'Select a base branch and initialize the preview first.');
+    if (!preview.worktree) throw new Error(preview.message ?? 'The work folder could not be created. Open Show Work Folder Output for details.');
     return preview;
-  }
-  private async previewTerminal() {
-    const session = this.session;
-    const preview = await this.ensurePreview();
-    this.assertSession(session);
-    const repository = this.backend!.root;
-    const existing = vscode.window.terminals.find((terminal) => {
-      const options = terminal.creationOptions;
-      if (terminal.exitStatus || !('cwd' in options)) return false;
-      // Shell integration can tell us the user moved away from the preview directory.
-      const cwd = terminal.shellIntegration?.cwd?.fsPath ?? (typeof options.cwd === 'string' ? options.cwd : options.cwd?.fsPath);
-      return (
-        cwd !== undefined &&
-        vscode.Uri.file(cwd).fsPath === vscode.Uri.file(preview.worktree!).fsPath &&
-        options.env?.WARDEN_REPO === repository &&
-        options.env?.WARDEN_PREVIEW === preview.worktree
-      );
-    });
-    const terminal =
-      existing ??
-      vscode.window.createTerminal({ name: 'Warden · Preview', cwd: preview.worktree, env: { WARDEN_PREVIEW: preview.worktree!, WARDEN_REPO: repository } });
-    terminal.show();
   }
   private async previewPath() {
     const preview = await this.ensurePreview();
@@ -1611,22 +1598,77 @@ export class Workbench {
     const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(this.backend!.root));
     const command = this.previewCommand();
     if (!command?.trim()) {
-      await this.previewTerminal();
+      // The window's own terminal is already in the work folder; only a command needs configuring.
+      await vscode.commands.executeCommand('workbench.action.openSettings', 'warden.previewCommand');
       return;
     }
     const task = new vscode.Task(
       { type: 'warden' },
       folder ?? vscode.TaskScope.Workspace,
-      'Run Preview',
+      'Run in Work Folder',
       'Warden',
       new vscode.ShellExecution(command, { cwd: preview.worktree }),
       [],
     );
     await vscode.tasks.executeTask(task);
   }
+  private async openWorkFolder() {
+    const preview = await this.ensurePreview();
+    await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(preview.worktree!), { forceNewWindow: false });
+  }
+  /** The Source Control input of the work folder, when the built-in Git extension has it open. */
+  private sourceControlInput(directory: string): { value: string } | undefined {
+    try {
+      const git = vscode.extensions.getExtension('vscode.git')?.exports?.getAPI(1) as
+        | { repositories: { rootUri: vscode.Uri; inputBox: { value: string } }[] }
+        | undefined;
+      return git?.repositories.find((repository) => repository.rootUri.fsPath === vscode.Uri.file(directory).fsPath)?.inputBox;
+    } catch {
+      return undefined;
+    }
+  }
+  /** Commits the user's own edits, as the work folder's Source Control view lists them, to the base branch. */
+  private async commitWorkFolder(submittedMessage?: string) {
+    const branch = this.data?.workflow?.developmentBranch;
+    if (!branch) throw new Error('Select a base branch first.');
+    const changes = await this.api('workfolder.changes', undefined);
+    if (!changes.directory || !changes.tree || !changes.developmentHead) throw new Error('The work folder is not synced. Run Sync Work Folder first.');
+    if (!changes.files.length) {
+      void vscode.window.showInformationMessage('The work folder has no edits of yours to commit.');
+      return;
+    }
+    const input = this.sourceControlInput(changes.directory);
+    const message =
+      submittedMessage ??
+      (await vscode.window.showInputBox({
+        title: `Commit ${changes.files.length === 1 ? changes.files[0]!.path : `${changes.files.length} files`} to ${branch}`,
+        prompt: 'Commit message',
+        value: input?.value,
+        ignoreFocusOut: true,
+      }));
+    if (!message?.trim()) return;
+    this.log.write('info', 'workfolder.commit', { branch, files: changes.files.length });
+    await this.api('workfolder.commit', { tree: changes.tree, developmentHead: changes.developmentHead, message });
+    if (input) input.value = '';
+  }
+  /** Runs in a terminal task so that credential prompts and Git's output stay native. */
+  private async pullBase() {
+    const branch = this.data?.workflow?.developmentBranch;
+    if (!branch) throw new Error('Select a base branch first.');
+    const task = new vscode.Task(
+      { type: 'warden' },
+      vscode.TaskScope.Workspace,
+      `Pull ${branch}`,
+      'Warden',
+      new vscode.ProcessExecution('git', ['pull', '--ff-only'], { cwd: this.backend!.root }),
+      [],
+    );
+    this.log.write('info', 'primary.pull', { branch });
+    await vscode.tasks.executeTask(task);
+  }
   private async setup() {
     const result = await this.api('preview.setup', undefined);
-    this.output.appendLine(result.setup?.output ?? 'No preview setup script configured');
+    this.output.appendLine(result.setup?.output ?? 'No work folder setup script configured');
     this.output.show(true);
   }
   private async showRebase(node?: Node) {
@@ -1864,7 +1906,6 @@ ${text}`,
       'workspaces.show',
       'workspaces.refresh',
       'preview.copy',
-      'preview.terminal',
       'settings.agents',
       'rebase.check',
     ];
@@ -1958,7 +1999,7 @@ ${text}`,
                 task!.agent && `Executor: ${task!.agent}`,
                 task!.worktree && `Workspace: ${task!.worktree}`,
                 `Base branch: ${task!.developmentBranch}`,
-                'Edit and commit code in the task workspace. The user validates it in the separate preview folder, reviews it in Warden, and commits it to the base branch.',
+                'Edit and commit code in the task workspace. The user validates it in the work folder, reviews it in Warden, and commits it to the base branch.',
               ]
                 .filter(Boolean)
                 .join('\n\n'),
@@ -1976,9 +2017,6 @@ ${text}`,
             break;
           case 'preview.setup':
             await this.setup();
-            break;
-          case 'preview.terminal':
-            await this.previewTerminal();
             break;
           case 'preview.run':
             await this.runPreview();

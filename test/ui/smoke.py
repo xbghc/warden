@@ -118,7 +118,7 @@ try:
         forecast['checks']['checks'][0].update(status='conflict', message='Conflicts expected in src/orders.ts. Rebase has not run.')
         page.evaluate("model => window.postMessage({type:'model', model}, '*')", forecast)
         expect(page.get_by_text('Conflicts Expected', exact=True)).to_be_visible()
-        expect(page.get_by_text('Preview Conflict', exact=True)).to_have_count(0)
+        expect(page.get_by_text('Work Folder Conflict', exact=True)).to_have_count(0)
         expect(page.get_by_role('heading', name='Results', exact=True)).to_have_count(0)
         page.screenshot(path=str(artifacts / 'rebase-forecast.png'), full_page=True)
 
