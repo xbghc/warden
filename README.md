@@ -24,7 +24,7 @@ To build a local VSIX:
 ```sh
 pnpm install
 pnpm package:vscode
-code --install-extension packages/vscode/warden-0.26.15.vsix
+code --install-extension packages/vscode/warden-0.26.16.vsix
 ```
 
 ## Development workflow
