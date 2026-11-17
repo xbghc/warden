@@ -26,7 +26,7 @@ import { badRequest, WardenError, notFound } from './errors.js';
 import { GitError, LONG_GIT_TIMEOUT_MS, gitEnvironment, refExists, runGit, runGitWrite } from './git.js';
 import { listWorktreesAll, type RepoContext } from './repo.js';
 import { forgetWorktreeTargets, type StateStore } from './state.js';
-import { checkoutState, checkoutWorktree, dirtyCount, listWorktreesDetailed, nextSlot } from './worktrees.js';
+import { checkoutState, checkoutWorktree, dirtyCount, listCheckoutIdentities, listWorktreesDetailed, nextSlot, type CheckoutIdentity } from './worktrees.js';
 import { applyPatch, GitSandbox, oid, patchBetween, gitOid, deliveryBase, deliveryContentBase, deliveredTree } from './git-sandbox.js';
 import { PreviewService } from './preview.js';
 import { assertSafetyBackupCurrent, createSafetyBackup, discardOperationBackup } from './backups.js';
@@ -680,7 +680,7 @@ export class WorkflowService {
     delete check.files;
   }
 
-  private async validateRebaseCheck(change: DevelopmentChange, checkout: WorktreeDetail, check: RebaseCheck) {
+  private async validateRebaseCheck(change: DevelopmentChange, checkout: CheckoutIdentity, check: RebaseCheck) {
     const [source, state, target] = await finishReads([
       readWorktreeState(checkout.path),
       checkoutState(this.repo, checkout),
@@ -890,11 +890,13 @@ export class WorkflowService {
     });
   }
 
-  private async listCheckouts() {
-    return new Map((await listWorktreesDetailed(this.repo)).map((row) => [row.path, row]));
+  // Guards read the status of the one workspace they act on themselves; the inventory only
+  // identifies checkouts, so it does not scan the working tree of every other one.
+  private async listCheckouts(): Promise<Map<string, CheckoutIdentity>> {
+    return new Map((await listCheckoutIdentities(this.repo)).map((row) => [row.path, row]));
   }
 
-  private async checkout(change: DevelopmentChange, checkouts = this.listCheckouts()): Promise<WorktreeDetail> {
+  private async checkout(change: DevelopmentChange, checkouts: Promise<Map<string, CheckoutIdentity>> = this.listCheckouts()): Promise<CheckoutIdentity> {
     const checkout = (await checkouts).get(change.worktree);
     if (!checkout || checkout.slot === undefined || checkout.prunable || checkout.foreign)
       fail('The task workspace no longer exists or belongs to another repository.', 'invalid_change_checkout');

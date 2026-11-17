@@ -160,24 +160,44 @@ function listingOrder(a: WorktreeDetail, b: WorktreeDetail): number {
   return rank(a) - rank(b) || (a.slot ?? 0) - (b.slot ?? 0);
 }
 
+/** A checkout's identity and unfinished operation, which need no scan of its working tree. */
+export type CheckoutIdentity = Omit<WorktreeDetail, 'dirty' | 'free'>;
+
+type Listed = Awaited<ReturnType<typeof listWorktreesAll>>[number];
+
+async function checkoutIdentity(ctx: RepoContext, w: Listed): Promise<CheckoutIdentity> {
+  const slot = w.isMain || w.bare ? undefined : slotOf(ctx, w.path);
+  // Primary and non-slot checkouts also carry operation markers. Branch following
+  // must not treat their unfinished merge or cherry-pick as a new requirement.
+  const state = w.bare || w.prunable ? { foreign: false } : await checkoutState(ctx, w, true);
+  return {
+    ...w,
+    ...(slot === undefined ? {} : { slot }),
+    ...(state.foreign ? { foreign: true } : {}),
+    ...(state.busy ? { busy: state.busy } : {}),
+  };
+}
+
+/**
+ * Every checkout without its status. `git status` reads a whole working tree, and a caller that
+ * guards one workspace reads that workspace itself, at the moment it needs the answer.
+ */
+export async function listCheckoutIdentities(ctx: RepoContext): Promise<CheckoutIdentity[]> {
+  return Promise.all((await listWorktreesAll(ctx)).map((w) => checkoutIdentity(ctx, w)));
+}
+
 export async function listWorktreesDetailed(ctx: RepoContext): Promise<WorktreeDetail[]> {
   const all = await listWorktreesAll(ctx);
   const details = await Promise.all(
     all.map(async (w) => {
-      const slot = w.isMain || w.bare ? undefined : slotOf(ctx, w.path);
       const dirty = w.prunable || w.bare ? 0 : await dirtyCount(w.path).catch(() => -1);
-      // Primary and non-slot checkouts also carry operation markers. Branch following
-      // must not treat their unfinished merge or cherry-pick as a new requirement.
-      const state = w.bare || w.prunable ? { foreign: false } : await checkoutState(ctx, w, true);
+      const identity = await checkoutIdentity(ctx, w);
       const detail: WorktreeDetail = {
-        ...w,
+        ...identity,
         dirty,
-        ...(slot === undefined ? {} : { slot }),
-        ...(state.foreign ? { foreign: true } : {}),
-        ...(state.busy ? { busy: state.busy } : {}),
         // Free is what the next checkout may take over: a detached HEAD, nothing that would be lost,
         // nothing stopped halfway, and a checkout that is this repository's own.
-        free: slot !== undefined && !w.prunable && w.detached && dirty === 0 && !state.foreign && !state.busy,
+        free: identity.slot !== undefined && !w.prunable && w.detached && dirty === 0 && !identity.foreign && !identity.busy,
       };
       return detail;
     }),

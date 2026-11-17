@@ -353,7 +353,9 @@ remain an ordinary, unredirected directory. Conversation archive cleanup uses th
 canonical directory; allowing a parent alias does not permit an ACP-directory symlink.
 
 Workflow reads share one checkout inventory per request instead of rebuilding every workspace's
-inventory for each task. The extension follows observed primary checkout branch changes only for
+inventory for each task. Rebase checks and the guards of rebase and delivery use an inventory
+without `git status`: it identifies checkouts and their unfinished operations, and each guard reads
+the status of the one workspace it acts on. The extension follows observed primary checkout branch changes only for
 `workflow.trackedBranches`, through `workflow.configure` with its existing integration and connection
 guards. Untracked branches and detached HEAD project an empty workbench without changing saved workflow
 or preview state. Explicit branch selection pins the stored engine context even while the visible

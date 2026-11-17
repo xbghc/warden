@@ -98,11 +98,27 @@ describe('shared workflow reads', () => {
     await task();
     await task('clone');
     const list = vi.spyOn(worktrees, 'listWorktreesDetailed');
+    const identities = vi.spyOn(worktrees, 'listCheckoutIdentities');
     expect((await workflow.get()).workflow?.changes).toHaveLength(3);
-    expect(list).toHaveBeenCalledTimes(1);
-    list.mockClear();
+    expect(identities).toHaveBeenCalledTimes(1);
+    identities.mockClear();
     expect((await workflow.rebaseChecks()).checks.map((row) => row.status)).toEqual(['current', 'current', 'current']);
-    expect(list).toHaveBeenCalledTimes(1);
+    expect(identities).toHaveBeenCalledTimes(1);
+    // Neither read needs the status of every checkout.
+    expect(list).not.toHaveBeenCalled();
+  });
+
+  it('scans each checked workspace once and no other checkout', { timeout: longGitTimeout }, async () => {
+    const tasks = [await task(), await task(), await task('clone')];
+    // A checkout that no task in this requirement uses, as other worktrees of the repository are.
+    const other = path.join(data, 'other');
+    fx.git('worktree', 'add', '-q', '--detach', other);
+    checkouts.push(other);
+    const reads = vi.spyOn(git, 'runGitBuffer');
+    expect((await workflow.rebaseChecks()).checks.map((row) => row.status)).toEqual(['current', 'current', 'current']);
+    const scanned = reads.mock.calls.filter(([args]) => args[0] === 'status').map(([, options]) => options.cwd);
+    reads.mockRestore();
+    expect(scanned.sort()).toEqual(tasks.map((row) => row.worktree).sort());
   });
 
   it('reuses a trial while still detecting edits, commits, branch switches and unfinished operations', { timeout: longGitTimeout }, async () => {

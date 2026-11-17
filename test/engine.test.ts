@@ -62,8 +62,11 @@ describe('desktop engine', () => {
     expect(inventory).toHaveBeenCalledTimes(2);
     expect(second.workspaces.worktrees).toContainEqual(expect.objectContaining({ path: task.worktree, dirty: 1 }));
     expect(first.workspaces.worktrees).toContainEqual(expect.objectContaining({ path: task.worktree, dirty: 0 }));
+    const identities = vi.spyOn(worktrees, 'listCheckoutIdentities');
     expect((await engine.execute('rebase.check', undefined)).checks).toContainEqual(expect.objectContaining({ changeId: task.id, status: 'blocked' }));
-    expect(inventory).toHaveBeenCalledTimes(3);
+    // The check reads the status of its own workspaces; its inventory only identifies checkouts.
+    expect(identities).toHaveBeenCalledTimes(1);
+    expect(inventory).toHaveBeenCalledTimes(2);
   });
 
   it('does not retain a failed or concurrent repository inventory for another read', async () => {
