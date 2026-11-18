@@ -766,6 +766,43 @@ describe('committing work folder edits', () => {
     expect(primaryStatus()).toBe('');
     expect(fx.git('-C', folder, 'status', '--porcelain').trim()).toBe('');
   });
+
+  it('clears an interrupted work folder commit from primary before a task is committed', { timeout: longGitTimeout }, async () => {
+    const { a, folder } = await editedFolder();
+    const before = head();
+    const write = git.runGitWrite;
+    const interrupt = () =>
+      vi.spyOn(git, 'runGitWrite').mockImplementation(async (args, options) => {
+        if (args[0] === 'commit' && options.cwd === fx.root) throw new Error('killed');
+        if (args.includes('-R')) throw new Error('killed');
+        return write(args, options);
+      });
+    interrupt();
+    await expect(workflow.commitWorkFolder({ ...(await review()), message: 'Interrupted' })).rejects.toThrow('killed');
+    vi.restoreAllMocks();
+    expect(primaryStatus()).not.toBe('');
+
+    // The staged patch is Warden's own leftover, invisible from the work folder window.
+    await edit(a, 'a.txt', 'A\n', true);
+    await deliver(a, 'Deliver A');
+    expect(fx.git('log', '-1', '--format=%s').trim()).toBe('Deliver A');
+    expect(fx.git('show', '--format=', '--name-only', 'HEAD').trim()).toBe('a.txt');
+    expect(fx.git('rev-parse', 'HEAD^').trim()).toBe(before);
+    expect(primaryStatus()).toBe('');
+    expect((await store.load()).workFolderCommit).toBeUndefined();
+    expect(await file(folder, 'README.md')).toBe('Edited in the work folder\n');
+
+    // Someone else's change beside the leftover still stops the task commit.
+    const b = await task('B');
+    await edit(b, 'b.txt', 'B\n', true);
+    interrupt();
+    await expect(workflow.commitWorkFolder({ ...(await review()), message: 'Interrupted again' })).rejects.toThrow('killed');
+    vi.restoreAllMocks();
+    await fx.write('other.txt', 'Unrelated\n');
+    await expect(deliver(b, 'Deliver B')).rejects.toMatchObject({ code: 'development_dirty' });
+    expect(await file(fx.root, 'other.txt')).toBe('Unrelated\n');
+    expect((await store.load()).workFolderCommit).toBeDefined();
+  });
 });
 
 describe('commit history arrangement', () => {

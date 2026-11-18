@@ -440,7 +440,8 @@ to be current. It applies the binary patch between the composition tree and the 
 on a connected task's change is refused with the shared paths. The resulting patch is journaled in
 `workFolderCommit` (parent commit and staged-diff fingerprint), applied to primary's index and files
 with `apply --index`, and committed there with ordinary `git commit -m`, hooks and signing included.
-A failed commit, or an interrupted one found by the next attempt, reverses exactly that staged patch
+A failed commit, or an interrupted one found by the next attempt or by the next preparation of a task
+commit, reverses exactly that staged patch
 when the index still matches the fingerprint and primary has no other changes; otherwise it stops
 with `development_dirty`. The work folder is then recomposed on the new base commit. The host's
 **Pull Base Branch** is not an engine command: it runs `git pull --ff-only` in primary as a VS Code

@@ -1004,6 +1004,9 @@ export class WorkflowService {
       fail('Finish the commit being prepared in the primary folder first.', 'development_in_use');
     if (change.integration?.prepared) return change;
     if (change.status === 'accepted') fail('A legacy recorded commit cannot be submitted again.', 'change_closed');
+    // An interrupted work folder commit leaves its patch staged in primary. It is Warden's own
+    // leftover and cannot be seen from the work folder window, so it must not read as the user's work.
+    await this.recoverWorkFolderCommit(workflow.developmentBranch);
     const target = await this.developmentHead(change.developmentBranch);
     const checkout = await this.checkout(change);
     const source = await revParse(checkout.path, 'HEAD');
