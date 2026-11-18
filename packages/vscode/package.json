@@ -547,35 +547,35 @@
         },
         {
           "command": "warden.createTask",
-          "when": "warden.agentReady"
+          "when": "warden.agentReady && warden.hasDevelopmentBranch"
         },
         {
           "command": "warden.taskActions",
-          "when": "warden.agentReady"
+          "when": "warden.agentReady && warden.hasDevelopmentBranch"
         },
         {
           "command": "warden.renameTask",
-          "when": "warden.agentReady"
+          "when": "warden.agentReady && warden.hasDevelopmentBranch"
         },
         {
           "command": "warden.moveTask",
-          "when": "warden.agentReady"
+          "when": "warden.agentReady && warden.hasDevelopmentBranch"
         },
         {
           "command": "warden.connect",
-          "when": "warden.agentReady"
+          "when": "warden.agentReady && warden.hasDevelopmentBranch"
         },
         {
           "command": "warden.deliver",
-          "when": "warden.agentReady"
+          "when": "warden.agentReady && warden.hasDevelopmentBranch"
         },
         {
           "command": "warden.retryHook",
-          "when": "warden.agentReady"
+          "when": "warden.agentReady && warden.hasDevelopmentBranch"
         },
         {
           "command": "warden.resumeTask",
-          "when": "warden.agentReady"
+          "when": "warden.agentReady && warden.hasDevelopmentBranch"
         },
         {
           "command": "warden.runPreview",
@@ -595,11 +595,11 @@
         },
         {
           "command": "warden.rebase",
-          "when": "warden.agentReady"
+          "when": "warden.agentReady && warden.hasDevelopmentBranch"
         },
         {
           "command": "warden.copyWorkspace",
-          "when": "warden.agentReady"
+          "when": "warden.agentReady && warden.hasDevelopmentBranch"
         },
         {
           "command": "warden.importNotes",
@@ -607,7 +607,7 @@
         },
         {
           "command": "warden.selectTask",
-          "when": "warden.agentReady"
+          "when": "warden.agentReady && warden.hasDevelopmentBranch"
         },
         {
           "command": "warden.showPreview",
@@ -619,7 +619,7 @@
         },
         {
           "command": "warden.chat",
-          "when": "warden.agentReady"
+          "when": "warden.agentReady && warden.hasDevelopmentBranch"
         },
         {
           "command": "warden.sendSelectionToAgent",
@@ -627,15 +627,15 @@
         },
         {
           "command": "warden.openWorkspace",
-          "when": "warden.agentReady"
+          "when": "warden.agentReady && warden.hasDevelopmentBranch"
         },
         {
           "command": "warden.taskHistory",
-          "when": "warden.agentReady"
+          "when": "warden.agentReady && warden.hasDevelopmentBranch"
         },
         {
           "command": "warden.copyBrief",
-          "when": "warden.agentReady"
+          "when": "warden.agentReady && warden.hasDevelopmentBranch"
         },
         {
           "command": "warden.switchChat",
