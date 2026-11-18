@@ -8,7 +8,7 @@ import { ensureSharedRepository, validatedSharedRepository } from './shared-repo
 import { GitSandbox, gitMessage, oid, patchBetween, deliveryBase, deliveryContentBase, deliveredTree } from './git-sandbox.js';
 import { listWorktreesAll, type RepoContext } from './repo.js';
 import type { StateStore } from './state.js';
-import { checkoutState, listCheckoutIdentities } from './worktrees.js';
+import { checkoutIdentity, checkoutState } from './worktrees.js';
 import { assertSetupIdle, runSetupCommand, setupOwner } from './workspace.js';
 
 function conflict(message: string, code = 'preview_conflict'): never {
@@ -21,8 +21,8 @@ function assertPreviewSetupIdle(setup: PreviewResponse['setup']) {
   if (setup?.status === 'running' && setup.owner !== undefined) assertSetupIdle({ status: setup.status, owner: setup.owner }, 'preview');
 }
 
-export async function primaryCheckout(repo: RepoContext, branch: string) {
-  const row = (await listWorktreesAll(repo)).find((w) => !w.clone && !w.shared && w.branch === branch && !w.prunable);
+export async function primaryCheckout(repo: RepoContext, branch: string, listed?: Awaited<ReturnType<typeof listWorktreesAll>>) {
+  const row = (listed ?? (await listWorktreesAll(repo))).find((w) => !w.clone && !w.shared && w.branch === branch && !w.prunable);
   if (!row) return conflict('Check out the base branch in the primary folder first.', 'development_checkout_missing');
   const state = await checkoutState(repo, row);
   if (state.foreign || state.busy) return conflict('Finish the Git operation in the primary folder first.', 'development_busy');
@@ -279,20 +279,23 @@ export class PreviewService {
 
   private async inputs(state: ReviewState, ids: string[]) {
     const workflow = state.workflow!;
-    const primary = await primaryCheckout(this.repo, workflow.developmentBranch);
+    // One inventory answers for primary and every source: this runs once a second.
+    const listed = await listWorktreesAll(this.repo);
+    const primary = await primaryCheckout(this.repo, workflow.developmentBranch, listed);
     // Primary only carries commits to and from the remote; its working files are not an input.
     const head = await oid(primary.path, 'HEAD');
-    // Sources are matched by identity and snapshotted below; a status scan of every checkout,
-    // the work folder included, on each tick would answer nothing asked here.
-    const checkouts = ids.length ? await listCheckoutIdentities(this.repo) : [];
     const sources = [];
     for (const id of ids) {
       const change = workflow.changes.find((c): c is DevelopmentChange => c.id === id && !!c.worktree);
       if (!change || change.developmentBranch !== workflow.developmentBranch || change.status === 'accepted')
         throw badRequest('This workspace does not belong to the current base branch.');
       if (change.deletion) throw badRequest('Task deletion is pending. Retry deletion first.', 'task_deleting');
-      const checkout = checkouts.find((w) => w.path === change.worktree && w.branch === change.branch && !w.prunable && !w.foreign && !w.busy);
-      if (!checkout || checkout.path === primary.path) conflict('The workspace is unavailable or has an unfinished Git operation.', 'preview_source_busy');
+      // Only a connected source is verified, and by identity alone: its content is snapshotted
+      // below, and the other checkouts, the work folder included, answer nothing asked here.
+      const row = listed.find((w) => w.path === change.worktree && w.branch === change.branch && !w.prunable);
+      const checkout = row && (await checkoutIdentity(this.repo, row));
+      if (!checkout || checkout.foreign || checkout.busy || checkout.path === primary.path)
+        conflict('The workspace is unavailable or has an unfinished Git operation.', 'preview_source_busy');
       const from = await deliveryBase(change, await oid(checkout.path, 'HEAD'), head, this.repo.commonRoot);
       const tree = await snapshotWorktree(checkout.path, snapshotStore(this.store.file));
       sources.push({ change, from, tree });

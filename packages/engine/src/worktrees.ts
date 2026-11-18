@@ -165,7 +165,7 @@ export type CheckoutIdentity = Omit<WorktreeDetail, 'dirty' | 'free'>;
 
 type Listed = Awaited<ReturnType<typeof listWorktreesAll>>[number];
 
-async function checkoutIdentity(ctx: RepoContext, w: Listed): Promise<CheckoutIdentity> {
+export async function checkoutIdentity(ctx: RepoContext, w: Listed): Promise<CheckoutIdentity> {
   const slot = w.isMain || w.bare ? undefined : slotOf(ctx, w.path);
   // Primary and non-slot checkouts also carry operation markers. Branch following
   // must not treat their unfinished merge or cherry-pick as a new requirement.

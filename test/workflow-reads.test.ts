@@ -143,6 +143,33 @@ describe('shared workflow reads', () => {
     expect(await readFile(path.join(`${fx.root}-work`, 'task.txt'), 'utf8')).toBe('Saved edit\n');
   });
 
+  it('lists checkouts once and verifies only connected sources to keep the work folder current', { timeout: longGitTimeout }, async () => {
+    const tasks = [await task(), await task(), await task('clone')];
+    const preview = new PreviewService(await resolveRepo(fx.root), store, 0);
+    checkouts.push(`${fx.root}-work`);
+    expect(await preview.set([tasks[0]!.id])).toMatchObject({ syncStatus: 'synced' });
+    const reads = vi.spyOn(git, 'runGit');
+    await preview.tick();
+    const calls = reads.mock.calls.map(([args, options]) => ({ args: args.join(' '), cwd: options.cwd }));
+    expect(calls.filter((call) => call.cwd === fx.root && call.args.startsWith('worktree list'))).toHaveLength(1);
+    // The unfinished-operation probe marks a verified checkout: primary and the connected task,
+    // not the two unconnected tasks or the work folder.
+    expect(
+      calls
+        .filter((call) => call.args.includes('--git-path rebase-merge'))
+        .map((call) => call.cwd)
+        .sort(),
+    ).toEqual([fx.root, tasks[0]!.worktree].sort());
+    reads.mockRestore();
+
+    // An unfinished operation in the connected source still stops its composition.
+    const marker = path.resolve(tasks[0]!.worktree, fx.git('-C', tasks[0]!.worktree, 'rev-parse', '--git-path', 'rebase-merge').trim());
+    await mkdir(marker, { recursive: true });
+    await writeFile(path.join(tasks[0]!.worktree, 'task.txt'), 'Saved edit\n');
+    await preview.tick();
+    expect(await preview.get()).toMatchObject({ syncStatus: 'error', message: expect.stringContaining('unfinished Git operation') });
+  });
+
   it('reuses a trial while still detecting edits, commits, branch switches and unfinished operations', { timeout: longGitTimeout }, async () => {
     const change = await behind();
     const create = vi.spyOn(GitSandbox, 'create');
