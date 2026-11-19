@@ -1173,8 +1173,13 @@ export class WorkflowService {
         } catch (error) {
           const output = (error instanceof GitError ? error.stderr.trim() || error.message : errorMessage(error)).slice(0, 8000);
           // Nothing was committed, so primary goes back to the base commit and the edits stay in the work folder.
-          await this.recoverWorkFolderCommit(workflow.developmentBranch);
-          fail(`The commit did not finish. Your edits are still in the work folder. ${output}`, 'commit_failed');
+          // A hook that edited primary before rejecting leaves changes the recovery will not discard.
+          // The refusal joins the hook's output; alone it would hide why the commit stopped.
+          const blocked = await this.recoverWorkFolderCommit(workflow.developmentBranch).then(
+            () => '',
+            (recovery) => `${errorMessage(recovery)} `,
+          );
+          fail(`The commit did not finish. Your edits are still in the work folder. ${blocked}${output}`, 'commit_failed');
         }
         await this.store.update((state) => {
           delete state.workFolderCommit;

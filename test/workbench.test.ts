@@ -767,6 +767,34 @@ describe('committing work folder edits', () => {
     expect(fx.git('-C', folder, 'status', '--porcelain').trim()).toBe('');
   });
 
+  it('reports the hook output when the rejecting hook also left edits in primary', { timeout: longGitTimeout }, async () => {
+    const { folder } = await editedFolder();
+    const before = head();
+    const hook = path.join(fx.root, '.git', 'hooks', 'pre-commit');
+    await mkdir(path.dirname(hook), { recursive: true });
+    // A formatter that rewrites a file and then a check that fails: the hook's edit is unstaged.
+    await writeFile(hook, '#!/bin/sh\necho "Formatted by hook" > README.md\necho lint-failed-in-hook >&2\nexit 1\n');
+    await chmod(hook, 0o755);
+    const rejected = await workflow.commitWorkFolder({ ...(await review()), message: 'Rejected' }).catch((error) => error);
+    expect(rejected).toMatchObject({ code: 'commit_failed' });
+    expect(rejected.message).toContain('lint-failed-in-hook');
+    expect(rejected.message).toContain('the primary folder has other changes');
+    // Nothing is discarded: the hook's edit stays in primary and the edits stay in the work folder.
+    expect(head()).toBe(before);
+    expect(await file(fx.root, 'README.md')).toBe('Formatted by hook\n');
+    expect(await file(folder, 'README.md')).toBe('Edited in the work folder\n');
+    expect((await store.load()).workFolderCommit).toMatchObject({ parent: before });
+    await rm(hook);
+
+    // Once the hook's edit is handled, the staged patch is recognized and removed, and the commit goes through.
+    fx.git('checkout', '--', 'README.md');
+    await workflow.commitWorkFolder({ ...(await review()), message: 'Committed after the hook' });
+    expect(fx.git('log', '-1', '--format=%s').trim()).toBe('Committed after the hook');
+    expect(fx.git('rev-parse', 'HEAD^').trim()).toBe(before);
+    expect(primaryStatus()).toBe('');
+    expect((await store.load()).workFolderCommit).toBeUndefined();
+  });
+
   it('clears an interrupted work folder commit from primary before a task is committed', { timeout: longGitTimeout }, async () => {
     const { a, folder } = await editedFolder();
     const before = head();

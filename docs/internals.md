@@ -444,7 +444,9 @@ with `apply --index`, and committed there with ordinary `git commit -m`, hooks a
 A failed commit, or an interrupted one found by the next attempt or by the next preparation of a task
 commit, reverses exactly that staged patch
 when the index still matches the fingerprint and primary has no other changes; otherwise it stops
-with `development_dirty`. The work folder is then recomposed on the new base commit. The host's
+with `development_dirty`. A commit whose hook edited primary before rejecting it stays `commit_failed`
+and carries both the hook's output and that refusal, with the hook's edits and the journal left in
+place. The work folder is then recomposed on the new base commit. The host's
 **Pull Base Branch** is not an engine command: it runs `git pull --ff-only` in primary as a VS Code
 task, with the user's own Git configuration, credentials and hooks.
 
