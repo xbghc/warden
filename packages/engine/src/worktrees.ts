@@ -72,6 +72,13 @@ async function checkoutDirectories(dir: string): Promise<{ common: string; priva
   }
 }
 
+/** Reads primary's directories at most once, on first use, for the checks that share it. */
+export type PrimaryDirectories = () => ReturnType<typeof checkoutDirectories>;
+export function primaryDirectories(ctx: RepoContext): PrimaryDirectories {
+  let read: ReturnType<typeof checkoutDirectories> | undefined;
+  return () => (read ??= checkoutDirectories(ctx.commonRoot));
+}
+
 /** A copied .git file must not borrow another checkout's branch and index. */
 async function registeredLinkedCheckout(dir: string, common: string, privateDirectory: string): Promise<boolean> {
   try {
@@ -111,14 +118,21 @@ const IN_PROGRESS: [string, string][] = [
  * nothing may be stopped halfway in it, since a release, a reuse or a removal would throw the
  * half-done rebase or merge away.
  */
-export async function checkoutState(ctx: RepoContext, wt: WorktreeInfo, cloneVerified = false): Promise<{ foreign: boolean; busy?: string }> {
+export async function checkoutState(
+  ctx: RepoContext,
+  wt: WorktreeInfo,
+  cloneVerified = false,
+  primary?: PrimaryDirectories,
+): Promise<{ foreign: boolean; busy?: string }> {
   const dir = wt.path;
   if (wt.clone) {
     if (!cloneVerified && !(await isCloneOf(ctx.commonRoot, dir))) return { foreign: true };
   } else if (wt.shared) {
     if (!(await isSharedCheckout(ctx.commonRoot, dir))) return { foreign: true };
   } else {
-    const [ours, theirs] = await Promise.all([checkoutDirectories(ctx.commonRoot), checkoutDirectories(dir)]);
+    // Primary's own directories answer for primary itself, and for every checkout of one inventory.
+    const known = primary ?? primaryDirectories(ctx);
+    const [ours, theirs] = await Promise.all([known(), dir === ctx.commonRoot ? known() : checkoutDirectories(dir)]);
     if (!ours || !theirs || ours.common !== theirs.common) return { foreign: true };
     if (wt.isMain ? theirs.private !== ours.common : !(await registeredLinkedCheckout(dir, ours.common, theirs.private))) return { foreign: true };
   }
@@ -165,11 +179,11 @@ export type CheckoutIdentity = Omit<WorktreeDetail, 'dirty' | 'free'>;
 
 type Listed = Awaited<ReturnType<typeof listWorktreesAll>>[number];
 
-export async function checkoutIdentity(ctx: RepoContext, w: Listed): Promise<CheckoutIdentity> {
+export async function checkoutIdentity(ctx: RepoContext, w: Listed, primary?: PrimaryDirectories): Promise<CheckoutIdentity> {
   const slot = w.isMain || w.bare ? undefined : slotOf(ctx, w.path);
   // Primary and non-slot checkouts also carry operation markers. Branch following
   // must not treat their unfinished merge or cherry-pick as a new requirement.
-  const state = w.bare || w.prunable ? { foreign: false } : await checkoutState(ctx, w, true);
+  const state = w.bare || w.prunable ? { foreign: false } : await checkoutState(ctx, w, true, primary);
   return {
     ...w,
     ...(slot === undefined ? {} : { slot }),
@@ -183,15 +197,17 @@ export async function checkoutIdentity(ctx: RepoContext, w: Listed): Promise<Che
  * guards one workspace reads that workspace itself, at the moment it needs the answer.
  */
 export async function listCheckoutIdentities(ctx: RepoContext): Promise<CheckoutIdentity[]> {
-  return Promise.all((await listWorktreesAll(ctx)).map((w) => checkoutIdentity(ctx, w)));
+  const primary = primaryDirectories(ctx);
+  return Promise.all((await listWorktreesAll(ctx)).map((w) => checkoutIdentity(ctx, w, primary)));
 }
 
 export async function listWorktreesDetailed(ctx: RepoContext): Promise<WorktreeDetail[]> {
   const all = await listWorktreesAll(ctx);
+  const primary = primaryDirectories(ctx);
   const details = await Promise.all(
     all.map(async (w) => {
       const dirty = w.prunable || w.bare ? 0 : await dirtyCount(w.path).catch(() => -1);
-      const identity = await checkoutIdentity(ctx, w);
+      const identity = await checkoutIdentity(ctx, w, primary);
       const detail: WorktreeDetail = {
         ...identity,
         dirty,

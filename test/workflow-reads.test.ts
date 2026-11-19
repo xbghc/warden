@@ -8,6 +8,7 @@ import { GitSandbox } from '../packages/engine/src/git-sandbox.js';
 import { PreviewService } from '../packages/engine/src/preview.js';
 import * as git from '../packages/engine/src/git.js';
 import * as worktrees from '../packages/engine/src/worktrees.js';
+import { listCheckoutIdentities } from '../packages/engine/src/worktrees.js';
 import { makeFixtureRepo, type FixtureRepo } from './fixtures/make-repo.js';
 
 let fx: FixtureRepo;
@@ -141,6 +142,31 @@ describe('shared workflow reads', () => {
     reads.mockRestore();
     expect(await preview.get()).toMatchObject({ syncStatus: 'synced' });
     expect(await readFile(path.join(`${fx.root}-work`, 'task.txt'), 'utf8')).toBe('Saved edit\n');
+  });
+
+  it("reads primary's own directories once for all the checkouts of a read", { timeout: longGitTimeout }, async () => {
+    const tasks = [await task(), await task(), await task()];
+    const preview = new PreviewService(await resolveRepo(fx.root), store, 0);
+    checkouts.push(`${fx.root}-work`);
+    await preview.set([tasks[0]!.id]);
+    const inPrimary = (reads: { mock: { calls: unknown[][] } }) =>
+      reads.mock.calls.filter(([args, options]) => (args as string[]).includes('--absolute-git-dir') && (options as { cwd: string }).cwd === fx.root).length;
+    // Primary, three task workspaces and the work folder are each compared with primary.
+    let reads = vi.spyOn(git, 'runGit');
+    const response = await workflow.get();
+    expect(inPrimary(reads)).toBe(1);
+    expect(response.workflow!.changes).toHaveLength(3);
+    reads.mockRestore();
+    reads = vi.spyOn(git, 'runGit');
+    await preview.tick();
+    expect(inPrimary(reads)).toBe(1);
+    reads.mockRestore();
+
+    // A directory that stopped being this repository's checkout is still told apart.
+    await rm(path.join(tasks[1]!.worktree, '.git'));
+    fx.git('init', '-q', tasks[1]!.worktree);
+    expect((await listCheckoutIdentities(await resolveRepo(fx.root))).find((row) => row.path === tasks[1]!.worktree)).toMatchObject({ foreign: true });
+    expect((await listCheckoutIdentities(await resolveRepo(fx.root))).find((row) => row.path === tasks[0]!.worktree)?.foreign).toBeUndefined();
   });
 
   it('lists checkouts once and verifies only connected sources to keep the work folder current', { timeout: longGitTimeout }, async () => {

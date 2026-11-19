@@ -353,7 +353,8 @@ remain an ordinary, unredirected directory. Conversation archive cleanup uses th
 canonical directory; allowing a parent alias does not permit an ACP-directory symlink.
 
 Workflow reads share one checkout inventory per request instead of rebuilding every workspace's
-inventory for each task. Rebase checks and the guards of rebase and delivery use an inventory
+inventory for each task. Each checkout of an inventory is compared with primary's own Git
+directories, which are read once per inventory rather than once per checkout. Rebase checks and the guards of rebase and delivery use an inventory
 without `git status`: it identifies checkouts and their unfinished operations, and each guard reads
 the status of the one workspace it acts on. Work folder composition and its once-a-second observation
 list checkouts once and read no status at all: only primary and the connected workspaces are
