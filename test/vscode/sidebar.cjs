@@ -14,12 +14,24 @@ async function checkQuietRefresh(workbench, workspace) {
   await workbench.refresh(true);
   while (workbench.checkReading) await workbench.checkReading;
   let updates = 0;
-  const subscription = workbench.sidebar.onDidChangeTreeData(() => ++updates);
+  // Name the part of the tree's state that moved, so a failure on a slow host says what was still settling.
+  const before = JSON.parse(workbench.sidebar.signature);
+  const moved = new Set();
+  const subscription = workbench.sidebar.onDidChangeTreeData(() => {
+    ++updates;
+    const after = JSON.parse(workbench.sidebar.signature);
+    for (const key of Object.keys(after))
+      if (JSON.stringify(after[key]) !== JSON.stringify(before[key])) moved.add(`${key}: ${JSON.stringify(before[key])} -> ${JSON.stringify(after[key])}`);
+  });
   const file = path.join(workspace.task.worktree, 'sidebar-refresh.txt');
   try {
     await workbench.refresh(true);
     await workbench.refresh(true);
-    assert.equal(updates, 0, 'unchanged repository reads do not reload the native tree or start its progress animation');
+    assert.equal(
+      updates,
+      0,
+      `unchanged repository reads do not reload the native tree or start its progress animation; changed ${[...moved].join('; ').slice(0, 4000)}`,
+    );
     assert.equal(workbench.sidebar.view.selection[0]?.task?.id, workspace.task.id, 'quiet refresh preserves the selected task');
     assert.equal(workbench.expanded[workspace.task.id], true, 'quiet refresh preserves expansion');
 
