@@ -81,7 +81,7 @@ try:
         # Navigation can abort the harness request before the native action is acknowledged.
         page.evaluate("async () => { await queue; }")
         page.goto(origin + '?surface=rebase')
-        expect(page.get_by_text('No workspaces', exact=True)).to_be_visible()
+        expect(page.get_by_text('No Workspaces', exact=True)).to_be_visible()
         # Native task creation and automatic allocation are covered in the extension host.
         def action(value):
             result = page.request.post(origin + '/action?surface=task', data=value)
@@ -105,6 +105,7 @@ try:
 
         page.goto(origin + '?surface=rebase')
         expect(page.get_by_text('订单接口', exact=True)).to_be_visible(timeout=30000)
+        expect(page.locator('label.selection-toggle')).to_have_text('Select All')
         expect(page.locator('label').filter(has_text='订单接口').get_by_text('Blocked', exact=True)).to_be_visible()
         page.get_by_role('checkbox', name='Select All', exact=True).check()
         expect(page.get_by_role('checkbox', name='订单接口', exact=True)).to_be_checked()

@@ -55,7 +55,7 @@ export const Controls: Story = {
       <div className="flex flex-wrap gap-4">
         <label className="selection-toggle">
           <Checkbox aria-label="Select All" defaultChecked="indeterminate" />
-          Select all
+          Select All
         </label>
         <label className="selection-toggle">
           <Checkbox aria-label="Selected" defaultChecked />
