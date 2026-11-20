@@ -11,6 +11,7 @@ import {
   PanelRight,
   ShieldQuestion,
   Square,
+  X,
 } from 'lucide-react';
 import type { AcpAction, AcpConfigOption, AcpMessage, AcpModel, AcpPermission, AcpStatus } from '@warden/shared';
 import { Button } from './components/ui/button';
@@ -626,12 +627,13 @@ export function AcpApp({ model, send: dispatch }: Props) {
             {canStop ? (
               <IconButton
                 label={status === 'cancelling' ? 'Stopping…' : 'Stop Turn'}
+                variant="default"
                 size="icon-sm"
-                className="acp-submit"
+                className="acp-submit acp-stop"
                 disabled={status === 'cancelling'}
                 onClick={() => send({ type: 'cancel' })}
               >
-                <Square aria-hidden="true" />
+                <Square fill="currentColor" aria-hidden="true" />
               </IconButton>
             ) : (
               <IconButton
@@ -761,7 +763,10 @@ function ChatError({ error, canRetry, retry }: { error: string; canRetry: boolea
         )}
       </div>
       <details>
-        <summary>Error Details</summary>
+        <summary>
+          <ChevronRight className="acp-disclosure" aria-hidden="true" />
+          Error Details
+        </summary>
         <pre>{error}</pre>
         <CopyText text={error} label="Copy Error" />
       </details>
@@ -800,10 +805,15 @@ const Message = memo(
                 <LoaderCircle className="acp-spinner" aria-hidden="true" />
               ) : message.status === 'completed' ? (
                 <Check aria-hidden="true" />
+              ) : message.status === 'failed' ? (
+                <X aria-hidden="true" />
               ) : null}
               <span className="acp-tool-title">{title || 'Agent activity'}</span>
               <span className="acp-tool-status muted">
-                <span>{unknown ? 'Outcome Unknown' : (labels[message.status ?? ''] ?? message.status)}</span>
+                {/* The check mark already says a plain success; the word stays for assistive technology. */}
+                <span className={message.status === 'completed' && !unknown && !message.compactionId ? 'sr-only' : undefined}>
+                  {unknown ? 'Outcome Unknown' : (labels[message.status ?? ''] ?? message.status)}
+                </span>
                 {message.exitCode !== undefined && <span>Exit {message.exitCode}</span>}
                 {message.exitSignal && <span>Signal {message.exitSignal}</span>}
               </span>
@@ -916,7 +926,10 @@ function Permission({
         {permission.reason && <p className="acp-permission-reason">{permission.reason}</p>}
         {permission.cwd && <p className="acp-permission-cwd path">Working directory: {permission.cwd}</p>}
         <details className="acp-permission-details">
-          <summary>Details and Workspace</summary>
+          <summary>
+            <ChevronRight className="acp-disclosure" aria-hidden="true" />
+            Details and Workspace
+          </summary>
           <p>Task: {task}</p>
           <p className="path">Workspace: {workspace}</p>
           <pre className="acp-message-text">{permission.detail}</pre>
