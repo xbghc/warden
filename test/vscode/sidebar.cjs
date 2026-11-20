@@ -11,12 +11,32 @@ let workbenchUnderTest;
 const taskPanelOpen = () => [...workbenchUnderTest.views.panels.keys()].some((surface) => surface !== 'rebase');
 
 async function checkQuietRefresh(workbench, workspace) {
-  await workbench.refresh(true);
-  while (workbench.checkReading) await workbench.checkReading;
+  // An earlier stage can leave the work folder composing. When that ends during a count it reloads the
+  // tree, which is correct and is not what these counts are about, so each count starts from rest.
+  const settle = async () => {
+    const deadline = Date.now() + 60_000;
+    for (;;) {
+      while (workbench.checkReading) await workbench.checkReading;
+      if (!['pending', 'updating'].includes(workbench.preview?.syncStatus)) return;
+      assert(Date.now() < deadline, `the work folder settles; it stayed ${workbench.preview?.syncStatus}`);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      await workbench.refresh(true);
+    }
+  };
   let updates = 0;
   // Name the part of the tree's state that moved, so a failure on a slow host says what was still settling.
-  const before = JSON.parse(workbench.sidebar.signature);
+  let before;
   const moved = new Set();
+  const count = async () => {
+    await settle();
+    before = JSON.parse(workbench.sidebar.signature);
+    moved.clear();
+    updates = 0;
+  };
+  const changed = () =>
+    `changed ${[...moved].join('; ').slice(0, 4000)}; work folder ${workbench.preview?.status}/${workbench.preview?.syncStatus}; check ${workbench.checkReading ? 'reading' : 'idle'}`;
+  await workbench.refresh(true);
+  await count();
   const subscription = workbench.sidebar.onDidChangeTreeData(() => {
     ++updates;
     const after = JSON.parse(workbench.sidebar.signature);
@@ -27,11 +47,7 @@ async function checkQuietRefresh(workbench, workspace) {
   try {
     await workbench.refresh(true);
     await workbench.refresh(true);
-    assert.equal(
-      updates,
-      0,
-      `unchanged repository reads do not reload the native tree or start its progress animation; changed ${[...moved].join('; ').slice(0, 4000)}`,
-    );
+    assert.equal(updates, 0, `unchanged repository reads do not reload the native tree or start its progress animation; ${changed()}`);
     assert.equal(workbench.sidebar.view.selection[0]?.task?.id, workspace.task.id, 'quiet refresh preserves the selected task');
     assert.equal(workbench.expanded[workspace.task.id], true, 'quiet refresh preserves expansion');
 
@@ -55,8 +71,7 @@ async function checkQuietRefresh(workbench, workspace) {
     const row = () => workbench.model('workspaces').workspaces.find((row) => row.task.id === workspace.task.id);
     const first = row().files.find((entry) => entry.path === 'sidebar-refresh.txt');
     assert(first, 'the expanded task includes the new file');
-    while (workbench.checkReading) await workbench.checkReading;
-    updates = 0;
+    await count();
     await fs.writeFile(file, 'Other version\n');
     await workbench.refresh(true);
     const second = row().files.find((entry) => entry.path === first.path);
@@ -64,9 +79,9 @@ async function checkQuietRefresh(workbench, workspace) {
     assert.equal(second.deletions, first.deletions);
     assert.notEqual(second.contentHash, first.contentHash);
     assert(updates > 0, 'content changes refresh the tree even when paths and line counts stay the same');
-    updates = 0;
+    await count();
     await workbench.refresh(true);
-    assert.equal(updates, 0, 'unchanged dirty workspaces also stay quiet');
+    assert.equal(updates, 0, `unchanged dirty workspaces also stay quiet; ${changed()}`);
 
     const preview = workbench.preview;
     try {
