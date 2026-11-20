@@ -111,7 +111,7 @@ function Rebase({ model, send, saved }: Props) {
                   checked={selectedChecks.length === checks.length ? true : selectedChecks.length ? 'indeterminate' : false}
                   onCheckedChange={(checked) => setSelected(checked === true ? checks.map((check) => check.changeId) : [])}
                 />
-                Select all
+                Select All
               </label>
               <span className="muted" role="status">
                 {selectedChecks.length} / {checks.length}
@@ -122,7 +122,7 @@ function Rebase({ model, send, saved }: Props) {
       )}
       {model.checkingRebase && <p role="status">Checking synchronization…</p>}
       {!model.checks && !model.checkingRebase && <p>Not Checked</p>}
-      {model.checks && !checks.length && <p>No workspaces</p>}
+      {model.checks && !checks.length && <p>No Workspaces</p>}
       {checks.map((check) => (
         <label className="check" key={check.changeId}>
           <Checkbox
