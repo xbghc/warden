@@ -5,7 +5,7 @@ import { terminalOutputScenario } from './acp-terminal-output.mjs';
 
 // A real subprocess with no model or credentials. Its own tools edit only its cwd;
 // Warden is responsible for the ACP conversation, not these filesystem operations.
-const [journal, mode = 'normal'] = process.argv.slice(2);
+const [journal, mode = 'normal', script] = process.argv.slice(2);
 const historyFile = `${journal}.history`;
 const pending = new Map();
 let sequence = 0;
@@ -295,6 +295,29 @@ async function handle(message) {
   const text = params.prompt[0]?.type === 'text' ? params.prompt[0].text : sentText;
   turn = { id, text, cancelled: false };
   remember('user', sentText);
+  if (mode === 'scripted') {
+    // A turn read from a file and played at a human pace, whatever the prompt says: a thought,
+    // tools that run and may write a file in the working directory, then a streamed reply.
+    const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const play = JSON.parse(readFileSync(script, 'utf8'));
+    await pause(400);
+    if (play.thought) notify({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: play.thought } });
+    for (const [index, tool] of (play.tools ?? []).entries()) {
+      await pause(300);
+      toolUpdate({ sessionUpdate: 'tool_call', toolCallId: `scripted-${index}`, title: tool.title, status: 'in_progress' });
+      await pause(tool.ms ?? 500);
+      if (tool.write) writeFileSync(path.join(process.cwd(), tool.write.path), tool.write.content);
+      toolUpdate({ sessionUpdate: 'tool_call_update', toolCallId: `scripted-${index}`, status: 'completed' });
+    }
+    for (const chunk of play.reply ?? []) {
+      await pause(250);
+      notify({ sessionUpdate: 'agent_message_chunk', messageId: 'scripted-reply', content: { type: 'text', text: chunk } });
+    }
+    remember('agent', (play.reply ?? []).join(''));
+    result(id, { stopReason: 'end_turn' });
+    turn = undefined;
+    return;
+  }
   if (text === 'crash') return process.exit(17);
   if (text === 'permission-error') {
     // The turn fails while its permission request is still pending.

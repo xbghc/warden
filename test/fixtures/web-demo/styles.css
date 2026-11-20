@@ -1,0 +1,49 @@
+body {
+  margin: 0;
+  font:
+    15px / 1.5 system-ui,
+    sans-serif;
+  color: #1b2230;
+  background: #f6f7f9;
+}
+main {
+  max-width: 640px;
+  margin: 32px auto;
+  padding: 0 16px;
+}
+h1 {
+  font-size: 22px;
+}
+#toolbar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+#toolbar button {
+  padding: 4px 12px;
+  border: 1px solid #c9d0db;
+  border-radius: 999px;
+  background: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+#toolbar button[aria-pressed="true"] {
+  border-color: #2f5fd0;
+  background: #2f5fd0;
+  color: #fff;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+}
+th,
+td {
+  padding: 8px 12px;
+  border-bottom: 1px solid #e3e7ee;
+  text-align: left;
+}
+.amount {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}

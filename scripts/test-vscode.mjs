@@ -1,6 +1,6 @@
 import path from 'node:path';
 import os from 'node:os';
-import { mkdtemp, mkdir, rm, writeFile, readFile, realpath, readdir } from 'node:fs/promises';
+import { cp, mkdtemp, mkdir, rm, writeFile, readFile, realpath, readdir } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { unzipSync } from 'fflate';
 import { runTests } from '@vscode/test-electron';
@@ -22,6 +22,8 @@ try {
   git('config', 'user.name', 'Test');
   git('config', 'user.email', 'test@example.com');
   await writeFile(path.join(root, 'README.md'), 'Baseline\n');
+  // The walkthrough shows the loop on a small web project with a development server.
+  if (process.env.WARDEN_VSCODE_WALKTHROUGH) await cp('test/fixtures/web-demo', root, { recursive: true });
   await writeFile(path.join(root, '.gitignore'), 'node_modules/\n');
   git('add', '.');
   git('commit', '-qm', 'Initial');
@@ -36,7 +38,7 @@ try {
   backend = await Engine.open(root, state);
   await backend.execute('workflow.configure', { branch: 'main' });
   await backend.execute('config.save', { hooks: {}, previewSetup: 'mkdir -p node_modules; echo setup > node_modules/ready' });
-  const task = await backend.execute('task.create', { title: 'Agent task' });
+  const task = await backend.execute('task.create', { title: process.env.WARDEN_VSCODE_WALKTHROUGH ? 'Export orders as CSV' : 'Agent task' });
   if (!task.worktree) throw new Error(task.workspaceError?.message ?? 'Task allocation failed');
   await writeFile(path.join(task.worktree, 'agent.txt'), 'Agent addition\n');
   await backend.close();
@@ -53,6 +55,7 @@ try {
       node: process.execPath,
       agent: path.resolve('test/fixtures/acp-agent.mjs'),
       journal: path.join(directory, 'acp.jsonl'),
+      turn: path.resolve('test/fixtures/web-demo-turn.json'),
     }),
   );
   const manifest = JSON.parse(await readFile('packages/vscode/package.json', 'utf8'));

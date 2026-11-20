@@ -1,0 +1,28 @@
+{
+  "thought": "The list renders every order from one array. A filter needs a selected status and a toolbar to choose it.",
+  "tools": [
+    {
+      "title": "Read app.js",
+      "ms": 700
+    },
+    {
+      "title": "Read index.html",
+      "ms": 500
+    },
+    {
+      "title": "Edit app.js",
+      "ms": 900,
+      "write": {
+        "path": "app.js",
+        "content": "const orders = [\n  { id: 'A-1042', customer: 'Lin Mei', status: 'Paid', total: 128.5 },\n  { id: 'A-1043', customer: 'Jonas Weber', status: 'Pending', total: 64.0 },\n  { id: 'A-1044', customer: 'Aiko Tanaka', status: 'Shipped', total: 310.2 },\n  { id: 'A-1045', customer: 'Omar Haddad', status: 'Pending', total: 42.75 },\n  { id: 'A-1046', customer: 'Sofia Rossi', status: 'Paid', total: 89.9 },\n];\n\nlet status = 'All';\n\nfunction renderToolbar() {\n  const toolbar = document.getElementById('toolbar');\n  toolbar.innerHTML = ['All', ...new Set(orders.map((order) => order.status))]\n    .map((name) => `<button type=\"button\" aria-pressed=\"${name === status}\">${name}</button>`)\n    .join('');\n  for (const button of toolbar.querySelectorAll('button'))\n    button.addEventListener('click', () => {\n      status = button.textContent;\n      render();\n    });\n}\n\nfunction render() {\n  renderToolbar();\n  document.getElementById('orders').innerHTML = orders\n    .filter((order) => status === 'All' || order.status === status)\n    .map((order) => `<tr><td>${order.id}</td><td>${order.customer}</td><td>${order.status}</td><td class=\"amount\">${order.total.toFixed(2)}</td></tr>`)\n    .join('');\n}\n\nrender();\n"
+      }
+    }
+  ],
+  "reply": [
+    "Added a status filter above the order list.\n\n",
+    "- `app.js` keeps the selected status and renders one button per status, with **All** first.\n",
+    "- The table shows only the orders with the selected status.\n\n",
+    "The toolbar container already existed in `index.html`, so the markup is unchanged. ",
+    "Connect this task to the work folder to try it with the development server."
+  ]
+}
