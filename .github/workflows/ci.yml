@@ -31,8 +31,9 @@ jobs:
   test:
     name: Test (${{ matrix.os }}, Node ${{ matrix.node }})
     runs-on: ${{ matrix.os }}
-    # Windows executes the complete suite serially to keep individual Git workflows responsive.
-    timeout-minutes: ${{ matrix.os == 'windows-latest' && 40 || 30 }}
+    # Windows executes the complete suite serially to keep individual Git workflows responsive. It has grown to
+    # 35-40 minutes there, so the limit leaves room for a slow runner instead of cancelling a suite that is passing.
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 55 || 30 }}
     strategy:
       fail-fast: false
       matrix:
