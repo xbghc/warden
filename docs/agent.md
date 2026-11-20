@@ -143,6 +143,18 @@ claims that saved text restores the agent's model state. Reopening an active cha
 **New Session** explicitly resets the conversation and connects after preserving the previous record.
 A completed turn does not connect to the work folder, commit, deliver or authorize a rebase. Separately enabled
 automatic rebase may proceed once the task becomes idle and its existing check qualifies.
+
+The workspace context asks the agent to commit related source changes on the task branch before it ends a turn.
+Uncommitted changes still reach the work folder and delivery, but a workspace that has them cannot be rebased, so
+an agent that never commits leaves its task unable to follow the base branch.
+
+A rebase of an idle task, requested or automatic, starts no agent turn. When the task has an agent session, open in
+this window or saved, Warden keeps a note for that session and sends it once, as a separate block after the user's
+next message, naming the base commit and saying that the agent's commits were replayed and other files may have
+changed. Several rebases before that message are told as the latest one. The note is cleared only after the agent
+has answered that message: one stopped before it was sent, or one that failed, keeps it. A task without a session
+gets no note, and a note is dropped when its session is replaced, by **New Session** or because the saved one could
+not be resumed: a session created after the rebase starts in the rebased workspace.
 See the [ACP boundary](acp-design.md) for ownership and recovery details.
 
 ## Task briefs

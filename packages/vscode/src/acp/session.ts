@@ -27,7 +27,7 @@ import { MAX_ACP_MESSAGE_BYTES } from './contracts.js';
 import { availableCommands, configOptions, emptyControls, isModelOption, sessionModes } from './session-controls.js';
 import { AcpStderr, acpDiagnosticSecrets, acpErrorMessage, acpFailureLog } from './diagnostics.js';
 import { approveRepositoryRead, repositoryReadRequest } from './read-permissions.js';
-import { workspaceContext, workspaceContextFallback } from './workspace-context.js';
+import { rebaseNotice, workspaceContext, workspaceContextFallback } from './workspace-context.js';
 import { sameAcpBinding } from './binding.js';
 import { describeProcesses, type ProcessIdentity, processTree, reapSurvivors } from './process-tree.js';
 
@@ -744,7 +744,8 @@ export class AcpSession {
     this.notify();
   }
 
-  send(value: string): Promise<void> {
+  /** `rebase` names the base commit of a rebase this session has not been told about; `told` runs once the agent has answered the prompt that says so. */
+  send(value: string, rebase?: { base: string; told(): void }): Promise<void> {
     if (this.rebaseReservation) return Promise.reject(new Error('This task is being rebased automatically. Try again when it finishes.'));
     if (!value.trim() || value.length > 100_000) return Promise.reject(new Error('Messages must contain 1–100,000 characters.'));
     const runtime = this.runtime;
@@ -754,11 +755,11 @@ export class AcpSession {
       return Promise.reject(new Error('A request is already running in this session. Wait or stop this turn.'));
     const turn: Turn = { id: randomUUID(), updates: 0, runtime, record: this.record, promise: Promise.resolve(), cancelling: false, sent: false, input: value };
     this.turn = turn;
-    turn.promise = this.runPrompt(turn, value);
+    turn.promise = this.runPrompt(turn, value, rebase);
     return turn.promise;
   }
 
-  private async runPrompt(turn: Turn, value: string) {
+  private async runPrompt(turn: Turn, value: string, rebase?: { base: string; told(): void }) {
     const runtime = turn.runtime;
     const wasInterrupted = this.record.interrupted;
     const span = runtime.log.start('acp.turn', { turn: turn.id, characters: value.length }, 'info');
@@ -768,10 +769,12 @@ export class AcpSession {
       await this.options.validate();
       if (!this.current(runtime) || turn.cancelling) throw new Error('Send cancelled.');
       const context = runtime.systemPrompt ? '' : workspaceContextFallback(this.environment);
+      const notice = rebase ? rebaseNotice(rebase.base) : '';
       const prompt: ContentBlock[] = [{ type: 'text', text: value }];
+      if (notice) prompt.push({ type: 'text', text: notice });
       if (context) prompt.push({ type: 'text', text: context });
-      // Record exactly the text sent, including the visible fallback, so replay needs no hidden-message rewriting.
-      turn.user = { id: randomUUID(), role: 'user', text: value + context, status: 'Sending', uncertain: true };
+      // Record exactly the text sent, including the visible notice and fallback, so replay needs no hidden-message rewriting.
+      turn.user = { id: randomUUID(), role: 'user', text: value + notice + context, status: 'Sending', uncertain: true };
       this.record.messages.push(turn.user);
       this.record.interrupted = true;
       this.history.lastChunk = undefined;
@@ -798,6 +801,8 @@ export class AcpSession {
       turn.user.status = result.stopReason === 'cancelled' ? 'Turn cancelled' : `Responded · ${result.stopReason}`;
       this.record.interrupted = false;
       completed = true;
+      // Only here has the agent received the notice: a send stopped before it left, or one that failed, keeps it.
+      rebase?.told();
       outcome = result.stopReason === 'cancelled' ? 'cancelled' : 'ok';
       runtime.log.write('debug', 'acp.turn.response', { turn: turn.id, stopReason: result.stopReason });
     } catch (error) {

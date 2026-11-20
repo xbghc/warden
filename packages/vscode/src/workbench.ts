@@ -627,6 +627,7 @@ export class Workbench {
         );
       });
     if (!eligible().length) return;
+    const targets = new Map<string, string>();
     const outcome = await this.perform(
       async () => {
         this.assertSession(session);
@@ -641,7 +642,10 @@ export class Workbench {
             const { changeId, sourceHead, developmentHead } = candidates.find((check) => check.changeId === taskId)!;
             return { changeId, sourceHead, developmentHead, ...(connectionToken ? { connectionToken } : {}) };
           });
-          for (const item of items) this.autoRebased.add(`${item.changeId}:${item.sourceHead}:${item.developmentHead}`);
+          for (const item of items) {
+            this.autoRebased.add(`${item.changeId}:${item.sourceHead}:${item.developmentHead}`);
+            targets.set(item.changeId, item.developmentHead);
+          }
           if (!items.length) return undefined;
           this.log.write('info', 'workbench.autoRebase.start', { tasks: items.length });
           return await this.api('rebase.run', { items, automatic: true });
@@ -652,9 +656,12 @@ export class Workbench {
       undefined,
       'rebase',
     );
-    if (!outcome || session !== this.session) return;
-    const title = (id: string) => this.tasks().find((task) => task.id === id)?.title ?? id;
+    if (!outcome) return;
     const updated = outcome.results.filter((row) => row.status === 'updated');
+    // The rebases happened whatever the window shows now; their agents are told either way.
+    for (const row of updated) await this.conversations.noteRebase(repository, row.changeId, targets.get(row.changeId) ?? '');
+    if (session !== this.session) return;
+    const title = (id: string) => this.tasks().find((task) => task.id === id)?.title ?? id;
     const failed = outcome.results.filter((row) => row.status !== 'updated');
     this.log.write(failed.length ? 'warn' : 'info', 'workbench.autoRebase.end', {
       updated: updated.length,
@@ -2032,7 +2039,17 @@ ${text}`,
             await this.refreshChecks();
             break;
           case 'rebase.run': {
+            // Taken before the rebase: the window may show another repository by the time it returns.
+            const repository = this.backend?.root;
             const result = await this.api('rebase.run', { items: action.items });
+            if (repository)
+              for (const row of result.results)
+                if (row.status === 'updated')
+                  await this.conversations.noteRebase(
+                    repository,
+                    row.changeId,
+                    action.items.find((item) => item.changeId === row.changeId)?.developmentHead ?? '',
+                  );
             if (session === this.session) this.rebaseResult = result;
             break;
           }

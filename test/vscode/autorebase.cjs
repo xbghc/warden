@@ -227,6 +227,11 @@ const checkAutoRebase = async (workbench, root, eventually) => {
       workbench.api = dispatch;
     }
     assert.equal(parent(live), fourth, 'a reserved idle connection still permits automatic rebase');
+    assert.equal(
+      workbench.conversations.context.workspaceState.get(`${liveChat.draftKey}:rebased`)?.base,
+      fourth,
+      'an automatic rebase leaves a note for the agent instead of prompting it',
+    );
     assert.equal(workbench.conversations.isBusy(root, live.id), false, 'the reservation is released after Git finishes');
     assert(
       requests.some((request) => request.items.some((item) => item.changeId === live.id && item.connectionToken)),

@@ -205,7 +205,7 @@ separately from the successful commit. New plans do not inherit the occupied wor
 
 Warden checks workspaces in isolated repositories and shows **Up to Date**, **Can Rebase**,
 **Conflicts Expected**, **Blocked**, or **Unknown**. Checking does not modify an agent's files, index or refs.
-Dirty/busy workspaces are blocked; a changed revision invalidates a check. Git state is not proof
+Dirty/busy workspaces are blocked, with a message that says to have the agent commit; a changed revision invalidates a check. Git state is not proof
 that an agent has stopped.
 
 Open *Rebase* and select one, several or all workspaces. The engine rechecks both observed heads

@@ -618,7 +618,7 @@ export class WorkflowService {
         check.sourceHead = source.head;
         if (row.status === 'integrating' || source.dirtyCount) {
           check.status = 'blocked';
-          check.message = 'The workspace has uncommitted changes or a commit is being prepared.';
+          check.message = 'The workspace has uncommitted changes or a commit is being prepared. Have its agent commit them, then check again.';
           continue;
         }
         const boundary = await deliveryBase(row, check.sourceHead, target, this.repo.commonRoot);

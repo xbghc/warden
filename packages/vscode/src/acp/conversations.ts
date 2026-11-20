@@ -46,6 +46,14 @@ export interface TaskAgentProcess extends AgentProcessInfo {
 }
 
 /** Conversation routing never depends on the workbench's currently selected repository. */
+/** A rebase the agent session `sessionId` was idle through and has not been told about. */
+type RebaseNote = { base: string; at: string; sessionId: string };
+/** Where a conversation's drafts and notes live in workspace storage: per task allocation, so a replaced workspace starts clean. */
+const draftKeyOf = (repository: string, taskId: string, identity: string) =>
+  `warden.acpDraft:${createHash('sha256')
+    .update(JSON.stringify([repository, taskId, identity]))
+    .digest('hex')}`;
+
 export class AcpConversations {
   private readonly entries = new Map<string, Conversation>();
   private readonly opening = new Map<string, Promise<Conversation>>();
@@ -151,15 +159,24 @@ export class AcpConversations {
       });
     }
   }
+  private storage(engine: Engine, binding: AcpBinding) {
+    return new AcpSessionStorage(
+      path.join(path.dirname(engine.store.file), 'acp'),
+      binding,
+      () => validateAcpBinding(engine, binding),
+      async () => {
+        const task = (await engine.store.load()).workflow?.changes.find((row) => row.id === binding.taskId);
+        if (!task || task.deletion) throw new Error('This task was deleted or is being deleted.');
+      },
+    );
+  }
   private async create(repository: string, taskId: string) {
     const key = this.key(repository, taskId);
     const prewarmed = this.prewarmedBindings.get(key);
     this.prewarmedBindings.delete(key);
     const engine = await this.engine(repository);
     const binding = (await prewarmed?.catch(() => undefined)) ?? (await resolveAcpBinding(engine, taskId));
-    const draftKey = `warden.acpDraft:${createHash('sha256')
-      .update(JSON.stringify([repository, taskId, binding.identity]))
-      .digest('hex')}`;
+    const draftKey = draftKeyOf(repository, taskId, binding.identity);
     const entry = {
       binding,
       engine,
@@ -173,15 +190,7 @@ export class AcpConversations {
     entry.session = new AcpSession({
       binding,
       modelPreferences: new AcpModelPreferences(this.context.globalState),
-      storage: new AcpSessionStorage(
-        path.join(path.dirname(engine.store.file), 'acp'),
-        binding,
-        () => validateAcpBinding(engine, binding),
-        async () => {
-          const task = (await engine.store.load()).workflow?.changes.find((row) => row.id === binding.taskId);
-          if (!task || task.deletion) throw new Error('This task was deleted or is being deleted.');
-        },
-      ),
+      storage: this.storage(engine, binding),
       validate: async () => {
         if (!vscode.workspace.isTrusted || this.closed) throw new Error('Agent actions are unavailable for this workspace.');
         await validateAcpBinding(engine, binding);
@@ -311,6 +320,29 @@ export class AcpConversations {
     };
   }
 
+  /**
+   * Remembers that a task workspace was rebased, for its agent to be told with the user's next
+   * message. Sending it now would start a turn nobody asked for, in every rebased task at once.
+   */
+  async noteRebase(repository: string, taskId: string, base: string) {
+    if (this.closed) return;
+    try {
+      const engine = await this.engine(repository);
+      const entry = this.entries.get(this.key(repository, taskId));
+      const binding = entry?.binding ?? (await resolveAcpBinding(engine, taskId));
+      // A chat that was not opened in this window may still have a saved session to resume.
+      const sessionId = entry ? entry.session.snapshot().record.sessionId : (await this.storage(engine, binding).load())?.sessionId;
+      const key = `${draftKeyOf(repository, taskId, binding.identity)}:rebased`;
+      // No session slept through this rebase: one created later starts in the rebased workspace.
+      if (!sessionId) return void (await this.context.workspaceState.update(key, undefined));
+      await this.context.workspaceState.update(key, { base, at: new Date().toISOString(), sessionId } satisfies RebaseNote);
+      this.log.write('info', 'acp.rebase.noted', { task: taskId, base });
+    } catch (error) {
+      // The rebase itself succeeded; a missing note only costs the agent a reminder.
+      this.log.write('warn', 'acp.rebase.note.failed', { task: taskId, ...diagnosticError(error) });
+    }
+  }
+
   /** Titles are not part of a binding's identity, so a rename updates live conversations in place. */
   retitle(repository: string, taskId: string, title: string) {
     const key = this.key(repository, taskId);
@@ -361,6 +393,7 @@ export class AcpConversations {
     await entry.draftSave;
     await this.context.workspaceState.update(entry.draftKey, undefined);
     await this.context.workspaceState.update(`${entry.draftKey}:view`, undefined);
+    await this.context.workspaceState.update(`${entry.draftKey}:rebased`, undefined);
     this.entries.delete(key);
     this.changed();
   }
@@ -720,7 +753,16 @@ export class AcpConversations {
         this.render(entry);
         try {
           await this.connect(entry, action.profileId);
-          await session.send(submission.text);
+          const noteKey = `${entry.draftKey}:rebased`;
+          const note = this.context.workspaceState.get<RebaseNote>(noteKey);
+          // The note is for the session that slept through the rebase. Connecting can replace that
+          // session, and its replacement began in the rebased workspace with nothing to be told.
+          const pending = note && note.sessionId === session.snapshot().record.sessionId ? note : undefined;
+          if (note && !pending) await this.context.workspaceState.update(noteKey, undefined);
+          let told = false;
+          await session.send(submission.text, pending && { base: pending.base, told: () => (told = true) });
+          // Told once, and only when the agent answered. A later rebase noted meanwhile stays.
+          if (told && this.context.workspaceState.get<RebaseNote>(noteKey)?.at === pending?.at) await this.context.workspaceState.update(noteKey, undefined);
           const record = session.snapshot().record;
           if (!record.interrupted && entry.draft.complete(submission.mutation)) this.saveDraft(entry);
         } finally {
@@ -740,6 +782,7 @@ export class AcpConversations {
           throw new Error('Stop and disconnect the current session first.');
         await session.disconnect();
         await session.newConversation();
+        await this.context.workspaceState.update(`${entry.draftKey}:rebased`, undefined);
         await this.connect(entry);
         break;
       case 'permission':

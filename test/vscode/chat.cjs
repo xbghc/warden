@@ -119,6 +119,64 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   assert.match(await fs.readFile(path.join(chat.binding.workspace, 'agent-output.txt'), 'utf8'), /^Task context edited by /);
   await assert.rejects(fs.access(path.join(fixture.root, 'agent-output.txt')));
   await assert.rejects(fs.access(path.join(preview.worktree, 'agent-output.txt')));
+  // A rebase the idle agent slept through is told once, with the user's next message, and never starts a turn itself.
+  const prompts = async () => (await journal()).filter((row) => row.method === 'session/prompt' && row.cwd === chat.binding.workspace);
+  const before = (await prompts()).length;
+  await conversations.noteRebase(fixture.root, chat.binding.taskId, 'first-base');
+  await conversations.noteRebase(fixture.root, chat.binding.taskId, 'latest-base');
+  assert.equal((await prompts()).length, before, 'noting a rebase sends nothing');
+  await conversations.handle(chat, { type: 'send', profileId: 'fixture', ...edit('after a rebase') });
+  let sent = (await prompts()).at(-1).params.prompt.map((block) => block.text);
+  assert.equal(sent[0], 'after a rebase', "the user's text stays the first block");
+  assert.equal(sent.filter((text) => text.includes('Warden workspace notice')).length, 1, 'the next message carries the notice');
+  assert(sent.join('').includes('"latest-base"') && !sent.join('').includes('first-base'), 'several rebases are told as the latest one');
+  assert(
+    chat.session.snapshot().record.messages.some((message) => message.role === 'user' && message.text.includes('Warden workspace notice')),
+    'the transcript shows what was sent',
+  );
+  await conversations.handle(chat, { type: 'send', profileId: 'fixture', ...edit('one more') });
+  sent = (await prompts()).at(-1).params.prompt.map((block) => block.text);
+  assert(!sent.join('').includes('Warden workspace notice'), 'the notice is told once');
+  const noteOf = (entry) => conversations.context.workspaceState.get(`${entry.draftKey}:rebased`);
+  const editOf = (entry, text) => {
+    const current = entry.draft.snapshot();
+    return { text, version: current.draftVersion, revision: current.draftRevision + 1 };
+  };
+  const lastPrompt = async (entry) =>
+    (await journal())
+      .filter((row) => row.method === 'session/prompt' && row.cwd === entry.binding.workspace)
+      .at(-1)
+      ?.params.prompt.map((block) => block.text)
+      .join('');
+  // Stop before the prompt leaves: the agent heard nothing, so the note waits for the next message.
+  await conversations.noteRebase(fixture.root, chat.binding.taskId, 'kept-base');
+  const stopped = conversations.handle(chat, { type: 'send', profileId: 'fixture', ...edit('never sent') });
+  for (let turns = 0; turns < 100000 && !chat.session.turn?.user; turns++) await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(chat.session.turn?.sent, false, 'the stop arrives before the prompt is sent');
+  await chat.session.cancel();
+  await stopped;
+  assert.equal(noteOf(chat)?.base, 'kept-base', 'a message stopped before sending keeps the note');
+  await conversations.handle(chat, { type: 'send', profileId: 'fixture', ...edit('after the stop') });
+  assert((await lastPrompt(chat)).includes('"kept-base"'), 'the next delivered message carries the kept note');
+  assert.equal(noteOf(chat), undefined);
+  // No session slept through a rebase noted before the chat was ever opened.
+  const unopened = await workbench.backend.execute('task.create', { title: 'Rebased before its chat' });
+  await conversations.noteRebase(fixture.root, unopened.id, 'before-open');
+  await conversations.show(fixture.root, unopened.id, 'panel');
+  const fresh = [...conversations.entries.values()].find((entry) => entry.binding.taskId === unopened.id);
+  await connected(fresh);
+  assert.equal(noteOf(fresh), undefined, 'a rebase with no agent session leaves no note');
+  await conversations.handle(fresh, { type: 'send', profileId: 'fixture', ...editOf(fresh, 'first message') });
+  assert(!(await lastPrompt(fresh)).includes('Warden workspace notice'), 'a session created after the rebase is told nothing');
+  // A session that exists when the rebase happens is noted, and New Session drops what it was owed.
+  await conversations.noteRebase(fixture.root, unopened.id, 'for-old-session');
+  assert.equal(noteOf(fresh)?.sessionId, fresh.session.snapshot().record.sessionId);
+  await conversations.handle(fresh, { type: 'new' });
+  await connected(fresh);
+  assert.equal(noteOf(fresh), undefined, 'New Session discards the note');
+  await conversations.handle(fresh, { type: 'send', profileId: 'fixture', ...editOf(fresh, 'in the new session') });
+  assert(!(await lastPrompt(fresh)).includes('Warden workspace notice'));
+  fresh.panel?.dispose();
   await conversations.handle(chat, { type: 'open-file', reference: 'agent-output.txt:1' });
   assert(
     vscode.window.tabGroups.all
@@ -281,7 +339,7 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   );
   assert.equal(chat.draft.text, 'hold', 'automatic resume preserves the unsent draft');
   assert.equal((await journal()).filter((row) => row.method === 'session/load' && row.cwd === chat.binding.workspace).length, 1);
-  assert.equal((await journal()).filter((row) => row.method === 'session/prompt').length, 3 + readPrompts, 'resume never resends a prompt');
+  assert.equal((await journal()).filter((row) => row.method === 'session/prompt').length, 8 + readPrompts, 'resume never resends a prompt');
   await endProcess(chat);
   await conversations.handle(chat, { type: 'send', profileId: 'fixture', ...edit('session-updates') });
   assert.equal(chat.session.snapshot().record.sessionId, savedSession, 'sending after disconnect resumes the original session');
