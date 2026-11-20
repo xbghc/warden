@@ -99,6 +99,31 @@ exports.checkPreviewActions = async (workbench, extension, eventually) => {
   for (const name of ['openWorkFolder', 'pullBase', 'runPreview', 'previewPath', 'showPreview', 'refreshPreview', 'setup', 'configure'])
     assert.equal(menus.commandPalette.find((item) => item.command === `warden.${name}`).when, 'warden.agentReady', 'secondary commands remain discoverable');
   assert.equal(workbench.status.command, 'warden.showPreview', 'status-bar activation keeps the diagnostic entry point');
+  // Tasks, connections, rebase and chats belong to the work folder window; the palette must not
+  // offer them from a window on primary, where no task is listed to show what they did.
+  for (const name of [
+    'createTask',
+    'taskActions',
+    'renameTask',
+    'moveTask',
+    'connect',
+    'deliver',
+    'retryHook',
+    'resumeTask',
+    'rebase',
+    'copyWorkspace',
+    'selectTask',
+    'chat',
+    'openWorkspace',
+    'taskHistory',
+    'copyBrief',
+    'deleteTask',
+  ])
+    assert.equal(
+      menus.commandPalette.find((item) => item.command === `warden.${name}`).when,
+      'warden.agentReady && warden.hasDevelopmentBranch',
+      `${name} is offered only in the work folder window`,
+    );
 
   const settings = vscode.workspace.getConfiguration('warden');
   const previous = settings.inspect('previewCommand').globalValue;

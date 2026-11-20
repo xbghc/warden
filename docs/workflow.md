@@ -66,7 +66,8 @@ connection status, authentication and recovery. Installation or configuration al
 The workbench lives in the window opened on the work folder. A window opened on primary offers
 **Configure ACP** and **Select Base Branch** as above, and once a base branch is selected only
 **Open Work Folder**, which creates `<primary>-work` if needed and opens it. Tasks, connections,
-review, rebase and chats are not offered in the primary window.
+review, rebase and chats are not offered in the primary window, in its sidebar or in the Command
+Palette; work folder commands stay in the palette there.
 
 Connection initialization sends no prompt, grants no tool permission and initiates no Git or work folder
 operation. Disconnect, replacement, failure and shutdown retire the owned connection process. Task
