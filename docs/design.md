@@ -85,7 +85,8 @@ A completed tool shows a check mark alone; other outcomes keep their word, and a
 Errors show a short explanation and recovery action, with technical details behind a disclosure.
 **New Session** lives in **More Chat Actions** to keep routine conversation controls focused.
 
-The task title and connection state stay above a scrolling transcript; the composer stays at the
+The task title stays above a scrolling transcript, with the connection state beside it whenever it is anything
+other than an ordinary connection (connecting, responding, waiting for permission, stopping, disconnected or failed); the composer stays at the
 bottom. Session notices sit under the title as plain lines of text, without cards. Task paths, agent identity and usage appear on demand under **More Chat Actions**; agent
 processes are ended from **Settings › ACP › Agent Processes**, not from the chat. Messages have no
 sender labels. New sessions use the agent verified in the workbench; existing sessions retain their

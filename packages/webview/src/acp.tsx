@@ -319,7 +319,12 @@ export function AcpApp({ model, send: dispatch }: Props) {
             <h1 title={binding.title}>{binding.title}</h1>
             <span className="acp-connection-status" role="status" aria-live="polite">
               {working && <LoaderCircle className="acp-spinner" aria-hidden="true" />}
-              <StatusBadge status={status}>{statusLabels[status]}</StatusBadge>
+              {/* An ordinary connection says nothing new; the word stays for assistive technology. */}
+              {status === 'connected' ? (
+                <span className="sr-only">{statusLabels[status]}</span>
+              ) : (
+                <StatusBadge status={status}>{statusLabels[status]}</StatusBadge>
+              )}
             </span>
             {model.presentation === 'editor' && (
               <IconButton label="Move Chat to Side Bar" size="icon-sm" disabled={switching} onClick={() => send({ type: 'open-sidebar' })}>
