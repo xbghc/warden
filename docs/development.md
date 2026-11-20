@@ -287,6 +287,11 @@ pnpm test:vscode
 title-only task creation and renaming, native Settings links, rebase selection and partial selection, and saves screenshots under
 `WARDEN_UI_ARTIFACTS` (default `/tmp/warden-ui-artifacts`). The harness is test-only and is not shipped.
 Inspect screenshots and console errors. Preserve intentional error cases in native-host tests as well.
+`WARDEN_VSCODE_WALKTHROUGH=<directory> xvfb-run -a -s "-screen 0 1440x900x24" pnpm test:vscode` runs
+`test/vscode/walkthrough.cjs` instead of the suite: the core loop in order in the packaged extension, from naming a task
+through the agent's edit, the work folder connection, the native diff and the commit to the rebase check. It
+saves one picture per step and `steps.json` with each step's result, and stops at the first step that cannot be done.
+Attach the pictures of an affected step to a UI change. Pictures are taken on Linux only.
 For manual verification, run `node --import tsx test/ui/harness.ts` and open its reported port. `/inspect`
 embeds the rebase panel at 320 pixels in light, dark and high-contrast themes. `WARDEN_UI_PORT` and
 `WARDEN_UI_HOST` optionally select the local test binding; defaults remain an ephemeral loopback port.
