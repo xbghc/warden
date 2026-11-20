@@ -233,3 +233,27 @@ it('locates the objects and the index of a checkout in one Git read per snapshot
     await rm(data, { recursive: true, force: true });
   }
 });
+
+it('names a nested repository without commits instead of passing on a bare Git refusal', async () => {
+  const fx = await makeFixtureRepo('warden-snapshot-nested-');
+  const data = await mkdtemp(path.join(os.tmpdir(), 'warden-snapshot-nested-data-'));
+  try {
+    const store = snapshotStore(path.join(data, 'state.json'));
+    await fx.write('vendor/lib/a.txt', 'a\n');
+    fx.git('-C', path.join(fx.root, 'vendor/lib'), 'init', '-q');
+    // Git cannot record a repository that has no commit, so no tree can stand for this folder.
+    await expect(snapshotWorktree(fx.root, store)).rejects.toMatchObject({
+      code: 'nested_repository_empty',
+      message: expect.stringContaining(`${path.join(fx.root, 'vendor/lib')} is a Git repository without commits`),
+    });
+    // Once it has a commit Git records it as a link, as `git add` does.
+    fx.git('-C', path.join(fx.root, 'vendor/lib'), 'add', '.');
+    fx.git('-C', path.join(fx.root, 'vendor/lib'), '-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-qm', 'Start');
+    const tree = await snapshotWorktree(fx.root, store);
+    const snapshot = await snapshotObjects(fx.root, store);
+    expect((await runGit(['ls-tree', tree, 'vendor/'], { cwd: fx.root, snapshot })).stdout).toMatch(/^160000 commit /);
+  } finally {
+    await fx.cleanup();
+    await rm(data, { recursive: true, force: true });
+  }
+});
