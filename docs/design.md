@@ -74,11 +74,13 @@ Opening Task Chat automatically resumes its saved session or creates the first s
 opens reuse an active connection or its pending attempt; opening never sends the draft.
 New chats show an empty conversation and composer without instructional copy. The conversation is the main scrolling
 region, with a **Jump to Latest** control when the user reads older messages. Replies render Markdown
-and copyable code blocks; tool activity and thoughts are compact disclosures. Permission requests
+and copyable code blocks; tool activity and thoughts are compact disclosures. Copy Message appears over a
+message's corner on hover or keyboard focus and takes no row of its own. Every disclosure uses the same chevron. Permission requests
 keep their action, a detail preview and the agent's choices visible, with full details on demand.
 The permission context scrolls independently so long commands do not push the decision buttons out
 of view. In short windows, the follow-up input becomes one line while retaining its draft. Tool
 summaries include agent-reported exit codes or signals beside the status, without inferring success.
+A completed tool shows a check mark alone; other outcomes keep their word, and a failure adds a cross.
 Errors show a short explanation and recovery action, with technical details behind a disclosure.
 **New Session** lives in **More Chat Actions** to keep routine conversation controls focused.
 
@@ -89,7 +91,7 @@ sender labels. New sessions use the agent verified in the workbench; existing se
 binding. Task Chat has no agent-profile picker, executable configuration or ACP setup guide.
 The composer has one input surface and a single footer row ordered Mode, Model, reasoning effort,
 then Send. Show the agent's available selectors; long values truncate instead of wrapping the row.
-Other agent options are not shown, and the header has no diff shortcut. Send becomes Stop Turn while running.
+Other agent options are not shown, and the header has no diff shortcut. Send becomes Stop Turn while running, a filled square on the same primary button.
 There is no permanent slash-command button: typing `/` at the beginning of the message opens a
 filtered command list above the input. Arrow keys select a command, Enter or Tab inserts it, and
 Escape dismisses the list. Completion preserves existing arguments and never submits the message.

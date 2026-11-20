@@ -277,10 +277,24 @@ summary {
 }
 .acp-error summary,
 .acp-permission-details summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   cursor: pointer;
+  list-style: none;
   color: var(--color-muted-foreground);
   font-size: 12px;
   padding: 3px 0;
+}
+.acp-error summary::-webkit-details-marker,
+.acp-permission-details summary::-webkit-details-marker {
+  display: none;
+}
+.acp-error summary > svg,
+.acp-permission-details summary > svg {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
 }
 .acp-error pre {
   max-height: 160px;
@@ -316,6 +330,7 @@ summary {
   border: 1px solid var(--vscode-contrastBorder, var(--color-border));
 }
 .acp-message {
+  position: relative;
   min-width: 0;
   width: 100%;
   max-width: 78ch;
@@ -334,16 +349,30 @@ summary {
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-  min-height: 24px;
-  margin-bottom: 6px;
   font-size: 12px;
 }
-.acp-message-heading > .acp-copy {
-  margin-left: auto;
-  opacity: 0.25;
+.acp-message-heading > :not(.acp-copy) {
+  margin-bottom: 6px;
 }
-.acp-message:hover .acp-copy,
-.acp-copy:focus-within {
+/* Copy floats over the message corner on hover or focus, so a message costs no row for it. */
+.acp-message-heading > .acp-copy {
+  position: absolute;
+  top: 6px;
+  right: 0;
+  border-radius: 4px;
+  background: var(--color-background);
+  opacity: 0;
+}
+.acp-sidebar .acp-message-heading > .acp-copy {
+  background: var(--vscode-sideBar-background, var(--color-background));
+}
+.acp-app .acp-message-user > .acp-message-heading > .acp-copy {
+  top: 4px;
+  right: 4px;
+  background: var(--color-muted);
+}
+.acp-message:hover > .acp-message-heading > .acp-copy,
+.acp-message-heading > .acp-copy:focus-within {
   opacity: 1;
 }
 .acp-copy {
