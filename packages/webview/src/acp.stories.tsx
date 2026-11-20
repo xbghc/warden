@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import type { AcpModel } from '@warden/shared';
+import { useEffect, useState } from 'react';
+import type { AcpMessage, AcpModel } from '@warden/shared';
 import { AcpApp } from './acp';
 
 const model: AcpModel = {
@@ -463,4 +464,121 @@ export const WritingFollowUp: Story = {
       },
     },
   },
+};
+
+/**
+ * A scripted turn played against the real component: prompt, thoughts, tools that run, finish and
+ * fail, a permission request, then a streamed reply. Static stories cannot show scroll following,
+ * layout shifts between tool states or the fold of finished activity; this one loops so they can be watched.
+ */
+const reply = [
+  '## 保留现有默认值\n\n',
+  '未传筛选条件时，旧调用方式保持兼容。\n\n',
+  '- `page` 默认是 **1**。\n',
+  '- `limit` 默认是 **20**。\n\n',
+  '```ts\nconst page = input.page ?? 1;\n',
+  'const limit = input.limit ?? 20;\n```\n\n',
+  '筛选参数 `status` 是可选的，',
+  '未提供时不改变查询结果。',
+  '失败的那项检查来自一个与本次改动无关的快照，',
+  '可以先查看任务 Diff，再运行预览测试。',
+];
+type Frame = { after: number; change(model: AcpModel): AcpModel };
+const withMessages = (model: AcpModel, change: (messages: AcpMessage[]) => AcpMessage[]): AcpModel => ({
+  ...model,
+  record: { ...model.record, messages: change(model.record.messages) },
+});
+const tool = (id: string, title: string, outcome: Partial<AcpMessage>, runs = 900): Frame[] => [
+  { after: 350, change: (model) => withMessages(model, (rows) => [...rows, { id, role: 'tool', text: `${title}\nRunning…`, status: 'in_progress' }]) },
+  {
+    after: runs,
+    change: (model) => withMessages(model, (rows) => rows.map((row) => (row.id === id ? { ...row, text: `${title}\nOutput of ${title}`, ...outcome } : row))),
+  },
+];
+const turn: Frame[] = [
+  {
+    after: 800,
+    change: (model) => ({
+      ...withMessages(model, (rows) => [...rows, { id: 'live-request', role: 'user', text: '检查分页默认值，并解释修改。' }]),
+      status: 'running',
+      sending: true,
+      draft: '',
+    }),
+  },
+  { after: 500, change: (model) => withMessages(model, (rows) => [...rows, { id: 'live-thought', role: 'thought', text: '先检查参数默认值与调用位置。' }]) },
+  ...tool('live-read', 'Read src/orders.ts', { status: 'completed' }),
+  ...tool('live-search', 'Search for listOrders callers', { status: 'completed' }, 600),
+  ...tool('live-tests', 'pnpm test orders', { status: 'failed', exitCode: 1 }, 1800),
+  {
+    after: 400,
+    change: (model) => ({
+      ...model,
+      status: 'waiting_permission',
+      permissions: [
+        {
+          id: 'live-permission',
+          title: 'Run command',
+          detail: JSON.stringify({ command: 'pnpm test orders --update', cwd: '/projects/orders-2' }, null, 2),
+          command: 'pnpm test orders --update',
+          cwd: '/projects/orders-2',
+          options: [
+            { id: 'once', kind: 'allow_once', label: 'Yes, proceed' },
+            { id: 'always', kind: 'allow_always', label: "Yes, and don't ask again for `pnpm test`" },
+            { id: 'reject', kind: 'reject_once', label: 'No, and tell the agent what to do differently' },
+          ],
+        },
+      ],
+    }),
+  },
+  { after: 3000, change: (model) => ({ ...model, status: 'running', permissions: [] }) },
+  ...tool('live-update', 'pnpm test orders --update', { status: 'completed', exitCode: 0 }, 1200),
+  ...reply.map(
+    (_, index): Frame => ({
+      after: index ? 220 : 500,
+      change: (model) =>
+        withMessages(model, (rows) => [
+          ...rows.filter((row) => row.id !== 'live-reply'),
+          { id: 'live-reply', role: 'agent', text: reply.slice(0, index + 1).join('') },
+        ]),
+    }),
+  ),
+  { after: 400, change: (model) => ({ ...model, status: 'connected', sending: false }) },
+];
+
+function Replay({ start, send }: { start: AcpModel; send(action: never): void }) {
+  const [current, setCurrent] = useState(start);
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout>;
+    let step = 0;
+    const next = () => {
+      const frame = turn[step++];
+      if (!frame) {
+        // Rest on the finished turn, then play it again from the starting transcript.
+        timer = setTimeout(() => {
+          step = 0;
+          setCurrent(start);
+          next();
+        }, 5000);
+        return;
+      }
+      timer = setTimeout(() => {
+        setCurrent(frame.change);
+        next();
+      }, frame.after);
+    };
+    next();
+    return () => clearTimeout(timer);
+  }, [start]);
+  return <AcpApp model={current} send={send} />;
+}
+
+export const LiveTurn: Story = {
+  ...Sidebar,
+  args: { model: { ...SessionControls.args!.model!, presentation: 'sidebar', draft: '', record: { ...SessionControls.args!.model!.record, messages: [] } } },
+  render: ({ model: start, send }) => <Replay start={start} send={send} />,
+};
+
+export const LiveTurnAfterLongHistory: Story = {
+  ...LiveTurn,
+  args: { model: { ...SidebarLongHistory.args!.model!, draft: '' } },
 };
