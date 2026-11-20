@@ -1,6 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
-import { chmod, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Engine } from '../packages/engine/src/engine.js';
 import { GitSandbox } from '../packages/engine/src/git-sandbox.js';
@@ -44,6 +44,37 @@ async function createTask(title: string) {
 }
 
 describe('saved workspace delivery', () => {
+  it('explains a nested repository without commits, and reviews and connects once it is gone', { timeout }, async () => {
+    const task = await createTask('Scaffolded folder');
+    const nested = path.join(task.worktree, 'vendor/lib');
+    await mkdir(nested, { recursive: true });
+    await writeFile(path.join(nested, 'a.txt'), 'a\n');
+    fx.git('-C', nested, 'init', '-q');
+    const refusal = { code: 'nested_repository_empty', message: expect.stringContaining(`${nested} is a Git repository without commits`) };
+    await expect(engine.execute('task.review', { taskId: task.id })).rejects.toMatchObject(refusal);
+    await expect(engine.execute('preview.connect', { connectedIds: [task.id] })).rejects.toMatchObject(refusal);
+    // The refusal left nothing behind: the same workspace is usable as soon as the cause is removed.
+    await rm(path.join(nested, '.git'), { recursive: true });
+    const review = (await engine.execute('task.review', { taskId: task.id }))!;
+    expect((await engine.execute('review.files', { key: review.targetKey })).files.map((file) => file.path)).toEqual(['vendor/lib/a.txt']);
+    expect((await engine.execute('preview.connect', { connectedIds: [task.id] })).syncStatus).toBe('synced');
+  });
+  it('names the work folder when the nested repository without commits is there', { timeout }, async () => {
+    const task = await createTask('Connected');
+    await writeFile(path.join(task.worktree, 'top.txt'), 'top\n');
+    expect((await engine.execute('preview.connect', { connectedIds: [task.id] })).syncStatus).toBe('synced');
+    const nested = path.join(`${fx.root}-work`, 'scaffold/app');
+    await mkdir(nested, { recursive: true });
+    fx.git('-C', nested, 'init', '-q');
+    await expect(engine.execute('preview.connect', { connectedIds: [] })).rejects.toMatchObject({
+      code: 'nested_repository_empty',
+      message: expect.stringContaining(`${nested} is a Git repository without commits`),
+    });
+    // The task workspace is not the cause, so its review is unaffected.
+    expect((await engine.execute('task.review', { taskId: task.id }))!.sourceHead).toBeTruthy();
+    await rm(path.join(nested, '.git'), { recursive: true });
+    expect((await engine.execute('preview.connect', { connectedIds: [] })).syncStatus).toBeTruthy();
+  });
   it.each([
     { synchronization: 'merge', increment: 'saved' },
     { synchronization: 'merge', increment: 'committed' },

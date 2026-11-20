@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { access, copyFile, mkdir, mkdtemp, open, rm, utimes, writeFile } from 'node:fs/promises';
-import { LONG_GIT_TIMEOUT_MS, runGit, runGitBuffer, runGitSnapshot, type SnapshotEnv } from './git.js';
+import { GitError, LONG_GIT_TIMEOUT_MS, runGit, runGitBuffer, runGitSnapshot, type SnapshotEnv } from './git.js';
 import { WardenError } from './errors.js';
 
 /**
@@ -167,7 +167,18 @@ export async function snapshotWorktree(cwd: string, store: string): Promise<stri
   return withIndexCopy(cwd, store, async (snapshot) => {
     await seedIndexedBlobs(cwd, snapshot);
     // Hashing every new or changed file scales with the workspace, not with Git's startup cost.
-    await runGitSnapshot(['add', '--all'], { cwd, ...snapshot, timeoutMs: LONG_GIT_TIMEOUT_MS });
+    await runGitSnapshot(['add', '--all'], { cwd, ...snapshot, timeoutMs: LONG_GIT_TIMEOUT_MS }).catch((error: unknown) => {
+      // Git records a nested repository by its commit and refuses one that has none. Its own
+      // message names the folder but not what to do, and this stops every review and connection.
+      const nested = error instanceof GitError ? /^(?:error|fatal): '(.+?)\/?' does not have a commit checked out$/m.exec(error.stderr)?.[1] : undefined;
+      if (!nested) throw error;
+      throw new WardenError(
+        409,
+        // The whole path, because the same snapshot serves every task workspace and the work folder.
+        `${path.join(cwd, nested)} is a Git repository without commits, which Git cannot record. Remove its .git folder to include its files, then try again.`,
+        'nested_repository_empty',
+      );
+    });
     const r = await runGitSnapshot(['write-tree', '--missing-ok'], { cwd, ...snapshot });
     return r.stdout.trim();
   });

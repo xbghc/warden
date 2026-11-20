@@ -121,6 +121,12 @@ three-way patch application in a temporary worktree of the external shared repos
 base branch commit. Only a complete, successful composition reaches the work folder. Primary files,
 index and HEAD are unchanged by connections, and primary's uncommitted files are not composed.
 
+A snapshot records a nested Git repository the way `git add` does: as a link to its current commit,
+without its files. A nested repository that has no commit cannot be recorded at all, so the snapshot
+stops with `nested_repository_empty` and the folder's full path until its `.git` folder is removed.
+In a task workspace this stops that task's review, connection and delivery. In the work folder it
+stops connecting and disconnecting every task, while review and delivery continue.
+
 The work folder's HEAD is that composition, so everything `git status` shows there is the user's own
 edit. A new composition is merged into those edits: Warden replays them on the new composition in the
 temporary worktree first, and writes to the folder only the paths the merge changed. An edit that
