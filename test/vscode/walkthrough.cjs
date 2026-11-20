@@ -32,7 +32,7 @@ exports.run = async () => {
   const steps = [];
   const step = async (title, action) => {
     const name = `${String(steps.length + 1).padStart(2, '0')}-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
-    const row = { name, title, status: 'passed' };
+    const row = { name, title, status: 'passed', startedAt: Date.now() };
     steps.push(row);
     try {
       await action();
@@ -44,6 +44,7 @@ exports.run = async () => {
     await new Promise((resolve) => setTimeout(resolve, pause));
     if (process.platform === 'linux' && process.env.DISPLAY)
       execFileSync('import', ['-display', process.env.DISPLAY, '-window', 'root', path.join(output, `${name}.png`)]);
+    row.endedAt = Date.now();
     await fs.writeFile(path.join(output, 'steps.json'), `${JSON.stringify(steps, null, 2)}\n`);
     if (row.status === 'blocked') throw new Error(`${title}: ${row.error}`);
   };
