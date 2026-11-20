@@ -77,6 +77,7 @@ region, with a **Jump to Latest** control when the user reads older messages. Re
 and copyable code blocks; tool activity and thoughts are compact disclosures. Copy Message appears over a
 message's corner on hover or keyboard focus and takes no row of its own. Every disclosure uses the same chevron. Permission requests
 keep their action, a detail preview and the agent's choices visible, with full details on demand.
+The choices are full-width rows in the agent's order, their text starting at the left edge.
 The permission context scrolls independently so long commands do not push the decision buttons out
 of view. In short windows, the follow-up input becomes one line while retaining its draft. Tool
 summaries include agent-reported exit codes or signals beside the status, without inferring success.
@@ -85,7 +86,7 @@ Errors show a short explanation and recovery action, with technical details behi
 **New Session** lives in **More Chat Actions** to keep routine conversation controls focused.
 
 The task title and connection state stay above a scrolling transcript; the composer stays at the
-bottom. Task paths, agent identity and usage appear on demand under **More Chat Actions**; agent
+bottom. Session notices sit under the title as plain lines of text, without cards. Task paths, agent identity and usage appear on demand under **More Chat Actions**; agent
 processes are ended from **Settings › ACP › Agent Processes**, not from the chat. Messages have no
 sender labels. New sessions use the agent verified in the workbench; existing sessions retain their
 binding. Task Chat has no agent-profile picker, executable configuration or ACP setup guide.
