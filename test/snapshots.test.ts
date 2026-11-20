@@ -1,9 +1,10 @@
 import os from 'node:os';
 import path from 'node:path';
 import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { snapshotObjects, snapshotStore, snapshotWorktree } from '../packages/engine/src/snapshots.js';
 import { runGit } from '../packages/engine/src/git.js';
+import * as git from '../packages/engine/src/git.js';
 import { makeFixtureRepo } from './fixtures/make-repo.js';
 
 const lineEndingCases = (['input', 'true', 'attributes'] as const).flatMap((normalization) =>
@@ -198,6 +199,36 @@ it('captures saved tracked and untracked content externally without changing the
     expect(fx.git('show-ref')).toBe(refs);
     expect(() => fx.git('cat-file', '-e', tree)).toThrow();
   } finally {
+    await fx.cleanup();
+    await rm(data, { recursive: true, force: true });
+  }
+});
+
+it('locates the objects and the index of a checkout in one Git read per snapshot', async () => {
+  const fx = await makeFixtureRepo('warden-snapshot-reads-');
+  const data = await mkdtemp(path.join(os.tmpdir(), 'warden-snapshot-reads-data-'));
+  const linked = `${fx.root}-linked`;
+  try {
+    fx.git('worktree', 'add', '-q', '-b', 'linked', linked);
+    const store = snapshotStore(path.join(data, 'state.json'));
+    // A linked worktree keeps its index privately and its objects in the main repository.
+    for (const cwd of [fx.root, linked]) {
+      await writeFile(path.join(cwd, 'saved.txt'), `Saved in ${path.basename(cwd)}\n`);
+      const reads = vi.spyOn(git, 'runGit');
+      const tree = await snapshotWorktree(cwd, store);
+      const located = reads.mock.calls.filter(([args]) => args[0] === 'rev-parse');
+      reads.mockRestore();
+      expect(located.map(([args, options]) => [args.join(' '), options.cwd])).toEqual([
+        ['rev-parse --git-path objects --git-path index --show-object-format', cwd],
+      ]);
+      const snapshot = await snapshotObjects(cwd, store);
+      expect((await runGit(['show', `${tree}:saved.txt`, '--'], { cwd, snapshot })).stdout).toBe(`Saved in ${path.basename(cwd)}\n`);
+      expect((await runGit(['show', `${tree}:README.md`, '--'], { cwd, snapshot })).stdout).toBe(fx.git('show', 'HEAD:README.md'));
+      expect(fx.git('-C', cwd, 'status', '--porcelain').trim()).toBe('?? saved.txt');
+    }
+  } finally {
+    vi.restoreAllMocks();
+    await rm(linked, { recursive: true, force: true });
     await fx.cleanup();
     await rm(data, { recursive: true, force: true });
   }

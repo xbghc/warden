@@ -19,12 +19,13 @@ async function repoObjects(cwd: string): Promise<string> {
   return path.resolve(cwd, r.stdout.trim());
 }
 
-async function repoIndex(cwd: string) {
-  const r = await runGit(['rev-parse', '--git-path', 'index', '--show-object-format'], { cwd });
-  const [index, format] = r.stdout.trim().split('\n');
-  if (!index || (format !== 'sha1' && format !== 'sha256'))
+/** The objects directory and the index of a checkout, with its object format, from one Git read. */
+async function repoLocations(cwd: string) {
+  const r = await runGit(['rev-parse', '--git-path', 'objects', '--git-path', 'index', '--show-object-format'], { cwd });
+  const [objects, index, format] = r.stdout.trim().split('\n');
+  if (!objects || !index || (format !== 'sha1' && format !== 'sha256'))
     throw new WardenError(409, 'Unable to identify the Git index location or object format.', 'snapshot_index_invalid');
-  return { path: path.resolve(cwd, index), format, hashBytes: format === 'sha256' ? 32 : 20 };
+  return { objects: path.resolve(cwd, objects), index: { path: path.resolve(cwd, index), format, hashBytes: format === 'sha256' ? 32 : 20 } };
 }
 
 /** Locate only the split-index link; Git itself expands entries and validates the copied indexes.
@@ -85,7 +86,9 @@ async function withIndexCopy<T>(cwd: string, store: string, fn: (env: Required<S
   const tmp = path.join(store, 'tmp');
   await mkdir(path.join(store, 'objects'), { recursive: true });
   await mkdir(tmp, { recursive: true });
-  const [objects, index] = await Promise.all([snapshotObjects(cwd, store), repoIndex(cwd)]);
+  const located = await repoLocations(cwd);
+  const objects: SnapshotEnv = { objects: path.join(store, 'objects'), alternates: located.objects };
+  const index = located.index;
   const directory = await mkdtemp(path.join(tmp, 'index-'));
   const copy = path.join(directory, 'index');
   try {
