@@ -375,6 +375,10 @@ the existing connection metadata lock; connection claims validate the task again
 that lock. Pending/deleted tasks cannot receive new prompts or recreate saved conversation records.
 Chat draft/view capture still completes while executable actions are blocked. After release, only
 that task's Warden-local records and archives are removed; external agent histories remain external.
+The window that observes the deletion also forgets the task's stored composer draft, reading position
+and pending rebase notice, whether or not it opened that chat; they are keyed by task and then by
+workspace allocation. Drafts, reading positions and rebase notices stored by versions before 0.27.10
+carried no task key and are dropped at startup.
 Retained conversation engines observe state changes for deletion cleanup without starting repository
 watchers or work folder synchronization. Task Chat cannot take over the workbench's work folder owner lease
 when the repository is reopened or selected elsewhere.

@@ -94,6 +94,49 @@ exports.checkTaskDeletion = async (workbench, extension, fixture, eventually) =>
     await workbench.backend.execute('task.delete', { taskId: observedTask.id, confirmation: checked.confirmation });
     await eventually(() => !workbench.conversations.entries.has(observedKey), 30_000);
     assert.equal(observedChat.surface, undefined, 'state notifications release a deleted conversation surface');
+
+    // A window that never opened the chat still holds what an earlier window, or an automatic
+    // rebase, stored for the task.
+    const unopenedTask = await workbench.backend.execute('task.create', { title: 'Delete with an unopened chat' });
+    const keptTask = await workbench.backend.execute('task.create', { title: 'Keep this chat' });
+    const stored = {};
+    for (const task of [unopenedTask, keptTask]) {
+      await workbench.conversations.show(fixture.root, task.id);
+      const key = JSON.stringify([fixture.root, task.id]);
+      const chat = workbench.conversations.entries.get(key);
+      await eventually(() => chat.session.snapshot().status === 'connected' && chat.surface?.ready, 30_000);
+      await workbench.conversations.handle(chat, { type: 'draft', text: `Unsent in ${task.id}`, version: 0, revision: 1 });
+      await workbench.conversations.release(chat);
+      await chat.session.close();
+      await chat.draftSave;
+      clearTimeout(chat.renderTimer);
+      workbench.conversations.entries.delete(key);
+      const state = workbench.context.workspaceState;
+      await state.update(`${chat.draftKey}:view`, { scrollTop: 1 });
+      await state.update(`${chat.draftKey}:rebased`, { base: 'main', at: new Date().toISOString(), sessionId: 'earlier' });
+      stored[task.id] = [chat.draftKey, `${chat.draftKey}:view`, `${chat.draftKey}:rebased`];
+      assert.equal(state.get(chat.draftKey), `Unsent in ${task.id}`);
+    }
+    await workbench.refresh(true);
+    const unopenedNode = (await workbench.getChildren()).find((row) => row.task.id === unopenedTask.id);
+    await vscode.commands.executeCommand('warden.deleteTask', unopenedNode);
+    assert.equal(workbench.errors.get(`task:${unopenedTask.id}`), undefined, JSON.stringify([...workbench.errors.values()]));
+    assert(!(await workbench.backend.store.load()).workflow.changes.some((task) => task.id === unopenedTask.id));
+    const stateKeys = workbench.context.workspaceState.keys();
+    assert.deepEqual(
+      stored[unopenedTask.id].filter((key) => stateKeys.includes(key)),
+      [],
+      'deleting a task whose chat this window never opened forgets its draft, view state and rebase note',
+    );
+    assert.deepEqual(
+      stored[keptTask.id].filter((key) => stateKeys.includes(key)),
+      stored[keptTask.id],
+      'another task keeps its draft, view state and rebase note',
+    );
+    // The state observer forgets a task deleted outside this window's command the same way.
+    const keptCheck = await workbench.backend.execute('task.deleteCheck', { taskId: keptTask.id });
+    await workbench.backend.execute('task.delete', { taskId: keptTask.id, confirmation: keptCheck.confirmation });
+    await eventually(() => !stored[keptTask.id].some((key) => workbench.context.workspaceState.keys().includes(key)), 30_000);
     console.log(
       'Packaged task deletion passed: native commands, confirmation/cancel, owned-agent disconnect, note/chat cleanup, state notifications, retained folders, fresh allocation and visible retry',
     );

@@ -48,11 +48,15 @@ export interface TaskAgentProcess extends AgentProcessInfo {
 /** Conversation routing never depends on the workbench's currently selected repository. */
 /** A rebase the agent session `sessionId` was idle through and has not been told about. */
 type RebaseNote = { base: string; at: string; sessionId: string };
-/** Where a conversation's drafts and notes live in workspace storage: per task allocation, so a replaced workspace starts clean. */
-const draftKeyOf = (repository: string, taskId: string, identity: string) =>
+/** Everything stored for a task shares this prefix, so deleting the task can forget allocations this window never opened. */
+const draftScopeOf = (repository: string, taskId: string) =>
   `warden.acpDraft:${createHash('sha256')
-    .update(JSON.stringify([repository, taskId, identity]))
-    .digest('hex')}`;
+    .update(JSON.stringify([repository, taskId]))
+    .digest('hex')}:`;
+/** Where a conversation's drafts and notes live in workspace storage: per task allocation, so a replaced workspace starts clean. */
+const draftKeyOf = (repository: string, taskId: string, identity: string) => `${draftScopeOf(repository, taskId)}${identity}`;
+/** Keys from before the task prefix cannot be traced to a task, so none of them could ever be forgotten. */
+const untraceableDraftKey = /^warden\.acpDraft:[0-9a-f]{64}(?::view|:rebased)?$/;
 
 export class AcpConversations {
   private readonly entries = new Map<string, Conversation>();
@@ -78,6 +82,8 @@ export class AcpConversations {
     private readonly defaultProfileId: () => string | undefined,
     private readonly log = new DiagnosticLog(),
   ) {
+    for (const name of context.workspaceState.keys())
+      if (untraceableDraftKey.test(name)) void Promise.resolve(context.workspaceState.update(name, undefined)).catch(report);
     this.subscriptions.push(
       vscode.window.registerWebviewViewProvider(
         'warden.taskChat',
@@ -384,16 +390,21 @@ export class AcpConversations {
     const key = this.key(repository, taskId);
     this.prewarmedBindings.delete(key);
     const entry = this.entries.get(key);
+    if (entry) {
+      const panel = entry.panel;
+      this.detach(entry);
+      panel?.dispose();
+      clearTimeout(entry.renderTimer);
+      await entry.session.close();
+      await entry.draftSave.catch(() => undefined);
+    }
+    // An earlier window's draft and a rebase noted for an unopened chat have no conversation here,
+    // and the deleted workspace can no longer be resolved to the allocation they were stored under.
+    const scope = draftScopeOf(repository, taskId);
+    const stored = this.context.workspaceState.keys().filter((name) => name.startsWith(scope));
+    for (const name of stored) await this.context.workspaceState.update(name, undefined);
+    if (stored.length) this.log.write('debug', 'acp.conversation.forgotten', { task: taskId, keys: stored.length });
     if (!entry) return;
-    const panel = entry.panel;
-    this.detach(entry);
-    panel?.dispose();
-    clearTimeout(entry.renderTimer);
-    await entry.session.close();
-    await entry.draftSave;
-    await this.context.workspaceState.update(entry.draftKey, undefined);
-    await this.context.workspaceState.update(`${entry.draftKey}:view`, undefined);
-    await this.context.workspaceState.update(`${entry.draftKey}:rebased`, undefined);
     this.entries.delete(key);
     this.changed();
   }
