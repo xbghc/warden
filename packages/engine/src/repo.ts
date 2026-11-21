@@ -222,7 +222,6 @@ async function listCloneSlots(ctx: RepoContext, listed: Set<string>, onlyPath?: 
         const root = await realpath(top);
         if (root !== dir || (await realpath(path.resolve(dir, common))) !== path.join(root, '.git')) return undefined;
         const branch = name.startsWith('refs/heads/') ? name.slice('refs/heads/'.length) : undefined;
-        const trunk = onlyPath ? undefined : await remoteDefault(dir);
         return {
           path: dir,
           head,
@@ -232,7 +231,6 @@ async function listCloneSlots(ctx: RepoContext, listed: Set<string>, onlyPath?: 
           bare: false,
           prunable: false,
           clone: true,
-          ...(trunk ? { trunk } : {}),
         };
       } catch {
         // No commit checked out: nothing warden made, and nothing it could release or check out into.

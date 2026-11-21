@@ -1,5 +1,5 @@
 import type { WorktreeDetail } from './types.js';
-import type { RepoContext } from '../../packages/engine/src/repo.js';
+import { remoteDefault, type RepoContext } from '../../packages/engine/src/repo.js';
 import { runGit } from '../../packages/engine/src/git.js';
 import { listUpstreams, listWorktreesDetailed as readWorktrees } from '../../packages/engine/src/worktrees.js';
 
@@ -56,7 +56,10 @@ export async function listWorktreesDetailed(ctx: RepoContext): Promise<WorktreeD
 async function describeClone(detail: WorktreeDetail, held: Map<string, string>): Promise<WorktreeDetail> {
   if (detail.foreign) return detail;
   const cwd = detail.path;
-  const trunk = detail.trunk;
+  // The management page compared a clone with its remote's default branch. No product read does,
+  // so the engine's inventory, which the work folder reads every second, no longer looks it up.
+  const trunk = await remoteDefault(cwd);
+  if (trunk) detail.trunk = trunk;
   if (detail.free) return describeFreeBranches(detail, held);
   const upstream = detail.branch ? (await listUpstreams(cwd)).get(detail.branch) : undefined;
   if (upstream && !upstream.gone) {

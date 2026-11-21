@@ -572,6 +572,25 @@ describe('saved baseline and preview runtime', () => {
     await expect(file(fx.root, 'b.txt')).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it('does not look up remote default branches when a tick finds nothing changed', async () => {
+    const a = await task('A');
+    const b = await task('B');
+    await edit(a, 'a.txt', 'one\n');
+    await edit(b, 'b.txt', 'one\n');
+    expect((await preview.set([a.id, b.id])).syncStatus).toBe('synced');
+    await preview.tick();
+    // Nothing in the work folder's inputs depends on a remote's default branch, and the lookup
+    // was one more Git process for every task workspace, every second.
+    const reads = vi.spyOn(git, 'runGit');
+    try {
+      await preview.tick();
+      expect(reads.mock.calls.length).toBeGreaterThan(0);
+      expect(reads.mock.calls.filter(([args]) => args[0] === 'for-each-ref').map(([args, options]) => [args.join(' '), options.cwd])).toEqual([]);
+    } finally {
+      reads.mockRestore();
+    }
+  });
+
   it('debounces actual content changes and reports whether each captured source has reached preview', async () => {
     const a = await task('A');
     await edit(a, 'a.txt', 'one\n');

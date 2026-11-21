@@ -65,6 +65,8 @@ export interface WorktreeComparison {
 
 /** Additional presentation data for the retired workspace management page. */
 export interface WorktreeDetail extends CheckoutDetail {
+  /** A clone's remote default branch (`origin/main`): what it is compared with, and where a new branch starts. */
+  trunk?: string;
   comparison?: WorktreeComparison;
   /** The upstream the branch is set to track when that ref no longer exists, as in `[origin/topic: gone]`. */
   upstreamGone?: string;
@@ -100,7 +102,7 @@ export interface RepoInfo {
   commonRoot: string;
   branch: string;
   head: string;
-  worktrees: WorktreeInfo[];
+  worktrees: (WorktreeInfo & { trunk?: string })[];
   /** Default target key (last used comparison or `all`). */
   defaultTarget: TargetKey;
   /** Trunk a `base` target is offered against by default: `main` or `master`, whichever exists. */

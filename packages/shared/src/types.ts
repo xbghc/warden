@@ -445,8 +445,6 @@ export interface WorktreeInfo {
   clone?: boolean;
   /** A task worktree in Warden's external common repository, independent of the primary Git store. */
   shared?: boolean;
-  /** A clone's remote default branch (`origin/main`): what it is compared with, and where a new branch starts. */
-  trunk?: string;
 }
 
 /** Worktree identity and safety observations used by allocation, review, preview and delivery. */
