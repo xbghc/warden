@@ -1,3 +1,4 @@
+import { fileModeChange } from './file-mode.js';
 import * as vscode from 'vscode';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
@@ -289,7 +290,7 @@ export class Sidebar implements vscode.TreeDataProvider<SidebarNode>, vscode.Tre
       return item;
     }
     if (node.kind === 'file') {
-      const mode = node.file.oldMode === node.file.newMode ? undefined : `File mode ${node.file.oldMode ?? 'none'} → ${node.file.newMode ?? 'none'}`;
+      const mode = fileModeChange(node.file);
       const directory = path.posix.dirname(node.file.path);
       const item = new vscode.TreeItem(path.posix.basename(node.file.path));
       item.id = `${prefix}file:${node.task?.id ?? node.target}:${node.file.path}`;

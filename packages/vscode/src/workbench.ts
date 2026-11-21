@@ -19,6 +19,7 @@ import type { WorkbenchAction, WorkbenchModel, Surface, WorkspaceRow, WorkbenchE
 import type { AcpBinding } from '@warden/shared';
 import { Documents } from './documents.js';
 import { Views } from './views.js';
+import { fileModeChange } from './file-mode.js';
 import { Sidebar } from './sidebar.js';
 import type { SidebarNode } from './sidebar.js';
 import { Settings } from './settings.js';
@@ -35,9 +36,6 @@ import type { PerformanceOutcome, PerformanceSpan, PerformanceStage } from './pe
 
 type Node = SidebarNode | SettingsNode | { kind: 'commit'; sha: string; message: string; session?: string };
 type CheckRequest = { engine: Engine; session: string; revision: number; head?: string; tasks: string[]; traced: boolean };
-
-const fileModeChange = (file: FileEntry): string | undefined =>
-  file.oldMode === file.newMode ? undefined : `File mode ${file.oldMode ?? 'none'} → ${file.newMode ?? 'none'}`;
 
 export class Workbench {
   private backend?: Engine;
