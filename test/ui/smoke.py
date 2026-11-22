@@ -127,6 +127,11 @@ try:
         forecast['checks']['checks'][0].update(status='unknown', sourceHead='', message='Checking synchronization…')
         page.evaluate("model => window.postMessage({type:'model', model}, '*')", forecast)
         expect(page.get_by_role('status').filter(has_text='Checking synchronization…')).to_be_visible()
+        # A check in progress is said once for the page; a row has no result yet, not an unknown one.
+        expect(page.get_by_text('Checking synchronization…')).to_have_count(1)
+        expect(page.get_by_text('Unknown', exact=True)).to_have_count(0)
+        expect(page.locator('.check .status-badge')).to_have_count(0)
+        expect(page.get_by_role('checkbox', name='订单接口', exact=True)).to_be_visible()
         expect(page.get_by_role('button', name='Check Again', exact=True)).to_be_disabled()
         expect(page.get_by_role('button', name='Rebase Selected', exact=True)).to_be_disabled()
         expect(page.locator('time')).to_have_count(0)
