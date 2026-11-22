@@ -591,6 +591,28 @@ describe('saved baseline and preview runtime', () => {
     }
   });
 
+  it('validates the shared repository once for the inventory when a tick finds nothing changed', async () => {
+    const a = await task('A');
+    const b = await task('B');
+    await edit(a, 'a.txt', 'one\n');
+    await edit(b, 'b.txt', 'one\n');
+    expect((await preview.set([a.id, b.id])).syncStatus).toBe('synced');
+    await preview.tick();
+    // The setup mirror and the checkout inventory both need the shared repository, and each
+    // ownership check is two Git processes, every second. These are clone tasks: a shared-kind
+    // task still validates the repository again when its own checkout is verified.
+    const reads = vi.spyOn(git, 'runGit');
+    try {
+      await preview.tick();
+      const calls = reads.mock.calls.map(([args]) => args.join(' '));
+      expect(calls.length).toBeGreaterThan(0);
+      expect(calls.filter((call) => call === 'rev-parse --is-bare-repository --absolute-git-dir')).toHaveLength(1);
+      expect(calls.filter((call) => call.startsWith('config --get-regexp ^(warden'))).toHaveLength(1);
+    } finally {
+      reads.mockRestore();
+    }
+  });
+
   it('debounces actual content changes and reports whether each captured source has reached preview', async () => {
     const a = await task('A');
     await edit(a, 'a.txt', 'one\n');

@@ -286,13 +286,21 @@ async function listedWorktrees(cwd: string): Promise<(WorktreeInfo & { prunable:
   return out;
 }
 
-export async function listWorktreesAll(ctx: RepoContext, onlyPath?: string): Promise<(WorktreeInfo & { prunable: boolean })[]> {
+/**
+ * `validated` carries the shared repository a caller has just validated under the same lock, or
+ * `undefined` inside it when there is none, so the ownership check is not repeated.
+ */
+export async function listWorktreesAll(
+  ctx: RepoContext,
+  onlyPath?: string,
+  validated?: { shared: string | undefined },
+): Promise<(WorktreeInfo & { prunable: boolean })[]> {
   if (onlyPath && onlyPath !== ctx.commonRoot && slotOf(ctx, onlyPath) !== undefined) {
     const git = await lstat(path.join(onlyPath, '.git')).catch(() => undefined);
     if (git?.isDirectory()) return listCloneSlots(ctx, new Set([ctx.commonRoot]), onlyPath);
   }
   // Internal preview and replay worktrees are deliberately absent from the public task inventory.
-  const [primary, repository] = await Promise.all([listedWorktrees(ctx.commonRoot), validatedSharedRepository(ctx.commonRoot)]);
+  const [primary, repository] = await Promise.all([listedWorktrees(ctx.commonRoot), validated ? validated.shared : validatedSharedRepository(ctx.commonRoot)]);
   for (const wt of primary) wt.isMain = wt.path === ctx.commonRoot;
   const shared = repository
     ? (await listedWorktrees(repository)).filter((wt) => !wt.bare && slotOf(ctx, wt.path) !== undefined).map((wt) => ({ ...wt, shared: true }))

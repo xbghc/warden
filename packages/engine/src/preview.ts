@@ -123,6 +123,7 @@ export class PreviewService {
   private async mirrorSetup(create: boolean) {
     const repository = create ? await ensureSharedRepository(this.store.repoRoot) : await validatedSharedRepository(this.store.repoRoot);
     if (repository) await mirrorLocalSetup(this.repo.commonRoot, repository);
+    return repository;
   }
 
   /** Observe content hashes, not porcelain status or agent activity; coalesce bursts before publication. */
@@ -145,8 +146,8 @@ export class PreviewService {
       let key: string | undefined;
       try {
         assertPreviewSetupIdle(state.connectionPreview.setup);
-        await this.mirrorSetup(false);
-        const inputs = await this.inputs(state, state.connectionPreview.connectedIds);
+        const shared = await this.mirrorSetup(false);
+        const inputs = await this.inputs(state, state.connectionPreview.connectedIds, { shared });
         const saved = state.connectionPreview;
         const folder = await WorkFolder.open(this.repo.commonRoot, this.store.file, saved.directory!);
         const actual = await folder.snapshot();
@@ -277,10 +278,11 @@ export class PreviewService {
     await GitSandbox.open(this.store, pending.sandbox).dispose();
   }
 
-  private async inputs(state: ReviewState, ids: string[]) {
+  /** `validated` holds the shared repository a tick validated just before, under the same repository lock. */
+  private async inputs(state: ReviewState, ids: string[], validated?: { shared: string | undefined }) {
     const workflow = state.workflow!;
     // One inventory answers for primary and every source: this runs once a second.
-    const listed = await listWorktreesAll(this.repo);
+    const listed = await listWorktreesAll(this.repo, undefined, validated);
     const directories = primaryDirectories(this.repo);
     const primary = await primaryCheckout(this.repo, workflow.developmentBranch, listed, directories);
     // Primary only carries commits to and from the remote; its working files are not an input.
