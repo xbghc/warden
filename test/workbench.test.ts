@@ -613,6 +613,29 @@ describe('saved baseline and preview runtime', () => {
     }
   });
 
+  it('asks no ancestry question of a workspace whose HEAD is the base commit', async () => {
+    const a = await task('A');
+    const b = await task('B');
+    const c = await task('C');
+    await edit(a, 'a.txt', 'one\n');
+    await edit(b, 'b.txt', 'one\n');
+    // Only a workspace with a commit of its own has a HEAD that differs from the base commit.
+    await edit(c, 'c.txt', 'one\n', true);
+    expect((await preview.set([a.id, b.id, c.id])).syncStatus).toBe('synced');
+    await preview.tick();
+    // Agents usually leave their work uncommitted, so most connected workspaces sit on the base
+    // commit, and a commit is its own ancestor without asking Git every second.
+    const reads = vi.spyOn(git, 'runGit');
+    try {
+      await preview.tick();
+      const ancestry = reads.mock.calls.filter(([args]) => args[0] === 'merge-base');
+      expect(ancestry.map(([args, options]) => [args.join(' '), options.cwd])).toEqual([[`merge-base --is-ancestor ${head()} ${sourceHead(c)}`, c.worktree]]);
+    } finally {
+      reads.mockRestore();
+    }
+    expect((await preview.get()).syncStatus).toBe('synced');
+  });
+
   it('debounces actual content changes and reports whether each captured source has reached preview', async () => {
     const a = await task('A');
     await edit(a, 'a.txt', 'one\n');

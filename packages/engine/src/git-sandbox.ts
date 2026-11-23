@@ -26,6 +26,9 @@ export async function deliveryBase(change: DevelopmentChange, head: string, targ
     return pending;
   };
   const cwd = change.worktree;
+  // A workspace without a commit of its own sits on the base commit, which is the usual state under
+  // the preview's one-second refresh: a commit is its own ancestor, and that needs no Git process.
+  if (target === head) return target;
   const contains = await runGit(['merge-base', '--is-ancestor', target, head], { cwd, okCodes: [0, 1, 128] });
   if (contains.code === 0) return target;
   const stored = change.sourceBase ?? change.base;
