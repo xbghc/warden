@@ -403,10 +403,26 @@ exports.run = async () => {
     assert.equal(new Set(typeFiles.map((row) => row.file.path)).size, typeFiles.length);
     assert.equal(typeChanges[0].file.oldMode, '100644');
     assert.equal(typeChanges[0].file.newMode, '120000');
+    assert.match(String(workbench.sidebar.getTreeItem(typeChanges[0]).description), /File mode 100644 → 120000/);
     await workbench.openDiff(typeChanges[0]);
     const typeDiff = vscode.window.tabGroups.all.flatMap((group) => group.tabs).find((tab) => tab.label.includes('100644 → 120000'));
     assert(typeDiff?.input instanceof vscode.TabInputTextDiff, 'the native diff shows the complete file-type transition');
     assert.equal((await vscode.workspace.openTextDocument(typeDiff.input.modified)).getText(), 'agent.txt');
+
+    // An added file has a mode on one side only. That is not a change of mode, in the row or the title.
+    await fs.writeFile(path.join(workspace, 'mode-added.txt'), 'Added\n');
+    await workbench.refresh();
+    const addedFile = (await workbench.getChildren(tasks[0])).find((row) => row.file.path === 'mode-added.txt');
+    assert(addedFile && !addedFile.file.oldMode && addedFile.file.newMode, 'Git reports only the new mode of an added file');
+    const addedItem = workbench.sidebar.getTreeItem(addedFile);
+    assert.doesNotMatch(String(addedItem.description), /File mode/, 'an added file is not described as a mode change');
+    assert.doesNotMatch(String(addedItem.tooltip), /File mode/);
+    await workbench.openDiff(addedFile);
+    const addedDiff = vscode.window.tabGroups.all.flatMap((group) => group.tabs).find((tab) => tab.label.includes('mode-added.txt'));
+    assert(addedDiff?.input instanceof vscode.TabInputTextDiff, 'the added file opens as a native diff');
+    assert.doesNotMatch(addedDiff.label, /File mode/, 'the diff title of an added file names no mode change');
+    await fs.rm(path.join(workspace, 'mode-added.txt'));
+    await workbench.refresh();
 
     await checkChats(workbench, extension, fixture, eventually);
     console.log(

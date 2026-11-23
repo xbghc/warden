@@ -94,8 +94,8 @@ Diffs use immutable `warden-review:` documents and cannot modify source files or
 Select a line or range and run **Warden: Copy Review Location** (`Ctrl+Alt+C`, macOS `Cmd+Alt+C`) to copy
 `path:start-end`. Native diff navigation, folding and search remain available.
 
-File-list tooltips and the native diff title display Git file-mode changes, including executable-bit and
-file-type changes. A mode-only change remains visible even when both read-only text snapshots are
+File-list rows, their tooltips and the native diff title display Git file-mode changes, including
+executable-bit and file-type changes. An added or deleted file has a mode on one side only and shows none. A mode-only change remains visible even when both read-only text snapshots are
 identical; the snapshots themselves contain only the original file content.
 
 Symbolic links display their destination text on both sides of the comparison, matching Git's
