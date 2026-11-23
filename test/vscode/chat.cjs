@@ -208,6 +208,20 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   await conversations.handle(chat, { type: 'set-config', configId: 'model', value: 'deep' });
   await conversations.handle(chat, { type: 'set-config', configId: 'thinking', value: true });
   assert.equal(chat.session.snapshot().controls.configOptions.find((option) => option.id === 'model').currentValue, 'deep');
+  // The assertion on the next task's model failed once on macOS and Windows with no failure logged.
+  // Record what the profile store held at both ends so a repeat shows where the preference went.
+  const storedModels = () => {
+    const state = workbench.context.globalState;
+    return JSON.stringify(
+      Object.fromEntries(
+        state
+          .keys()
+          .filter((key) => key.startsWith('warden.acp'))
+          .map((key) => [key, state.get(key)]),
+      ),
+    );
+  };
+  const storedAfterSelection = storedModels();
   assert.equal(chat.session.snapshot().controls.configOptions.find((option) => option.id === 'thinking').currentValue, true);
   assert.equal(chat.session.snapshot().controls.modes, undefined, 'session config takes precedence over legacy modes');
   console.log('Checking automatic repository read approvals');
@@ -268,7 +282,7 @@ const checkChats = async (workbench, extension, fixture, eventually) => {
   assert.equal(
     otherChat.session.snapshot().controls.configOptions.find((option) => option.id === 'model').currentValue,
     'deep',
-    'new tasks reuse the profile model preference',
+    `new tasks reuse the profile model preference; stored after selection ${storedAfterSelection}, stored now ${storedModels()}, notices ${JSON.stringify(otherChat.session.snapshot().controls.notices)}, resumed record ${JSON.stringify(otherChat.session.snapshot().record.modelSelection)}`,
   );
   await conversations.handle(otherChat, { type: 'set-config', configId: 'model', value: 'fast' });
   await eventually(() => otherChat.surface.ready);
