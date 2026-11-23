@@ -132,16 +132,19 @@ function Rebase({ model, send, saved }: Props) {
           />
           <div className="check-body">
             <strong>{model.workflow?.workflow?.changes.find((task) => task.id === check.changeId)?.title ?? check.changeId}</strong>
-            <div className="metadata">
-              <StatusBadge status={check.status}>{rebaseCheckLabels[check.status]}</StatusBadge>
-              {!model.checkingRebase && (
-                <time className="muted" dateTime={check.checkedAt} title="Checked at">
-                  {new Date(check.checkedAt).toLocaleTimeString('en-US')}
-                </time>
-              )}
-            </div>
-            {check.message && <p className="muted">{check.message}</p>}
-            {check.files?.length ? <pre>{check.files.join('\n')}</pre> : null}
+            {/* A check in progress has no result yet: the page says so once, and no row claims Unknown. */}
+            {!model.checkingRebase && (
+              <>
+                <div className="metadata">
+                  <StatusBadge status={check.status}>{rebaseCheckLabels[check.status]}</StatusBadge>
+                  <time className="muted" dateTime={check.checkedAt} title="Checked at">
+                    {new Date(check.checkedAt).toLocaleTimeString('en-US')}
+                  </time>
+                </div>
+                {check.message && <p className="muted">{check.message}</p>}
+                {check.files?.length ? <pre>{check.files.join('\n')}</pre> : null}
+              </>
+            )}
           </div>
         </label>
       ))}

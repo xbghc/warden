@@ -94,20 +94,25 @@ export const CheckingSynchronization: Story = {
     model: {
       ...base,
       surface: 'rebase',
-      workflow: { workflow: { developmentBranch: task.developmentBranch, changes: [task] }, developmentHead: 'c42e9100' },
+      workflow: {
+        workflow: {
+          developmentBranch: task.developmentBranch,
+          changes: synchronizationCases.map(({ id, title }) => ({ ...task, id, title })),
+        },
+        developmentHead: 'c42e9100',
+      },
       checkingRebase: true,
-      rebaseSelection: { request: 'pending', taskIds: [task.id] },
+      rebaseSelection: { request: 'pending', taskIds: [synchronizationCases[0]!.id] },
+      // The host fills every row with the same placeholder while it checks; rows show only their task.
       checks: {
-        checks: [
-          {
-            changeId: task.id,
-            sourceHead: '',
-            developmentHead: 'c42e9100',
-            checkedAt: '2026-10-31T02:45:08Z',
-            status: 'unknown',
-            message: 'Checking synchronization…',
-          },
-        ],
+        checks: synchronizationCases.map(({ id }) => ({
+          changeId: id,
+          sourceHead: '',
+          developmentHead: 'c42e9100',
+          checkedAt: '2026-10-31T02:45:08Z',
+          status: 'unknown' as const,
+          message: 'Checking synchronization…',
+        })),
       },
     },
   },

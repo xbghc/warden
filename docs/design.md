@@ -28,7 +28,7 @@ for switching among multiple workspace roots.
 Agent initialization overlaps repository loading after the primary directory is known. Advisory
 synchronization checks run in the background without blocking the task list. Pending task checks
 show a synchronization spinner and explicit checking feedback; the rebase form disables execution
-until the check finishes. Results for a replaced repository, branch or task binding are discarded.
+until the check finishes, says once that it is checking and shows no result, time or message on a row. Results for a replaced repository, branch or task binding are discarded.
 
 Prefer native VS Code UI for navigation and ordinary operations. Select a webview only for a
 specific interaction that benefits from a custom form or conversation layout. The workspace sidebar
